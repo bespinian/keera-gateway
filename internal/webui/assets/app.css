@@ -756,6 +756,16 @@ input[type="checkbox"]:disabled {
   color: var(--accent);
   font-weight: 600;
 }
+/* A segmented control of icons, such as a list's table and tiles. */
+.seg-icons button {
+  display: grid;
+  place-items: center;
+  padding: 5px 8px;
+}
+.seg-icons svg {
+  width: 15px;
+  height: 15px;
+}
 
 /* A choice made before the form it configures, instead of a select inside it:
    for modes whose fields differ almost entirely, and where a tile needs a logo
@@ -1377,12 +1387,17 @@ td {
 tbody tr:last-child td {
   border-bottom: 0;
 }
-/* A row with its own screen opens on a click anywhere in it. */
-tr.row-opens {
+/* A row with its own screen opens on a click anywhere in it, and a row with
+   one thing to do does it. */
+tr.row-opens,
+.table-tiles > .row-opens {
   cursor: pointer;
 }
 tr.row-opens:hover td {
   background: var(--surface-2);
+}
+.table-tiles > .row-opens:hover {
+  border-color: var(--accent);
 }
 td.num,
 th.num {
@@ -1461,6 +1476,96 @@ th.num .th-sort {
   font-size: 12.5px;
   color: var(--muted);
   cursor: pointer;
+}
+.toolbar-end {
+  margin-left: auto;
+}
+/* The arrow beside a list's sort dropdown, as tall as the dropdown. */
+.btn-sort {
+  align-self: stretch;
+  justify-content: center;
+  padding: 0 10px;
+}
+
+/* A list shown as tiles instead of a table. The tile itself is the caller's.
+   At most five in a row: on a wide screen, more get too many to read across.
+   The minimum is a fifth of the row, less the gaps. */
+.table-tiles {
+  --tile-gap: 10px;
+  display: grid;
+  grid-template-columns: repeat(
+    auto-fill,
+    minmax(max(260px, (100% - 4 * var(--tile-gap)) / 5), 1fr)
+  );
+  gap: var(--tile-gap);
+}
+.table-tiles > .table-none {
+  grid-column: 1 / -1;
+}
+
+/* A model in the catalogue's tiles: who offers it, what it is, what it costs. */
+.model-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.model-tile-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+/* As tall as the two lines beside it. */
+.model-tile-head .tile-mark {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 0;
+}
+.model-tile-head .tile-mark svg {
+  width: 20px;
+  height: 20px;
+}
+.model-tile-head .tile-mark .provider-mark {
+  width: 24px;
+  height: 24px;
+}
+.model-tile-name {
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.model-tile-what {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+/* The numbers sit at the bottom, so they line up across a row of tiles. */
+.model-tile-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: auto 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.model-tile-facts dt {
+  font-size: 11px;
+  color: var(--faint);
+}
+.model-tile-facts dd {
+  margin: 2px 0 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 
 .empty {

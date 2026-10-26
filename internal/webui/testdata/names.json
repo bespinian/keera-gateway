@@ -38,11 +38,7 @@
     ]
   },
   "sandbox": {
-    "valid": [
-      "desk",
-      "my-box-2",
-      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    ],
+    "valid": ["desk", "my-box-2", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
     "invalid": [
       "",
       "-desk",

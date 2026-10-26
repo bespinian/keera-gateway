@@ -70,7 +70,11 @@ export async function keysView(ctx) {
           label: "Issue key",
           // A disabled person cannot be given a key, so they are not offered.
           onClick: () =>
-            issueKey(ctx, projects, users.filter((u) => !u.disabled_at)),
+            issueKey(
+              ctx,
+              projects,
+              users.filter((u) => !u.disabled_at),
+            ),
         }
       : null,
   );

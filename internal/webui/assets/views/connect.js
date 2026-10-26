@@ -247,7 +247,9 @@ async function addClient(ctx, catalogue, keys, button, secret = null) {
       return;
     }
     if (turn !== drawing) return;
-    const block = (res.data || []).find((b) => b.client === state.client.client);
+    const block = (res.data || []).find(
+      (b) => b.client === state.client.client,
+    );
     steps.replaceChildren(
       block ? instructions(ctx, state, block, res.placeholder) : "",
     );

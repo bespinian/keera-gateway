@@ -16,12 +16,7 @@ import {
   rangeOf,
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
-import {
-  firstRun,
-  firstRunDue,
-  memberRun,
-  memberRunDue,
-} from "./firstrun.js";
+import { firstRun, firstRunDue, memberRun, memberRunDue } from "./firstrun.js";
 import { openFailed } from "./logfilters.js";
 import { orgNameOf } from "./orgs.js";
 

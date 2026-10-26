@@ -22,12 +22,7 @@ import {
 import { orgNameOf } from "./orgs.js";
 import { reaches } from "./router-tree.js";
 import { modePills } from "./filters.js";
-import {
-  nodeCard,
-  headButton,
-  removeButton,
-  emptyCard,
-} from "./node-card.js";
+import { nodeCard, headButton, removeButton, emptyCard } from "./node-card.js";
 import {
   rateShort,
   budgetShort,

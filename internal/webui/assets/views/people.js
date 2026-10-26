@@ -319,11 +319,7 @@ function addPerson(ctx) {
     "select",
     { class: "select" },
     ctx.state.me.sso
-      ? h(
-          "option",
-          { value: "sso", selected: true },
-          "Their identity provider",
-        )
+      ? h("option", { value: "sso", selected: true }, "Their identity provider")
       : null,
     h("option", { value: "passkey", selected: !ctx.state.me.sso }, "A passkey"),
   );

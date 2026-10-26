@@ -198,7 +198,8 @@ export async function modelsView(ctx) {
         shrink: true,
         sortKey: (m) => m.max_context_tokens || null,
         sortDir: "desc",
-        cell: (m) => (m.max_context_tokens ? compact(m.max_context_tokens) : dash()),
+        cell: (m) =>
+          m.max_context_tokens ? compact(m.max_context_tokens) : dash(),
       },
       {
         // Same median and window as the model's own screen.
@@ -209,7 +210,7 @@ export async function modelsView(ctx) {
         cell: (m) => ttftCell(stats[m.alias]),
       },
       {
-        label: "Price / Mtok (CHF)",
+        label: "Price CHF / MTok",
         num: true,
         shrink: true,
         // By input price, the number a catalogue is read for.
@@ -314,30 +315,28 @@ export async function catalogueView(ctx) {
       `${providers.length} ${plural(providers.length, "provider")}`,
   );
 
-  const price = (v) =>
-    v ? h("span", { class: "nowrap" }, listPrice(v)) : dash();
+  const price = (v) => (v ? h("span", { class: "nowrap" }, chf(v)) : dash());
 
-  // Self-hosted models are in no provider's table, so they are added here.
+  // Self-hosted models are in no provider's table, so they are added here,
+  // beside the link back: the screen has nothing else to put in a row of its
+  // own.
   const head = h(
     "div",
-    { class: "detail-head" },
+    { class: "detail-head row" },
     crumb(ctx, "/models", "Models"),
+    h("div", { class: "spacer" }),
     canEdit
       ? h(
-          "div",
-          { class: "row", style: { justifyContent: "flex-end" } },
-          h(
-            "button",
-            {
-              class: "btn",
-              title:
-                "A model on your own inference server, such as vLLM, " +
-                "Ollama or Keera Engine",
-              onClick: () => editModel(ctx, null, providers, null),
-            },
-            icon(icons.selfHosted),
-            "Self-hosted model",
-          ),
+          "button",
+          {
+            class: "btn",
+            title:
+              "A model on your own inference server, such as vLLM, " +
+              "Ollama or Keera Engine",
+            onClick: () => editModel(ctx, null, providers, null),
+          },
+          icon(icons.selfHosted),
+          "Self-hosted model",
         )
       : null,
   );
@@ -384,31 +383,32 @@ export async function catalogueView(ctx) {
         shrink: true,
         sortKey: (r) => r.m.max_context_tokens || null,
         sortDir: "desc",
-        cell: (r) => (r.m.max_context_tokens ? compact(r.m.max_context_tokens) : dash()),
+        cell: (r) =>
+          r.m.max_context_tokens ? compact(r.m.max_context_tokens) : dash(),
       },
       {
-        label: "Input / Mtok (CHF)",
+        label: "Input / MTok",
         num: true,
         shrink: true,
         sortKey: (r) => r.m.input_micros_per_mtok || null,
         cell: (r) => price(r.m.input_micros_per_mtok),
       },
       {
-        label: "Cached input / Mtok (CHF)",
+        label: "Cached input / MTok",
         num: true,
         shrink: true,
         sortKey: (r) => r.m.cached_input_micros_per_mtok || null,
         cell: (r) => price(r.m.cached_input_micros_per_mtok),
       },
       {
-        label: "Cache write / Mtok (CHF)",
+        label: "Cache write / MTok",
         num: true,
         shrink: true,
         sortKey: (r) => r.m.cache_write_micros_per_mtok || null,
         cell: (r) => price(r.m.cache_write_micros_per_mtok),
       },
       {
-        label: "Output / Mtok (CHF)",
+        label: "Output / MTok",
         num: true,
         shrink: true,
         sortKey: (r) => r.m.output_micros_per_mtok || null,
@@ -420,40 +420,17 @@ export async function catalogueView(ctx) {
         sortKey: (r) => r.aliases[0] || null,
         cell: (r) =>
           r.aliases.length
-            ? h(
-                "div",
-                { class: "stack" },
-                r.aliases.map((a) =>
-                  h(
-                    "span",
-                    { class: "mono" },
-                    rowLink(ctx, "/models/" + encodeURIComponent(a), a),
-                  ),
-                ),
-              )
+            ? h("div", { class: "stack" }, aliasLinks(ctx, r.aliases))
             : dash(),
       },
-      canEdit
-        ? {
-            label: "",
-            shrink: true,
-            cell: (r) =>
-              h(
-                "button",
-                {
-                  class: "btn btn-sm",
-                  title: `Add this model to ${orgNameOf(ctx)}`,
-                  onClick: () =>
-                    editModel(ctx, null, providers, { p: r.p, m: r.m }),
-                },
-                icon(icons.plus),
-                "Add",
-              ),
-          }
-        : null,
-    ].filter(Boolean),
+    ],
     rows,
     {
+      // A click on a model adds it, the one thing to do with it here.
+      pick: canEdit
+        ? (r) => editModel(ctx, null, providers, { p: r.p, m: r.m })
+        : null,
+      pickTitle: `Add this model to ${orgNameOf(ctx)}`,
       emptyTitle: "No hosted models",
       emptyBody: "This build knows no hosted providers.",
       // Newest first: people usually look for a new model.
@@ -469,6 +446,7 @@ export async function catalogueView(ctx) {
           locationName(r.p.location),
         ].join(" "),
       searchLabel: "models",
+      tile: (r) => catalogueTile(ctx, r),
       choices: [
         {
           label: "Providers",
@@ -510,6 +488,93 @@ export async function catalogueView(ctx) {
   );
 
   return h("div", {}, head, list);
+}
+
+// catalogueTile is one catalogue row as a tile: the same facts as the table.
+function catalogueTile(ctx, r) {
+  // Unlike the table's, a price here may wrap: a tile's column is narrow.
+  const price = (v) => chf(v) || dash();
+  const fact = (label, value) =>
+    h("div", {}, h("dt", {}, label), h("dd", {}, value));
+  return h(
+    "article",
+    { class: "model-tile" },
+    h(
+      "div",
+      { class: "model-tile-head" },
+      h(
+        "span",
+        { class: "tile-mark" },
+        providerMark(r.p.name) || icon(icons.cloud),
+      ),
+      h(
+        "div",
+        { class: "stack" },
+        h("span", { class: "small" }, providerName(r.p.name)),
+        h(
+          "span",
+          { class: "faint small" },
+          [
+            r.p.location && locationName(r.p.location),
+            r.m.release_date && releaseDay(r.m.release_date),
+          ]
+            .filter(Boolean)
+            .join(" · "),
+        ),
+      ),
+    ),
+    h(
+      "div",
+      { class: "stack" },
+      h(
+        "span",
+        { class: "model-tile-name" + (r.m.display_name ? "" : " mono") },
+        r.m.display_name || r.m.id,
+      ),
+      r.m.display_name
+        ? h("span", { class: "mono faint small" }, r.m.id)
+        : null,
+    ),
+    r.m.description
+      ? h("p", { class: "model-tile-what" }, r.m.description)
+      : null,
+    h(
+      "dl",
+      { class: "model-tile-facts", title: "Prices per million tokens" },
+      fact(
+        "Context",
+        r.m.max_context_tokens ? compact(r.m.max_context_tokens) : dash(),
+      ),
+      fact("Input / MTok", price(r.m.input_micros_per_mtok)),
+      fact("Output / MTok", price(r.m.output_micros_per_mtok)),
+      fact("Cached input / MTok", price(r.m.cached_input_micros_per_mtok)),
+      fact("Cache write / MTok", price(r.m.cache_write_micros_per_mtok)),
+    ),
+    r.aliases.length
+      ? h(
+          "div",
+          { class: "small muted" },
+          "In use as ",
+          aliasLinks(ctx, r.aliases).map((link, i) => [i ? ", " : "", link]),
+        )
+      : null,
+  );
+}
+
+// chf is a list price with its currency, or null when there is none.
+function chf(micros) {
+  return micros ? "CHF " + listPrice(micros) : null;
+}
+
+// aliasLinks links each alias a catalogue model is in use as.
+function aliasLinks(ctx, aliases) {
+  return aliases.map((a) =>
+    h(
+      "span",
+      { class: "mono" },
+      rowLink(ctx, "/models/" + encodeURIComponent(a), a),
+    ),
+  );
 }
 
 function locationCell(loc) {
@@ -605,7 +670,11 @@ function viewModel(ctx, m) {
                 "span",
                 {},
                 `${compact(m.max_context_tokens)} tokens`,
-                h("span", { class: "hint-origin" }, ` - ${num(m.max_context_tokens)}`),
+                h(
+                  "span",
+                  { class: "hint-origin" },
+                  ` - ${num(m.max_context_tokens)}`,
+                ),
               )
             : h("span", { class: "muted" }, "not advertised"),
           "Advertised to clients. A request that cannot fit is refused.",
@@ -895,7 +964,8 @@ const PRESET_FIELDS = [
     label: "context window",
     fromModel: true,
     numeric: true,
-    of: (p, m) => (m && m.max_context_tokens ? String(m.max_context_tokens) : null),
+    of: (p, m) =>
+      m && m.max_context_tokens ? String(m.max_context_tokens) : null,
   },
   {
     key: "releaseDate",
@@ -1308,7 +1378,9 @@ function editModel(ctx, existing, providers, pick) {
     body: h("form", { onSubmit: (e) => e.preventDefault() }, hosted, rest),
     submitLabel: existing ? "Save" : "Add model",
     done: existing ? "Model saved" : "Model added",
-    ctx,
+    // A new model is added from the catalogue, so instead of reloading that,
+    // show the new model among the others.
+    ctx: existing ? ctx : { ...ctx, reload: () => ctx.navigate("/models") },
     submit: async () => {
       const list = backends.value
         .split("\n")

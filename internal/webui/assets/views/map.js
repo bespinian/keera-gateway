@@ -1032,8 +1032,7 @@ function showTip(tip, canvas, n) {
           : "unknown",
     ]);
     if (n.kindName) rows.push(["Surface", n.kindName]);
-    if (!n.folded && !n.enabled)
-      rows.push(["Status", "disabled"]);
+    if (!n.folded && !n.enabled) rows.push(["Status", "disabled"]);
   }
   if (n.folded)
     rows.push(["Folded together", n.rest.map((r) => r.label).join(", ")]);

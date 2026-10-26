@@ -16,10 +16,7 @@ export function firstRunDue(ctx, setup) {
   // Credit is one organisation's, so there is none to ask for while an
   // operator looks at all of them.
   return (
-    !!ctx.state.me.payments &&
-    !!ctx.orgID &&
-    !setup.credits &&
-    !setup.invoiced
+    !!ctx.state.me.payments && !!ctx.orgID && !setup.credits && !setup.invoiced
   );
 }
 

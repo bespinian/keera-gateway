@@ -41,6 +41,7 @@ import {
   detailHead,
   busyButton,
   banner,
+  go,
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
 import { orgNameOf } from "./orgs.js";
@@ -162,7 +163,20 @@ export async function filtersView(ctx) {
     },
   );
 
-  return h("div", {}, head, rows);
+  // A filter on its own changes nothing, so the list says where one is used.
+  const link = (path, text) =>
+    h("a", { href: path, onClick: go(ctx, path) }, text);
+  const note = h(
+    "div",
+    { class: "hint", style: { marginTop: "14px" } },
+    "Filters are used inside ",
+    link("/projects", "Guardrails"),
+    " and ",
+    link("/routers", "Routers"),
+    ".",
+  );
+
+  return h("div", {}, head, rows, note);
 }
 
 // A filter from before modes existed has none, and it rewrote.

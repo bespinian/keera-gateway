@@ -45,12 +45,7 @@ import { oneLine } from "../status.js";
 import { orgNameOf } from "./orgs.js";
 import { modePills, newFilter } from "./filters.js";
 import { nodeCard, removeButton, emptyCard, addButton } from "./node-card.js";
-import {
-  rateShort,
-  budgetShort,
-  rateFields,
-  budgetFields,
-} from "./limits.js";
+import { rateShort, budgetShort, rateFields, budgetFields } from "./limits.js";
 import {
   routeFields,
   modeOf,
@@ -348,10 +343,8 @@ export async function routerDetailView(ctx) {
   const notes = h("div", { class: "stack", style: { gap: "8px" } });
   const status = h("span", { class: "faint small" });
   const dirtyPill = h("span", {});
-  const saveButton = busyButton(
-    { class: "btn btn-primary" },
-    fresh ? "Create router" : "Save",
-    () => save(env),
+  const saveButton = busyButton({ class: "btn btn-primary" }, "Save", () =>
+    save(env),
   );
 
   env.render = () => {

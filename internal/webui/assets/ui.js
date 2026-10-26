@@ -272,6 +272,9 @@ export const icons = {
   copy: "M20 9h-9a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2zM5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1",
   close: "M18 6L6 18M6 6l12 12",
   menu: "M3 6h18M3 12h18M3 18h18",
+  // A list's two layouts: rows, or a grid of tiles.
+  rows: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
+  tiles: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z",
   more: "M5 12h.01M12 12h.01M19 12h.01",
   theme: "M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z",
   check: "M20 6L9 17l-5-5",
@@ -1062,7 +1065,16 @@ function toggleBox(t, checked, onChange) {
  *    rowClass     (row) => string - a class for that row's <tr>
  *    open         (row) => path - the row's own screen, which a click anywhere
  *                 on the row opens. Needs `ctx`. Null leaves that row closed.
+ *    pick         (row) => void - what a click anywhere on the row does, or
+ *                 Enter on it, when the row has no screen of its own, such as
+ *                 adding the catalogue's model.
+ *    pickTitle    what pick does, for the tooltip
  *    emptyTitle / emptyBody
+ *    tile         (row) => node - the row as a tile. Passing it adds a switch
+ *                 between the table and a grid of tiles, for a list people
+ *                 browse more than they compare. Search, filters and sorting
+ *                 work the same in both. Tiles show until someone chooses
+ *                 the table. Not with `rank`.
  *
  *  A column with a sortKey gets a header that sorts by it. Searching and
  *  sorting happen here, as most screens hold their whole list. A paged list
@@ -1107,9 +1119,11 @@ export function table(columns, rows, opts = {}) {
       ? null
       : columns.find((c) => c.sortKey && c.label === opts.sortBy) || null,
     dir: opts.sortDir === "desc" ? -1 : 1,
+    tiles: !!opts.tile,
   };
 
   const body = h("tbody");
+  const grid = opts.tile ? h("div", { class: "table-tiles" }) : null;
   const count = h("span", { class: "faint nowrap small" });
   const sortable = new Map();
 
@@ -1171,37 +1185,70 @@ export function table(columns, rows, opts = {}) {
     return out;
   }
 
+  const none = "Nothing matches. Clear the search, or turn a filter off.";
+
+  // clickable makes a row or a tile open its screen, or run pick.
+  function clickable(el, row) {
+    const path = opts.open ? opts.open(row) : null;
+    if (path) openRow(el, opts.ctx, path);
+    else if (opts.pick) pickRow(el, () => opts.pick(row), opts.pickTitle);
+    return el;
+  }
+
+  // setLayout shows the table or the tiles, and the controls that go with each.
+  function setLayout(tiles) {
+    view.tiles = tiles;
+    card.hidden = tiles;
+    grid.hidden = !tiles;
+    tileControls.hidden = !tiles;
+    tableButton.setAttribute("aria-pressed", String(!tiles));
+    tilesButton.setAttribute("aria-pressed", String(tiles));
+    draw();
+  }
+
   function draw() {
     const shown = visible();
+    count.textContent =
+      shown.length === rows.length ? "" : `${shown.length} of ${rows.length}`;
+    if (sortSelect) {
+      sortSelect.value = String(sortCols.indexOf(view.sort));
+      sortDir.textContent = view.dir === 1 ? "↑" : "↓";
+      sortDir.disabled = !view.sort;
+    }
+    if (view.tiles) {
+      replace(
+        grid,
+        shown.length
+          ? shown.map((row) => clickable(opts.tile(row), row))
+          : h("div", { class: "card table-none" }, none),
+      );
+      return;
+    }
     replace(
       body,
       shown.length
-        ? shown.map((row) => {
-            const path = opts.open ? opts.open(row) : null;
-            const open = path ? openRow(opts.ctx, path) : null;
-            const cls = [opts.rowClass && opts.rowClass(row), path && "row-opens"];
-            return h(
-              "tr",
-              {
-                class: cls.filter(Boolean).join(" ") || null,
-                onClick: open,
-                onAuxClick: open,
-              },
-              columns.map((c) => h("td", { class: cellClass(c) }, c.cell(row))),
-            );
-          })
+        ? shown.map((row) =>
+            clickable(
+              h(
+                "tr",
+                { class: (opts.rowClass && opts.rowClass(row)) || null },
+                columns.map((c) =>
+                  h("td", { class: cellClass(c) }, c.cell(row)),
+                ),
+              ),
+              row,
+            ),
+          )
         : h(
             "tr",
             {},
             h(
               "td",
               { colspan: String(columns.length), class: "table-none" },
-              "Nothing matches. Clear the search, or turn a filter off.",
+              none,
             ),
           ),
     );
-    count.textContent =
-      shown.length === rows.length ? "" : `${shown.length} of ${rows.length}`;
     for (const [c, { th, arrow }] of sortable) {
       const active = view.sort === c;
       arrow.textContent = active ? (view.dir === 1 ? "↑" : "↓") : "";
@@ -1214,8 +1261,64 @@ export function table(columns, rows, opts = {}) {
     }
   }
 
+  // Tiles have no headers to click, so they sort with a dropdown instead. Both
+  // change the same sort, so switching keeps the order.
+  const sortCols = columns.filter((c) => c.sortKey);
+  const sortSelect =
+    grid && sortCols.length
+      ? h(
+          "select",
+          {
+            class: "select toolbar-select",
+            "aria-label": "Sort by",
+            onChange: (e) => {
+              const c = sortCols[Number(e.target.value)] || null;
+              view.sort = c;
+              if (c) view.dir = c.sortDir === "desc" ? -1 : 1;
+              draw();
+            },
+          },
+          view.sort ? null : h("option", { value: "-1" }, "As listed"),
+          sortCols.map((c, i) =>
+            h(
+              "option",
+              { value: String(i) },
+              `Sort by ${c.label.toLowerCase()}`,
+            ),
+          ),
+        )
+      : null;
+  const sortDir = sortSelect
+    ? h("button", {
+        class: "btn btn-sort",
+        type: "button",
+        title: "Reverse the order",
+        "aria-label": "Reverse the order",
+        onClick: () => {
+          view.dir = -view.dir;
+          draw();
+        },
+      })
+    : null;
+  const tileControls = grid
+    ? h("div", { class: "row-tight" }, sortSelect, sortDir)
+    : null;
+  const layoutButton = (tiles, path, label) =>
+    h(
+      "button",
+      {
+        type: "button",
+        title: label,
+        "aria-label": label,
+        onClick: () => setLayout(tiles),
+      },
+      icon(path),
+    );
+  const tableButton = grid ? layoutButton(false, icons.rows, "Table") : null;
+  const tilesButton = grid ? layoutButton(true, icons.tiles, "Tiles") : null;
+
   let toolbar = null;
-  if (opts.search || toggles.length || choices.length) {
+  if (opts.search || toggles.length || choices.length || grid) {
     const label = opts.searchLabel ? `Search ${opts.searchLabel}` : "Search";
     toolbar = h(
       "div",
@@ -1256,12 +1359,24 @@ export function table(columns, rows, opts = {}) {
           if (t.onChange) t.onChange(v);
         }),
       ),
-      h("div", { class: "spacer" }),
-      count,
+      // One group, so a narrow screen wraps it whole, still on the right.
+      h(
+        "div",
+        { class: "row toolbar-end" },
+        count,
+        tileControls,
+        grid
+          ? h(
+              "div",
+              { class: "seg seg-icons", role: "group", "aria-label": "Layout" },
+              tableButton,
+              tilesButton,
+            )
+          : null,
+      ),
     );
   }
 
-  draw();
   const card = h(
     "div",
     { class: "card" },
@@ -1271,26 +1386,53 @@ export function table(columns, rows, opts = {}) {
       h("table", {}, h("thead", {}, h("tr", {}, heads)), body),
     ),
   );
-  const el = toolbar ? h("div", {}, toolbar, card) : card;
+  if (grid) setLayout(view.tiles);
+  else draw();
+  const el = toolbar ? h("div", {}, toolbar, card, grid) : card;
   // The request log pushes new rows onto the array and calls this. Calling
   // table() again would lose the reader's search and sort.
   el.redraw = draw;
   return el;
 }
 
+/** ownClick reports whether a click in a row is not the row's to handle. */
+function ownClick(e) {
+  // A link, button or field in the row does its own thing.
+  if (e.target.closest("a, button, input, select, textarea, label"))
+    return true;
+  // Selecting text to copy it, such as an id, is not a click.
+  return !!getSelection().toString();
+}
+
 /** openRow opens a row's screen on a click anywhere in the row, and in a new
  *  tab on a middle or modified click, like the link in it would. */
-function openRow(ctx, path) {
-  return (e) => {
-    // A link, button or field in the row does its own thing.
-    if (e.target.closest("a, button, input, select, textarea, label")) return;
-    // Selecting text to copy it, such as an id, is not a click.
-    if (getSelection().toString()) return;
+function openRow(el, ctx, path) {
+  const open = (e) => {
+    if (ownClick(e)) return;
     if (e.type === "auxclick" && e.button !== 1) return;
     if (e.button === 1 || e.ctrlKey || e.metaKey || e.shiftKey)
       window.open(path, "_blank");
     else ctx.navigate(path);
   };
+  el.classList.add("row-opens");
+  el.addEventListener("click", open);
+  el.addEventListener("auxclick", open);
+}
+
+/** pickRow runs pick on a click anywhere in the row, and on Enter or Space,
+ *  like a button. The row takes the focus, as it has no link to tab to. */
+function pickRow(el, pick, title) {
+  el.classList.add("row-opens");
+  el.tabIndex = 0;
+  if (title) el.title = title;
+  el.addEventListener("click", (e) => {
+    if (!ownClick(e)) pick();
+  });
+  el.addEventListener("keydown", (e) => {
+    if (e.target !== el || (e.key !== "Enter" && e.key !== " ")) return;
+    e.preventDefault();
+    pick();
+  });
 }
 
 /** rankHead is a header for a list the control plane ranks. Every ranking is
