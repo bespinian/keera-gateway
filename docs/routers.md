@@ -358,19 +358,12 @@ should say whether a wrong choice should cost money or risk data leaving.
 The panel's form offers this:
 
 ```
-Choose the model that suits this request.
+Send small, simple requests to the cheapest model, such as a rename or a commit
+message.
 
-Send small, self-contained requests to the cheapest capable model: a rename, a
-syntax question, a short edit to one file, a commit message.
+Send requests that need planning or reasoning to a more capable model.
 
-Send requests needing design, several steps at once, or judgement about a system
-to a model that can reason.
-
-Send anything containing a client's name, an account number, personal details or
-a credential to a model inside the cluster, whatever else it is asking for. That
-takes priority.
-
-If you are unsure, choose the more capable model rather than the cheaper one.
+If you are unsure, choose the more capable model.
 ```
 
 Limits:

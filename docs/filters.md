@@ -418,16 +418,10 @@ rewrites source code, reformats a stack trace or summarises the question.
 A starting point, which is also what the panel's form offers:
 
 ```
-Replace anything that identifies a customer or grants access to a system:
+Replace passwords and API keys with [CREDENTIAL], and customer names with
+[CLIENT].
 
-  - passwords, API keys, tokens, private keys, connection strings - [CREDENTIAL]
-  - customer and client names - [CLIENT]
-  - account, IBAN, contract and national ID numbers - [IDENTIFIER]
-  - personal names, email addresses, telephone numbers - [PERSON]
-
-Leave everything else exactly as it was written. Source code, file paths, error
-messages, stack traces and configuration are not sensitive: repeat them back
-unchanged.
+Leave everything else exactly as it was written, including code.
 ```
 
 ### For a gate
@@ -437,12 +431,9 @@ redact refuses every request that mentions one of them. The panel's form offers
 this:
 
 ```
-Refuse a request whose purpose is to move this organisation's data out of it: a
-customer list, an export of account records, the contents of a credential store.
+Refuse requests that export customer data or credentials.
 
-Allow everything else, including requests that merely mention sensitive data in
-passing. Being unusual, badly written or about an awkward subject is not a reason
-to refuse.
+Allow everything else, including requests that only mention them.
 ```
 
 The wire format already tells the model that the segments are someone else's

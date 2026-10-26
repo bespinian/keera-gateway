@@ -1209,22 +1209,16 @@ function cutRefusal(s) {
 }
 
 // Patterns suit shapes, not judgements.
-const RULES_EXAMPLE = `(?i)\\b[a-z_]*(?:secret|token|password|api[_-]?key)[a-z_]*\\s*[=:]\\s*\\S+ => [CREDENTIAL]
-(?i)\\b(?:(?:sk|pk|xox[baprs])-|gh[pousr]_)[a-z0-9_-]{16,}\\b            => [CREDENTIAL]
-(?i)\\b[a-z]+://[^\\s:@]+:[^\\s:@]+@\\S+                                   => [CONNECTION-STRING]
-\\b[A-Z]{2}\\d{2}(?:[ ]?[A-Z0-9]{4}){2,7}\\b                               => [IBAN]
-\\b\\d{3}\\.\\d{4}\\.\\d{4}\\.\\d{2}\\b                                            => [AHV]
-\\b(?:\\d{4}[ -]){3}\\d{4}\\b                                             => [CARD]`;
+const RULES_EXAMPLE = `(?i)\\bsk-[a-z0-9]{20,}\\b     => [API-KEY]
+[\\w.+-]+@[\\w-]+\\.[\\w.]+      => [EMAIL]
+(?i)\\bexport all customers\\b => REFUSE: that moves the customer list out`;
 
 // A gate cannot remove anything, so it says what may not go rather than
 // listing things to remove, which would refuse every request mentioning one.
-const GATE_EXAMPLE = `Refuse a request whose purpose is to move this \
-organisation's data out of it: a customer list, an export of account records, \
-the contents of a credential store.
+const GATE_EXAMPLE = `Refuse requests that export customer data or \
+credentials.
 
-Allow everything else, including requests that merely mention sensitive data \
-in passing. Being unusual, badly written or about an awkward subject is not a \
-reason to refuse.`;
+Allow everything else, including requests that only mention them.`;
 
 // A decision model answers yes or no, and yes refuses. See
 // docs/gateway.md#decision-models.
@@ -1235,17 +1229,10 @@ records or credentials
 no: ordinary programming work, even if it mentions customers, accounts or \
 credentials`;
 
-const PROMPT_EXAMPLE = `Replace anything that identifies a customer or grants \
-access to a system:
+const PROMPT_EXAMPLE = `Replace passwords and API keys with [CREDENTIAL], and \
+customer names with [CLIENT].
 
-  - passwords, API keys, tokens, private keys, connection strings - [CREDENTIAL]
-  - customer and client names - [CLIENT]
-  - account, IBAN, contract and national ID numbers - [IDENTIFIER]
-  - personal names, email addresses, telephone numbers - [PERSON]
-
-Leave everything else exactly as it was written. Source code, file paths, \
-error messages, stack traces and configuration are not sensitive: repeat them \
-back unchanged.`;
+Leave everything else exactly as it was written, including code.`;
 
 // A prompt equal to one of EXAMPLES is unedited and may be swapped.
 const EXAMPLES = [PROMPT_EXAMPLE, GATE_EXAMPLE, DECISION_GATE_EXAMPLE];
