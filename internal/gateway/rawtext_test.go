@@ -10,8 +10,7 @@ import (
 )
 
 func TestTextReachesTheBackendAsTheClientWroteIt(t *testing.T) {
-	// The prompt is copied, not decoded and escaped again, so what the client
-	// escaped stays escaped the same way.
+	// The prompt is copied, not re-escaped, so the client's escapes stay.
 	const text = `"a\"b\\c <d> & é 🙂 \n\t "`
 	in := `{"model":"m","system":[{"type":"text","text":` + text + `}],"messages":[` +
 		`{"role":"user","content":` + text + `},` +
@@ -37,9 +36,8 @@ func TestTextReachesTheBackendAsTheClientWroteIt(t *testing.T) {
 }
 
 func TestTextTheBackendMightRefuseIsCleanedUp(t *testing.T) {
-	// Bytes that are not UTF-8, and a lone half of a surrogate pair, are valid
-	// enough for the gateway but not for a tokenizer. They become U+FFFD, as
-	// decoding would make them.
+	// Invalid UTF-8 and a lone surrogate would break a tokenizer, so they
+	// become U+FFFD, as decoding would make them.
 	in := "{\"model\":\"m\",\"messages\":[{\"role\":\"user\",\"content\":\"a\xffb\"}," +
 		`{"role":"assistant","content":"c\ud800d"},{"role":"user","content":"e🙂f"}]}`
 	raw, err := decodeRaw(anthropicShape{}, in)
@@ -60,8 +58,7 @@ func TestTextTheBackendMightRefuseIsCleanedUp(t *testing.T) {
 }
 
 func TestTextBlocksAreJoinedWithoutLosingTheirEscapes(t *testing.T) {
-	// Joining copies the inside of each literal, so an escape at either edge
-	// of a block must survive it.
+	// An escape at either edge of a block must survive joining.
 	in := `{"model":"m","messages":[{"role":"user","content":[` +
 		`{"type":"tool_result","tool_use_id":"t","content":[{"type":"text","text":"a\""},` +
 		`{"type":"text","text":""},{"type":"text","text":"\\b"}]}]}]}`

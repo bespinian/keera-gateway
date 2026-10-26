@@ -17,8 +17,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/authn"
 )
 
-// The credentials file is a credential, so it is written where only its owner
-// can read it. A file mode nobody checks is a file mode that drifts.
+// Only the owner may read the credentials file.
 func TestTheCredentialsFileIsReadableOnlyByItsOwner(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("KEERA_CONFIG_DIR", filepath.Join(dir, "keera"))
@@ -53,8 +52,7 @@ func dirMode(t *testing.T, path string) fs.FileMode {
 	return info.Mode().Perm()
 }
 
-// A machine can be signed in to several gateways. Signing in to or out of one
-// must not touch the others.
+// Signing in to or out of one gateway must not touch the others.
 func TestGatewaysAreSignedInToIndependently(t *testing.T) {
 	t.Setenv("KEERA_CONFIG_DIR", t.TempDir())
 
@@ -80,9 +78,7 @@ func TestGatewaysAreSignedInToIndependently(t *testing.T) {
 	}
 }
 
-// The same gateway written two ways is one gateway. Otherwise a second sign-in
-// is filed where the first one is not looked for, and somebody is asked to sign
-// in again by a trailing slash.
+// Otherwise a trailing slash would ask somebody to sign in again.
 func TestOneGatewayWrittenTwoWaysIsOneSignIn(t *testing.T) {
 	t.Setenv("KEERA_CONFIG_DIR", t.TempDir())
 
@@ -94,9 +90,7 @@ func TestOneGatewayWrittenTwoWaysIsOneSignIn(t *testing.T) {
 	}
 }
 
-// A machine that has never signed in is not an error, and neither is one whose
-// file was deleted. Both are just "not signed in", which every command says for
-// itself with something to do about it.
+// A missing or deleted file just means "not signed in".
 func TestAMachineThatNeverSignedInReadsAsEmpty(t *testing.T) {
 	t.Setenv("KEERA_CONFIG_DIR", filepath.Join(t.TempDir(), "never-written"))
 
@@ -105,8 +99,7 @@ func TestAMachineThatNeverSignedInReadsAsEmpty(t *testing.T) {
 	}
 }
 
-// An expired sign-in is refused here rather than at the gateway, so that the
-// message says what to do about it instead of "sign in".
+// Refused here rather than at the gateway, so the message says what to do.
 func TestAnExpiredSignInIsRefusedBeforeItIsSpent(t *testing.T) {
 	t.Setenv("KEERA_CONFIG_DIR", t.TempDir())
 	t.Setenv("KEERA_OPERATOR_KEY", "")
@@ -125,8 +118,7 @@ func TestAnExpiredSignInIsRefusedBeforeItIsSpent(t *testing.T) {
 	}
 }
 
-// An operator key exported in the shell was set on purpose, so it wins over a
-// stored sign-in.
+// An exported operator key was set on purpose, so it wins.
 func TestTheOperatorKeyWinsOverASignIn(t *testing.T) {
 	t.Setenv("KEERA_CONFIG_DIR", t.TempDir())
 	base := "http://127.0.0.1:8080"
@@ -143,9 +135,8 @@ func TestTheOperatorKeyWinsOverASignIn(t *testing.T) {
 	}
 }
 
-// Which directory to sign in through is settled before a browser is opened, so
-// that a deployment with two of them says so in the terminal rather than
-// sending somebody to whichever one was configured first.
+// A deployment with two directories says so in the terminal rather than open
+// whichever was configured first.
 func TestTheDirectoryToSignInThroughIsSettledFirst(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -220,9 +211,8 @@ func TestTheDirectoryToSignInThroughIsSettledFirst(t *testing.T) {
 	}
 }
 
-// The loopback port is not private: anything on the machine can reach it. What
-// makes the sign-in this process started recognisable is the state it published,
-// so a callback carrying anything else is answered and discarded.
+// Anything on the machine can reach the loopback port, so a callback without
+// this process's state is discarded.
 func TestALoopbackCallbackIsOnlyAcceptedWithItsOwnState(t *testing.T) {
 	ln := listener(t)
 	defer func() { _ = ln.Close() }()
@@ -256,15 +246,13 @@ func TestALoopbackCallbackIsOnlyAcceptedWithItsOwnState(t *testing.T) {
 	}
 }
 
-// The label is only ever read by a person deciding which of their sign-ins is
-// which, so what matters is that there is always one.
+// The label only helps a person tell sign-ins apart, so there must be one.
 func TestAMachineAlwaysHasSomethingToCallItself(t *testing.T) {
 	if got := machineLabel(); got == "" {
 		t.Error("machineLabel = empty, want something a person can recognise")
 	}
 }
 
-// listener is the loopback port a sign-in comes back to.
 func listener(t *testing.T) net.Listener {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -274,10 +262,7 @@ func listener(t *testing.T) net.Listener {
 	return ln
 }
 
-// A whole sign-in, with a stub for the gateway and an HTTP client for the
-// browser. It checks the joins: the browser URL carries the loopback address
-// and the challenge, the code is redeemed with this process's verifier, and
-// the token lands in the credentials file.
+// A whole sign-in, with a stub gateway and an HTTP client as the browser.
 func TestAWholeSignInFromTheTerminal(t *testing.T) {
 	t.Setenv("KEERA_CONFIG_DIR", t.TempDir())
 	t.Setenv("KEERA_OPERATOR_KEY", "")
@@ -293,8 +278,7 @@ func TestAWholeSignInFromTheTerminal(t *testing.T) {
 			_, _ = w.Write([]byte(`{"sso":true,"providers":[{"name":"sso","label":"single sign-on"}]}`))
 
 		case "/control/auth/login":
-			// What the identity provider and the callback do, with the part
-			// this test is not about left out.
+			// The identity provider and the callback, trimmed down.
 			q := r.URL.Query()
 			challenge = q.Get("cli_challenge")
 			back, err := url.Parse(q.Get("cli_redirect"))
@@ -341,9 +325,7 @@ func TestAWholeSignInFromTheTerminal(t *testing.T) {
 	defer gateway.Close()
 	t.Setenv("KEERA_CONTROL_URL", gateway.URL)
 
-	// Where the desktop would be. The browser follows the redirect to the
-	// loopback listener by itself, which is the whole of what a browser does
-	// here.
+	// The browser follows the redirect to the loopback listener.
 	openInBrowser = func(target string) {
 		go func() {
 			res, err := http.Get(target)
@@ -358,8 +340,8 @@ func TestAWholeSignInFromTheTerminal(t *testing.T) {
 		t.Fatalf("keera login: %v", err)
 	}
 
-	// The proof key: what the gateway was shown when the sign-in started has to
-	// be the challenge for the verifier that redeemed it.
+	// The challenge shown at the start must match the verifier that redeemed
+	// the code.
 	if challenge == "" || verifier == "" || authn.CLIChallenge(verifier) != challenge {
 		t.Errorf("challenge %q does not belong to verifier %q", challenge, verifier)
 	}
@@ -373,7 +355,6 @@ func TestAWholeSignInFromTheTerminal(t *testing.T) {
 	}
 }
 
-// signInFor is the sign-in held for one gateway, if there is one.
 func signInFor(base string) signIn {
 	c, err := loadCredentials()
 	if err != nil {

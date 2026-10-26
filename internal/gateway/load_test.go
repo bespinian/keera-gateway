@@ -8,8 +8,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// Most of this is tested through order: what matters is not that a number was
-// stored, but where a request would go because of it.
+// Most of this is tested through order, since what matters is where a request
+// goes.
 
 func TestLeastBusyPrefersTheEmptiestDestination(t *testing.T) {
 	l := newLoads()
@@ -24,8 +24,7 @@ func TestLeastBusyPrefersTheEmptiestDestination(t *testing.T) {
 	for _, release := range stop {
 		release()
 	}
-	// Everything is back to nothing in flight, so nothing tells the three
-	// apart and what is left is the order the administrator wrote.
+	// Nothing is in flight, so the written order is left.
 	got = []string{"a", "b", "c"}
 	l.order(policy.RouteModeLeastBusy, got, byAlias)
 	if want := []string{"a", "b", "c"}; !slices.Equal(got, want) {
@@ -75,15 +74,13 @@ func TestLatencyTriesADestinationItHasNotMeasured(t *testing.T) {
 
 func TestAnOldReadingStopsBeingAReading(t *testing.T) {
 	l := newLoads()
-	// Anchored so that "now" is the real one, because order is what is being
-	// asserted and order reads the clock for itself.
+	// Anchored to the real now, since order reads the clock itself.
 	now := time.Now()
 	l.observe("stale", 50*time.Millisecond, now.Add(-loadStale))
 	l.observe("recent", 400*time.Millisecond, now)
 
-	// 'stale' was the faster of the two and is now the one nothing knows
-	// about, which puts it first: this is how a measured step notices that
-	// the model it stopped sending to has changed.
+	// 'stale' was faster but is now unknown, which puts it first, so a
+	// measured step notices if it changed.
 	if r := l.read("stale", now); r.known {
 		t.Errorf("a reading %s old is still being treated as one", loadStale)
 	}
@@ -97,12 +94,11 @@ func TestAnOldReadingStopsBeingAReading(t *testing.T) {
 func TestLatencyIsWeightedTowardsWhatJustHappened(t *testing.T) {
 	l := newLoads()
 	now := time.Now()
-	// A destination that was fast, and has just answered slowly.
+	// Fast, then slow.
 	l.observe("a", 100*time.Millisecond, now)
 	l.observe("a", 900*time.Millisecond, now.Add(loadHalfLife))
 
-	// One half-life on, the old reading is worth half of what it was: the
-	// average is about halfway between the two rather than at either end.
+	// After one half-life, the average is about halfway between the two.
 	got := l.read("a", now.Add(loadHalfLife)).latency
 	if got < 450*time.Millisecond || got > 550*time.Millisecond {
 		t.Errorf("latency = %s, want about 500ms - one sample should move the average "+
@@ -114,9 +110,8 @@ func TestLatencyIsWeightedTowardsWhatJustHappened(t *testing.T) {
 func TestAFailedDestinationIsRankedLastInBothModes(t *testing.T) {
 	l := newLoads()
 	now := time.Now()
-	// The trap both modes fall into without this. A destination that is down
-	// answers nothing, so it measures as unmeasured and as completely idle -
-	// which is the best score there is in either mode.
+	// A destination that is down looks unmeasured and idle, the best score in
+	// either mode.
 	l.fail("down", now)
 	l.observe("up", 700*time.Millisecond, now)
 	release := l.begin("up")
@@ -150,8 +145,7 @@ func TestAnUnmeasuredModeIsLeftAlone(t *testing.T) {
 	l.observe("b", time.Millisecond, time.Now())
 	l.observe("a", time.Second, time.Now())
 
-	// A fallback step's order is the administrator's statement about which
-	// destination is wanted, and nothing measured here may reorder it.
+	// A fallback step keeps the administrator's order.
 	got := []string{"a", "b"}
 	l.order(policy.RouteModeFallback, got, byAlias)
 	if want := []string{"a", "b"}; !slices.Equal(got, want) {
@@ -172,6 +166,6 @@ func TestDescribeSaysNothingAboutAModeThatMeasuresNothing(t *testing.T) {
 	}
 }
 
-// byAlias keeps each destination's numbers under its alias. The tests have one
-// organisation, so the alias is as unique as a model key.
+// byAlias keys each destination by alias, which is unique with one
+// organisation.
 func byAlias(alias string) string { return alias }

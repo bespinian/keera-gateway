@@ -1,10 +1,9 @@
 # sshd inside a Keera sandbox.
 #
 # It runs as the sandbox user, with no privilege separation: there is one
-# account. Why port 2222 is explained at PortSSH in internal/sandbox/sandbox.go.
+# account. PortSSH in internal/sandbox/sandbox.go explains port 2222.
 #
-# Authentication is by the key the gateway put in authorized_keys when the
-# sandbox was created. The account has no password.
+# Only the key the gateway put in authorized_keys signs in. No password.
 
 Port 2222
 AddressFamily inet
@@ -15,15 +14,10 @@ PidFile /run/sshd/sshd.pid
 
 # What the gateway set, handed to every session.
 #
-# An ssh session does not inherit the container's environment, so a shell would
-# have no gateway address and no API key. Shell startup files are not enough: a
-# non-interactive `ssh host cmd`, as scp and editors' remote servers use, reads
-# ~/.bashrc only on some bash builds, not Alpine's.
-#
-# So sshd injects it from ~/.ssh/environment for every session. The usual worry,
-# a user setting LD_PRELOAD for a privileged login, does not apply: the only
-# account is the sandbox's owner, and the entrypoint writes the file before sshd
-# starts.
+# An ssh session does not inherit the container's environment, and shell
+# startup files miss non-interactive sessions such as scp. So sshd reads it
+# from ~/.ssh/environment. The usual LD_PRELOAD worry does not apply: there is
+# one account, and the entrypoint writes the file before sshd starts.
 PermitUserEnvironment yes
 
 # The only way in.
@@ -37,15 +31,14 @@ UsePAM no
 
 # A shell, an editor's remote server, scp, and ports forwarded to the laptop.
 AllowTcpForwarding yes
-# An agent forwarded into a machine that runs a model's output would sign with
-# the developer's keys.
+# A forwarded agent would let a model's output sign with the developer's keys.
 AllowAgentForwarding no
 PermitTunnel no
 X11Forwarding no
 Subsystem sftp internal-sftp
 
-# The gateway's attach surface has an idle watchdog measured in hours. This finer
-# one releases the pty soon after a client vanishes.
+# The gateway's idle watchdog is in hours. This releases the pty soon after a
+# client vanishes.
 ClientAliveInterval 60
 ClientAliveCountMax 10
 

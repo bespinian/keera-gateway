@@ -1,7 +1,7 @@
-// The first-run checklist, ticked off from what the control plane already has.
-// It replaces the dashboard until the first request has been served and, with
-// card payments, until the organisation has had credit. A member gets a
-// shorter guide, until one of their keys has made a request.
+// The first-run checklist, ticked off from what the control plane has. It
+// replaces the dashboard until the first request is served and, with card
+// payments, until the organisation has had credit. A member gets a shorter
+// guide, until one of their keys has made a request.
 
 import {
   h,
@@ -25,8 +25,7 @@ import { newOrg, orgNameOf } from "./orgs.js";
 export function firstRunDue(ctx, setup) {
   if (!isAdmin(ctx) || !setup) return false;
   if (setup.requests === 0) return true;
-  // Credit is one organisation's, so there is none to ask for while an
-  // operator looks at all of them.
+  // No credit to ask for while an operator looks at all organisations.
   return (
     !!ctx.state.me.payments && !!ctx.orgID && !setup.credits && !setup.invoiced
   );
@@ -42,8 +41,8 @@ export function firstRun(ctx, setup, credit, providers) {
       title: "Create your organisation",
       icon: icons.orgs,
       done: setup.orgs > 0,
-      // Before there is one, or while an operator looks at all of them at
-      // once, there is no name to give.
+      // No name to give before there is one, or for an operator looking at
+      // all of them.
       body:
         ctx.orgID || ctx.state.me.org_id
           ? [
@@ -94,8 +93,7 @@ export function firstRun(ctx, setup, credit, providers) {
     },
   ];
 
-  // Only with card payments. An organisation billed by invoice needs no
-  // credit.
+  // Only with card payments; invoiced organisations need no credit.
   if (ctx.state.me.payments) {
     const account = credit && credit.account;
     const limited =
@@ -117,7 +115,7 @@ export function firstRun(ctx, setup, credit, providers) {
     });
   }
 
-  // Last, because a request needs everything above it.
+  // Last, as a request needs everything above it.
   steps.push({
     title: "Send your first request",
     icon: icons.connect,
@@ -153,8 +151,8 @@ export function memberRunDue(ctx, access) {
   );
 }
 
-/** An administrator issues the key, so the first step is to get its secret:
- *  by activating the key, or rotating one already active. */
+/** An admin issues the key, so the first step is to get its secret: by
+ *  activating the key, or rotating one already active. */
 export function memberRun(ctx, access, providers) {
   const keys = usableKeys(access);
   const key = keys[0];
@@ -303,8 +301,8 @@ const flowTools = [
   ["Keera Chat", () => brandMark(18)],
 ];
 
-// Some of the providers in internal/catalog/providers.go: two frontier labs
-// and two in Switzerland.
+// Two frontier labs and two in Switzerland, from
+// internal/catalog/providers.go.
 const flowProviders = ["anthropic", "openai", "infomaniak", "cscs"];
 
 const flowChecks = [
@@ -314,10 +312,9 @@ const flowChecks = [
   ["Usage", icons.usage],
 ];
 
-/** overview shows what the steps below set up: tools on the left send their
- *  requests through the gateway to the providers' models on the right. Each
- *  provider is shown by its logo and one of its models from the catalogue in
- *  providers, or by its name when that is empty. */
+/** overview shows what the steps below set up: tools send requests through
+ *  the gateway to the providers' models. Each provider shows its logo and one
+ *  of its models, or its name when providers is empty. */
 function overview(ctx, providers) {
   // A long model name is cut short on a narrow screen.
   const item = (mark, label) =>
@@ -375,8 +372,8 @@ function overview(ctx, providers) {
   );
 }
 
-/** flowLines joins n rows of equal height to the gateway's edge. It stretches
- *  to the rows' height, so the strokes keep their width by not scaling. */
+/** flowLines joins n equal rows to the gateway's edge. It stretches to the
+ *  rows' height, so the strokes do not scale, to keep their width. */
 function flowLines(n, out) {
   const height = n * 10;
   const mid = height / 2;

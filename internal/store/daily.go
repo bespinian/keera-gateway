@@ -12,10 +12,9 @@ import (
 )
 
 // usage_daily holds the totals of usage_events per organisation, key, model,
-// client and UTC day. It is written in the same batch as the events, so a
-// whole day of it always agrees with them, and it is kept longer: reports over
-// more than two days read it, so they still work once retention has removed
-// the events.
+// client and UTC day. It is written in the same batch as the events, so the
+// two agree, and kept longer, so reports over more than two days still work
+// after retention.
 
 // dailyKey is one row of usage_daily. Missing ids are "", as in the table.
 type dailyKey struct {
@@ -58,8 +57,8 @@ func addDaily(sums map[dailyKey]*dailySum, e Event) {
 	}
 }
 
-// queueDaily adds sums to usage_daily. Rows are sorted so every replica takes
-// their locks in one order, as with spend.
+// queueDaily adds sums to usage_daily, sorted so every replica locks rows in
+// the same order.
 func queueDaily(batch *pgx.Batch, sums map[dailyKey]*dailySum) {
 	keys := slices.SortedFunc(maps.Keys(sums), func(a, b dailyKey) int {
 		return cmp.Or(
@@ -94,13 +93,12 @@ func queueDaily(batch *pgx.Batch, sums map[dailyKey]*dailySum) {
 }
 
 // dailyAfter is the longest window still read from usage_events. It matches
-// chartBucket: a window drawn by the day is counted by the day.
+// chartBucket, so a window drawn by the day is counted by the day.
 const dailyAfter = 48 * time.Hour
 
 // DayWindow reports whether a report over from..to reads usage_daily, and if
-// so widens the window to whole UTC days: from back to its midnight, to
-// forward to the next one, so a window ending now includes today so far.
-// Applying it twice changes nothing.
+// so widens the window to whole UTC days, so a window ending now includes
+// today. Applying it twice changes nothing.
 func DayWindow(from, to time.Time) (time.Time, time.Time, bool) {
 	if to.Sub(from) <= dailyAfter {
 		return from, to, false
@@ -112,17 +110,17 @@ func DayWindow(from, to time.Time) (time.Time, time.Time, bool) {
 	return policy.PeriodDay.Start(from), end, true
 }
 
-// usageSource is where a report counts from: usage_events, or usage_daily
-// for a window DayWindow widened. Each expression counts the same thing in
-// both, so the two agree on any whole day.
+// usageSource is where a report counts from: usage_events, or usage_daily for
+// a window DayWindow widened. Both count the same, so they agree on any whole
+// day.
 type usageSource struct {
 	daily bool
 	table string
-	// window is the condition on $1 and $2, the window's ends.
+	// window is the condition on $1 and $2.
 	window string
 	// all, served, refused and failed count requests.
 	all, served, refused, failed string
-	// at is a row's time, to put it in a chart's bucket.
+	// at is a row's time, for a chart's bucket.
 	at string
 }
 

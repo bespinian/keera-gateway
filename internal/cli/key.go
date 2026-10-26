@@ -17,30 +17,23 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// keyRun is one 'keera key' invocation.
 type keyRun struct {
 	*cmdRun
-	project string
-	user    string
-	name    string
-	expires string
-	// subscription issues a key for Claude Code signed in to a Claude plan.
+	project      string
+	user         string
+	name         string
+	expires      string
 	subscription bool
-	// noUser issues a key attributed to nobody, such as a pipeline's.
-	noUser bool
-	// pending leaves the key for its holder to activate.
-	pending bool
-	// all lists revoked keys too.
-	all bool
+	noUser       bool
+	pending      bool
+	all          bool
 }
 
-// defaultKeyLife is how long a new key lasts unless --expires says otherwise.
-// The panel offers the same default, so a key does not live for ever because
-// nobody chose.
+// defaultKeyLife matches the panel's default, so a key does not live for ever
+// because nobody chose.
 const defaultKeyLife = 90 * 24 * time.Hour
 
-// createdKey is a new key as the control API returns it, secret included. A
-// pending key has no secret yet.
+// createdKey includes the secret, except for a pending key.
 type createdKey struct {
 	store.KeyInfo
 	Key string `json:"key,omitempty"`
@@ -93,8 +86,7 @@ func (r *keyRun) create(ctx context.Context) error {
 		}
 		r.name = r.fs.Arg(0)
 	}
-	// Required, as in the panel: a key without a name is a row nobody can
-	// identify later.
+	// Required, as in the panel: a key without a name cannot be told apart.
 	if strings.TrimSpace(r.name) == "" {
 		return errors.New("name the key after what it is for, such as: keera key create \"Ada's laptop\"")
 	}
@@ -107,13 +99,12 @@ func (r *keyRun) create(ctx context.Context) error {
 		return err
 	}
 	req := map[string]any{"org_id": orgID, "project_id": project, "name": r.name}
-	// Sent only when set, so a plain create still works against a v0.9.0
-	// gateway, which refuses fields it does not know.
+	// Sent only when set, because a v0.9.0 gateway refuses unknown fields.
 	if r.pending {
 		req["pending"] = true
 	}
-	// A key with a person on it is what makes `keera usage --by user` work,
-	// and what puts it on that person's own screens.
+	// A key with a person on it shows in `keera usage --by user` and on their
+	// own screens.
 	owner, err := r.owner(ctx, orgID)
 	if err != nil {
 		return err
@@ -125,7 +116,7 @@ func (r *keyRun) create(ctx context.Context) error {
 		return errors.New("--pending leaves the key for the person it belongs to; " +
 			"name them with --user")
 	}
-	// The control API reads no expiry as a key that never expires.
+	// The control API reads no expiry as never.
 	switch r.expires {
 	case "":
 		req["expires_in_seconds"] = int64(defaultKeyLife / time.Second)
@@ -156,9 +147,8 @@ func (r *keyRun) create(ctx context.Context) error {
 	return nil
 }
 
-// owner is the person a new key belongs to: --user, or else the caller, so
-// the key shows on their own screens. --no-user, and the operator key, which
-// is nobody, give a key that belongs to nobody.
+// owner is --user, or else the caller. --no-user and the operator key give a
+// key that belongs to nobody.
 func (r *keyRun) owner(ctx context.Context, orgID string) (store.User, error) {
 	switch {
 	case r.noUser && r.user != "":
@@ -179,7 +169,6 @@ func (r *keyRun) owner(ctx context.Context, orgID string) (store.User, error) {
 	return store.User{ID: me.UserID, Email: me.Email}, nil
 }
 
-// activate gives a pending key its secret and prints it, once.
 func (r *keyRun) activate(ctx context.Context) error {
 	k, err := r.find(ctx)
 	if err != nil {
@@ -196,8 +185,7 @@ func (r *keyRun) activate(ctx context.Context) error {
 	return nil
 }
 
-// activateKey gives a pending key its secret. A name renames it in the same
-// step; an empty one keeps its name.
+// activateKey renames the key too when name is not empty.
 func activateKey(ctx context.Context, c *client, keyID, name string) (createdKey, error) {
 	var created createdKey
 	err := c.do(ctx, "POST", "/v1/keys/"+url.PathEscape(keyID)+"/activate",
@@ -222,8 +210,8 @@ func (r *keyRun) list(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// Filtered here rather than by the control API, which other callers
-	// need to return revoked keys, and so it works against older gateways.
+	// Filtered here, because other callers need revoked keys and older
+	// gateways cannot filter.
 	if !r.all {
 		keys = slices.DeleteFunc(keys, func(k store.KeySummary) bool { return k.RevokedAt != nil })
 	}
@@ -232,7 +220,7 @@ func (r *keyRun) list(ctx context.Context) error {
 			printNone(w, "keys", "keera key create <name>")
 			return
 		}
-		// Last use decides whether a key is safe to revoke, so it is a column.
+		// Last use tells whether a key is safe to revoke.
 		w.header("ID\tNAME\tPREFIX\tKIND\tPROJECT\tSTATE\tLAST USED\tCLAUDE PLAN USED")
 		for _, k := range keys {
 			// The control plane reads use since the start of the month.
@@ -251,8 +239,7 @@ func (r *keyRun) list(ctx context.Context) error {
 	})
 }
 
-// planText is how much of a Claude plan a subscription key's holder has used,
-// in each of the plan's two windows.
+// planText is how much of a Claude plan is used, in each of its two windows.
 func planText(p *policy.PlanUsage) string {
 	if p == nil {
 		return "-"
@@ -275,15 +262,13 @@ func planText(p *policy.PlanUsage) string {
 	return strings.Join(parts, " · ")
 }
 
-// find resolves the key named by the first argument in the organisation.
 func (r *keyRun) find(ctx context.Context) (store.KeySummary, error) {
 	return findKey(ctx, r.c, r.org, r.fs.Arg(0))
 }
 
 func (r *keyRun) revoke(ctx context.Context) error {
-	// An id names a key outright, so --yes with an id needs no lookup. A
-	// name only means something inside an organisation, and the prompt needs
-	// the record to say what it is about.
+	// --yes with an id needs no lookup. A name needs the organisation, and
+	// the prompt needs the record.
 	target := r.fs.Arg(0)
 	if !r.yes || !id.HasPrefix(target, "key") {
 		found, err := r.find(ctx)
@@ -310,13 +295,13 @@ func (r *keyRun) revoke(ctx context.Context) error {
 }
 
 func (r *keyRun) rotate(ctx context.Context) error {
-	// The control API reads no lifetime as "keep the old one's", so a rotated
-	// key cannot be told to never expire.
+	// The control API reads no lifetime as "keep the old one's", so "never"
+	// cannot be sent.
 	if r.expires == "never" {
 		return errors.New("--expires never is for 'keera key create'; a rotated key keeps " +
 			"the old one's lifetime unless --expires gives another")
 	}
-	// Checked before the prompt, so a mistyped day does not cost a confirmation.
+	// Checked before the prompt.
 	var expiry map[string]any
 	if r.expires != "" {
 		field, v, err := expiryField(r.expires)
@@ -383,8 +368,7 @@ func (r *keyRun) set(ctx context.Context) error {
 	})
 }
 
-// keyNamed is what a person types back to confirm: the key's name, or its id
-// when it has none.
+// keyNamed is what is typed back to confirm: the name, or the id without one.
 func keyNamed(k store.KeySummary) (named, noun string) {
 	if k.Name == "" {
 		return k.ID, "id"
@@ -392,8 +376,8 @@ func keyNamed(k store.KeySummary) (named, noun string) {
 	return k.Name, "name"
 }
 
-// lastUsed says when a key was last used, for a prompt about it. The control
-// plane only reads use since the start of the month, so no use is not "never".
+// lastUsed does not say "never", because the control plane only reads use
+// since the start of the month.
 func lastUsed(k store.KeySummary) string {
 	if k.LastUsedAt == nil {
 		return "  it has not been used this month"
@@ -401,9 +385,8 @@ func lastUsed(k store.KeySummary) string {
 	return "  it was last used " + k.LastUsedAt.Format(time.DateOnly)
 }
 
-// confirmKeyRevoke says what stops working and makes the administrator type
-// the key back. A revoked key cannot be printed again or restored, so the
-// prompt points at rotation, which replaces a key with no outage.
+// confirmKeyRevoke points at rotation, because a revoked key cannot be
+// restored and rotation replaces a key with no outage.
 func confirmKeyRevoke(k store.KeySummary) error {
 	named, noun := keyNamed(k)
 	return confirm(fmt.Sprintf("Revoking %s (%s):", named, k.ID), []string{
@@ -415,8 +398,7 @@ func confirmKeyRevoke(k store.KeySummary) error {
 	}, noun, named, "nothing was revoked")
 }
 
-// confirmKeyRotate asks before a rotation, which revokes the old key at once:
-// whatever still holds it fails until it is given the new one.
+// confirmKeyRotate asks first because rotation revokes the old key at once.
 func confirmKeyRotate(k store.KeySummary) error {
 	named, noun := keyNamed(k)
 	return confirm(fmt.Sprintf("Rotating %s (%s):", named, k.ID), []string{
@@ -427,15 +409,13 @@ func confirmKeyRotate(k store.KeySummary) error {
 	}, noun, named, "nothing was rotated")
 }
 
-// rotatedKey is a new key from a rotation, and the id of the key it replaced.
 type rotatedKey struct {
 	createdKey
 	ReplacedKeyID string `json:"replaced_key_id"`
 }
 
-// rotateKey replaces a key with one carrying the same project, owner and
-// guardrails, and revokes the old one, in one control-plane transaction. An
-// empty name or expiry keeps the old key's. expiry holds what expiryField gave.
+// rotateKey keeps the project, owner and guardrails. An empty name or expiry
+// keeps the old key's; expiry comes from expiryField.
 func rotateKey(ctx context.Context, c *client, keyID, name string, expiry map[string]any) (rotatedKey, error) {
 	req := map[string]any{"name": name}
 	maps.Copy(req, expiry)
@@ -444,9 +424,8 @@ func rotateKey(ctx context.Context, c *client, keyID, name string, expiry map[st
 	return rotated, err
 }
 
-// expiryField is --expires as a key request carries it. A lifetime such as
-// 90d goes in seconds. A day such as 2026-12-31 is the last day the key works,
-// so it expires at the end of that day, in local time.
+// expiryField sends a lifetime such as 90d in seconds. A day such as
+// 2026-12-31 is the last day the key works, until its end in local time.
 func expiryField(expires string) (field string, value any, err error) {
 	day, err := time.ParseInLocation(time.DateOnly, expires, time.Local)
 	if err != nil {
@@ -464,12 +443,9 @@ func expiryField(expires string) (field string, value any, err error) {
 	return "expires_at", end.Format(time.RFC3339), nil
 }
 
-// findKey resolves an id or a name to a key.
-//
-// A name only matches keys that still work, because rotation leaves the old
-// key revoked under the same name. If several live keys share the name, it
-// refuses and lists their ids: acting on the wrong key breaks its clients.
-// org is resolved as resolveOrg does.
+// findKey takes an id or a name. A name only matches live keys, because
+// rotation leaves the old key revoked under the same name. If several live
+// keys share it, it refuses and lists their ids.
 func findKey(ctx context.Context, c *client, org, who string) (store.KeySummary, error) {
 	orgID, err := resolveOrg(ctx, c, org)
 	if err != nil {
@@ -513,8 +489,7 @@ func findKey(ctx context.Context, c *client, org, who string) (store.KeySummary,
 	return store.KeySummary{}, notFound("key", who, orgID, "key")
 }
 
-// freshKeyHint says how to get a new key in place of a revoked one. Only an
-// administrator issues keys, so a member is sent to one.
+// freshKeyHint sends a member to an administrator, who alone issues keys.
 func freshKeyHint(ctx context.Context, c *client, projectID, name string) string {
 	if me, err := whoami(ctx, c); err == nil && me.Role == string(authn.RoleMember) {
 		return "ask an administrator for a new key in your name"

@@ -15,8 +15,7 @@ func TestRetentionDeletesPastTheWindowAndNothingInsideIt(t *testing.T) {
 	f := newFixture(t, st, ctx)
 	now := time.Now().UTC()
 
-	// recent is now, not a day ago: on the 1st, a day ago is last month, and
-	// its spend window is not the open one this test checks survives.
+	// recent is now, not a day ago: on the 1st, a day ago is last month.
 	old, recent := now.AddDate(0, 0, -400), now
 	for _, ts := range []time.Time{old, recent} {
 		if err := st.WriteEvents(ctx, []Event{{
@@ -90,8 +89,7 @@ func TestRetentionWorksInMoreThanOneBatch(t *testing.T) {
 	f := newFixture(t, st, ctx)
 	old := time.Now().UTC().AddDate(0, 0, -400)
 
-	// More than one batch, so the loop that keeps a DELETE short is exercised
-	// rather than assumed.
+	// More than one batch, to exercise the loop.
 	const rows = purgeBatch + 17
 	batch := make([]Event, 0, rows)
 	for range rows {
@@ -117,8 +115,7 @@ func TestRetentionWorksInMoreThanOneBatch(t *testing.T) {
 	}
 }
 
-// A short retention must not take the open month with it: on the 20th with
-// seven days kept, the month began before the cutoff but has not ended.
+// A short retention keeps the open month, though it began before the cutoff.
 func TestRetentionKeepsTheOpenMonthWhenItBeganBeforeTheCutoff(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)

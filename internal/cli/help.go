@@ -1,11 +1,9 @@
 package cli
 
-// Help is a structure rather than one block of prose, so the answer fits the
-// question: `keera` prints the summaries, `keera help <command>` one section,
-// and `keera help <command> <subcommand>` one verb with only its own flags.
-//
-// Flags are described on the FlagSet each command parses with, so each is
-// worded once. This file adds which verb reads which flag.
+// Help is structured so the answer fits the question: `keera` prints the
+// summaries, `keera help <command>` one section, and `keera help <command>
+// <subcommand>` one verb. Flags are described on each command's FlagSet; this
+// file adds which verb reads which flag.
 
 import (
 	"context"
@@ -17,8 +15,7 @@ import (
 	"strings"
 )
 
-// The flags add and set both read. Each verb of a model, MCP server or filter
-// adds a few of its own; a router's two read the same ones.
+// The flags add and set both read.
 var (
 	modelFieldFlags = []string{
 		"provider", "backend", "product-id", "backend-model", "kind",
@@ -27,8 +24,7 @@ var (
 	}
 	mcpFieldFlags    = []string{"endpoint", "description", "auth-header", "api-key"}
 	filterFieldFlags = []string{"mode", "model", "prompt", "rules", "description"}
-	// routeStepFlags change one route step, so a router can be written
-	// without a file.
+	// routeStepFlags let a router be written without a file.
 	routeStepFlags = []string{
 		"mode", "model", "destinations", "prompt", "fallback", "no-fallback",
 		"header", "values",
@@ -37,60 +33,51 @@ var (
 		routeStepFlags, []string{"json"})
 )
 
-// command is one noun this command line understands.
 type command struct {
 	name    string
 	aliases []string
-	// summary is the one line `keera` prints beside the name.
 	summary string
-	// prose explains the idea rather than the syntax. Printed under the
-	// subcommand list.
+	// prose explains the idea rather than the syntax.
 	prose string
-	// subs are the verbs. A command with none, such as `keera usage`, takes
-	// flags directly and names them in args and flags instead.
-	subs  []subcommand
-	args  string
-	flags []string
-	// examples are printed last, where they are easiest to find.
+	// A command without subs, such as `keera usage`, names its flags in args
+	// and flags instead.
+	subs     []subcommand
+	args     string
+	flags    []string
 	examples []string
-	// hidden keeps a command out of the overview without making it an error.
+	// hidden keeps a command out of the overview.
 	hidden bool
 }
 
-// subcommand is one verb of one command.
 type subcommand struct {
 	name string
-	// aliases are the other spellings the dispatcher accepts for this verb,
-	// so help can print them and 'keera help <cmd> <alias>' finds the verb.
-	// The ones in commonAliases are added for a verb of that name.
+	// aliases are the other spellings the dispatcher accepts, on top of
+	// commonAliases.
 	aliases []string
 	args    string
 	summary string
-	// flags names the flags this verb reads, out of the ones its command
-	// declares. help_test checks them against the real FlagSet.
+	// flags names the flags this verb reads. help_test checks them against
+	// the real FlagSet.
 	flags    []string
 	prose    string
 	examples []string
 }
 
-// commonAliases are the other spellings every verb of that name accepts, so
-// the same word works on every command.
+// commonAliases let the same word work on every command.
 var commonAliases = map[string][]string{
 	"list": {"ls"}, "delete": {"rm", "remove"}, "set": {"edit", "update"},
 	"create": {"add", "new"}, "add": {"create", "new"}, "show": {"get"},
 	"check": {"probe", "test"}, "report": {"stats"},
 }
 
-// otherNames is every other spelling of the verb.
 func (s subcommand) otherNames() []string {
 	return append(slices.Clone(commonAliases[s.name]), s.aliases...)
 }
 
-// tagline is the first line of the help.
 const tagline = "keera - administer a Keera Gateway"
 
-// commands is every command, in the order the overview lists them: set-up
-// first, then what sits in front of a request, then the reports.
+// commands is in overview order: set-up first, then what sits in front of a
+// request, then the reports.
 var commands = []command{
 	{
 		name:    "login",
@@ -913,7 +900,7 @@ var commands = []command{
 	{name: "help", summary: "help for one command", args: "[<command> [<subcommand>]]", hidden: true},
 }
 
-// find resolves a name, including a plural or a habit spelling, to its command.
+// find also accepts a plural or a habit spelling.
 func find(name string) (command, bool) {
 	for _, c := range commands {
 		if c.name == name || slices.Contains(c.aliases, name) {
@@ -932,8 +919,8 @@ func (c command) sub(name string) (subcommand, bool) {
 	return subcommand{}, false
 }
 
-// overview is what `keera` on its own prints: one line per command, short
-// enough to read without scrolling. p is the painter of the stream it goes to.
+// overview is what `keera` on its own prints, short enough to read without
+// scrolling.
 func overview(p painter) string {
 	var b strings.Builder
 	b.WriteString(p.head(tagline) + "\n\n" + p.head("Usage:") +
@@ -961,8 +948,7 @@ func overview(p painter) string {
 	return b.String()
 }
 
-// helpText renders one command, or one of its subcommands. fs is the
-// FlagSet the command parses with, or nil for a command with no flags.
+// helpText takes a nil fs for a command with no flags.
 func helpText(fs *flag.FlagSet, name, subName string) string {
 	c, ok := find(name)
 	if !ok {
@@ -985,7 +971,6 @@ func helpText(fs *flag.FlagSet, name, subName string) string {
 	}
 	writeProse(&b, c.prose)
 
-	// With subcommands, each verb lists its own flags.
 	if len(c.subs) == 0 {
 		writeFlags(&b, fs, c.flags)
 	}
@@ -1007,7 +992,6 @@ func subHelpText(fs *flag.FlagSet, c command, sub subcommand) string {
 	writeProse(&b, sub.prose)
 	writeFlags(&b, fs, sub.flags)
 	writeExamples(&b, sub.examples)
-	// The command's prose explains the idea, so point back at it.
 	fmt.Fprintf(&b, "\nMore about 'keera %s': %s\n", c.name, style.cmd("keera help "+c.name))
 	return b.String()
 }
@@ -1039,8 +1023,7 @@ func writeProse(b *strings.Builder, prose string) {
 	}
 	b.WriteString("\n")
 	for para := range strings.SplitSeq(prose, "\n\n") {
-		// A paragraph with its own line breaks, such as the table of router
-		// modes, is laid out by hand: indent it, do not rewrap it.
+		// A paragraph with its own line breaks is indented, not rewrapped.
 		if strings.Contains(para, "\n") {
 			b.WriteString(indent(para, "  ") + "\n\n")
 			continue
@@ -1051,13 +1034,10 @@ func writeProse(b *strings.Builder, prose string) {
 	trimTrailingBlank(b)
 }
 
-// proseWidth is the width help and reports are laid out for.
 const proseWidth = 78
 
-// wrapAt breaks text to width. The first line starts at column first,
-// because something is already printed in front of it, and every later line
-// is indented to column indent. It counts runes, not bytes, because the prose
-// holds em-dashes.
+// wrapAt starts the first line at column first and indents the rest to
+// indent. It counts runes, because the prose holds em-dashes.
 func wrapAt(text string, first, indent, width int) string {
 	var b strings.Builder
 	column := first
@@ -1095,8 +1075,6 @@ func writeFlags(b *strings.Builder, fs *flag.FlagSet, names []string) {
 	writeFlagLines(b, fs, present)
 }
 
-// writeFlagLines prints each flag with two dashes, its value's placeholder
-// and its description, wrapped to the column it starts in.
 func writeFlagLines(b *strings.Builder, fs *flag.FlagSet, names []string) {
 	type row struct{ left, usage string }
 	rows := make([]row, 0, len(names))
@@ -1126,9 +1104,8 @@ func writeFlagLines(b *strings.Builder, fs *flag.FlagSet, names []string) {
 	}
 }
 
-// shownDefault reports whether a flag's default is worth printing. Empty,
-// false, zero and negative values mean "not given" here, so printing
-// "(default -1)" would only mislead. A durationVar prints "0" when not given.
+// shownDefault hides empty, false, zero and negative defaults, which mean "not
+// given" here. A durationVar prints "0" when not given.
 func shownDefault(def string) bool {
 	if def == "" || def == "false" {
 		return false
@@ -1155,8 +1132,7 @@ func writeExamples(b *strings.Builder, examples []string) {
 	}
 }
 
-// example paints a line to copy: the command in one colour, and a trailing
-// # comment, which is not typed, in another.
+// example paints a trailing # comment apart from the command.
 func example(line string) string {
 	i := strings.Index(line, "#")
 	if i < 0 {
@@ -1182,22 +1158,15 @@ func trimTrailingBlank(b *strings.Builder) {
 	b.WriteString(s + "\n")
 }
 
-// printHelp writes one command's help to stdout. It returns an error so a
-// command can end with `return printHelp(...)`. It is a variable so a test
-// can see the FlagSet a command declares.
+// printHelp is a variable so a test can see the FlagSet a command declares.
 var printHelp = func(fs *flag.FlagSet, name, sub string) error {
 	fmt.Print(helpText(fs, name, sub))
 	return nil
 }
 
-// wantsHelp spots a request for help in any of the ways people write it:
-// `keera filter --help`, `keera filter help`, `keera filter add --help` or
-// `keera filter help add`. It returns the subcommand asked about, empty for
-// the command itself, and false when this is not a request for help.
-//
-// The word "help" counts only where a verb goes, so a project or a prompt can be
-// called "help". It stops at "--", because what follows belongs to another
-// program, as in `keera sandbox ssh box -- git --help`.
+// wantsHelp returns the subcommand asked about, empty for the command itself.
+// The word "help" counts only where a verb goes, so a project can be called
+// "help". It stops at "--", as in `keera sandbox ssh box -- git --help`.
 func wantsHelp(args []string) (string, bool) {
 	asked := false
 	var named []string
@@ -1221,8 +1190,8 @@ func wantsHelp(args []string) (string, bool) {
 	return "", true
 }
 
-// suggest is the command whose name is nearest to what was typed. Empty when
-// nothing is near enough, because a wild guess does not help.
+// suggest returns "" when nothing is near enough, because a wild guess does
+// not help.
 func suggest(typed string) string {
 	best, bestDistance := "", 3
 	for _, c := range commands {
@@ -1238,7 +1207,7 @@ func suggest(typed string) string {
 	return best
 }
 
-// suggestSub is the same thing one level down, for `keera filter lst`.
+// suggestSub is suggest for verbs, as in `keera filter lst`.
 func suggestSub(name, typed string) string {
 	c, ok := find(name)
 	if !ok {
@@ -1256,8 +1225,7 @@ func suggestSub(name, typed string) string {
 	return best
 }
 
-// distance is the Levenshtein distance: enough to catch a missing, extra
-// or wrong letter.
+// distance is the Levenshtein distance.
 func distance(a, b string) int {
 	if a == b {
 		return 0
@@ -1281,8 +1249,7 @@ func distance(a, b string) int {
 	return prev[len(b)]
 }
 
-// subAliases is every other spelling this command's verbs answer to, as
-// "verb (alias, alias)", printed under the list of verbs.
+// subAliases prints as "verb (alias, alias)".
 func subAliases(c command) []string {
 	out := make([]string, 0, len(c.subs))
 	for _, s := range c.subs {
@@ -1293,15 +1260,14 @@ func subAliases(c command) []string {
 	return out
 }
 
-// unknownSub is what a command says to a verb it does not have: the nearest
-// verb, or else the list of verbs.
+// unknownSub names the nearest verb, or else lists them.
 func unknownSub(name, typed string) error {
 	c, ok := find(name)
 	if !ok {
 		return fmt.Errorf("unknown command: keera %s", name)
 	}
-	// No verb at all is a question about the command, so print its help.
-	// Commands with a listing never get here.
+	// No verb is a question about the command. Commands with a listing never
+	// get here.
 	if typed == "" {
 		fmt.Print(helpText(nil, name, ""))
 		return fmt.Errorf("%s needs a subcommand", name)
@@ -1319,8 +1285,7 @@ func unknownSub(name, typed string) error {
 	return fmt.Errorf("%s\nRun 'keera help %s'", msg, name)
 }
 
-// helpCmd is `keera help [<command> [<subcommand>]]`. A command's flags live
-// on the FlagSet it builds, so this runs the command with --help.
+// helpCmd runs the command with --help, since its flags live on its FlagSet.
 func helpCmd(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		fmt.Print(overview(style))

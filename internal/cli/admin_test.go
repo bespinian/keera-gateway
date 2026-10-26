@@ -23,18 +23,16 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// recorded is one request the fake control plane saw.
 type recorded struct {
 	method string
 	path   string
-	// query is what the command narrowed the call to. For a report it is the
-	// whole behaviour: a window not passed on answers a different question.
+	// For a report the query is the whole behaviour.
 	query string
 	body  map[string]any
 }
 
 // fakeControl stands in for the control API. Handlers are keyed by
-// "METHOD /path", and everything they were sent is kept for the assertions.
+// "METHOD /path".
 type fakeControl struct {
 	t        *testing.T
 	seen     []recorded
@@ -43,7 +41,6 @@ type fakeControl struct {
 
 func newFakeControl(t *testing.T, handlers map[string]any) *fakeControl {
 	t.Helper()
-	// Who is calling, for the commands that ask before choosing a default.
 	// An administrator, so no default is chosen unless a test says otherwise.
 	if _, set := handlers["GET /v1/me"]; !set {
 		handlers["GET /v1/me"] = map[string]any{"role": "admin", "org_id": "org_1"}
@@ -57,13 +54,11 @@ func newFakeControl(t *testing.T, handlers map[string]any) *fakeControl {
 	t.Cleanup(srv.Close)
 	t.Setenv("KEERA_CONTROL_URL", srv.URL)
 	t.Setenv("KEERA_OPERATOR_KEY", "test-operator-key")
-	// No organisation is chosen unless a test chooses one.
 	t.Setenv("KEERA_ORG", "")
 	return f
 }
 
-// failure is a handler that answers with an error envelope, for the paths whose
-// behaviour is what the CLI does when the control plane refuses.
+// failure answers with an error envelope.
 type failure struct {
 	status  int
 	message string
@@ -74,9 +69,8 @@ func (f *fakeControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if raw, _ := io.ReadAll(r.Body); len(raw) > 0 {
 		_ = json.Unmarshal(raw, &body)
 	}
-	// Handlers are keyed without httpx.ControlPrefix. A call that arrives
-	// without the prefix would 404 in production, so it is kept as it came
-	// and fails to match.
+	// Handlers are keyed without httpx.ControlPrefix. A call without the
+	// prefix would 404 in production, so it fails to match.
 	path := r.URL.Path
 	if after, ok := strings.CutPrefix(path, httpx.ControlPrefix); ok {
 		path = after
@@ -102,7 +96,6 @@ func (f *fakeControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(res)
 }
 
-// called reports whether METHOD path was requested at all.
 func (f *fakeControl) called(method, path string) bool {
 	for _, r := range f.seen {
 		if r.method == method && r.path == path {
@@ -112,7 +105,6 @@ func (f *fakeControl) called(method, path string) bool {
 	return false
 }
 
-// request returns the one call to METHOD path, failing if it was not made.
 func (f *fakeControl) request(method, path string) recorded {
 	f.t.Helper()
 	for _, r := range f.seen {
@@ -124,13 +116,11 @@ func (f *fakeControl) request(method, path string) recorded {
 	return recorded{}
 }
 
-// quiet swallows what a command prints, so a passing test says nothing. Both
-// streams: a command that hands over a secret puts it on stdout and says what
-// it did on stderr. Calling either function puts the streams back and returns
-// what that one was sent, for the tests whose behaviour is the output.
+// quiet swallows stdout and stderr. Calling either returned function puts the
+// streams back and returns what that one was sent.
 func quiet(t *testing.T) (stdout, stderr func() string) {
 	t.Helper()
-	// Each pipe is read as it fills, so a long help text cannot block.
+	// Read as it fills, so a long help text cannot block.
 	pipe := func() (*os.File, <-chan string) {
 		r, w, err := os.Pipe()
 		if err != nil {
@@ -159,8 +149,7 @@ func quiet(t *testing.T) (stdout, stderr func() string) {
 	return func() string { restore(); return out }, func() string { restore(); return errs }
 }
 
-// capture runs one invocation and returns what it printed on stdout, which is
-// what a person redirects: help, a report, the block `keera connect` writes.
+// capture runs one invocation and returns its stdout.
 func capture(t *testing.T, args ...string) string {
 	t.Helper()
 	stdout, _ := quiet(t)
@@ -170,8 +159,7 @@ func capture(t *testing.T, args ...string) string {
 	return stdout()
 }
 
-// oneOrg is what resolveOrg needs to fill in --org by itself, which is the
-// case in every dedicated deployment.
+// oneOrg lets resolveOrg fill in --org by itself.
 var oneOrg = map[string]any{"data": []map[string]any{{"id": "org_1", "name": "Example Bank"}}}
 
 var paymentsProject = map[string]any{"data": []map[string]any{
@@ -192,7 +180,7 @@ func TestOrgCreateSendsTheDomain(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// Lowercased, because that is what a sign-in is compared against.
+	// Lowercased, as sign-ins are compared.
 	if got := f.request("POST", "/v1/orgs").body["email_domain"]; got != "anotherbank.ch" {
 		t.Errorf("email_domain sent = %v, want anotherbank.ch", got)
 	}
@@ -236,8 +224,8 @@ func TestOrgSetRenamesWithoutTouchingTheDomain(t *testing.T) {
 	}
 }
 
-// The id can be left off where there is only one organisation, which is the
-// deployment that has to set a domain before it gets its second.
+// The id can be left off where there is only one organisation, which is when
+// a domain has to be set.
 func TestOrgSetFindsTheOnlyOrganisation(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
@@ -276,21 +264,18 @@ func TestOrgSetClearsTheDomainOnlyWithItsOwnFlag(t *testing.T) {
 	if err := Run(context.Background(), []string{"org", "set", "org_2", "--no-domain"}); err != nil {
 		t.Fatal(err)
 	}
-	// Sent as an empty string rather than left out: the endpoint leaves an
-	// absent field as it is.
+	// Sent as "", since the endpoint keeps an absent field.
 	if got, present := f.request("PATCH", "/v1/orgs/org_2").body["email_domain"]; !present || got != "" {
 		t.Errorf("email_domain = %v (present %v), want an empty string", got, present)
 	}
 }
 
-// A domain that is not a domain matches no sign-in, and would be found out
-// months later by a customer who cannot get in.
+// A bad domain matches no sign-in, which nobody would notice for months.
 func TestOrgSetRefusesSomethingThatIsNotADomain(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, map[string]any{})
 
-	// An address and a URL both carry the domain that was meant, so the refusal
-	// says what to type instead of only that this was wrong.
+	// The refusal says which domain to type instead.
 	for _, given := range []string{"alice@example.ch", "https://example.ch/", "example.ch:443"} {
 		err := Run(context.Background(), []string{"org", "set", "org_2", "--domain", given})
 		if err == nil {
@@ -301,16 +286,15 @@ func TestOrgSetRefusesSomethingThatIsNotADomain(t *testing.T) {
 			t.Errorf("--domain %q said %q, want it to name the domain meant", given, err)
 		}
 	}
-	// A typo carries nothing to suggest, so it names what is wrong with it.
+	// A typo has nothing to suggest, so it names what is wrong.
 	err := Run(context.Background(), []string{"org", "set", "org_2", "--domain", "exam ple.ch"})
 	if err == nil || !strings.Contains(err.Error(), "cannot appear") {
 		t.Errorf("error = %v, want it to name the character", err)
 	}
 }
 
-// Creating the second organisation is what turns "everyone lands here" into
-// "placed by domain or refused", and it does that to the organisation that was
-// already there rather than to the one being created.
+// Creating a second organisation means sign-ins to the first are placed by
+// domain or refused.
 func TestOrgCreateWarnsAboutAnOrganisationWithNoDomain(t *testing.T) {
 	_, stderr := quiet(t)
 	f := newFakeControl(t, map[string]any{
@@ -339,8 +323,7 @@ func TestOrgCreateSaysNothingOnTheFirstOrganisation(t *testing.T) {
 		"POST /v1/orgs": map[string]any{"id": "org_1", "name": "Example Bank"},
 	})
 
-	// One organisation needs no domain at all: everyone who signs in lands in
-	// it. Warning here would be noise on every dedicated deployment there is.
+	// One organisation needs no domain: everyone lands in it.
 	if err := Run(context.Background(), []string{"org", "create", "Example Bank"}); err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +341,6 @@ func TestUserRoleResolvesAnEmailToAnID(t *testing.T) {
 		"PATCH /v1/users/user_1": map[string]any{"id": "user_1", "role": "admin"},
 	})
 
-	// An operator types the address they know, in whatever case they know it.
 	if err := userCmd(context.Background(), []string{"role", "alice@example.com", "admin"}); err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +367,7 @@ func TestUserAddRefusesSomebodyWhoIsAlreadyThere(t *testing.T) {
 		}},
 	})
 
-	// Upserting would silently re-role them and leave their sessions alone.
+	// Upserting would silently change their role and keep their sessions.
 	err := userCmd(context.Background(), []string{"add", "alice@example.com", "--role", "admin"})
 	if err == nil || !strings.Contains(err.Error(), "keera user role") {
 		t.Fatalf("error = %v, want it to point at keera user role", err)
@@ -413,7 +395,7 @@ func TestUserAddSendsTheRole(t *testing.T) {
 	}
 }
 
-// A key that names nobody is a key whose spend no report can attribute.
+// No report can attribute the spend of a key that names nobody.
 func TestKeyCreateAttributesAPersonByEmail(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
@@ -431,8 +413,7 @@ func TestKeyCreateAttributesAPersonByEmail(t *testing.T) {
 	}
 }
 
-// liveKey is one key as GET /v1/keys reports it: on a project, attributed to a
-// person, issued for 90 days, and carrying guardrails of its own.
+// liveKey has a project, a person, 90 days and its own guardrails.
 var liveKey = map[string]any{
 	"data": []map[string]any{{
 		"id": "key_old", "org_id": "org_1", "project_id": "project_1", "user_id": "user_1",
@@ -442,9 +423,8 @@ var liveKey = map[string]any{
 	}},
 }
 
-// The control plane copies the project, the person, the lifetime and the key's
-// own guardrails in one transaction. The CLI only names the key and passes on
-// what was asked to change.
+// The control plane copies everything else; the CLI only names the key and
+// passes on what was asked to change.
 func TestKeyRotateAsksTheControlPlane(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
@@ -502,8 +482,7 @@ func TestKeyRotateRefusesAKeyThatIsAlreadyRevoked(t *testing.T) {
 	}
 }
 
-// Only an administrator issues keys, so a member is not pointed at a command
-// that would refuse them.
+// A member is not pointed at a command that would refuse them.
 func TestKeyRotateSendsAMemberWithARevokedKeyToAnAdministrator(t *testing.T) {
 	quiet(t)
 	revoked := []map[string]any{{
@@ -525,8 +504,7 @@ func TestKeyRotateSendsAMemberWithARevokedKeyToAnAdministrator(t *testing.T) {
 	}
 }
 
-// keyVerbs are the verbs that act on one key named by id or name, with the
-// call each makes, under /v1/keys/<id>.
+// keyVerbs act on one key, with the call each makes under /v1/keys/<id>.
 var keyVerbs = []struct {
 	verb, method, suffix string
 	reply                map[string]any
@@ -540,8 +518,7 @@ func TestKeyRotateAndRevokeResolveANameAmongTheKeysThatStillWork(t *testing.T) {
 		t.Run(tc.verb, func(t *testing.T) {
 			quiet(t)
 			f := newFakeControl(t, map[string]any{
-				// The shape an organisation is in after one rotation: two keys
-				// with the same name, one of them revoked.
+				// After one rotation: two keys with the same name, one revoked.
 				"GET /v1/keys": map[string]any{"data": []map[string]any{
 					{
 						"id": "key_gone", "org_id": "org_1", "name": "laptop",
@@ -589,8 +566,7 @@ func TestKeyRotateAndRevokeRefuseAnAmbiguousName(t *testing.T) {
 	}
 }
 
-// Revoking by id with --yes needs no lookup. Without --yes the record is read
-// for the prompt; that is the test below.
+// Revoking by id with --yes needs no lookup.
 func TestKeyRevokeByIdLooksNothingUp(t *testing.T) {
 	quiet(t)
 	keyID := id.New("key")
@@ -606,8 +582,8 @@ func TestKeyRevokeByIdLooksNothingUp(t *testing.T) {
 	}
 }
 
-// Revoking cannot be undone, so it asks first. Closed stdin is a confirmation
-// not given. The prompt goes to stderr, so `--json` output stays JSON.
+// Closed stdin is a confirmation not given. The prompt goes to stderr, so
+// `--json` output stays JSON.
 func TestKeyRevokeAsksBeforeItRevokes(t *testing.T) {
 	_, stderr := quiet(t)
 	keyID := id.New("key")
@@ -658,10 +634,8 @@ func TestModelAddFillsInTheProviderDefaults(t *testing.T) {
 	}
 }
 
-// 'set' changes the price it is given and keeps the rest. The endpoint
-// replaces the whole entry, so a field the CLI forgot to restate is a field
-// that is gone: a dropped cached-input rate charges cached tokens at full
-// price.
+// The endpoint replaces the whole entry, so a field the CLI forgot to restate
+// is gone.
 func TestModelSetChangesWhatItIsGivenAndKeepsTheRest(t *testing.T) {
 	stored := map[string]any{
 		"alias": "keera-speed", "kind": "chat",
@@ -732,7 +706,7 @@ func TestModelDisableKeepsTheEntryAndOnlyStopsServingIt(t *testing.T) {
 	}
 }
 
-// Setting a key sends the model as it is, so nothing else about it changes.
+// Setting a key sends the rest of the model unchanged.
 func TestModelSetStoresACredentialAndKeepsTheRest(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
@@ -766,7 +740,7 @@ func TestModelCheckFailsWhenTheProbeDoes(t *testing.T) {
 		},
 	})
 
-	// A rollout gated on a check should not have to read the table to find out.
+	// A failed check fails the command.
 	err := modelCmd(context.Background(), []string{"check", "keera-speed"})
 	if err == nil || !strings.Contains(err.Error(), "did not pass") {
 		t.Fatalf("error = %v, want a failed command", err)
@@ -838,7 +812,7 @@ func TestApplyModelFlagsLeavesUngivenFieldsAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 0 is a price, not an absence: a model can be deliberately unbilled.
+	// 0 is a price: a model can be deliberately unbilled.
 	if got.OutputMicrosPerMTok != 0 {
 		t.Errorf("output price = %d, want 0", got.OutputMicrosPerMTok)
 	}
@@ -847,9 +821,8 @@ func TestApplyModelFlagsLeavesUngivenFieldsAlone(t *testing.T) {
 	}
 }
 
-// A product id is part of an address, not a field of a stored model, so
-// changing one has to rebuild the address rather than patch it: the stored
-// backends already have the old id written in and no placeholder left.
+// The stored backends have the old product id written in, so a new one
+// rebuilds the address.
 func TestProductIDFlagRebuildsTheAddress(t *testing.T) {
 	current := declared(policy.Model{
 		Alias: "keera-swiss", Kind: policy.KindChat, Provider: "infomaniak",
@@ -869,8 +842,7 @@ func TestProductIDFlagRebuildsTheAddress(t *testing.T) {
 	}
 }
 
-// A backend given alongside it is the operator's own answer and wins, the way
-// every other value they state wins over the provider's table.
+// A stated backend wins, as every stated value wins over the provider's table.
 func TestProductIDFlagGivesWayToAStatedBackend(t *testing.T) {
 	f := &modelFlags{
 		productID: "999888", backends: stringList{"http://egress.corp:8080/v1"},
@@ -887,8 +859,7 @@ func TestProductIDFlagGivesWayToAStatedBackend(t *testing.T) {
 	}
 }
 
-// Where a model runs belongs to its provider, so a new provider brings its own
-// location rather than keeping the old one's.
+// A new provider brings its own location.
 func TestProviderFlagBringsItsOwnLocation(t *testing.T) {
 	current := declared(policy.Model{
 		Alias: "keera-big", Kind: policy.KindChat, Provider: "anthropic",
@@ -923,8 +894,7 @@ func TestProviderFlagBringsItsOwnLocation(t *testing.T) {
 	}
 }
 
-// The old provider's address and prices would send the requests to the wrong
-// place and bill them at the wrong rate.
+// Otherwise requests would go to the wrong place at the wrong rate.
 func TestProviderFlagBringsItsOwnAddressAndPrices(t *testing.T) {
 	current := declared(policy.Model{
 		Alias: "keera-coder", Kind: policy.KindChat, Provider: "anthropic",
@@ -948,9 +918,8 @@ func TestProviderFlagBringsItsOwnAddressAndPrices(t *testing.T) {
 	}
 }
 
-// Another model of the same provider has its own prices, context window,
-// name, description and release date. Keeping the old model's would bill it
-// wrong.
+// Another model of the same provider has its own values; keeping the old
+// model's would bill it wrong.
 func TestBackendModelFlagBringsTheNewModelsValues(t *testing.T) {
 	current := declared(policy.Model{
 		Alias: "keera-coder", Kind: policy.KindChat, Provider: "stepping-stone",
@@ -1062,8 +1031,8 @@ func TestFilterAddSendsTheModelAndTheInstruction(t *testing.T) {
 	}
 }
 
-// An empty --description clears it, on every command that has one, and a set
-// with nothing to change writes nothing.
+// An empty --description clears it, and a set with nothing to change writes
+// nothing.
 func TestSetClearsADescriptionAndRefusesNothing(t *testing.T) {
 	for _, kind := range []string{"filter", "router"} {
 		t.Run(kind, func(t *testing.T) {
@@ -1101,10 +1070,8 @@ func TestSetClearsADescriptionAndRefusesNothing(t *testing.T) {
 	}
 }
 
-// set (or edit, update) changes what it is given and keeps the rest. Shadow
-// has two flags so a set naming neither does not switch a shadow filter to
-// enforcing. --no-shadow moves nothing else: what the shadow run measured is
-// what goes live.
+// A set naming neither shadow flag does not switch a shadow filter to
+// enforcing, and --no-shadow changes nothing else.
 func TestFilterAndRouterSetKeepTheRest(t *testing.T) {
 	filter := map[string]any{
 		"alias": "redact-secrets", "model": "keera-guard",
@@ -1171,8 +1138,7 @@ func TestFilterAndRouterSetKeepTheRest(t *testing.T) {
 	}
 }
 
-// A new filter enforces, as it does in the panel, and --shadow starts it in
-// shadow.
+// A new filter enforces, as in the panel, unless --shadow is given.
 func TestFilterAddEnforcesUnlessShadow(t *testing.T) {
 	for _, tc := range []struct {
 		flags []string
@@ -1262,8 +1228,8 @@ func TestPolicySetAppliesFiltersAndClearsThemByFlag(t *testing.T) {
 	if len(got) != 2 || got[0] != "redact-secrets" || got[1] != "redact-clients" {
 		t.Errorf("filters = %v, want both in the order given", req.body["filters"])
 	}
-	// The limits already stored are read back first, so naming a filter does
-	// not silently drop the rate limit somebody else set.
+	// The stored limits are read first, so naming a filter keeps the rate
+	// limit.
 	if got := rateLimits(req.body); len(got) != 1 || got[0]["requests"] != float64(120) {
 		t.Errorf("rate_limits = %v; setting one field must not clear the others", got)
 	}
@@ -1288,9 +1254,8 @@ func TestPolicySetClearsFiltersOnlyWithItsOwnFlag(t *testing.T) {
 	}
 }
 
-// An operator's model goes to an organisation: the only one when --org is
-// left out. A change to an existing model goes to the organisation it
-// belongs to.
+// Without --org an operator's model goes to the only organisation. A change
+// goes to the model's own organisation.
 func TestAnOperatorsModelGoesToTheOnlyOrganisation(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
@@ -1329,7 +1294,7 @@ func TestAnOperatorsModelGoesToTheOnlyOrganisation(t *testing.T) {
 	}
 }
 
-// Someone in one organisation never names it: a guardrail on "org" is theirs.
+// A guardrail on "org" needs no id for someone in one organisation.
 func TestAnOrganisationsGuardrailNeedsNoID(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
@@ -1405,8 +1370,7 @@ func TestModelUsersNamesTheFiltersAndRoutersOnIt(t *testing.T) {
 	}
 }
 
-// An administrator's models are their organisation's, which is the only one
-// they can see: nothing asks them for --org.
+// An administrator sees only their organisation, so nothing asks for --org.
 func TestAnAdministratorsModelNeedsNoOrg(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
@@ -1427,7 +1391,7 @@ func TestAnAdministratorsModelNeedsNoOrg(t *testing.T) {
 
 func TestMicrosRoundsRatherThanTruncates(t *testing.T) {
 	// 2.01 * 1e6 is 2009999.9999999998 as a float; the panel rounds, so the
-	// command must too or the two would store different budgets.
+	// command must too.
 	for units, want := range map[float64]int64{2.01: 2_010_000, 0.29: 290_000, 15: 15_000_000, 0: 0} {
 		if got := micros(units); got != want {
 			t.Errorf("micros(%v) = %d, want %d", units, got, want)
@@ -1460,8 +1424,7 @@ func TestReportsTakeAProjectByNameAndAPersonByEmail(t *testing.T) {
 	}
 }
 
-// The request log filters by one status or a whole class, so --status takes
-// both. Anything else would filter nothing, so it is refused here.
+// --status takes one status or a class. Anything else would filter nothing.
 func TestFailuresTakeAStatusOrAClass(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
@@ -1481,8 +1444,7 @@ func TestFailuresTakeAStatusOrAClass(t *testing.T) {
 }
 
 func TestANegativeBudgetFlagIsLeftUnset(t *testing.T) {
-	// Negative is how the flag says it was not given. 'keera budget' and
-	// 'guardrail set' share the flags, so they read it the same way.
+	// Negative means not given, in 'keera budget' and 'guardrail set' alike.
 	for _, amount := range []float64{-1, -5} {
 		var lim policy.Limits
 		f := registerGuardrailFlags(flag.NewFlagSet("budget", flag.ContinueOnError))
@@ -1523,7 +1485,6 @@ func TestGuardrailTakesAProjectByName(t *testing.T) {
 	}
 }
 
-// rateLimits reads the rate limits out of a guardrail sent as JSON.
 func rateLimits(body map[string]any) []map[string]any {
 	var out []map[string]any
 	list, _ := body["rate_limits"].([]any)
@@ -1536,8 +1497,7 @@ func rateLimits(body map[string]any) []map[string]any {
 }
 
 func TestLimitCountsPerDayWithPer(t *testing.T) {
-	// --per says which of the scope's rate limits to set. The one per minute
-	// it already has stays.
+	// --per picks the rate limit to set; the one per minute stays.
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
 		"GET /v1/projects": paymentsProject,
@@ -1593,8 +1553,7 @@ func TestGuardrailTakesAProjectByNameInOneOfSeveralOrgs(t *testing.T) {
 	}
 }
 
-// A filter or router that does not exist is said before the prompt, not after
-// somebody has typed its alias back.
+// A missing filter or router is reported before the prompt.
 func TestDeleteLooksTheAliasUpBeforeAsking(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, map[string]any{
@@ -1609,8 +1568,8 @@ func TestDeleteLooksTheAliasUpBeforeAsking(t *testing.T) {
 	}
 }
 
-// A command that cannot be right is refused before anything is sent: a flag
-// is never quietly dropped, and no sign-in is needed to hear about a typo.
+// A command that cannot be right is refused before anything is sent, so no
+// flag is quietly dropped.
 func TestRefusedBeforeAnyCall(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -1623,8 +1582,7 @@ func TestRefusedBeforeAnyCall(t *testing.T) {
 		{"org delete with --domain", []string{"org", "delete", "org_1", "--domain", "example.ch", "--yes"}, "does not take"},
 		{"guardrail get with --requests", []string{"guardrail", "get", "project", "project_1", "--requests", "5"}, "does not take"},
 		{"model enable with --provider", []string{"model", "enable", "keera-speed", "--provider", "openai"}, "does not take --provider"},
-		// The operator role crosses organisations, so only the gateway's own
-		// configuration grants it, and the refusal names that variable.
+		// Only the gateway's configuration grants the operator role.
 		{"the operator role", []string{"user", "role", "alice@example.com", "operator"}, "KEERA_OPERATORS"},
 		{"key create named twice", []string{"key", "create", "laptop", "--name", "phone"}, "name once"},
 		{"a filter mode that does not exist", []string{"filter", "add", "a", "--mode", "redact"}, "--mode"},
@@ -1686,8 +1644,7 @@ func TestMaxSizeShowsEitherPartAlone(t *testing.T) {
 	}
 }
 
-// 'add' never replaces what is there: changing an entry is what 'set' is for,
-// and an 'add' that overwrote would drop every field it was not given.
+// An 'add' that overwrote would drop every field it was not given.
 func TestAddRefusesAnAliasThatExists(t *testing.T) {
 	quiet(t)
 	existing := map[string]any{"data": []map[string]any{{"alias": "a"}}}
@@ -1715,7 +1672,7 @@ func TestAddRefusesAnAliasThatExists(t *testing.T) {
 	}
 }
 
-// Rotating revokes the old key at once, so it asks first, as revoking does.
+// Rotating revokes the old key at once, so it asks first.
 func TestKeyRotateAsksBeforeItRotates(t *testing.T) {
 	_, stderr := quiet(t)
 	f := newFakeControl(t, map[string]any{
@@ -1734,8 +1691,7 @@ func TestKeyRotateAsksBeforeItRotates(t *testing.T) {
 	}
 }
 
-// A new key lasts as long as the panel's default unless told otherwise, and
-// 'never' is how to ask for one that does not expire.
+// A new key gets the panel's default lifetime; 'never' asks for none.
 func TestKeyCreateExpiresByDefault(t *testing.T) {
 	quiet(t)
 	for _, tc := range []struct {
@@ -1762,8 +1718,7 @@ func TestKeyCreateExpiresByDefault(t *testing.T) {
 	}
 }
 
-// A day for --expires is the last day the key works, so the key lasts to the
-// end of it. A day already gone is refused before anything is sent.
+// A day for --expires is the last day the key works. A past day is refused.
 func TestKeyCreateExpiresOnADay(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
@@ -1801,8 +1756,7 @@ func TestDeleteJSONKeepsWhatTheServerSaid(t *testing.T) {
 	}
 }
 
-// A leading flag leaves the verb out, which is the listing where there is one
-// and a request for the verbs where there is not.
+// A leading flag means the listing, or the list of verbs where there is none.
 func TestALeadingFlagIsTheListing(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
@@ -1856,7 +1810,6 @@ func TestOrgCommandsTakeAName(t *testing.T) {
 	}
 }
 
-// 'invoiced' is switched off with --off, as 'auto-topup' is.
 func TestBillingInvoicedOff(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
@@ -1870,7 +1823,7 @@ func TestBillingInvoicedOff(t *testing.T) {
 	}
 }
 
-// Forgetting the card asks first, as the panel does, and --yes skips that.
+// Forgetting the card asks first unless --yes is given.
 func TestBillingForgetCardConfirms(t *testing.T) {
 	account := map[string]any{"payments": true, "account": map[string]any{
 		"org_id": "org_1", "card": map[string]any{"label": "Visa 4242"},
@@ -1896,7 +1849,6 @@ func TestBillingForgetCardConfirms(t *testing.T) {
 	f.request("DELETE", "/v1/billing/account/card")
 }
 
-// stdin makes text what the command reads from the terminal.
 func stdin(t *testing.T, text string) {
 	t.Helper()
 	r, w, err := os.Pipe()
@@ -1910,8 +1862,7 @@ func stdin(t *testing.T, text string) {
 	t.Cleanup(func() { os.Stdin = old; _ = r.Close() })
 }
 
-// Each part of a guardrail is cleared by its own --no- flag, so no word is
-// reserved that a model or a tool could be called.
+// --no- flags clear, so no word is reserved that a model could be called.
 func TestGuardrailClearsWithNoFlags(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
@@ -1958,8 +1909,7 @@ func TestUsageNarrowsLikeTheOtherReports(t *testing.T) {
 	}
 }
 
-// A key issued by a person is theirs unless they say otherwise, so it shows on
-// their own screens.
+// A key issued by a person is theirs unless they say otherwise.
 func TestKeyCreateIsTheCallersByDefault(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
@@ -1982,7 +1932,7 @@ func TestKeyCreateIsTheCallersByDefault(t *testing.T) {
 	}
 }
 
-// A pending key is left for its holder, so no secret comes back to print.
+// A pending key has no secret to print.
 func TestKeyCreatePendingNeedsAPersonAndPrintsNoSecret(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
@@ -2023,8 +1973,7 @@ func TestKeyActivateAsksTheControlPlane(t *testing.T) {
 	}
 }
 
-// Every level's budget must hold, so each is printed with the level that set
-// it, and none at all is unlimited.
+// Each budget is printed with its level, and none at all is unlimited.
 func TestEffectiveBudgetsNameTheirLevel(t *testing.T) {
 	style = false
 	eff := control.Effective{Levels: []control.EffectiveLevel{

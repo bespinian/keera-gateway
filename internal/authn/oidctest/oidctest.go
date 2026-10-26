@@ -1,7 +1,5 @@
-// Package oidctest is a minimal but real OpenID provider, for tests of
-// signing in and of asking the directory again: discovery, a JWK set, and a
-// token endpoint that mints properly signed id_tokens, so signature and nonce
-// checks are exercised rather than assumed to work.
+// Package oidctest is a minimal but real OpenID provider for tests. It mints
+// properly signed id_tokens, so signature and nonce checks are exercised.
 package oidctest
 
 import (
@@ -18,24 +16,23 @@ import (
 	"github.com/go-jose/go-jose/v4"
 )
 
-// IDP is the provider. Its fields bend what the next token response says;
-// set them before the request they are for.
+// IDP is the provider. Its fields change the next token response.
 type IDP struct {
 	*httptest.Server
-	// Key signs id_tokens. Replacing it makes signatures fail, because the
-	// JWK set keeps advertising the original.
+	// Key signs id_tokens. Replacing it makes signatures fail, since the JWK
+	// set keeps the original.
 	Key *rsa.PrivateKey
 	// Claims edits what the next id_token carries.
 	Claims func(m map[string]any)
 	// RefreshToken is returned with every token response. Empty returns none.
 	RefreshToken string
-	// RefuseRefresh is the OAuth error code a refresh is answered with, such
-	// as "invalid_grant". Empty lets refreshes through.
+	// RefuseRefresh is the OAuth error code for a refresh, such as
+	// "invalid_grant". Empty lets refreshes through.
 	RefuseRefresh string
 	// FailRefresh answers a refresh with a 500, like a provider that is down.
 	FailRefresh bool
-	// NoIDTokenOnRefresh leaves the id_token out of a refresh's answer, as
-	// some providers do.
+	// NoIDTokenOnRefresh leaves the id_token out of a refresh, as some
+	// providers do.
 	NoIDTokenOnRefresh bool
 
 	mu       sync.Mutex
@@ -117,8 +114,8 @@ func New(t *testing.T) *IDP {
 	return idp
 }
 
-// LastForm is what the client posted to the token endpoint last, which is
-// where PKCE either happened or did not.
+// LastForm is what the client last posted to the token endpoint, to check
+// PKCE.
 func (idp *IDP) LastForm() url.Values {
 	idp.mu.Lock()
 	defer idp.mu.Unlock()

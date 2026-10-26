@@ -20,11 +20,9 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// The podman driver runs sandboxes on a single host, for local development and
-// tests: a gateway that runs as a process there (`make dev`) and has podman.
-// The compose gateway runs in a container and cannot use it.
-//
-// It is the weaker driver, on purpose and openly:
+// The podman driver runs sandboxes on one host, for `make dev` and tests. The
+// compose gateway runs in a container and cannot use it. It is the weaker
+// driver:
 //
 //	no warm pool          every start is a cold start
 //	no scheduling         one host; it fits or it does not
@@ -33,18 +31,15 @@ import (
 //	                      does; while the gateway is down, sandboxes outlive
 //	                      their lifetime, and the sweep at start-up ends them
 //
-// The last is the real difference from Kubernetes (see docs/sandboxes.md).
+// See docs/sandboxes.md.
 
 type PodmanOptions struct {
-	// Binary is the podman command, "podman" by default.
 	Binary string
-	// Network is the container network sandboxes join. Empty is podman's
-	// default, which on rootless podman the host cannot route into; that is
-	// why Dial uses a published port.
+	// Network empty is podman's default. Rootless, the host cannot route into
+	// it, which is why Dial uses a published port.
 	Network string
-	// Runtimes maps an isolation tier to an OCI runtime on this host: "crun"
-	// or "runc" for standard, "runsc" for isolated, "krun" for vm. A tier with
-	// no entry is refused, never downgraded.
+	// Runtimes maps a tier to an OCI runtime: "crun" or "runc" for standard,
+	// "runsc" for isolated, "krun" for vm. A tier with no entry is refused.
 	Runtimes map[policy.Isolation]string
 	Log      *slog.Logger
 }
@@ -54,7 +49,6 @@ type Podman struct {
 	log  *slog.Logger
 }
 
-// NewPodman builds the driver and checks that the binary runs.
 func NewPodman(ctx context.Context, opts PodmanOptions) (*Podman, error) {
 	if opts.Binary == "" {
 		opts.Binary = "podman"
@@ -72,7 +66,6 @@ func NewPodman(ctx context.Context, opts PodmanOptions) (*Podman, error) {
 
 func (p *Podman) Name() string { return "podman" }
 
-// Capabilities reports no warm pool, and the tiers with a runtime mapped.
 func (p *Podman) Capabilities() Capabilities {
 	return capabilitiesFor(p.opts.Runtimes, false)
 }
@@ -88,8 +81,7 @@ func (p *Podman) Create(ctx context.Context, spec Spec) (Status, error) {
 		return Status{}, err
 	}
 
-	// Already there is what was asked for, so a retry after a dropped
-	// connection does not fail.
+	// Already there, so a retry after a dropped connection does not fail.
 	if st, err := p.Status(ctx, spec.Ref); err == nil {
 		return st, nil
 	} else if !errors.Is(err, ErrNotFound) {
@@ -103,8 +95,7 @@ func (p *Podman) Create(ctx context.Context, spec Spec) (Status, error) {
 	return p.Status(ctx, spec.Ref)
 }
 
-// runArgs is the `podman run` command line for a spec, and the environment
-// podman needs to run it with.
+// runArgs is the `podman run` command line, and podman's environment.
 func (p *Podman) runArgs(spec Spec, runtime string) (args, env []string) {
 	args = []string{"run", "--detach", "--name", containerName(spec.Ref)}
 	if runtime != "" {
@@ -113,8 +104,7 @@ func (p *Podman) runArgs(spec Spec, runtime string) (args, env []string) {
 	if p.opts.Network != "" {
 		args = append(args, "--network", p.opts.Network)
 	}
-	// The Kubernetes labels and owner annotation. They are the only record of
-	// a sandbox outside the database.
+	// The only record of a sandbox outside the database.
 	labels := labelsFor(spec)
 	maps.Copy(labels, annotationsFor(spec))
 	for _, name := range slices.Sorted(maps.Keys(labels)) {
@@ -126,22 +116,18 @@ func (p *Podman) runArgs(spec Spec, runtime string) (args, env []string) {
 	if spec.Class.Memory > 0 {
 		args = append(args, "--memory", fmt.Sprintf("%dm", spec.Class.Memory))
 	}
-	// The same hardening as the Kubernetes driver. The root filesystem stays
-	// writable there too.
+	// The same hardening as the Kubernetes driver.
 	args = append(args,
 		"--security-opt", "no-new-privileges",
 		"--cap-drop", "ALL",
 		"--user", strconv.Itoa(sandboxUID),
 		"--volume", volumeName(spec.Ref)+":"+homePath,
 	)
-	// sshd is published on a host-chosen port on loopback. Rootless podman's
-	// network is not routable from the host, and loopback keeps developers'
-	// shells off the host's public address.
+	// Loopback only, to keep shells off the host's public address.
 	args = append(args, "--publish", "127.0.0.1::"+strconv.Itoa(PortSSH))
-	// Every user of the host can read a process's arguments, so values go to
-	// podman through its own environment, which only the gateway's user can
-	// read. A name podman already has, such as PATH or HOME, stays on the
-	// command line: podman itself would run with the sandbox's value.
+	// Every user can read a process's arguments, so values go through
+	// podman's environment. A name podman uses itself, such as PATH or HOME,
+	// stays on the command line.
 	for _, kv := range envList(spec.Env) {
 		if _, podmans := os.LookupEnv(kv.Name); podmans && !strings.HasPrefix(kv.Name, "KEERA_") {
 			args = append(args, "--env", kv.Name+"="+kv.Value)
@@ -153,7 +139,6 @@ func (p *Podman) runArgs(spec Spec, runtime string) (args, env []string) {
 	return append(args, spec.Class.Image), env
 }
 
-// podmanInspect is the part of `podman inspect` this driver reads.
 type podmanInspect struct {
 	State struct {
 		Status   string `json:"Status"`
@@ -200,9 +185,8 @@ func (p *Podman) Status(ctx context.Context, ref Ref) (Status, error) {
 	return st, nil
 }
 
-// sshdListens stands in for the Kubernetes readiness probe. It waits for
-// sshd's greeting, because rootless podman's port forwarder accepts a
-// connection even when nothing listens behind it yet.
+// sshdListens stands in for a readiness probe. It waits for sshd's greeting,
+// because rootless podman accepts a connection even when nothing listens yet.
 func (p *Podman) sshdListens(ctx context.Context, ref Ref) bool {
 	conn, err := p.dialPublished(ctx, ref, PortSSH)
 	if err != nil {
@@ -212,11 +196,9 @@ func (p *Podman) sshdListens(ctx context.Context, ref Ref) bool {
 	return sshGreets(conn)
 }
 
-// sshGreetingTimeout bounds the wait for sshd's greeting, which it sends as
-// soon as a connection is open.
+// sshGreetingTimeout is short: sshd greets as soon as a connection opens.
 const sshGreetingTimeout = 2 * time.Second
 
-// sshGreets reports whether conn opens with an SSH version line.
 func sshGreets(conn net.Conn) bool {
 	_ = conn.SetReadDeadline(time.Now().Add(sshGreetingTimeout))
 	greeting := make([]byte, 4)
@@ -224,7 +206,6 @@ func sshGreets(conn net.Conn) bool {
 	return err == nil && string(greeting) == "SSH-"
 }
 
-// podmanState collapses a container's state into a sandbox state and detail.
 func podmanState(in podmanInspect) (policy.SandboxState, string) {
 	switch {
 	case in.State.Running:
@@ -232,11 +213,8 @@ func podmanState(in podmanInspect) (policy.SandboxState, string) {
 	case in.State.Status == "created":
 		return policy.SandboxPending, "starting"
 	case in.State.Status == "exited" && in.State.ExitCode == 0:
-		// A clean stop is what a suspend looks like here. A process that
-		// exited zero by itself looks the same; reading it as suspended is the
-		// safe guess, since a resume that exits again is visible. An agent
-		// that finished is told apart by the manager, which knows it was
-		// not suspended.
+		// A suspend looks like a clean exit. Suspended is the safe guess; the
+		// manager tells a finished agent apart.
 		return policy.SandboxSuspended, "stopped; its volume is kept"
 	case in.State.Status == "exited":
 		detail := fmt.Sprintf("the sandbox process exited with status %d", in.State.ExitCode)
@@ -249,7 +227,6 @@ func podmanState(in podmanInspect) (policy.SandboxState, string) {
 	}
 }
 
-// Suspend stops the container and keeps the named volume.
 func (p *Podman) Suspend(ctx context.Context, ref Ref) error {
 	_, err := p.run(ctx, "stop", "--time", "20", containerName(ref))
 	return podmanNotFound(err)
@@ -260,12 +237,10 @@ func (p *Podman) Resume(ctx context.Context, ref Ref) error {
 	return podmanNotFound(err)
 }
 
-// Revive replaces the container and keeps the named volume. A container's
-// environment is fixed when it is made, so a new key needs a new container,
-// and only the home directory carries over.
+// Revive replaces the container, since its environment is fixed, and keeps the
+// volume.
 func (p *Podman) Revive(ctx context.Context, spec Spec) error {
-	// Without its volume there is no home to carry over, and `podman run`
-	// would quietly make a new, empty one.
+	// Otherwise `podman run` would quietly make a new, empty volume.
 	if _, err := p.run(ctx, "volume", "inspect", volumeName(spec.Ref)); err != nil {
 		return podmanNotFound(err)
 	}
@@ -276,15 +251,13 @@ func (p *Podman) Revive(ctx context.Context, spec Spec) error {
 	return err
 }
 
-// Extend only checks that the container still exists. The row holds the
-// expiry and the sweep enforces it. No label carries it, because podman cannot
-// change a container's labels.
+// Extend only checks the container exists. The sweep enforces the expiry, since
+// podman cannot change a container's labels.
 func (p *Podman) Extend(ctx context.Context, ref Ref, _ time.Time) error {
 	_, err := p.Status(ctx, ref)
 	return err
 }
 
-// Terminate removes the container and its volume.
 func (p *Podman) Terminate(ctx context.Context, ref Ref) error {
 	if err := p.removeContainer(ctx, containerName(ref)); err != nil {
 		return err
@@ -297,7 +270,7 @@ func (p *Podman) Terminate(ctx context.Context, ref Ref) error {
 	return nil
 }
 
-// removeContainer removes a container, and counts one already gone as removed.
+// removeContainer counts a container already gone as removed.
 func (p *Podman) removeContainer(ctx context.Context, name string) error {
 	if _, err := p.run(ctx, "rm", "--force", "--time", "20", name); err != nil && !isNoSuchContainer(err) {
 		return err
@@ -305,12 +278,10 @@ func (p *Podman) removeContainer(ctx context.Context, name string) error {
 	return nil
 }
 
-// Dial connects to the host port the container's port is published on. It
-// refuses a sandbox that is not running, so a suspended one says so rather
-// than that its port is not published. It skips Status's wait for sshd's
-// greeting: the connection itself shows whether sshd answers.
+// Dial connects to the published host port. It refuses a sandbox that is not
+// running, for a clearer error.
 func (p *Podman) Dial(ctx context.Context, ref Ref, port int) (net.Conn, error) {
-	// Only sshd's port is published, so any other could never be reached.
+	// Only sshd's port is published.
 	if port != PortSSH {
 		return nil, Refuse("on podman only port %d of a sandbox is reachable, not %d", PortSSH, port)
 	}
@@ -330,8 +301,7 @@ func (p *Podman) dialPublished(ctx context.Context, ref Ref, port int) (net.Conn
 	if err != nil {
 		return nil, podmanNotFound(err)
 	}
-	// One "127.0.0.1:43117" line per mapping. Take the first; a second line
-	// would be the IPv6 mapping of the same port.
+	// One "127.0.0.1:43117" line per mapping; a second is the IPv6 one.
 	line, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
 	line = strings.TrimSpace(line)
 	if line == "" {
@@ -341,15 +311,13 @@ func (p *Podman) dialPublished(ctx context.Context, ref Ref, port int) (net.Conn
 	return dialSandbox(ctx, ref, port, line)
 }
 
-// podmanTimeout bounds one command. It is generous because `run` on a cold
-// image includes the pull.
+// podmanTimeout is generous because `run` may include an image pull.
 const podmanTimeout = 5 * time.Minute
 
 func (p *Podman) run(ctx context.Context, args ...string) ([]byte, error) {
 	return p.runEnv(ctx, nil, args...)
 }
 
-// runEnv is run with env added to podman's own environment.
 func (p *Podman) runEnv(ctx context.Context, env []string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, podmanTimeout)
 	defer cancel()
@@ -370,10 +338,9 @@ func (p *Podman) runEnv(ctx context.Context, env []string, args ...string) ([]by
 	return stdout.Bytes(), nil
 }
 
-// podmanError carries what the command printed, which is the useful part.
+// podmanError carries what the command printed.
 type podmanError struct {
-	// Binary is the command that was run, which KEERA_SANDBOX_PODMAN_BINARY
-	// can point somewhere other than podman.
+	// Binary can be set by KEERA_SANDBOX_PODMAN_BINARY.
 	Binary string
 	Args   []string
 	Msg    string
@@ -386,9 +353,8 @@ func (e *podmanError) Error() string {
 
 func (e *podmanError) Unwrap() error { return e.Err }
 
-// isNoSuchContainer recognises a missing container or volume. It matches the
-// message, because podman's exit code for it (125) is shared with every usage
-// error.
+// isNoSuchContainer matches the message, since podman's exit code 125 is
+// shared with every usage error.
 func isNoSuchContainer(err error) bool {
 	var pe *podmanError
 	if !errors.As(err, &pe) {
@@ -401,8 +367,7 @@ func isNoSuchContainer(err error) bool {
 		strings.Contains(msg, "not found")
 }
 
-// podmanNotFound turns a missing container or volume into ErrNotFound and passes
-// anything else through.
+// podmanNotFound maps a missing container or volume to ErrNotFound.
 func podmanNotFound(err error) error {
 	if isNoSuchContainer(err) {
 		return ErrNotFound

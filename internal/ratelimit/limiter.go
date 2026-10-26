@@ -1,5 +1,5 @@
-// Package ratelimit provides the token buckets behind Keera Gateway's per-scope
-// request and token rate limits.
+// Package ratelimit provides the token buckets behind the per-scope request
+// and token rate limits.
 package ratelimit
 
 import (
@@ -26,9 +26,8 @@ func (b *bucket) refill(now time.Time) {
 // Limiter holds one bucket per (scope, limit) pair, in memory.
 //
 // Buckets are per replica, so with N replicas the real ceiling is N times the
-// configured one. That is fine for a brake on runaway clients; the exact
-// spending control is the budget. Setting KEERA_REDIS_URL shares the buckets
-// through [Redis], which keeps this one as its fallback.
+// configured one. That is fine for a brake; the budget is the exact control.
+// KEERA_REDIS_URL shares the buckets through [Redis], with this as fallback.
 type Limiter struct {
 	mu sync.Mutex
 	b  map[string]*bucket
@@ -36,14 +35,13 @@ type Limiter struct {
 
 func New() *Limiter { return &Limiter{b: make(map[string]*bucket)} }
 
-// get returns the bucket for key, creating it or retuning it if the configured
-// rate has changed since it was made.
+// get returns the bucket for key, creating it, or retuning it if the rate
+// changed.
 func (l *Limiter) get(key string, perMinute int, now time.Time) *bucket {
 	b, ok := l.b[key]
 	perSec, burst := rate(perMinute)
 	if !ok {
-		// Set lastSeen here too, or Sweep would take a new bucket for one idle
-		// since the zero time.
+		// Or Sweep would see a new bucket as idle since the zero time.
 		b = &bucket{tokens: burst, perSec: perSec, burst: burst, last: now, lastSeen: now}
 		l.b[key] = b
 		return b
@@ -74,9 +72,9 @@ func (l *Limiter) Allow(key string, perMinute int, now time.Time) bool {
 
 // Requirement is one bucket a request has to satisfy.
 //
-// Take consumes a unit on admission, as a requests-per-minute limit does.
-// Without it the bucket only has to be in credit, as for tokens per minute:
-// the real cost is known only at the end and is charged then.
+// Take consumes a unit on admission, as for requests per minute. Without it
+// the bucket only has to be in credit, as for tokens per minute, which are
+// charged at the end.
 //
 // A PerMinute of zero or less is unlimited and always satisfied.
 type Requirement struct {
@@ -89,8 +87,8 @@ type Requirement struct {
 // Take requirements only if all of them hold. It returns the index of the
 // first requirement that failed, or -1 when the request is admitted.
 //
-// Deciding and charging under one lock keeps a refusal free: otherwise an
-// org's bucket could pay for a request its project's bucket then refused.
+// Deciding and charging under one lock keeps a refusal free: an org's bucket
+// never pays for a request its project's bucket refused.
 func (l *Limiter) Admit(reqs []Requirement, now time.Time) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -112,9 +110,9 @@ func (l *Limiter) Admit(reqs []Requirement, now time.Time) int {
 	return -1
 }
 
-// ChargeAll takes n units from the bucket of every requirement, allowing it to
-// go negative so that one very large request is paid for by the requests that
-// follow it. Take is not used.
+// ChargeAll takes n units from the bucket of every requirement. A bucket may
+// go negative, so the requests after a very large one pay for it. Take is not
+// used.
 func (l *Limiter) ChargeAll(reqs []Requirement, n float64, now time.Time) {
 	if n == 0 {
 		return
@@ -128,9 +126,8 @@ func (l *Limiter) ChargeAll(reqs []Requirement, n float64, now time.Time) {
 	}
 }
 
-// Remaining reports how many units key's bucket still holds, or -1 when the
-// limit is unlimited. It goes on every response, so a client can slow down
-// before it hits a 429.
+// Remaining reports how many units key's bucket still holds, or -1 when
+// unlimited. It goes on every response, so a client can slow down before a 429.
 func (l *Limiter) Remaining(key string, perMinute int, now time.Time) int {
 	if perMinute <= 0 {
 		return -1
@@ -151,8 +148,7 @@ func (l *Limiter) Retry(key string, perMinute int, now time.Time) time.Duration 
 	return retryAfter(b.tokens, b.perSec)
 }
 
-// Sweep forgets buckets untouched for idle, so many short-lived keys do not
-// grow memory for ever.
+// Sweep forgets buckets untouched for idle, so memory does not grow for ever.
 func (l *Limiter) Sweep(idle time.Duration, now time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -164,8 +160,7 @@ func (l *Limiter) Sweep(idle time.Duration, now time.Time) {
 }
 
 // holds reports whether a bucket with tokens left satisfies a requirement. A
-// Take needs a whole unit. Otherwise any credit will do: ChargeAll puts the
-// bucket into debt, and the next request pays for it.
+// Take needs a whole unit; otherwise any credit will do.
 func holds(take bool, tokens float64) bool {
 	if take {
 		return tokens >= 1
@@ -173,8 +168,7 @@ func holds(take bool, tokens float64) bool {
 	return tokens > 0
 }
 
-// remaining is what a client is told is left. A bucket in debt from ChargeAll
-// still has "none left".
+// remaining is what a client is told is left. A bucket in debt reads 0.
 func remaining(tokens float64) int {
 	if tokens > 0 {
 		return int(tokens)
@@ -190,8 +184,8 @@ func retryAfter(tokens, perSec float64) time.Duration {
 	return time.Duration((1 - tokens) / perSec * float64(time.Second))
 }
 
-// rate turns a per-minute limit into the two numbers a bucket is made of, in
-// one place so the in-memory and Redis limiters cannot drift.
+// rate turns a per-minute limit into a bucket's rate and burst, in one place
+// so the in-memory and Redis limiters cannot drift.
 func rate(perMinute int) (perSec, burst float64) {
 	return float64(perMinute) / 60, float64(perMinute)
 }

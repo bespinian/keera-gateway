@@ -2,13 +2,11 @@
 #
 #   podman compose -f compose.yaml -f compose.dev.yaml up -d keera-db keera-engine keera-decider
 #
-# Only those three services: the gateway runs on the host under air, and a
-# container would fight it for :8080.
+# Only those three: the gateway runs on the host under air.
 #
-# Every port is bound to loopback, and closed in every other file here. vLLM,
-# llama.cpp and laya-serve have no authentication by default, so anything that
-# reaches them bypasses the gateway's keys, budgets and audit. That is fine on
-# loopback on a development machine; do not copy it into a deployment.
+# Every port is bound to loopback. The backends have no authentication, so
+# anything that reaches them bypasses the gateway's keys, budgets and audit.
+# Do not copy this into a deployment.
 services:
   keera-db:
     ports:

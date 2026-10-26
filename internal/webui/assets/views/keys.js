@@ -43,7 +43,7 @@ export async function keysView(ctx) {
     api.keys(ctx.orgID, { since }),
     api.projects(ctx.orgID).catch(() => ({ data: [] })),
     api.models(ctx.orgID).catch(() => ({ data: [] })),
-    // Empty without an identity provider; the user field is then left out.
+    // Empty without an identity provider.
     api.users(ctx.orgID).catch(() => ({ data: [] })),
   ]);
   const keys = keysRes.data || [];
@@ -82,8 +82,7 @@ export async function keysView(ctx) {
   const rows = table(
     [
       {
-        // What a key has been doing is a list of requests, so it gets its own
-        // screen rather than a cell.
+        // A key's requests get their own screen rather than a cell.
         label: "Name",
         sortKey: (k) => k.name,
         cell: (k) =>
@@ -134,7 +133,7 @@ export async function keysView(ctx) {
           }
         : null,
       {
-        // Active first, because a list of keys is read to find the live ones.
+        // Active first: people look for the live ones.
         label: "Status",
         shrink: true,
         sortKey: (k) =>
@@ -142,8 +141,7 @@ export async function keysView(ctx) {
         cell: (k) => statePill(stateOf(k)),
       },
       {
-        // This answers whether revoking the key would break somebody, which
-        // created and expires dates do not.
+        // Says whether revoking the key would break someone.
         label: "Last used",
         shrink: true,
         sortKey: (k) =>
@@ -244,8 +242,7 @@ export async function keysView(ctx) {
             canActivate(ctx, k) && stateOf(k) === "pending"
               ? activateButton(ctx, k, "btn btn-sm")
               : null,
-            // Expired keys can be rotated too. A member cannot issue a new key,
-            // so this is how they get going again.
+            // Expired keys can be rotated too: a member cannot issue a new key.
             canRevoke(ctx, k) && canRotate(k)
               ? h(
                   "button",
@@ -277,7 +274,6 @@ export async function keysView(ctx) {
       emptyBody: canEdit
         ? "Issue one to get started. Usage and the audit log are tracked per key."
         : "An administrator issues keys. Usage and the audit log are tracked per key.",
-      // The list can get long, and people look for a key by its name.
       search: (k) =>
         [
           k.name,
@@ -316,8 +312,7 @@ export async function keysView(ctx) {
         },
         // A dropdown with one choice filters nothing.
       ].filter((c) => c.options.length > 1),
-      // Revoked keys are hidden by default, since the list is read to find
-      // working keys. Expired keys always show; their row says so.
+      // Revoked keys are hidden by default. Expired keys always show.
       toggles: [
         {
           label: "Show revoked",
@@ -349,8 +344,7 @@ const NOBODY = "-";
 
 export const NO_USER = "No user";
 
-// The period last_used_at covers when the keys were read with since, worded
-// to follow "used" or "not".
+// The period last_used_at covers for since, worded to follow "used" or "not".
 export function inPeriod(since) {
   return `in the ${rangeOf(since, RANGES[1]).long.toLowerCase()}`;
 }
@@ -363,15 +357,14 @@ function byLabel(rows, value, label) {
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
-// Also covers renaming and rotating. A member may only touch their own key. A
-// key with no user is a shared one, so the id must be present and match.
+// Also covers renaming and rotating. A member may only touch their own key,
+// so the user id must be present and match.
 export function canRevoke(ctx, k) {
   if (isAdmin(ctx)) return true;
   return !!k.user_id && k.user_id === ctx.state.me.user_id;
 }
 
-// period is the span last_used_at covers, which depends on how the keys were
-// read: My access reads this month.
+// period is the span last_used_at covers. My access reads this month.
 function revokeBody(k, period = "this month") {
   const base =
     `Clients using ${k.name} stop working within a second. ` +
@@ -425,8 +418,7 @@ export function prefixOf(k) {
   return k.pending ? "no secret yet" : k.prefix + "…";
 }
 
-// The person a pending key is for, or an administrator, who could rotate it
-// anyway.
+// The person a pending key is for, or an admin, who could rotate it anyway.
 export function canActivate(ctx, k) {
   return canRevoke(ctx, k);
 }
@@ -454,7 +446,7 @@ export function activateButton(ctx, k, cls = "btn") {
   );
 }
 
-// A member gets it read-only: it answers "why was my editor refused".
+// Read-only for a member: it answers "why was my editor refused".
 export async function openKey(ctx, key, models, projectName, canEdit) {
   const ceilings = await ceilingsFor("key", {
     orgID: key.org_id,
@@ -473,7 +465,7 @@ export async function openKey(ctx, key, models, projectName, canEdit) {
   });
 }
 
-// done gets the new key, so a screen about the old key can move to it.
+// done gets the new key, so a screen about the old one can move to it.
 export function confirmRotate(ctx, k, { done } = {}) {
   confirm({
     title: k.name ? `Rotate ${k.name}?` : "Rotate this key?",
@@ -535,15 +527,13 @@ function localDay(d) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-// The last second of the day, so a key still works all of the day it expires
-// on.
+// The last second, so a key works all of the day it expires on.
 function endOfDay(day) {
   const [y, m, d] = day.split("-").map(Number);
   return new Date(y, m - 1, d, 23, 59, 59);
 }
 
-// For a screen that has not loaded projects and people. An operator viewing
-// every organisation picks one on the keys screen first.
+// For a screen that has not loaded projects and people.
 export async function openIssueKey(ctx) {
   if (!ctx.orgID && ctx.state.me.unrestricted) return ctx.navigate("/keys");
   const [projectsRes, usersRes] = await Promise.all([
@@ -558,8 +548,7 @@ export async function openIssueKey(ctx) {
 }
 
 // last holds the previous key's project and expiry, for "Issue another". The
-// key is the reader's own by default, as with `keera key create`: a key with
-// no user shows on nobody's My access. The user is not carried over, since a
+// key is the reader's own by default. The user is not carried over, since a
 // key given to the wrong person counts as theirs.
 function issueKey(ctx, projects, users, last = {}) {
   if (!projects.length) {
@@ -592,8 +581,7 @@ function issueKey(ctx, projects, users, last = {}) {
     placeholder: "alice-laptop",
     autofocus: true,
   });
-  // The oldest project is picked, as the control plane does for a key that
-  // names none.
+  // The oldest project is the default, as in the control plane.
   const first = projects.some((t) => t.id === last.project)
     ? last.project
     : oldestProject(projects);
@@ -617,8 +605,8 @@ function issueKey(ctx, projects, users, last = {}) {
       ),
     ),
   );
-  // A key for somebody else is theirs to activate by default, so only they
-  // see its secret. The administrator can still take it now to hand it over.
+  // A key for someone else is theirs to activate by default, so only they see
+  // its secret. The admin can still take it now to hand it over.
   const activation = h(
     "select",
     { class: "select" },
@@ -635,7 +623,7 @@ function issueKey(ctx, projects, users, last = {}) {
   person.addEventListener("change", () => {
     activationField.hidden = !forSomebodyElse();
   });
-  // Each span shows the day it ends on: "90 days" is hard to picture.
+  // Each span shows its end day: "90 days" is hard to picture.
   const expiry = h(
     "select",
     { class: "select" },
@@ -744,7 +732,7 @@ function issueKey(ctx, projects, users, last = {}) {
 }
 
 // The only time the secret can be seen, so the reader's own key is set up
-// from here.
+// here.
 function showSecret(ctx, created, again, title = "Key issued") {
   const body = field("The key", secretField(created.key, "The API key"));
   const own =
@@ -834,8 +822,8 @@ function closeButtons(ctx, close, again) {
 function planUsed(plan) {
   if (!plan) return null;
   const parts = [];
-  // Whole percent, as `keera key list` shows it: a plan's use is a rough
-  // figure from Anthropic, and a decimal would claim more.
+  // Whole percent: a plan's use is a rough figure, and a decimal would claim
+  // more.
   const whole = (x) => `${Math.round(x * 100)}%`;
   if (plan.five_hour != null) parts.push(`5h ${whole(plan.five_hour)}`);
   if (plan.seven_day != null) parts.push(`7d ${whole(plan.seven_day)}`);

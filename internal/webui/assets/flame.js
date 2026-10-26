@@ -5,7 +5,7 @@
 import { h, ms } from "./ui.js";
 
 // Each step in plain words, and the group its time counts to. The groups make
-// the summary above the chart: is it the gateway, the guardrails, or the model?
+// the summary: is it the gateway, the guardrails, or the model?
 const STEPS = {
   auth: {
     label: "Authenticating",
@@ -76,8 +76,7 @@ const STEPS = {
   },
 };
 
-// The groups, in summary order. A bar takes its group's colour, to match the
-// summary.
+// In summary order. A bar takes its group's colour.
 const GROUPS = [
   { key: "client", label: "Client" },
   { key: "gateway", label: "Gateway" },
@@ -85,19 +84,18 @@ const GROUPS = [
   { key: "model", label: "Model" },
 ];
 
-/** micros writes a duration recorded in microseconds. Steps range from forty
- *  microseconds to forty seconds, so the unit follows the number: in
- *  milliseconds alone half the bars would round to zero. */
+/** micros writes a duration given in microseconds. Steps range from 40µs to
+ *  40s, so the unit follows the number. */
 function micros(v) {
   const n = Math.max(0, Math.round(v || 0));
   if (n < 1000) return n + " µs";
   if (n < 10000) return (n / 1000).toFixed(1) + " ms";
   if (n < 1000000) return Math.round(n / 1000) + " ms";
-  // Seconds as ms() writes them, so a step reads like the total above it.
+  // As ms() writes seconds, to match the total above.
   return ms(n / 1000);
 }
 
-// Three decimals is a tenth of a pixel, and keeps the inline style readable.
+// Three decimals is a tenth of a pixel.
 function pct(fraction) {
   return (Math.max(0, Math.min(1, fraction)) * 100).toFixed(3) + "%";
 }
@@ -108,9 +106,9 @@ function began(what, at, took) {
     : `${what}: ${micros(took)}, at the very start`;
 }
 
-// The notes that mean a step failed. They are drawn as failures, because on a
-// slow request they are usually the cause. A filter that refused is not among
-// them: that is the guardrail working.
+// The notes that mean a step failed: on a slow request they are usually the
+// cause. A filter that refused is not among them: that is the guardrail
+// working.
 const WENT_WRONG = ["unreachable", "could not run", "could not choose"];
 
 function groupOf(span) {
@@ -135,11 +133,9 @@ function name(span) {
   return span.of ? label + " " + span.of : label;
 }
 
-/** flameChart draws the steps of one request, or nothing when there are none,
- *  as for a request recorded before steps were kept.
- *
- *  The bars are scaled to latencyMS, the request's total, not to the last
- *  step's end, so the gaps between steps are real. */
+/** flameChart draws the steps of one request, or nothing when there are
+ *  none. The bars are scaled to latencyMS, the request's total, so the gaps
+ *  between steps are real. */
 export function flameChart(spans, latencyMS) {
   if (!spans || spans.length === 0) return null;
 
@@ -148,8 +144,8 @@ export function flameChart(spans, latencyMS) {
     (end, s) => Math.max(end, (s.at_us || 0) + (s.for_us || 0)),
     0,
   );
-  // The longer of the two, so rounding between the latency in milliseconds
-  // and the steps in microseconds cannot push the last bar off its track.
+  // The longer of the two, so rounding cannot push the last bar off its
+  // track.
   const total = Math.max(last, Math.round((latencyMS || 0) * 1000), 1);
 
   const spent = {};
@@ -196,8 +192,8 @@ export function flameChart(spans, latencyMS) {
             { class: "flame-track" },
             h("div", {
               class: "flame-bar " + tone(s),
-              // A step that took no measurable time still happened, and on a
-              // refusal it is often the one looked for, so it keeps a sliver.
+              // A step that took no time still happened, and on a refusal is
+              // often the one looked for, so it keeps a sliver.
               style: {
                 left: pct(at / total),
                 width: pct(Math.max(took / total, 0.005)),

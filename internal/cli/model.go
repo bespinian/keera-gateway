@@ -15,8 +15,8 @@ import (
 
 const disabledUsage = "add the model without serving it yet"
 
-// modelFlags are the fields of a catalogue entry, as flags. Each one left out
-// means "leave this as it is", so `keera model set` can change one field.
+// modelFlags are a catalogue entry's fields. A flag left out keeps its value,
+// so `keera model set` can change one field.
 type modelFlags struct {
 	provider     string
 	backends     stringList
@@ -25,7 +25,7 @@ type modelFlags struct {
 	kind         string
 	displayName  string
 	description  string
-	// named and describe are whether --display-name and --description were
+	// named and describe record whether --display-name and --description were
 	// given, so an empty one clears.
 	named          bool
 	describe       bool
@@ -89,12 +89,10 @@ func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 	return f
 }
 
-// applyModelFlags folds one invocation's flags into a declared catalogue entry.
 func applyModelFlags(m catalog.Model, f *modelFlags) catalog.Model {
 	if f.provider != "" {
-		// Where the model runs and its address belong to the provider, so a
-		// new provider brings its own, and its own values for the model. The
-		// same flags given too win.
+		// A new provider brings its own address and model values, unless the
+		// flags set them too.
 		if !strings.EqualFold(f.provider, m.Provider) {
 			m.Location = ""
 			m.Backends = nil
@@ -107,18 +105,16 @@ func applyModelFlags(m catalog.Model, f *modelFlags) catalog.Model {
 	}
 	if f.productID != "" {
 		m.ProductID = f.productID
-		// The stored addresses have the old id baked in, so a new id means
-		// building them again from the provider. A --backend given too wins.
+		// The stored addresses contain the old id, so they are rebuilt unless
+		// --backend is given.
 		if len(f.backends) == 0 {
 			m.Backends = nil
 		}
 	}
 	if f.backendModel != "" {
-		// Another model has its own name and release date, and with a
-		// provider its own prices, context window and description, which the
-		// provider fills in again. Without a provider only the name and date
-		// go: nothing would refill the prices, and a model with none is billed
-		// at nothing.
+		// Another model has its own values, which a provider fills in again.
+		// Without a provider only the name and date go: nothing would refill
+		// the prices, and a model with none is billed at nothing.
 		if f.backendModel != m.BackendModel {
 			m.DisplayName = ""
 			m.ReleaseDate = ""
@@ -163,8 +159,8 @@ func applyModelFlags(m catalog.Model, f *modelFlags) catalog.Model {
 	return m
 }
 
-// clearModelValues empties what a provider's table fills in for one model, so
-// the table fills it in again for another.
+// clearModelValues empties what a provider's table fills in, so it is filled
+// in again for another model.
 func clearModelValues(m catalog.Model) catalog.Model {
 	m.DisplayName = ""
 	m.Description = ""
@@ -178,8 +174,7 @@ func clearModelValues(m catalog.Model) catalog.Model {
 	return m
 }
 
-// setPrice applies a price flag in CHF per million tokens, where -1 means
-// "not given".
+// setPrice takes CHF per million tokens; -1 means "not given".
 func setPrice(dst **int64, units float64) {
 	if units >= 0 {
 		m := micros(units)
@@ -187,8 +182,8 @@ func setPrice(dst **int64, units float64) {
 	}
 }
 
-// credential resolves --api-key and --no-api-key to what the request carries:
-// nil to leave the stored one alone, "" to remove it, or the secret itself.
+// credential returns nil to keep the stored key, "" to remove it, or the
+// secret.
 func credential(apiKey string, noAPIKey bool) (*string, error) {
 	switch {
 	case noAPIKey && apiKey != "":
@@ -209,9 +204,8 @@ func credential(apiKey string, noAPIKey bool) (*string, error) {
 	return nil, nil
 }
 
-// declared turns a stored model back into template-file form, so `set` can
-// change one field and send the whole entry through the same validation as
-// `add` and a file.
+// declared turns a stored model back into template-file form, so `set` goes
+// through the same validation as `add` and a file.
 func declared(m policy.Model) catalog.Model {
 	in, outPrice, maxContext := m.InputMicrosPerMTok, m.OutputMicrosPerMTok, m.MaxContext
 	cachedPrice, writePrice := m.CachedInputMicrosPerMTok, m.CacheWriteMicrosPerMTok
@@ -220,8 +214,7 @@ func declared(m policy.Model) catalog.Model {
 		Kind:         string(m.Kind),
 		Backends:     m.Backends,
 		BackendModel: m.BackendModel,
-		// Kept so changing one field does not drop the provider. Its values are
-		// already filled in, so expanding it again changes nothing.
+		// Kept so `set` does not drop it. Expanding it again changes nothing.
 		Provider:                 m.Provider,
 		DisplayName:              m.DisplayName,
 		Description:              m.Description,
@@ -238,15 +231,13 @@ func declared(m policy.Model) catalog.Model {
 	}
 }
 
-// modelPut is a catalogue entry plus the write-only credential. The credential
-// is left out unless this invocation set it, so a save never wipes a key
-// nobody mentioned.
+// modelPut leaves the credential out unless it was set, so a save never wipes
+// a key nobody mentioned.
 type modelPut struct {
 	policy.Model
 	APIKey *string `json:"api_key,omitempty"`
 }
 
-// modelRun is one 'keera model' invocation.
 type modelRun struct {
 	*aliasRun
 	f *modelFlags
@@ -268,8 +259,8 @@ func modelCmd(ctx context.Context, args []string) error {
 	r.f.named = given(r.fs, "display-name")
 	r.f.describe = given(r.fs, "description")
 
-	// These two need no organisation. validate needs no server either, so a
-	// template file can be checked in CI.
+	// No organisation needed. validate needs no server either, so CI can run
+	// it.
 	switch r.verb {
 	case "validate":
 		return r.validate()
@@ -277,8 +268,7 @@ func modelCmd(ctx context.Context, args []string) error {
 		return r.catalogue(ctx)
 	}
 
-	// apply picks the organisation once the file has been read, so a bad file
-	// fails without calling the control plane.
+	// apply reads the file first, so a bad file fails without a call.
 	if r.verb != "apply" {
 		if err := r.resolveOrg(ctx); err != nil {
 			return err
@@ -308,16 +298,13 @@ func (r *modelRun) validate() error {
 	return out(r.asJSON, models, func(w *table) { printModels(w, models) })
 }
 
-// providerEntry is one provider as GET /v1/providers serves it.
 type providerEntry struct {
 	catalog.Provider
 	PlatformKey bool `json:"platform_key,omitempty"`
 }
 
-// catalogue asks the gateway, as the panel does, so the list is the one the
-// deployment adds models against and says which keys it holds. Without a
-// sign-in there is no gateway to ask, so it shows the list built into this
-// binary.
+// catalogue asks the gateway, as the panel does, which also says which keys
+// it holds. Without a sign-in it shows the list built into this binary.
 func (r *modelRun) catalogue(ctx context.Context) error {
 	var providers []providerEntry
 	if r.c.bearer() == "" {
@@ -338,7 +325,7 @@ func (r *modelRun) catalogue(ctx context.Context) error {
 func modelAlias(m policy.Model) string { return m.Alias }
 
 // put is 'add' and 'set'. The endpoint replaces the entry, so 'set' starts
-// from the stored one to keep what was not given.
+// from the stored one.
 func (r *modelRun) put(ctx context.Context) error {
 	alias := r.fs.Arg(0)
 	current, err := startPut(ctx, r.aliasRun, alias, policy.Model{}, modelAlias)
@@ -351,8 +338,6 @@ func (r *modelRun) put(ctx context.Context) error {
 	return r.save(ctx, alias, declared(current))
 }
 
-// save applies the flags to m, validates it and writes it to the
-// organisation's models.
 func (r *modelRun) save(ctx context.Context, alias string, m catalog.Model) error {
 	parsed, err := catalog.ParseModel(applyModelFlags(m, r.f))
 	if err != nil {
@@ -398,9 +383,8 @@ func (r *modelRun) apply(ctx context.Context) error {
 	if err := r.resolveOrg(ctx); err != nil {
 		return err
 	}
-	// One model at a time, as the endpoint takes them. The file is validated
-	// first, so a stop halfway is the control plane going away or refusing one
-	// model, such as a name taken by a router, and a re-run is safe.
+	// One at a time, as the endpoint takes them. The file was validated, so a
+	// re-run after a stop halfway is safe.
 	for i, m := range models {
 		m.OrgID = r.orgID
 		if err := r.c.do(ctx, "PUT", r.path(m.Alias, ""), modelPut{Model: m}, &models[i]); err != nil {
@@ -430,8 +414,7 @@ func (r *modelRun) delete(ctx context.Context) error {
 	return r.deleteEntry(ctx, m.Alias, lines)
 }
 
-// catalogue lists an organisation's models. An empty orgID leaves the
-// organisation to the control plane.
+// catalogue leaves the organisation to the control plane when orgID is empty.
 func catalogue(ctx context.Context, c *client, orgID string) ([]policy.Model, error) {
 	return list[policy.Model](ctx, c, inOrg("/v1/models", orgID))
 }
@@ -459,9 +442,8 @@ func (r *modelRun) putModel(ctx context.Context, m policy.Model, cred *string) e
 	return err
 }
 
-// warnUnusedBackends says when the gateway sent a model somewhere other than
-// the --backend given. It does that for a model on the deployment's own key,
-// which goes only to its provider. It writes to stderr, so --json stays clean.
+// warnUnusedBackends says when the gateway ignored --backend, as it does for a
+// model on the deployment's own key. It writes to stderr.
 func warnUnusedBackends(asked []string, saved policy.Model) {
 	if len(asked) == 0 || !saved.PlatformKey || slices.Equal(asked, saved.Backends) {
 		return
@@ -470,8 +452,8 @@ func warnUnusedBackends(asked []string, saved policy.Model) {
 		"so --backend was not used.\n", saved.Provider, strings.Join(saved.Backends, ", "))
 }
 
-// modelUsers lists the filters and routers that name a model, so the
-// confirmation names them. Deleting it is refused while any of them uses it.
+// modelUsers lists the filters and routers that name a model, which block its
+// deletion.
 func modelUsers(ctx context.Context, c *client, orgID, alias string) (filters, routers []string, err error) {
 	fs, err := list[policy.Filter](ctx, c, inOrg("/v1/filters", orgID))
 	if err != nil {
@@ -494,8 +476,6 @@ func modelUsers(ctx context.Context, c *client, orgID, alias string) (filters, r
 	return filters, routers, nil
 }
 
-// modelDeleteLines is what deleting a model takes with it. Clients name
-// models, so removing one breaks every client that still names it.
 func modelDeleteLines(m policy.Model, filters, routers []string) []string {
 	lines := []string{
 		"  every client that names it starts being refused",
@@ -509,7 +489,7 @@ func modelDeleteLines(m policy.Model, filters, routers []string) []string {
 		users = append(users, "router "+rt)
 	}
 	if len(users) > 0 {
-		// The control plane refuses it, so this says why before it does.
+		// The control plane refuses it; this says why first.
 		lines = append(lines, "  nothing yet: it is refused while these use it: "+
 			strings.Join(users, ", "))
 	}
@@ -541,8 +521,7 @@ func printProviders(w *table, providers []providerEntry) {
 			_, _ = fmt.Fprintf(w, "  its address is per customer, so a model "+
 				"here also needs --product-id\n")
 		}
-		// The description goes last: a trailing cell is not padded, so a long
-		// one does not push the other columns out of line.
+		// The description goes last, since a trailing cell is not padded.
 		w.header(fmt.Sprintf(
 			"  MODEL\tNAME\tRELEASED\tCONTEXT\tIN/MTOK\tCACHED/MTOK\tWRITE/MTOK\t"+
 				"OUT/MTOK (%s)\tDESCRIPTION", policy.Currency))
@@ -582,9 +561,8 @@ func enabledStatus(enabled bool) string {
 	return statusWord("disabled")
 }
 
-// optionalPrice is a cached-input or cache-write price. A dash rather than 0.00
-// when no rate is stated, because those tokens are charged at the input price,
-// not free.
+// optionalPrice shows a dash rather than 0.00 for no rate, because those
+// tokens are charged at the input price, not free.
 func optionalPrice(micros int64) string {
 	if micros == 0 {
 		return "-"
@@ -592,7 +570,6 @@ func optionalPrice(micros int64) string {
 	return policy.FormatMicros(micros)
 }
 
-// longPromptPrices says what a long prompt costs instead, per million tokens.
 func longPromptPrices(t policy.PriceTier) string {
 	return fmt.Sprintf("over %d tokens (%s): %s in, %s cached, %s written, %s out",
 		t.AboveTokens, policy.Currency, policy.FormatMicros(t.InputMicrosPerMTok),
@@ -609,8 +586,8 @@ func printModel(w *table, m policy.Model) {
 	showIfSet(w, "provider", m.Provider)
 	show(w, "location", dash(m.Location))
 	showIfSet(w, "released", m.ReleaseDate)
-	// Printed even when missing: without a description a router knows the
-	// model by its alias alone.
+	// Printed even when missing: without one a router knows the model by its
+	// alias alone.
 	if m.Description != "" {
 		show(w, "description", m.Description)
 	} else {
@@ -623,8 +600,7 @@ func printModel(w *table, m policy.Model) {
 	}
 	show(w, "in/mtok", policy.FormatPrice(m.InputMicrosPerMTok))
 	show(w, "out/mtok", policy.FormatPrice(m.OutputMicrosPerMTok))
-	// In words rather than 0.00: an unstated rate is charged at the input
-	// price, not free.
+	// In words rather than 0.00: an unstated rate is not free.
 	if m.CachedInputMicrosPerMTok > 0 {
 		show(w, "cached in/mtok", policy.FormatPrice(m.CachedInputMicrosPerMTok))
 	} else {
@@ -646,8 +622,7 @@ func printModel(w *table, m policy.Model) {
 	show(w, "enabled", yesNo(m.Enabled))
 }
 
-// credentialSource says whether a backend credential is stored, which is what
-// an operator debugging a 401 wants to know.
+// credentialSource helps an operator debugging a 401.
 func credentialSource(m policy.Model) string {
 	switch {
 	case m.Subscription:
@@ -660,8 +635,7 @@ func credentialSource(m policy.Model) string {
 	return "-"
 }
 
-// printProbe leaves out streaming and tool calls for a model that is not chat:
-// its check sends one plain request.
+// printProbe leaves out streaming and tool calls for a model that is not chat.
 func printProbe(w *table, p gateway.Probe, chat bool) {
 	show(w, "alias", p.Alias)
 	showIfSet(w, "backend", p.Backend)

@@ -17,9 +17,9 @@ type seenRequest struct {
 	body   string
 }
 
-// providerHarness is a gateway with a hosted model, keera-frontier, declared
-// against provider, next to the local keera-code. Both are served by backend,
-// and every request it receives is put on the returned channel.
+// providerHarness is a gateway with a hosted model, keera-frontier, of
+// provider, and the local keera-code. Both are served by backend, and every
+// request it receives goes on the returned channel.
 func providerHarness(t *testing.T, provider, backendModel string, backend http.HandlerFunc,
 	res *policy.Resolved,
 ) (*harness, chan seenRequest) {
@@ -47,8 +47,8 @@ func providerHarness(t *testing.T, provider, backendModel string, backend http.H
 	return newHarness(t, record, models, res), seen
 }
 
-// nextSeen is the next request the backend received. It fails the test rather
-// than hang when none comes.
+// nextSeen is the next request the backend received. It fails the test
+// instead of hanging when none comes.
 func nextSeen(t *testing.T, seen chan seenRequest) seenRequest {
 	t.Helper()
 	select {
@@ -73,7 +73,7 @@ const anthropicAnswer = `{"id":"msg_1","type":"message","role":"assistant",` +
 
 func TestMessagesGoToAnthropicInTheirOwnAPI(t *testing.T) {
 	// Translating would lose prompt caching and thinking, so the request goes
-	// as it came, with the fields the translation would have dropped.
+	// as it came.
 	h, seen := providerHarness(t, "anthropic", "claude-opus-5", jsonBackend(anthropicAnswer), nil)
 
 	req, _ := http.NewRequest(http.MethodPost, h.url("/v1/messages"), strings.NewReader(
@@ -120,8 +120,8 @@ func TestMessagesGoToAnthropicInTheirOwnAPI(t *testing.T) {
 		t.Errorf("answer names model %q, want the alias: %s", answer.Model, body)
 	}
 
-	// Anthropic counts cached tokens apart from the input; the row counts them
-	// inside it, and charges them at the cached rate: 100 + 900/10 + 50*4.
+	// Anthropic counts cached tokens apart from the input; the row counts
+	// them inside it, at the cached rate: 100 + 900/10 + 50*4.
 	ev := h.sink.last(t)
 	if ev.InputTokens != 1000 || ev.CachedInputTokens != 900 || ev.OutputTokens != 50 {
 		t.Errorf("tokens = %d in (%d cached), %d out; want 1000 (900), 50",
@@ -132,8 +132,8 @@ func TestMessagesGoToAnthropicInTheirOwnAPI(t *testing.T) {
 	}
 }
 
-// Each API reports cache writes in its own field, and Anthropic's, unlike the
-// other two, outside the input count.
+// Each API reports cache writes in its own field; only Anthropic's is outside
+// the input count.
 func TestEveryDialectReadsTheCacheWrites(t *testing.T) {
 	for name, tc := range map[string]struct {
 		usage func([]byte) *tokenUsage
@@ -217,9 +217,8 @@ func TestAFilterRewritesANativeRequestInItsOwnShape(t *testing.T) {
 	}
 }
 
-// Every text a provider reads is filtered, including the parts the
-// translation has no place for: a document whose source is text, its title
-// and context, a search result, and a refusal the client sends back.
+// Every text a provider reads is filtered, including parts the translation
+// has no place for, such as documents, search results and refusals.
 func TestAFilterReadsDocumentsAndRefusalsInANativeRequest(t *testing.T) {
 	for _, tc := range []struct{ provider, path, answer, body string }{
 		{"anthropic", "/v1/messages", anthropicAnswer, `{"model":"keera-frontier","max_tokens":64,` +
@@ -260,8 +259,8 @@ func TestAFilterReadsDocumentsAndRefusalsInANativeRequest(t *testing.T) {
 }
 
 func TestAFilterRewriteChangesOnlyTheTextItRewrote(t *testing.T) {
-	// Encoding the body again would sort the keys of earlier turns, so the
-	// prompt cache would miss and a thinking block may be refused.
+	// Re-encoding would sort keys of earlier turns, so the prompt cache would
+	// miss and a thinking block may be refused.
 	messages := `[{"role":"user","content":"read <a> & b"},` +
 		`{"role":"assistant","content":[` +
 		`{"type":"thinking","thinking":"ok","signature":"c2ln"},` +
@@ -292,8 +291,8 @@ func TestAFilterRewriteChangesOnlyTheTextItRewrote(t *testing.T) {
 }
 
 func TestFiltersReadTheOutputOfEveryToolTheClientRuns(t *testing.T) {
-	// These tools are kept on the deployment's key, and their output is
-	// where file contents travel.
+	// These tools stay on the deployment's key, and file contents travel in
+	// their output.
 	b, err := parseBody([]byte(`{"model":"m","input":[` +
 		`{"type":"local_shell_call_output","call_id":"c1","output":"hunter2 one"},` +
 		`{"type":"shell_call_output","call_id":"c2","output":[` +
@@ -415,8 +414,8 @@ func TestARewriteOfAnInlineFileKeepsItsEncoding(t *testing.T) {
 }
 
 func TestARewriteOfABodyWithAKeyTwiceKeepsOnlyTheFilteredOne(t *testing.T) {
-	// The filters read the last copy of a key. A provider that reads the first
-	// would get text no filter saw, so such a body is encoded again whole.
+	// The filters read the last copy of a duplicate key. A provider reading
+	// the first would get unfiltered text, so such a body is re-encoded.
 	b, err := parseBody([]byte(`{"model":"m","messages":[{"role":"user",` +
 		`"content":"hunter2 one","content":"hunter2 two"}]}`))
 	if err != nil {
@@ -439,8 +438,8 @@ func TestARewriteOfABodyWithAKeyTwiceKeepsOnlyTheFilteredOne(t *testing.T) {
 }
 
 func TestAKeyInOtherCaseCannotCarryTextPastAFilter(t *testing.T) {
-	// The filters look up "content" as spelled, but the translation for the
-	// fallback reads "Content" as content too, so it would pass unfiltered.
+	// The filters look up "content" exactly, but the translation also reads
+	// "Content", which would pass unfiltered.
 	for _, tc := range []struct{ provider, path, body string }{
 		{"anthropic", "/v1/messages", `{"model":"ha","max_tokens":64,` +
 			`"messages":[{"role":"user","Content":"hunter2"}]}`},
@@ -611,7 +610,7 @@ func TestAFallbackFromAnthropicToALocalModelIsTranslated(t *testing.T) {
 
 // A router that reads nothing needs no translation, so a body only the
 // provider can read still reaches it when every destination is that
-// provider's. Here a Responses request carries only the response it continues.
+// provider's.
 func TestARouterThatReadsNothingLeavesANativeRequestUntranslated(t *testing.T) {
 	h, seen := providerHarness(t, "openai", "gpt-frontier", jsonBackend(
 		`{"id":"resp_2","object":"response","status":"completed","output":[],`+
@@ -664,7 +663,7 @@ func TestCountTokensIsAnsweredWithoutForwarding(t *testing.T) {
 
 func TestCountTokensCountsTheGuardrailsSystemPrompt(t *testing.T) {
 	// Every request gets the guardrail's prompt, so a count without it is
-	// low, and a client would compact too late.
+	// too low and a client would compact too late.
 	prompt := strings.Repeat("b", 3000)
 	h, _ := providerHarness(t, "anthropic", "claude-opus-5", jsonBackend(`{}`), guarded(prompt))
 
@@ -679,8 +678,8 @@ func TestCountTokensCountsTheGuardrailsSystemPrompt(t *testing.T) {
 	}
 }
 
-// A router's prompts are counted along the way that adds the most, since
-// which way a request goes is not known until it is sent.
+// A router's prompts are counted along the branch that adds the most, since
+// the path is not known until the request is sent.
 func TestCountTokensTakesTheLongestWayThroughARouter(t *testing.T) {
 	prompt := func(n int, next *policy.Step) *policy.Step {
 		return &policy.Step{Kind: policy.StepSystemPrompt, Prompt: strings.Repeat("p", n), Next: next}
@@ -714,8 +713,8 @@ func TestRenameModelChangesOnlyTheModelField(t *testing.T) {
 	}
 }
 
-// OpenAI records a client's X-Client-Request-Id, so its support can find a
-// request whose answer never arrived. Other backends are not sent it.
+// OpenAI records X-Client-Request-Id, so its support can find a lost request.
+// Other backends do not get it.
 func TestTheClientsRequestIDGoesOnlyToOpenAI(t *testing.T) {
 	h, seen := providerHarness(t, "openai", "gpt-5.5",
 		jsonBackend(`{"model":"gpt-5.5","choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}`), nil)
@@ -734,8 +733,7 @@ func TestTheClientsRequestIDGoesOnlyToOpenAI(t *testing.T) {
 		if got := nextSeen(t, seen).header.Get("X-Client-Request-Id"); got != want {
 			t.Errorf("%s was sent X-Client-Request-Id %q, want %q", alias, got, want)
 		}
-		// Whatever the model, the usage row keeps both ids, so the request
-		// can be found by either.
+		// The usage row always keeps both ids.
 		ev := h.sink.last(t)
 		if ev.RequestID != resp.Header.Get("X-Request-Id") || ev.ClientRequestID != "job-12" {
 			t.Errorf("%s: row has ids %q and %q, want %q and job-12", alias,

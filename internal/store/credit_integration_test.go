@@ -121,8 +121,7 @@ func TestAPaymentIsCreditedOnce(t *testing.T) {
 	}
 }
 
-// Opening Billing looks up the organisation's own pending payments. Grants,
-// which end at once, must not push a pending top-up out of view.
+// Grants, which end at once, must not push a pending top-up out of view.
 func TestPendingPaymentsOfSkipsEndedOnes(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -148,8 +147,8 @@ func TestPendingPaymentsOfSkipsEndedOnes(t *testing.T) {
 	}
 }
 
-// Payments page like every other list: each page starts after the id the last
-// one ended on, and together they hold each payment once.
+// Each page of payments starts after the last page's id, and together they
+// hold each payment once.
 func TestPaymentsPageByTheLastID(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -335,8 +334,8 @@ func TestADeletedOrganisationsCardIsNotCharged(t *testing.T) {
 	}
 }
 
-// An organisation that signed itself up is limited until it pays. Credit an
-// operator grants is not a payment, so it lifts nothing.
+// A self-signed-up organisation is limited until it pays. A grant does not
+// lift it.
 func TestTheFirstPaymentLiftsTheLimit(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)

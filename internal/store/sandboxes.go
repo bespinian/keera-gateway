@@ -10,17 +10,13 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// The sandbox tables: each organisation's classes, which work like its
-// models, and a log of the machines actually lent out.
-//
-// A sandbox row is kept after the machine is gone, because its cost, owner and
-// repository still matter later. Usage retention deletes it with the rest of
-// the usage.
+// The sandbox tables hold each organisation's classes, which work like its
+// models, and a log of the machines lent out. A sandbox row outlives its
+// machine for cost and reports; usage retention deletes it.
 
-// liveSandbox is the condition for a sandbox that still holds resources. It
-// matches Sandbox.Live. An expired sandbox is one: it keeps its volume until
-// it is resumed or terminated. So is a failed engineer sandbox, which keeps
-// its volume until it is terminated.
+// liveSandbox is the condition for a sandbox that still holds resources, as
+// in Sandbox.Live. Expired sandboxes and failed engineer sandboxes count: they
+// keep their volume.
 const liveSandbox = "(state IN ('pending','ready','suspended','expired') " +
 	"OR (state = 'failed' AND purpose = 'engineer'))"
 
@@ -45,11 +41,9 @@ func scanSandboxClass(r row) (policy.SandboxClass, error) {
 }
 
 // WarmSandboxClasses reads the classes that should have a warm pool, across
-// every organisation. A self-signed-up organisation has none until its first
-// payment, because a pool holds the deployment's machines whether used or not.
-// Only engineers claim from a pool, so a class only agents use has none.
-// Unlike models they are not cached: only the control API and the sandbox
-// manager read them, and both already talk to Postgres.
+// every organisation. A limited organisation has none, because a pool holds
+// the deployment's machines even when unused. A class only agents use has
+// none either, since only engineers claim from a pool.
 func (s *Store) WarmSandboxClasses(ctx context.Context) ([]policy.SandboxClass, error) {
 	return queryAll(ctx, s.pool, scanSandboxClass, sandboxClassColumns+` FROM sandbox_classes
 		WHERE warm > 0 AND org_id IN (SELECT id FROM orgs WHERE NOT limited)
@@ -68,9 +62,8 @@ func (s *Store) SandboxClass(ctx context.Context, orgID, name string) (policy.Sa
 	return c, notFound(err)
 }
 
-// UpsertSandboxClass creates or replaces one of an organisation's classes. It
-// writes the saved timestamps back onto c, so the control plane can answer a
-// PUT with what was stored.
+// UpsertSandboxClass creates or replaces one of an organisation's classes, and
+// writes the saved timestamps back onto c.
 func (s *Store) UpsertSandboxClass(ctx context.Context, c *policy.SandboxClass) error {
 	return upsertSandboxClass(ctx, s.pool, c)
 }
@@ -103,12 +96,9 @@ func (s *Store) DeleteSandboxClass(ctx context.Context, orgID, name string) erro
 	return s.execOne(ctx, "DELETE FROM sandbox_classes WHERE org_id = $1 AND name = $2", orgID, name)
 }
 
-// SandboxClassInUse counts the live sandboxes of one of an organisation's
-// classes.
-//
-// It is read before a deletion. Running sandboxes keep their own copy of the
-// class's settings, so deleting it breaks nothing: the control plane warns
-// with the count rather than refusing.
+// SandboxClassInUse counts the live sandboxes of a class, so a deletion can
+// warn. Running sandboxes keep their own copy of the class, so deleting it
+// breaks nothing.
 func (s *Store) SandboxClassInUse(ctx context.Context, orgID, name string) (int, error) {
 	var n int
 	err := s.pool.QueryRow(ctx,
@@ -123,8 +113,8 @@ type Sandbox struct {
 	OrgID     string `json:"org_id"`
 	ProjectID string `json:"project_id,omitempty"`
 	UserID    string `json:"user_id,omitempty"`
-	// Owner is the address the sandbox was created for. It is copied, not
-	// joined, so it survives the person being deleted.
+	// Owner is the address the sandbox was created for, copied so it survives
+	// the person being deleted.
 	Owner   string              `json:"owner,omitempty"`
 	Name    string              `json:"name"`
 	Class   string              `json:"class"`
@@ -132,8 +122,8 @@ type Sandbox struct {
 	State   policy.SandboxState `json:"state"`
 	Detail  string              `json:"detail,omitempty"`
 
-	// The machine as it actually ran, copied from the class at creation. The
-	// class may change later, and the bill must describe the real machine.
+	// The machine as it ran, copied from the class at creation, so the bill
+	// stays right when the class changes.
 	Image     string           `json:"image,omitempty"`
 	Isolation policy.Isolation `json:"isolation,omitempty"`
 	CPU       int              `json:"cpu_millis"`
@@ -143,35 +133,33 @@ type Sandbox struct {
 	// KeyID is the API key minted for this sandbox. Its secret went only into
 	// the sandbox's environment.
 	KeyID string `json:"key_id,omitempty"`
-	// SessionKey is the task an agent sandbox's requests belong to, so the
-	// sandbox and its session can be shown together.
+	// SessionKey is the session of an agent sandbox's requests.
 	SessionKey string `json:"session_key,omitempty"`
 
 	Repo   string `json:"repo,omitempty"`
 	Branch string `json:"branch,omitempty"`
-	// AuthorizedKeys are the ssh public keys that may open a shell in it.
+	// AuthorizedKeys are the SSH public keys that may open a shell in it.
 	AuthorizedKeys []string `json:"-"`
-	// GitCredentialID is the forge's id for the repository credential this
-	// sandbox holds, so it can be revoked when the sandbox ends. The
-	// credential itself is not stored.
+	// GitCredentialID is the forge's id for the sandbox's repository
+	// credential, to revoke it when the sandbox ends. The credential itself is
+	// not stored.
 	GitCredentialID string `json:"-"`
 	Node            string `json:"node,omitempty"`
 	Address         string `json:"-"`
-	// Backing is what kind of cluster object holds this sandbox: one the driver
-	// created, or a claim on a warm pool. See sandbox.Backing.
+	// Backing is what holds this sandbox: an object the driver created, or a
+	// claim on a warm pool.
 	Backing string `json:"backing,omitempty"`
 
 	CreatedAt time.Time  `json:"created_at"`
 	ReadyAt   *time.Time `json:"ready_at,omitempty"`
-	// LastActiveAt is when somebody last had a connection open to it, or when it
-	// last came back to ready. Idle suspension counts from here.
+	// LastActiveAt is when somebody last had a connection open, or when it last
+	// became ready. Idle suspension counts from here.
 	LastActiveAt *time.Time `json:"last_active_at,omitempty"`
 	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
 	SuspendedAt  *time.Time `json:"suspended_at,omitempty"`
 	TerminatedAt *time.Time `json:"terminated_at,omitempty"`
 
-	// RunningSeconds is how long this sandbox has actually held compute. With
-	// the tokens, it is what a task cost.
+	// RunningSeconds is how long this sandbox has held compute.
 	RunningSeconds int64      `json:"running_seconds"`
 	AccountedAt    *time.Time `json:"-"`
 }
@@ -182,8 +170,7 @@ func (s Sandbox) Live() bool {
 	return s.State.Live() || (s.State == policy.SandboxFailed && s.Purpose == policy.PurposeEngineer)
 }
 
-// CoreSeconds is running time weighted by the machine's size, which is what a
-// chargeback needs.
+// CoreSeconds is running time weighted by the machine's size, for chargeback.
 func (s Sandbox) CoreSeconds() int64 {
 	return s.RunningSeconds * int64(s.CPU) / 1000
 }
@@ -205,20 +192,17 @@ func scanSandbox(r row) (Sandbox, error) {
 	return sb, err
 }
 
-// sandboxWhere reads the one sandbox the rest of the query picks.
 func (s *Store) sandboxWhere(ctx context.Context, rest string, args ...any) (Sandbox, error) {
 	sb, err := scanSandbox(s.pool.QueryRow(ctx, sandboxColumns+" FROM sandboxes "+rest, args...))
 	return sb, notFound(err)
 }
 
-// sandboxesWhere reads every sandbox the rest of the query picks.
 func (s *Store) sandboxesWhere(ctx context.Context, rest string, args ...any) ([]Sandbox, error) {
 	return queryAll(ctx, s.pool, scanSandbox, sandboxColumns+" FROM sandboxes "+rest, args...)
 }
 
-// CreateSandbox inserts a sandbox. The one collision a caller can act on, a
-// live sandbox with the same name, is ErrSandboxNameTaken. Any other unique
-// violation would be a random id colliding, which is not worth a message.
+// CreateSandbox inserts a sandbox. A live sandbox with the same name gives
+// ErrSandboxNameTaken; other collisions are too rare for their own error.
 func (s *Store) CreateSandbox(ctx context.Context, sb Sandbox) (Sandbox, error) {
 	err := s.pool.QueryRow(ctx, `INSERT INTO sandboxes
 		(id, org_id, project_id, user_id, owner, name, class, purpose, state, detail,
@@ -250,17 +234,15 @@ func (s *Store) Sandbox(ctx context.Context, id string) (Sandbox, error) {
 }
 
 // LiveSandboxesByName finds the live sandboxes of that name in an
-// organisation, which is how `keera sandbox ssh <name>` resolves a name. A
-// name is unique per person, so there can be one for each. A name used only
-// by finished sandboxes finds none.
+// organisation, for `keera sandbox ssh <name>`. A name is unique per person,
+// so there can be one for each.
 func (s *Store) LiveSandboxesByName(ctx context.Context, orgID, name string) ([]Sandbox, error) {
 	return s.sandboxesWhere(ctx, "WHERE org_id = $1 AND name = $2 AND "+liveSandbox+
 		" ORDER BY created_at", orgID, name)
 }
 
-// LiveSandboxByKey finds the live sandbox a presented key was minted for, if
-// that key still works. It is how a sandbox asks for a fresh repository
-// credential with nothing but its own key.
+// LiveSandboxByKey finds the live sandbox a working key was minted for, so a
+// sandbox can get a fresh repository credential with only its own key.
 func (s *Store) LiveSandboxByKey(ctx context.Context, hash []byte) (Sandbox, error) {
 	return s.sandboxWhere(ctx, `WHERE key_id = (
 			SELECT k.id FROM api_keys k LEFT JOIN users u ON u.id = k.user_id
@@ -276,23 +258,19 @@ func (s *Store) SetSandboxGitCredential(ctx context.Context, id, credentialID st
 		id, credentialID)
 }
 
-// SandboxQuery narrows the list. The zero value is every live sandbox, newest
-// first.
+// SandboxQuery narrows the list. The zero value is every live sandbox.
 type SandboxQuery struct {
 	// OrgID empty lists every organisation's, for an operator.
 	OrgID     string
 	ProjectID string
 	UserID    string
 	Class     string
-	// Purpose narrows to engineer or agent sandboxes.
-	Purpose policy.Purpose
-	// All includes finished sandboxes. It is off by default, because the usual
-	// question is "what is running now".
+	Purpose   policy.Purpose
+	// All includes finished sandboxes.
 	All   bool
 	Limit int
 }
 
-// ListSandboxes reads the sandboxes q selects.
 func (s *Store) ListSandboxes(ctx context.Context, q SandboxQuery) ([]Sandbox, error) {
 	limit := pageLimit(q.Limit, 200, 500)
 	return s.sandboxesWhere(ctx, `
@@ -307,13 +285,9 @@ func (s *Store) ListSandboxes(ctx context.Context, q SandboxQuery) ([]Sandbox, e
 		q.OrgID, q.ProjectID, q.UserID, q.Class, string(q.Purpose), q.All, limit)
 }
 
-// SandboxObservation is what the driver saw, written back onto the row.
-//
-// It is applied all at once, because a partial update could leave a row that
-// disagrees with itself, such as a ready sandbox with no address.
-//
-// It has no expiry: the row owns that. Create, Extend and a resume write it,
-// and a driver only ever holds a copy.
+// SandboxObservation is what the driver saw, written back onto the row all at
+// once, so a row never disagrees with itself, such as a ready sandbox with no
+// address. It has no expiry: the row owns that.
 type SandboxObservation struct {
 	State   policy.SandboxState
 	Detail  string
@@ -323,22 +297,20 @@ type SandboxObservation struct {
 
 // ObserveSandbox writes back what the driver saw.
 //
-// ready_at is set the first time a sandbox is ready and never again: a resume
-// is not when the machine became usable. active_at is set each time it comes
-// back to ready, so a resumed sandbox is not idle from before it was
-// suspended. suspended_at is reset on each suspend.
+// ready_at is set only the first time a sandbox is ready. active_at is set each
+// time it becomes ready, so a resumed sandbox does not count as idle since
+// before its suspension. suspended_at is reset on each suspend.
 //
-// A row that is gone or already terminated is left alone without an error.
-// Usually somebody ended the sandbox after the sweep read it.
+// A row that is gone or terminated is left alone without an error: usually
+// somebody ended the sandbox after the sweep read it.
 func (s *Store) ObserveSandbox(ctx context.Context, id string, obs SandboxObservation) error {
 	_, err := s.observeSandbox(ctx, id, sandboxGuard{}, obs)
 	return err
 }
 
-// ObserveSandboxFrom is ObserveSandbox for what the driver said about a row
-// read in state from. A row that has moved on since is left alone: somebody
-// suspended, resumed or ended the sandbox while the driver was asked, and
-// what it said is out of date. Written anyway, it would undo their change.
+// ObserveSandboxFrom is ObserveSandbox for a row read in state from. A row
+// that has changed state since is left alone, so an out-of-date observation
+// cannot undo somebody's suspend, resume or end.
 func (s *Store) ObserveSandboxFrom(ctx context.Context, id string, from policy.SandboxState,
 	obs SandboxObservation,
 ) error {
@@ -347,15 +319,14 @@ func (s *Store) ObserveSandboxFrom(ctx context.Context, id string, from policy.S
 }
 
 // sandboxGuard is what a row must still be for an observation to be written.
-// Each field left zero is not checked.
+// Zero fields are not checked.
 type sandboxGuard struct {
 	from policy.SandboxState
 	// expiresAt is the end the writer read, on a row not yet expired.
 	expiresAt *time.Time
 }
 
-// observeSandbox is ObserveSandbox, held to guard. It returns how many rows
-// it changed.
+// observeSandbox is ObserveSandbox, held to guard. It returns the rows changed.
 func (s *Store) observeSandbox(ctx context.Context, id string, guard sandboxGuard,
 	obs SandboxObservation,
 ) (int64, error) {
@@ -403,12 +374,11 @@ func (s *Store) TouchSandbox(ctx context.Context, id string) error {
 	return err
 }
 
-// SetSandboxExpiry moves when a sandbox ends, and its key with it: the key
-// expires with the sandbox, so an extension that left it behind would cut
-// the sandbox off from inference at the old time.
+// SetSandboxExpiry moves when a sandbox ends, and its key's expiry with it, so
+// the sandbox keeps inference access until the new time.
 //
-// An expired sandbox is ErrNotFound, like a terminated one: resuming it is
-// what gives it a new end. See ExpireSandbox for the race this settles.
+// An expired sandbox is ErrNotFound, like a terminated one: only a resume
+// gives it a new end. See ExpireSandbox for the race this settles.
 func (s *Store) SetSandboxExpiry(ctx context.Context, id string, at time.Time) error {
 	var n int
 	err := s.pool.QueryRow(ctx, `
@@ -430,8 +400,8 @@ func (s *Store) SetSandboxExpiry(ctx context.Context, id string, at time.Time) e
 	return nil
 }
 
-// CountLiveSandboxes counts what an organisation or a project is holding, for
-// the quota. A key has no sandbox quota: a sandbox's key is minted for it.
+// CountLiveSandboxes counts the live sandboxes of an organisation or project,
+// for the quota.
 func (s *Store) CountLiveSandboxes(ctx context.Context, scopeType policy.ScopeType, scopeID string) (int, error) {
 	column := "org_id"
 	if scopeType == policy.ScopeProject {
@@ -443,8 +413,8 @@ func (s *Store) CountLiveSandboxes(ctx context.Context, scopeType policy.ScopeTy
 	return n, err
 }
 
-// SandboxesPastExpiry reads the live sandboxes whose time is up, for the sweep.
-// The expired ones are already ended. The states are spelled out to match the
+// SandboxesPastExpiry reads the live sandboxes whose time is up, for the sweep,
+// leaving out those already expired. The states are spelled out to match the
 // partial index.
 func (s *Store) SandboxesPastExpiry(ctx context.Context, now time.Time, limit int) ([]Sandbox, error) {
 	if limit <= 0 {
@@ -457,10 +427,9 @@ func (s *Store) SandboxesPastExpiry(ctx context.Context, now time.Time, limit in
 		LIMIT $2`, now, limit)
 }
 
-// ExpireSandbox marks sb expired, if its end is still the one the sweep read.
-// It is ErrNotFound when the sandbox was extended, ended or resumed since:
-// SetSandboxExpiry refuses an expired row, so between an extension and an
-// expiry exactly one wins.
+// ExpireSandbox marks sb expired if its end is still the one the sweep read,
+// and is ErrNotFound otherwise. SetSandboxExpiry refuses an expired row, so
+// of an extension and an expiry exactly one wins.
 func (s *Store) ExpireSandbox(ctx context.Context, sb Sandbox, detail string) error {
 	if sb.ExpiresAt == nil {
 		return ErrNotFound
@@ -473,9 +442,8 @@ func (s *Store) ExpireSandbox(ctx context.Context, sb Sandbox, detail string) er
 	return err
 }
 
-// LiveSandboxes reads the sandboxes the drivers should still know about, for
-// the sweep that reconciles rows with reality: up to limit of them, in id
-// order after the id after, so the sweep can page through all of them.
+// LiveSandboxes reads up to limit sandboxes the drivers should still know
+// about, in id order after the id after, so the sweep can page through them.
 func (s *Store) LiveSandboxes(ctx context.Context, after string, limit int) ([]Sandbox, error) {
 	if limit <= 0 {
 		limit = 500
@@ -485,8 +453,8 @@ func (s *Store) LiveSandboxes(ctx context.Context, after string, limit int) ([]S
 }
 
 // accrueRunning adds the time since accounted_at to running_seconds, as of $1,
-// for sandboxes holding compute. It stops at expires_at, when a sandbox stops
-// even if no sweep has ended it yet.
+// for sandboxes holding compute. It stops at expires_at, even if no sweep has
+// ended the sandbox yet.
 const accrueRunning = `UPDATE sandboxes SET
 		running_seconds = running_seconds +
 			GREATEST(0, EXTRACT(EPOCH FROM (LEAST($1::timestamptz, COALESCE(expires_at, $1::timestamptz))
@@ -495,11 +463,8 @@ const accrueRunning = `UPDATE sandboxes SET
 	WHERE state IN ('pending','ready')`
 
 // AccountSandboxes brings running_seconds up to date for every sandbox holding
-// compute, and returns how many rows it touched.
-//
-// It is one statement, which keeps it correct across replicas: each sweep adds
-// only the time since accounted_at and moves it forward. The clock is read from
-// the column, so time a gateway was down is still charged, up to expiry.
+// compute, and returns how many rows it touched. It is one statement, so it is
+// safe across replicas. Time a gateway was down is still charged, up to expiry.
 func (s *Store) AccountSandboxes(ctx context.Context, now time.Time) (int64, error) {
 	tag, err := s.pool.Exec(ctx, accrueRunning, now)
 	if err != nil {
@@ -508,9 +473,8 @@ func (s *Store) AccountSandboxes(ctx context.Context, now time.Time) (int64, err
 	return tag.RowsAffected(), nil
 }
 
-// StopAccounting freezes a sandbox's clock when it stops holding compute
-// (suspended, expired, terminated, failed), so the time until the next sweep
-// is not charged.
+// StopAccounting freezes a sandbox's clock when it stops holding compute, so
+// the time until the next sweep is not charged.
 func (s *Store) StopAccounting(ctx context.Context, id string, now time.Time) error {
 	_, err := s.pool.Exec(ctx, accrueRunning+" AND id = $2", now, id)
 	return err
@@ -518,25 +482,21 @@ func (s *Store) StopAccounting(ctx context.Context, id string, now time.Time) er
 
 // SandboxUsage is what one group of sandboxes came to over a window.
 type SandboxUsage struct {
-	// Group is a project id, a user's address or a class name, as the
-	// caller grouped by.
+	// Group is a project id, a user's address or a class name.
 	Group string `json:"group"`
 	// OrgID is set only when a report across every organisation groups by
-	// class: two organisations can each have a class of the same name.
+	// class, since two organisations can have a class of the same name.
 	OrgID string `json:"org_id,omitempty"`
 	// Count is how many sandboxes, Running the seconds they held compute, and
-	// CoreSeconds the same weighted by machine size. Each tells a different
-	// story, so all three are shown.
+	// CoreSeconds the same weighted by machine size.
 	Count       int64 `json:"count"`
 	Running     int64 `json:"running_seconds"`
 	CoreSeconds int64 `json:"core_seconds"`
-	// Live is how many of them still hold resources now, which the other
-	// numbers cannot give.
+	// Live is how many of them still hold resources now.
 	Live int64 `json:"live"`
 }
 
-// sandboxGroupColumns maps the public group_by values to columns, which keeps
-// the caller's string out of the SQL text. It mirrors groupColumns in usage.go.
+// sandboxGroupColumns maps group_by values to columns, like groupColumns.
 var sandboxGroupColumns = map[string]string{
 	"class":   "s.class",
 	"project": "COALESCE(s.project_id, '')",
@@ -555,11 +515,8 @@ func SandboxGroupBys() []string {
 	return slices.Sorted(maps.Keys(sandboxGroupColumns))
 }
 
-// SandboxUsageBy groups sandbox time over a window.
-//
-// groupBy is "class", "project" or "user". The window applies to creation time,
-// so a sandbox is counted whole in the window it started in. Splitting its
-// seconds across days would need a row per interval.
+// SandboxUsageBy groups sandbox time over a window by "class", "project" or
+// "user". A sandbox counts whole in the window it was created in.
 func (s *Store) SandboxUsageBy(ctx context.Context, orgID, groupBy string, from, to time.Time) (
 	[]SandboxUsage, error,
 ) {

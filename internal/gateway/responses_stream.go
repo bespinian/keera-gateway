@@ -11,16 +11,13 @@ import (
 	"github.com/bespinian/keera-gateway/internal/id"
 )
 
-// The streaming half of the Responses surface.
-//
-// Like a Messages stream, a Responses stream is explicit events: the response
-// opens, output items open and close by index, and the response closes with a
-// status and the token counts. Clients read the finished items from the
-// events that close them, so those carry the whole item.
+// The streaming half of the Responses surface. The response opens, output
+// items open and close by index, and the response closes with a status and
+// token counts. Clients read finished items from their closing events, so
+// those carry the whole item.
 
 // pipe forwards a chat completion stream as a Responses stream. The API has
-// no keep-alive event, so unlike the Messages stream this one writes only
-// when the upstream does.
+// no keep-alive event, so it writes only when the upstream does.
 func (sh responsesShape) pipe(dst io.Writer, flush func(), src io.Reader, alias string,
 	_ bool, limit int64,
 ) (streamStats, error) {
@@ -32,8 +29,8 @@ func (sh responsesShape) pipe(dst io.Writer, flush func(), src io.Reader, alias 
 	})
 }
 
-// responsesStream is the state a chat completion stream has to be read against
-// to be re-emitted as a Responses stream.
+// responsesStream is the state of translating a chat stream to a Responses
+// stream.
 type responsesStream struct {
 	alias     string
 	tools     toolNames
@@ -43,8 +40,7 @@ type responsesStream struct {
 	seq       int
 
 	started bool
-	// done is every finished output item, for the event that closes the
-	// response.
+	// done is every finished output item, for the closing event.
 	done []any
 	// blocks is the output item under way.
 	blocks
@@ -96,8 +92,7 @@ func (s *responsesStream) toolDelta(index int, tc oaiToolCallDelta) error {
 	})
 }
 
-// response is the response object as the events that open and close the
-// stream carry it.
+// response is the response object carried by the opening and closing events.
 func (s *responsesStream) response(status string, incomplete any) responsesOut {
 	output := s.done
 	if output == nil {
@@ -151,8 +146,7 @@ func (s *responsesStream) openCall(upstreamIndex int, upstreamID, name string) e
 	return s.emit("response.output_item.added", map[string]any{"output_index": s.open, "item": s.call})
 }
 
-// closeItem closes the open item, repeating it whole in the events that close
-// it.
+// closeItem closes the open item, repeating it whole in the closing events.
 func (s *responsesStream) closeItem() error {
 	if s.open < 0 {
 		return nil
@@ -188,8 +182,8 @@ func (s *responsesStream) closeCall(index int, args string) error {
 	if item["type"] == "custom_tool_call" {
 		input := customInput(args)
 		item["input"] = input
-		// What was not streamed yet. Arguments that were not read as they
-		// came are sent whole here, and the done event has the last word.
+		// What was not streamed yet. Arguments not read as they came are sent
+		// whole here; the done event is final.
 		if rest, ok := strings.CutPrefix(input, s.input.sent.String()); ok {
 			err = s.inputDelta(index, rest)
 		}
@@ -220,13 +214,13 @@ func (s *responsesStream) inputDelta(index int, text string) error {
 }
 
 // inputStream reads a custom tool's text out of {"input": "..."} as the
-// arguments arrive. Otherwise a long patch sends nothing until it is whole, and
-// a client may give up on the quiet stream. Arguments of any other shape are
-// left to customInput once whole.
+// arguments arrive. Otherwise a long patch sends nothing until whole, and a
+// client may give up on the quiet stream. Other shapes are left to
+// customInput once whole.
 type inputStream struct {
 	raw []byte // arrived, not read yet
 	// inside is set once the opening quote is read, and done once the string
-	// ended or the arguments turned out not to have the expected shape.
+	// ended or the arguments have another shape.
 	inside, done bool
 	sent         strings.Builder
 }
@@ -278,8 +272,8 @@ func inputStart(raw []byte) (n int, ok bool) {
 }
 
 // stringPrefix is how much of raw, the inside of a JSON string, can be decoded
-// now: up to the closing quote, which sets end, or to an escape not yet whole.
-// A high surrogate waits for its pair, which would otherwise be decoded alone.
+// now: up to the closing quote, which sets end, or to an incomplete escape. A
+// high surrogate waits for its pair.
 func stringPrefix(raw []byte) (n int, end bool) {
 	for n < len(raw) {
 		switch raw[n] {
@@ -312,17 +306,16 @@ func stringPrefix(raw []byte) (n int, end bool) {
 	return n, false
 }
 
-// finish closes the response, with the usage record the last chunk carried,
-// or fails it if the upstream failed. A failure closed as a response would
-// read as a finished turn, with any tool call in it cut short. The item under
-// way is left open: it is not whole, so it is not in the output.
+// finish closes the response with the last chunk's usage, or fails it if the
+// upstream failed, since a closed response reads as a finished turn. The item
+// under way is not whole, so it is left out.
 func (s *responsesStream) finish(cut error) error {
 	if err := s.start(); err != nil {
 		return err
 	}
 	if cut != nil {
 		failed := s.response("failed", nil)
-		// server_error: the request was fine, and retrying is the remedy.
+		// server_error: the request was fine, so a retry may work.
 		failed.Error = map[string]string{"code": "server_error", "message": cutMessage(cut)}
 		return s.emit("response.failed", map[string]any{"response": failed})
 	}

@@ -15,8 +15,7 @@ func TestOIDCConfigValidate(t *testing.T) {
 		t.Errorf("a complete configuration was rejected: %v", err)
 	}
 
-	// Nothing configured is not an error: the operator key is the deployment's
-	// first ten minutes.
+	// Nothing configured is fine: the operator key works.
 	if err := (OIDCConfig{}).Validate(); err != nil {
 		t.Errorf("an empty configuration should be allowed: %v", err)
 	}
@@ -32,13 +31,11 @@ func TestOIDCConfigValidate(t *testing.T) {
 		{"no redirect", func(c *OIDCConfig) { c.RedirectURL = "" }, "redirect URL"},
 		{"a relative issuer", func(c *OIDCConfig) { c.IssuerURL = "login.example.ch" }, "absolute"},
 		{"no name", func(c *OIDCConfig) { c.Name = "" }, "name"},
-		// The name ends up in a URL and in every external ID this provider
-		// writes, so it is kept to what is unambiguous in both.
+		// The name goes into a URL and every external ID.
 		{"a name with a space", func(c *OIDCConfig) { c.Name = "entra id" }, "provider name"},
 		{"a name in capitals", func(c *OIDCConfig) { c.Name = "Entra" }, "provider name"},
 		{"a name with a colon", func(c *OIDCConfig) { c.Name = "en:tra" }, "provider name"},
-		// The operator key signs in as keera:operator-key, and a provider of
-		// that name could issue the same subject.
+		// A provider called keera could issue keera:operator-key.
 		{"the reserved name", func(c *OIDCConfig) { c.Name = "keera" }, "reserved"},
 		// ?provider=passkey starts a passkey sign-in.
 		{"the passkey name", func(c *OIDCConfig) { c.Name = "passkey" }, "reserved"},

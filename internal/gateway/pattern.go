@@ -12,19 +12,14 @@ import (
 
 // A pattern filter runs regular expressions over the segments, in process,
 // with no model and no cost. It is for secrets with a shape: credentials,
-// connection strings, IBANs, card numbers. Being free, it can cover a whole
-// organisation; a rule cannot "improve" someone's code; and it is
-// deterministic, so its check shows what production does.
-//
-// It cannot read: a customer's name in a sentence has no shape. That needs a
-// model mode.
+// connection strings, IBANs, card numbers. It is free and deterministic, but
+// cannot catch what has no shape, such as a name; that needs a model mode.
 
-// compiled is one pattern filter's rules. Filters change rarely and run on
-// every request, so the rules are compiled once and kept.
+// compiled is one pattern filter's rules, compiled once and kept.
 type compiled struct {
 	rules []compiledRule
-	// err is a rule that would not compile. It is kept so a broken filter
-	// fails the same way each time without being recompiled.
+	// err is a rule that would not compile, kept so a broken filter fails
+	// the same way without recompiling.
 	err error
 }
 
@@ -34,8 +29,7 @@ type compiledRule struct {
 }
 
 // patternCache holds compiled rules, one entry per filter. An edit changes
-// the filter's write time and the next request recompiles in place, so old
-// rules do not pile up.
+// the write time, and the next request recompiles in place.
 type patternCache struct{ m sync.Map }
 
 type patternEntry struct {
@@ -54,11 +48,10 @@ func (c *patternCache) rulesFor(f policy.Filter) compiled {
 }
 
 // compileRules fails closed. The control plane validates rules on write, so a
-// failure here means the row was changed behind its back.
+// failure means the row was changed directly.
 func compileRules(rules []policy.FilterRule) compiled {
 	if len(rules) == 0 {
-		// The control plane refuses to store this. A guardrail that passes
-		// everything is worse than one that is plainly broken.
+		// A guardrail that passes everything is worse than a broken one.
 		return compiled{err: errors.New("it has no rules, so it would read every request " +
 			"the guardrail covers and change nothing")}
 	}
@@ -74,10 +67,9 @@ func compileRules(rules []policy.FilterRule) compiled {
 	return out
 }
 
-// patternHit is one rule that fired, for a check to report. Real requests
-// keep none.
+// patternHit is one rule that fired, for a check to report.
 type patternHit struct {
-	// Rule is the expression that matched: the line to change.
+	// Rule is the expression that matched.
 	Rule string `json:"rule"`
 	// Matches is how many times it matched across every segment.
 	Matches int `json:"matches"`
@@ -85,11 +77,9 @@ type patternHit struct {
 	Refused bool `json:"refused,omitempty"`
 }
 
-// runPattern applies one pattern filter's rules to the segments.
-//
-// The rules run in order, each on what the one before left, so a specific
-// rule above a broad one can narrow it. A refusal is a filterRefusedError, as
-// a model's is, so it takes the same path through outcomes, logs and shadow
+// runPattern applies one pattern filter's rules to the segments, in order,
+// each on what the one before left. A refusal is a filterRefusedError, as a
+// model's is, so it takes the same path through outcomes, logs and shadow
 // mode.
 func runPattern(c compiled, texts []string) ([]string, []patternHit, error) {
 	if c.err != nil {
@@ -108,8 +98,8 @@ func runPattern(c compiled, texts []string) ([]string, []patternHit, error) {
 			}
 			matches += found
 			if cr.rule.Refuse {
-				// The reason is the administrator's wording, but it is bounded
-				// like a model's: it goes into an error body and a usage row.
+				// Capped like a model's reason: it goes into an error body and
+				// a usage row.
 				return nil, append(hits, patternHit{
 					Rule: cr.rule.Pattern, Matches: matches, Refused: true,
 				}), &filterRefusedError{reason: sanitizeReason(cr.rule.Reason)}
@@ -124,8 +114,8 @@ func runPattern(c compiled, texts []string) ([]string, []patternHit, error) {
 	return out, hits, nil
 }
 
-// patternCheckWarnings says what a pattern filter still got wrong: it left
-// what it should remove, or touched what it should leave (naming the rule).
+// patternCheckWarnings says what a pattern filter got wrong: it left what it
+// should remove, or touched what it should leave.
 func patternCheckWarnings(out []string, hits []patternHit, codeHits []patternHit) []string {
 	var warnings []string
 	if leftSecret(out) {
@@ -147,7 +137,7 @@ func patternCheckWarnings(out []string, hits []patternHit, codeHits []patternHit
 	return warnings
 }
 
-// quoteRule renders an expression for a sentence somebody reads.
+// quoteRule renders an expression for use in a message.
 func quoteRule(s string) string {
 	// With the ellipsis, a cut rule is 60 bytes too.
 	if len(s) > 60 {

@@ -51,8 +51,8 @@ export async function projectsView(ctx) {
           "the organisation allows, never widen it."
       : "A project's guardrails apply to every key in it. Open a project to see " +
           "them. An administrator sets them.",
-    // The organisation's guardrails cap every project, and its system prompt
-    // reaches every request. A member is subject to both, so may read both.
+    // The organisation's guardrails cap every project and its prompt reaches
+    // every request, so a member may read them.
     busyButton(
       { title: "Guardrails that apply to every project" },
       [icon(icons.sliders), "Organisation guardrails"],
@@ -74,8 +74,8 @@ export async function projectsView(ctx) {
   const rows = table(
     [
       {
-        // The name opens the project's own screen. The button at the end of
-        // the row opens the guardrails.
+        // The name opens the project's screen; the row's button opens the
+        // guardrails.
         label: "Name",
         sortKey: (t) => t.name,
         cell: (t) =>
@@ -112,7 +112,7 @@ export async function projectsView(ctx) {
       },
       {
         label: "Budget",
-        // By share of budget used, so the ones about to run out come first.
+        // So the ones about to run out come first.
         sortKey: (t) =>
           t.budget_micros ? t.spend_micros / t.budget_micros : null,
         sortDir: "desc",
@@ -177,8 +177,7 @@ export async function projectsView(ctx) {
               "Guardrails",
               () => openProject(ctx, t, models, orgID, orgName, canEdit),
             ),
-            // Not beside the name: the name links to the project's screen,
-            // and a pencil there would read as editing that screen.
+            // Not beside the name, which links to the project's screen.
             canEdit
               ? iconButton(
                   icons.pencil,
@@ -260,8 +259,8 @@ function newProject(ctx) {
   });
 }
 
-// editProject changes a project's labels only. Everything holds the project by
-// its id, so a rename is safe. The dialog says so, as nobody would assume it.
+// editProject changes a project's labels only. Everything refers to the
+// project by id, so a rename is safe.
 export function editProject(ctx, project) {
   const { name, description } = projectFields(project);
   formModal({
@@ -297,8 +296,8 @@ export function editProject(ctx, project) {
 }
 
 // deleteProject removes a project once nothing live is bound to it. The
-// control plane refuses while any key in it is not revoked, expired ones
-// included, so the button explains and links to the keys instead of failing.
+// control plane refuses while any key in it is not revoked, so the button
+// explains and links to the keys.
 export function deleteProject(ctx, project, done = () => ctx.reload()) {
   const live = project.active_keys || 0;
   if (live) {
@@ -345,9 +344,8 @@ export function deleteProject(ctx, project, done = () => ctx.reload()) {
   });
 }
 
-// openProject opens the guardrails dialog with the organisation's limits as the
-// ceiling, so "projects can only narrow" shows as real numbers. A member gets
-// it read-only: the numbers answer "why was I refused".
+// openProject opens the guardrails dialog with the organisation's limits as
+// the ceiling. A member gets it read-only: it answers "why was I refused".
 export async function openProject(
   ctx,
   project,
@@ -368,8 +366,7 @@ export async function openProject(
   });
 }
 
-/** oldestProject is the id of the project a key or sandbox that names none
- *  goes in: the organisation's oldest. */
+/** oldestProject is where a key or sandbox that names none goes. */
 export function oldestProject(projects) {
   let first = null;
   for (const t of projects) {

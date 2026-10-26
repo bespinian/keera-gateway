@@ -16,11 +16,11 @@ import (
 // panel shows a form and sends it here, and the gateway binds as the person.
 // After that it is the same sign-in as through any directory. See docs/sso.md.
 
-// passwordPerAccountRPM bounds the attempts on one account, from any number of
-// addresses, so the gateway cannot guess a password or lock an account out
-// faster than this. It is counted twice: by what was typed, which bounds the
-// searches, and by the entry found, which bounds the passwords tried on it
-// however its username is spelled.
+// passwordPerAccountRPM bounds the attempts on one account, from any address,
+// so nobody can guess a password or lock an account out faster than this. It is
+// counted twice: by what was typed, which bounds the searches, and by the entry
+// found, which bounds the passwords tried on it however its username is
+// spelled.
 const passwordPerAccountRPM = 5
 
 // The per-account buckets share the limiter with the per-address ones, whose

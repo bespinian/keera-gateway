@@ -1,9 +1,8 @@
 /* Keera Gateway control panel.
    One stylesheet, no build step. Tokens first, then layout, then components. */
 
-/* Space Grotesk is for the name, titles and big figures. It is too wide for
-   dense tables, so body text uses the system font. It is served from here
-   because the CSP allows fonts only from this origin. */
+/* Space Grotesk is for titles and big figures; it is too wide for dense
+   tables. The CSP allows fonts only from this origin. */
 @font-face {
   font-family: "Space Grotesk";
   src: url("fonts/space-grotesk.woff2") format("woff2");
@@ -13,8 +12,7 @@
 }
 
 :root {
-  /* Native parts the tokens cannot reach, like open option lists and
-     scrollbars, follow this. */
+  /* For native parts the tokens cannot reach, like scrollbars. */
   color-scheme: light;
   --bg: #f7f7f5;
   --surface: #ffffff;
@@ -84,8 +82,8 @@
 }
 
 /* The same tokens, for dark chosen in the panel. One rule cannot match both a
-   media query and a selector, and a script would show light first: the CSP
-   allows no inline script before the first paint. */
+   media query and a selector, and the CSP allows no inline script to set it
+   before the first paint. */
 :root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #121215;
@@ -119,8 +117,8 @@
   box-sizing: border-box;
 }
 
-/* The components below set their own display, which outranks the browser's
-   rule for [hidden] and leaves a "hidden" button on screen. */
+/* Components set their own display, which outranks the browser's rule for
+   [hidden]. */
 [hidden] {
   display: none !important;
 }
@@ -213,9 +211,8 @@ code,
   }
 }
 
-/* The shell is exactly the viewport height, not at least it. A definite height
-   lets a pane inside overflow and scroll by itself; with min-height a long
-   playground conversation would stretch the page instead. */
+/* Exactly the viewport height, not min-height, so a pane inside scrolls by
+   itself instead of stretching the page. */
 .shell {
   display: grid;
   grid-template-columns: 232px 1fr;
@@ -236,9 +233,7 @@ code,
   overflow-y: auto;
 }
 
-/* The brand links to the Dashboard, so it reacts to the pointer like the
-   entries below. The space below it is a margin, not padding, so the hover
-   pill stays even. */
+/* The space below is a margin, not padding, so the hover pill stays even. */
 .brand {
   display: flex;
   align-items: center;
@@ -261,24 +256,21 @@ code,
   text-decoration: none;
 }
 
-/* The mark is the favicon file, sized by the caller's width and height, so
-   there is one drawing of it. */
 .brand-mark {
   display: block;
   border-radius: 6px;
   flex: none;
 }
 
-/* The menu button and the scrim only appear in the narrow layout, via the media
-   query at the end of this file. Both rules name two classes to win over .btn,
-   which comes later. */
+/* Shown only in the narrow layout, at the end of this file. Two classes to win
+   over .btn, which comes later. */
 .btn.nav-toggle,
 .nav-scrim {
   display: none;
 }
 
-/* Each labelled block of the sidebar. The sidebar's gap falls between groups,
-   so the group sets it again between its items. */
+/* The sidebar's gap falls between groups, so a group sets it again between
+   its items. */
 .nav-group {
   display: flex;
   flex-direction: column;
@@ -323,14 +315,12 @@ code,
   color: var(--accent);
   font-weight: 600;
 }
-/* Getting started is highlighted until the organisation is set up. A shadow,
-   not a border, so the item keeps its size. */
+/* A shadow, not a border, so the item keeps its size. */
 .nav-item.nav-highlight {
   color: var(--accent);
   font-weight: 600;
   box-shadow: inset 0 0 0 1.5px var(--accent);
 }
-/* A bar on the sidebar's edge, beside the current page. */
 .nav-item[aria-current="page"]::before {
   content: "";
   position: absolute;
@@ -347,8 +337,7 @@ code,
   flex: none;
 }
 
-/* The entry that reveals the screens this deployment does not use. Quieter than
-   a real destination, because it is an offer, not a place. */
+/* Reveals unused screens. Quieter than a real destination. */
 .nav-more {
   color: var(--faint);
   font-weight: 500;
@@ -458,9 +447,8 @@ code,
   margin-top: 2px;
 }
 
-/* The scroll container for every view: the sidebar and topbar stay put, and a
-   tall view scrolls here. It also gives the playground a definite height to
-   fill, so its transcript scrolls instead of growing the page. */
+/* Every view scrolls here, so the sidebar and topbar stay put. Its definite
+   height lets the playground transcript scroll instead of growing the page. */
 .content {
   padding: 24px 28px 64px;
   width: 100%;
@@ -490,7 +478,7 @@ code,
 }
 .btn:hover:not(:disabled) {
   background: var(--surface-3);
-  /* A link can look like a button, and links underline on hover. */
+  /* For a link styled as a button. */
   text-decoration: none;
 }
 .btn:disabled {
@@ -527,14 +515,12 @@ code,
   padding: 4px 9px;
   font-size: 12px;
 }
-/* A button that is a switch rather than an action, outside a segmented control,
-   such as the request log's Live. */
+/* A switch outside a segmented control, such as Live. */
 .btn[aria-pressed="true"] {
   border-color: var(--accent);
   color: var(--accent);
 }
-/* The Live switch sits beside a range picker, so it takes the segmented
-   control's size. */
+/* Sized like the range picker beside it. */
 .btn-live {
   padding: 5px 11px;
   font-size: 12.5px;
@@ -571,8 +557,7 @@ code,
 .input::placeholder {
   color: var(--faint);
 }
-/* The browser's own arrow differs per platform and ignores the theme, so the
-   select draws its own. */
+/* The browser's arrow differs per platform and ignores the theme. */
 .select {
   cursor: pointer;
   appearance: none;
@@ -587,8 +572,7 @@ code,
   background-repeat: no-repeat;
 }
 
-/* Where the browser lets CSS style the open list, it matches the panel instead
-   of the system menu. */
+/* Where the browser allows it, the open list matches the panel. */
 @supports (appearance: base-select) {
   .select,
   .select::picker(select) {
@@ -630,8 +614,7 @@ code,
   }
 }
 
-/* A field whose value cannot be set here. Being disabled is the form's only
-   explanation, so it must look disabled, not just refuse input. */
+/* Being disabled is the form's only explanation, so it must look it. */
 .input:disabled,
 .select:disabled {
   background-color: var(--surface-2);
@@ -654,9 +637,8 @@ input[type="checkbox"]:disabled {
 .field {
   display: grid;
   gap: 5px;
-  /* Each row takes its content's height and no more. Otherwise, in a
-     .field-row, a hint that wraps would make one input taller than the one
-     beside it. */
+  /* Otherwise, in a .field-row, a wrapping hint makes one input taller than
+     the one beside it. */
   align-content: start;
   margin-bottom: 14px;
 }
@@ -670,8 +652,7 @@ input[type="checkbox"]:disabled {
   color: var(--muted);
   line-height: 1.45;
 }
-/* What a payment adds up to, under the amount. It is what the person is about
-   to pay, so it reads as body text, not a footnote. */
+/* What the person is about to pay, so body text, not a footnote. */
 .price-sum {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -692,20 +673,17 @@ input[type="checkbox"]:disabled {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
-  /* Both fields start at the top of the row, so the one with less below it is
-     not stretched. */
+  /* So the field with less below it is not stretched. */
   align-items: start;
 }
-/* Where a filled-in value came from. It is a fact about the value, not help
-   with the field, so it sits a shade behind the hint. */
+/* Where a filled-in value came from: a shade behind the hint. */
 .field .hint-origin {
   font-size: 11.5px;
   color: var(--faint);
   line-height: 1.45;
 }
 
-/* A fold in a form for what a hosted provider filled in. It starts closed; see
-   hostedFields. */
+/* What a hosted provider filled in. See hostedFields. */
 .fold {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -756,7 +734,6 @@ input[type="checkbox"]:disabled {
   color: var(--accent);
   font-weight: 600;
 }
-/* A segmented control of icons, such as a list's table and tiles. */
 .seg-icons button {
   display: grid;
   place-items: center;
@@ -767,9 +744,8 @@ input[type="checkbox"]:disabled {
   height: 15px;
 }
 
-/* A choice made before the form it configures, instead of a select inside it:
-   for modes whose fields differ almost entirely, and where a tile needs a logo
-   or a sentence an <option> cannot hold. */
+/* A choice made before the form, for modes whose fields differ and that need
+   a logo or sentence an <option> cannot hold. */
 .tiles {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
@@ -808,8 +784,7 @@ input[type="checkbox"]:disabled {
   background: var(--surface-3);
   color: var(--accent);
 }
-/* On the chosen tile the mark's panel would add a second accent wash, so the
-   tile's surface shows the state instead. */
+/* Avoids a second accent wash on the chosen tile. */
 .tile[aria-pressed="true"] .tile-mark {
   background: var(--surface);
 }
@@ -817,8 +792,7 @@ input[type="checkbox"]:disabled {
   width: 16px;
   height: 16px;
 }
-/* A provider's logo on a tile. It is artwork, not a 24-square icon, so it keeps
-   its own proportions inside the box: a wide wordmark is not squared off. */
+/* A logo keeps its proportions, so a wide wordmark is not squared off. */
 .tile-mark .provider-mark {
   width: 18px;
   height: 18px;
@@ -833,7 +807,7 @@ input[type="checkbox"]:disabled {
   line-height: 1.4;
 }
 
-/* The same choice once made: one row, with the way back to the others. */
+/* The choice once made: one row, with a way back. */
 .tile-chosen {
   display: flex;
   align-items: center;
@@ -871,8 +845,7 @@ input[type="checkbox"]:disabled {
   display: grid;
   gap: 16px;
 }
-/* A page laid out by .grid gets its spacing from the gap, so the header must
-   not add its own margin as well. */
+/* .grid spaces by its gap, so no margin of its own. */
 .grid > .detail-head {
   margin-bottom: 0;
 }
@@ -919,8 +892,7 @@ input[type="checkbox"]:disabled {
   margin-top: 4px;
 }
 
-/* A row's name, which links to that row's own screen. It looks like plain text
-   until hovered. */
+/* Looks like plain text until hovered. */
 .row-link {
   color: var(--text);
   font-weight: 600;
@@ -935,8 +907,7 @@ input[type="checkbox"]:disabled {
   margin-bottom: 16px;
 }
 
-/* The link back is the only thing on a detail screen that names its list, as
-   the page title is the entity's own name. */
+/* The only thing on a detail screen that names its list. */
 .crumb {
   display: inline-flex;
   align-items: center;
@@ -954,8 +925,7 @@ input[type="checkbox"]:disabled {
   height: 14px;
 }
 
-/* A heading for a section outside a card, when the card below is a table whose
-   head is its column names. */
+/* A heading outside a card, above a table. */
 .section-head {
   display: flex;
   align-items: center;
@@ -964,9 +934,9 @@ input[type="checkbox"]:disabled {
   margin: 0 0 12px;
 }
 
-/* A row the request log received while on screen. It fades from a wash to
-   nothing over a few seconds, because a table that keeps its highlights cannot
-   be scanned. The bar on the left edge helps where the colour cannot be seen. */
+/* A row that arrived while on screen. It fades out, as a table that keeps its
+   highlights cannot be scanned. The left bar helps where colour cannot be
+   seen. */
 tr.row-new > td {
   animation: row-new 4s ease-out forwards;
 }
@@ -992,14 +962,11 @@ tr.row-new > td:first-child {
   }
 }
 
-/* A row for something finished: a sandbox that was deleted, expired or failed.
-   Dimmed, not hidden, because these rows are shown so people can see what a
-   sandbox cost after it was gone. */
+/* A finished sandbox: dimmed, not hidden, so people can see what it cost. */
 .row-faint td {
   opacity: 0.55;
 }
 
-/* Label and value, for facts that are not measurements. */
 .facts {
   display: grid;
   gap: 11px;
@@ -1011,10 +978,9 @@ tr.row-new > td:first-child {
   align-items: baseline;
 }
 
-/* The router editor draws the tree the gateway walks: each step a card, its
-   branches stacked to its right, joined by lines. Plain boxes rather than SVG,
-   so a tree of any shape lays itself out. Under 700px it becomes an indented
-   outline that fits a phone. */
+/* The router tree: each step a card, its branches to its right, joined by
+   lines. Plain boxes rather than SVG, so any shape lays itself out. Under
+   700px it becomes an indented outline. */
 .pl-canvas {
   overflow-x: auto;
   padding: 4px 2px 8px;
@@ -1040,8 +1006,8 @@ tr.row-new > td:first-child {
   align-items: center;
   padding: 7px 0;
 }
-/* The rail joining a step's branches. It runs from the first branch's middle
-   to the last one's, so it meets each branch's own line. */
+/* The rail joining a step's branches, from the first branch's middle to the
+   last one's. */
 .pl-branch::before {
   content: "";
   position: absolute;
@@ -1059,7 +1025,7 @@ tr.row-new > td:first-child {
 .pl-branch:only-child::before {
   display: none;
 }
-/* The line into a branch, with when it is taken and where to add a step. */
+/* The line into a branch, with its condition and an add button. */
 .pl-edge {
   position: relative;
   flex: none;
@@ -1116,8 +1082,8 @@ tr.row-new > td:first-child {
   height: 13px;
 }
 
-/* One step. Its kind sets the colour of its edge and heading, from the chart
-   series, which read well in both themes. */
+/* A step's kind sets its colour, from the chart series, which read well in
+   both themes. */
 .pl-node {
   --kind: var(--muted);
   flex: none;
@@ -1152,15 +1118,13 @@ tr.row-new > td:first-child {
 .pl-kind-system_prompt {
   --kind: var(--s6);
 }
-/* A guardrail's own kinds. Models are the router's model colour, since both
-   say where a request may go. */
+/* A guardrail's own kinds. Models use the router's model colour. */
 .pl-kind-models {
   --kind: var(--s2);
 }
 .pl-kind-tools {
   --kind: var(--s1);
 }
-/* A prompt is prose: shown as such, not as an alias. */
 .pl-prompt {
   font-weight: 500;
   font-style: italic;
@@ -1181,7 +1145,7 @@ tr.row-new > td:first-child {
 .pl-node-bad:hover {
   border-color: var(--bad);
 }
-/* A place that has to be filled before the router can be saved. */
+/* Must be filled before the router can be saved. */
 .pl-node-empty {
   border: 1.5px dashed var(--border-strong);
   background: var(--surface-2);
@@ -1220,7 +1184,6 @@ button.pl-node-empty:hover {
   font-size: 11.5px;
   line-height: 1.4;
 }
-/* A button in a card's head, such as moving a filter. */
 .pl-node-btn {
   display: grid;
   place-items: center;
@@ -1238,7 +1201,6 @@ button.pl-node-empty:hover {
   color: var(--accent);
   background: var(--accent-soft);
 }
-/* Removing is the one that loses something. */
 .pl-node-remove:hover,
 .pl-node-remove:focus-visible {
   color: var(--bad);
@@ -1248,8 +1210,7 @@ button.pl-node-empty:hover {
   width: 13px;
   height: 13px;
 }
-/* A guardrail's blocks: router steps without the lines between them, since
-   each holds on its own. */
+/* A guardrail's blocks: router steps without lines, as each holds alone. */
 .gr-blocks {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(184px, 1fr));
@@ -1259,8 +1220,7 @@ button.pl-node-empty:hover {
   width: auto;
 }
 
-/* Where a branch ends without a step of its own: straight to a route step's
-   destination, or refused. */
+/* A branch end with no step: a destination, or refused. */
 .pl-end {
   display: inline-flex;
   align-items: center;
@@ -1276,7 +1236,6 @@ button.pl-node-empty:hover {
   width: 14px;
   height: 14px;
 }
-/* A provider's mark keeps its proportions, as beside a name. */
 .pl-node-head > .provider-mark,
 .pl-end > .provider-mark {
   width: auto;
@@ -1290,7 +1249,6 @@ button.pl-node-empty:hover {
   color: var(--bad);
 }
 
-/* Where requests come in: the start of the first line. */
 .pl-entry {
   flex: none;
   display: flex;
@@ -1302,7 +1260,6 @@ button.pl-node-empty:hover {
 }
 
 @media (max-width: 700px) {
-  /* The line into the first step runs down, like the stems. */
   .pl-entry {
     flex-direction: column;
     align-items: flex-start;
@@ -1396,8 +1353,7 @@ td {
 tbody tr:last-child td {
   border-bottom: 0;
 }
-/* A row with its own screen opens on a click anywhere in it, and a row with
-   one thing to do does it. */
+/* A row that opens or acts on a click anywhere in it. */
 tr.row-opens,
 .table-tiles > .row-opens {
   cursor: pointer;
@@ -1417,7 +1373,7 @@ th.shrink {
   width: 1%;
   white-space: nowrap;
 }
-/* A row's buttons line up on the right edge, even when another row has more. */
+/* Buttons line up on the right, even when another row has more. */
 td.actions {
   text-align: right;
 }
@@ -1426,8 +1382,7 @@ td.actions > .row-tight {
   justify-content: flex-end;
 }
 
-/* A sortable header is a real button: reachable from the keyboard, and it says
-   what it does on hover. */
+/* A sortable header is a real button, so the keyboard reaches it. */
 th .th-sort {
   border: 0;
   background: none;
@@ -1448,8 +1403,7 @@ th .th-sort:hover {
 th[aria-sort] .th-sort {
   color: var(--text);
 }
-/* Right-aligned columns put the arrow on the left, so it stays next to the
-   number. */
+/* The arrow goes left, so it stays next to the number. */
 th.num .th-sort {
   flex-direction: row-reverse;
   align-items: baseline;
@@ -1459,8 +1413,8 @@ th.num .th-sort {
   line-height: 1;
 }
 
-/* What a search or a toggle left. It replaces the rows, because an empty table
-   under a filled-in search box looks like a list that lost its contents. */
+/* Replaces the rows when a search leaves none: an empty table under a search
+   box looks like a list that lost its contents. */
 .table-none {
   padding: 30px 16px;
   text-align: center;
@@ -1489,16 +1443,14 @@ th.num .th-sort {
 .toolbar-end {
   margin-left: auto;
 }
-/* The arrow beside a list's sort dropdown, as tall as the dropdown. */
 .btn-sort {
   align-self: stretch;
   justify-content: center;
   padding: 0 10px;
 }
 
-/* A list shown as tiles instead of a table. The tile itself is the caller's.
-   At most five in a row: on a wide screen, more get too many to read across.
-   The minimum is a fifth of the row, less the gaps. */
+/* At most five tiles in a row, as more are hard to read across. The minimum
+   is a fifth of the row, less the gaps. */
 .table-tiles {
   --tile-gap: 10px;
   display: grid;
@@ -1512,7 +1464,6 @@ th.num .th-sort {
   grid-column: 1 / -1;
 }
 
-/* A model in the catalogue's tiles: who offers it, what it is, what it costs. */
 .model-tile {
   display: flex;
   flex-direction: column;
@@ -1527,7 +1478,6 @@ th.num .th-sort {
   align-items: center;
   gap: 9px;
 }
-/* As tall as the two lines beside it. */
 .model-tile-head .tile-mark {
   flex: none;
   width: 36px;
@@ -1558,7 +1508,7 @@ th.num .th-sort {
   line-height: 1.45;
   color: var(--muted);
 }
-/* The numbers sit at the bottom, so they line up across a row of tiles. */
+/* At the bottom, so the numbers line up across a row of tiles. */
 .model-tile-facts {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1618,15 +1568,13 @@ th.num .th-sort {
   color: var(--accent);
 }
 
-/* A hosted provider's mark beside its name. The marks differ in proportion, so
-   they share a height, the text's; the width follows from the artwork. */
+/* Marks differ in proportion, so they share the text's height. */
 .provider-mark {
   height: 1em;
   width: auto;
   flex: none;
 }
-/* A logo about twice as wide as tall looks too big at full height next to
-   square ones. A tile's fixed square already fits it. */
+/* A wide logo looks too big at full height next to square ones. */
 .provider-mark-wide {
   height: 0.7em;
 }
@@ -1639,7 +1587,6 @@ th.num .th-sort {
   flex: none;
 }
 
-/* A pill that also links to the detail behind it. */
 .pill-button {
   border: 0;
   cursor: pointer;
@@ -1652,13 +1599,11 @@ a.pill-button:hover {
   text-decoration: none;
 }
 
-/* The ceiling a guardrail field already sits under, shown next to the field. */
 .ceiling {
   color: var(--accent);
 }
 
-/* A standing instruction, shown to someone subject to it. It is prose an
-   administrator wrote, so it keeps their line breaks and sits in its own block. */
+/* Prose an administrator wrote, so it keeps their line breaks. */
 .prompt-text {
   white-space: pre-wrap;
   background: var(--surface-3);
@@ -1669,8 +1614,7 @@ a.pill-button:hover {
   line-height: 1.5;
 }
 
-/* An instruction in a table cell: two lines, enough to say which filter this
-   is. The whole text is on its edit screen. */
+/* Two lines in a table cell, enough to tell filters apart. */
 .clamp-2 {
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -1680,7 +1624,7 @@ a.pill-button:hover {
   font-size: 12px;
 }
 
-/* Waiting for something other than a chat token, such as a model check. */
+/* Waiting on something other than a chat token, such as a model check. */
 .blip {
   display: inline-block;
   width: 7px;
@@ -1690,8 +1634,8 @@ a.pill-button:hover {
   animation: blink 1.1s ease-in-out infinite;
 }
 
-/* The same dot on the request log's Live switch: watching, turned off, or not
-   connected. Otherwise a stream that stopped looks like a quiet afternoon. */
+/* The dot on the Live switch, so a stopped stream does not look like no
+   traffic. */
 .blip[data-state="live"] {
   animation: none;
   box-shadow: 0 0 0 3px var(--accent-soft);
@@ -1727,8 +1671,8 @@ a.pill-button:hover {
   background: var(--bad);
 }
 
-/* The request waterfall. Every row's track spans the whole request, so a step
-   that started late shows as a gap instead of being hidden. */
+/* The request waterfall. Each track spans the whole request, so a late step
+   shows as a gap. */
 .flame {
   display: grid;
   grid-template-columns: minmax(120px, max-content) 1fr max-content;
@@ -1770,8 +1714,7 @@ a.pill-button:hover {
   white-space: nowrap;
 }
 
-/* The four groups a request's time can go on. The bars carry colours, not
-   labels, because the summary above already names them. */
+/* The four groups of a request's time. The summary above names them. */
 .flame-bar.client,
 .flame-swatch.client {
   background: var(--faint);
@@ -1819,8 +1762,7 @@ a.pill-button:hover {
 }
 
 @media (max-width: 560px) {
-  /* The names wrap onto their own line instead of squeezing the tracks: a 20px
-     track is not a chart. */
+  /* Names wrap onto their own line instead of squeezing the tracks. */
   .flame {
     grid-template-columns: 1fr max-content;
   }
@@ -2014,9 +1956,9 @@ a.pill-button:hover {
   white-space: nowrap;
 }
 
-/* One task's calls, in order. The bars are evenly spaced turns, not a time
-   axis, which would spend its width on pauses. It scrolls instead of
-   squeezing, so hundreds of calls do not become sub-pixel bars. */
+/* One task's calls, evenly spaced rather than on a time axis, which would
+   spend its width on pauses. It scrolls, so hundreds of calls do not become
+   sub-pixel bars. */
 .turns {
   display: flex;
   align-items: flex-end;
@@ -2045,15 +1987,14 @@ a.pill-button:hover {
 .turn[data-tone="bad"] {
   background: var(--bad);
 }
-/* A turn that cost nothing must still be visible: a refusal is often the row
-   someone looks for, and a bar of no height cannot be clicked. */
+/* A turn that cost nothing must stay visible and clickable: a refusal is
+   often what someone looks for. */
 .turn[data-empty] {
   opacity: 0.5;
 }
 
-/* The transcript scrolls, not the page, so the composer is always reachable.
-   No bottom padding here: the composer is already pinned above the edge, and
-   the padding would add a second, nested scrollbar. */
+/* The transcript scrolls, not the page, so the composer stays reachable. No
+   bottom padding: it would add a second, nested scrollbar. */
 .content:has(> .chat) {
   display: flex;
   flex-direction: column;
@@ -2065,8 +2006,7 @@ a.pill-button:hover {
   flex-direction: column;
   gap: 12px;
   flex: 1;
-  /* A low floor, so the transcript does not collapse to a sliver; a higher one
-     pushes the composer below the fold in a short window. */
+  /* Low enough not to push the composer off a short window. */
   min-height: 240px;
 }
 
@@ -2159,9 +2099,8 @@ a.pill-button:hover {
   min-width: 0;
 }
 
-/* A reply is plain text: nothing a model generates is ever handed to the
-   browser as markup. Line breaks are kept, because prose, lists and unfenced
-   code all rely on them. */
+/* A reply is plain text: model output is never handed to the browser as
+   markup. Line breaks are kept, as prose, lists and code rely on them. */
 .msg-text,
 .msg-live {
   margin: 0;
@@ -2250,8 +2189,7 @@ a.pill-button:hover {
   align-items: flex-end;
   gap: 8px;
 }
-/* min-height holds one line before anything is typed; autosize takes over from
-   there and stops at max-height. */
+/* min-height holds one line; autosize takes over up to max-height. */
 .composer-input {
   resize: none;
   overflow-y: auto;
@@ -2308,11 +2246,10 @@ a.pill-button:hover {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  /* Not stretched to the row's height, which would squash a wide image. */
+  /* Stretching would squash a wide image. */
   align-items: flex-start;
   gap: 6px;
 }
-/* Space only when text follows the images. */
 .bubble-images:not(:last-child) {
   margin-bottom: 6px;
 }
@@ -2327,8 +2264,7 @@ a.pill-button:hover {
   .blip {
     animation: none;
   }
-  /* The mark stays visible but does not fade. The log removes it once the row
-     is no longer new. */
+  /* The mark stays but does not fade. The log removes it later. */
   tr.row-new > td {
     animation: none;
     background: var(--accent-soft);
@@ -2378,15 +2314,14 @@ a.pill-button:hover {
   padding: 18px;
   overflow-y: auto;
 }
-/* No margin runs into the footer's border, so dialogs ending on a banner or
-   field get no extra space under it. */
+/* No extra space above the footer's border. */
 .modal-body > :last-child,
 .modal-body > form > :last-child,
 .modal-body > .stack > :last-child {
   margin-bottom: 0;
 }
-/* The hidden submit button modal() puts in a dialog's form. Browsers submit on
-   Enter only if it is rendered, so it is shrunk to nothing, not hidden. */
+/* modal()'s hidden submit button. Browsers submit on Enter only if it is
+   rendered, so it is shrunk to nothing, not hidden. */
 .submit-proxy {
   position: absolute;
   width: 1px;
@@ -2522,7 +2457,6 @@ a.pill-button:hover {
   box-shadow: var(--shadow);
   padding: 30px;
 }
-/* Every action on a sign-in card is one full-width choice. */
 .signin-card .btn {
   width: 100%;
   justify-content: center;
@@ -2589,8 +2523,7 @@ a.pill-button:hover {
   color: var(--good);
 }
 
-/* Numbered steps: a developer works down this screen once, so the numbers are
-   all the structure it needs. */
+/* Numbered steps, worked down once. */
 .steps {
   display: grid;
   gap: 14px;
@@ -2619,8 +2552,7 @@ a.pill-button:hover {
   flex: none;
 }
 
-/* The first-run checklist reuses the step layout, with two more states: done,
-   and next. */
+/* The first-run checklist adds two states: done, and next. */
 .step-done {
   opacity: 0.62;
 }
@@ -2636,8 +2568,7 @@ a.pill-button:hover {
   border-color: var(--accent);
 }
 
-/* The first run gives each step a large icon, with the number or tick as a
-   badge in its corner. */
+/* A large icon, with the number or tick as a badge in its corner. */
 .step-icon {
   position: relative;
   width: 56px;
@@ -2688,8 +2619,8 @@ a.pill-button:hover {
   padding: 1px 5px;
 }
 
-/* A copyable block. It scrolls instead of wrapping: a soft-wrapped URL in a
-   config reads as two lines. */
+/* Scrolls instead of wrapping: a wrapped URL in a config reads as two
+   lines. */
 .code {
   position: relative;
 }
@@ -2728,8 +2659,7 @@ a.pill-button:hover {
   .nav-collapsed .nav-text {
     display: none;
   }
-  /* Collapsed there is no room for headings, so a rule shows the groups.
-     Without it the icons run together. */
+  /* Collapsed, there is no room for headings, so a rule shows the groups. */
   .nav-collapsed .nav-label {
     display: none;
   }
@@ -2759,8 +2689,8 @@ a.pill-button:hover {
   }
 }
 
-/* The map itself is a canvas, as hundreds of things move each minute. This
-   styles its frame and the tooltip, which is DOM so it stays readable. */
+/* The map is a canvas, as hundreds of things move each minute. The tooltip
+   is DOM so it stays readable. */
 .map-page {
   display: grid;
   gap: 16px;
@@ -2777,8 +2707,7 @@ a.pill-button:hover {
   gap: 3px;
 }
 
-/* The canvas is drawn at the card's width and scrolls sideways instead of being
-   squeezed: a narrower map stops being readable. */
+/* Scrolls sideways instead of squeezing: a narrower map is unreadable. */
 .map-holder {
   position: relative;
   padding: 0;
@@ -2830,14 +2759,13 @@ a.pill-button:hover {
 }
 
 @media (max-width: 990px) {
-  /* The sidebar leaves the grid here, so the main pane runs the full width. */
   .shell {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(0, 1fr);
   }
-  /* The drawer: the same sidebar, parked off the left edge until the menu
-     button brings it in. Its height is written like the sticky sidebar's,
-     because the page is zoomed by --ui-scale and a viewport unit is not. */
+  /* The drawer, off the left edge until opened. Its height is set like the
+     sticky sidebar's, as the page is zoomed by --ui-scale and a viewport
+     unit is not. */
   .sidebar {
     position: fixed;
     top: 0;
@@ -2847,7 +2775,7 @@ a.pill-button:hover {
     height: calc(100vh / var(--ui-scale));
     box-shadow: var(--shadow);
     transform: translateX(-101%);
-    /* Hidden as well as moved, so the keyboard cannot tab into a closed drawer. */
+    /* So the keyboard cannot tab into a closed drawer. */
     visibility: hidden;
     transition:
       transform 0.18s ease,
@@ -2878,8 +2806,7 @@ a.pill-button:hover {
     display: inline-flex;
     flex: none;
   }
-  /* Collapsing the drawer to icons would save nothing: it is over the page
-     either way, and closes once used. */
+  /* Collapsing would save nothing: the drawer covers the page either way. */
   .nav-collapse {
     display: none;
   }
@@ -2898,9 +2825,8 @@ a.pill-button:hover {
 }
 
 @media (max-width: 616px) {
-  /* The topbar now holds the menu button too, so it tightens its padding and
-     truncates the page title instead of pushing the organisation and theme off
-     the row. */
+  /* The topbar now holds the menu button too, so it truncates the title
+     instead of pushing the other controls off the row. */
   .topbar {
     gap: 8px;
     padding: 12px 16px;
@@ -2934,8 +2860,7 @@ a.pill-button:hover {
   .toolbar-search {
     flex: 1 1 100%;
   }
-  /* The map's controls move below its heading; the canvas keeps its width and
-     scrolls. */
+  /* The map's controls move below its heading. */
   .map-head {
     flex-direction: column;
     align-items: stretch;
@@ -2943,8 +2868,7 @@ a.pill-button:hover {
 }
 
 /* Above the first-run checklist: tools, the gateway and models, joined by
-   lines. Both lists come before the gateway in the row, so the lines are drawn
-   from the lists' rows to its edges. */
+   lines drawn from the lists' rows to the gateway's edges. */
 .flow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 56px auto 56px minmax(0, 1fr);
@@ -2967,8 +2891,8 @@ a.pill-button:hover {
 .flow-head-end {
   grid-column: 5;
 }
-/* Rows of equal height with no gap between them: the lines end at fixed
-   fractions of the list's height, so each must meet the middle of a row. */
+/* Equal rows with no gap: the lines end at fixed fractions of the list's
+   height, so each must meet the middle of a row. */
 .flow-list {
   grid-row: 2;
   display: grid;
@@ -3066,7 +2990,7 @@ a.pill-button:hover {
   text-align: center;
 }
 
-/* Too narrow for three columns: the parts stack, and the lines go. */
+/* Too narrow for three columns: the parts stack, without lines. */
 @media (max-width: 616px) {
   .flow {
     grid-template-columns: minmax(0, 1fr);

@@ -12,12 +12,9 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// connectCmd is the panel's "Connect client" dialog, in a terminal.
-//
-// The configuration blocks come from the control plane rather than from this
-// binary, so an older CLI cannot hand out a configuration the deployment has
-// moved on from. Setting up Claude Code is the exception: its settings are
-// built here, with only the gateway's address from the control plane.
+// connectCmd is the panel's "Connect client" dialog in a terminal. The
+// configurations come from the control plane, so an older CLI cannot hand out
+// a stale one. Claude Code's settings are the exception and are built here.
 func connectCmd(ctx context.Context, args []string) error {
 	r := newCmdRun("connect", args)
 	fs := r.fs
@@ -90,7 +87,6 @@ func connectCmd(ctx context.Context, args []string) error {
 		return err
 	}
 
-	// No client named: list the choices rather than pick one.
 	if sub == "list" || sub == "" {
 		return out(r.asJSON, cat, func(w *table) {
 			listConnect(w, cat.Data, chat, cat.GatewayURL)
@@ -133,8 +129,7 @@ func connectCmd(ctx context.Context, args []string) error {
 			func(o policy.Model) bool { return o.Alias == m.Alias })...)
 	}
 
-	// The deployment says where clients reach it. A client pointed anywhere
-	// else would get a 401 that looks like a bad key.
+	// A client pointed anywhere else would get a 401 that looks like a bad key.
 	gatewayURL := cat.GatewayURL
 
 	if r.asJSON {
@@ -158,10 +153,9 @@ var errNoChatModel = errors.New("a coding agent needs a chat model and this orga
 	"no enabled one; add one with: keera model add <alias> --backend <url> " +
 	"--backend-model <name>")
 
-// connectModels is what a client may be pointed at: the enabled chat models,
-// and the organisation's routers, which a client names in the same field.
-// Subscription models are left out: only --subscription sets those up. A
-// failed read of the routers still offers the models.
+// connectModels is the enabled chat models and the routers, which a client
+// names in the same field. Subscription models are left out: only
+// --subscription sets those up.
 func connectModels(ctx context.Context, c *client, org string) ([]policy.Model, error) {
 	models, err := catalogue(ctx, c, org)
 	if err != nil {
@@ -179,7 +173,6 @@ func connectModels(ctx context.Context, c *client, org string) ([]policy.Model, 
 	return chat, nil
 }
 
-// ownKey is one of the caller's keys, as /v1/access describes it.
 type ownKey struct {
 	ID     string         `json:"id"`
 	OrgID  string         `json:"org_id"`
@@ -187,16 +180,13 @@ type ownKey struct {
 	Prefix string         `json:"prefix"`
 	Kind   policy.KeyKind `json:"kind"`
 	State  string         `json:"state"`
-	// AllowedModels is every model the key may call, already resolved.
+	// AllowedModels is already resolved.
 	AllowedModels []string `json:"allowed_models"`
 }
 
-// connectKey picks the caller's key whose models go into the configuration:
-// the one named, or else their first active one. Somebody with no key of their
-// own, such as the operator key, gets none, and every model is configured.
-//
-// Only the caller's own keys are offered: the configuration is for their
-// machine, and a subscription key works only through --subscription.
+// connectKey picks the caller's key named, or else their first active one.
+// Somebody with no key, such as the operator key, gets none, and every model
+// is configured. A subscription key works only through --subscription.
 func connectKey(ctx context.Context, c *client, org, named string) (*ownKey, error) {
 	keys, err := ownKeys(ctx, c, org)
 	if err != nil {
@@ -229,9 +219,8 @@ func connectKey(ctx context.Context, c *client, org, named string) (*ownKey, err
 		named, strings.Join(names, ", "))
 }
 
-// ownKeys lists the caller's keys in orgID. The organisation is named, so the
-// server lists the keys of the one KEERA_ORG chose, not the one 'keera org
-// switch' did.
+// ownKeys names orgID, so the server lists the keys of the one KEERA_ORG
+// chose, not the one 'keera org switch' did.
 func ownKeys(ctx context.Context, c *client, orgID string) ([]ownKey, error) {
 	var access struct {
 		Keys []ownKey `json:"keys"`
@@ -240,8 +229,7 @@ func ownKeys(ctx context.Context, c *client, orgID string) ([]ownKey, error) {
 	return access.Keys, err
 }
 
-// keyModels is the chat models and routers a key's allow-list names, in the
-// organisation's order.
+// keyModels keeps the organisation's order.
 func keyModels(chat []policy.Model, allowed []string) []policy.Model {
 	out := make([]policy.Model, 0, len(chat))
 	for _, m := range chat {
@@ -252,7 +240,6 @@ func keyModels(chat []policy.Model, allowed []string) []policy.Model {
 	return out
 }
 
-// connectList is what the catalogue renders a configuration from.
 func connectList(models []policy.Model) []connect.Model {
 	out := make([]connect.Model, 0, len(models))
 	for _, m := range models {
@@ -300,8 +287,8 @@ func listConnect(w *table, clients []connect.Client,
 	}
 }
 
-// printConnect writes the three steps in order. Only the configuration block
-// goes to stdout, so it can be redirected into its file.
+// printConnect writes only the configuration block to stdout, so it can be
+// redirected into its file.
 func printConnect(c connect.Client, own *ownKey, models []policy.Model, base string) {
 	which := "every model"
 	if own != nil {
@@ -346,8 +333,8 @@ func printConnect(c connect.Client, own *ownKey, models []policy.Model, base str
 		wrapAt(c.RunText(connectList(models)), 0, 3, 76))
 }
 
-// shownKey is how a printed configuration shows the key: by its prefix when
-// it is known, since the secret was shown only once.
+// shownKey shows the key's prefix when known, since the secret was shown
+// only once.
 func shownKey(own *ownKey) string {
 	if own != nil {
 		return own.Prefix + "…"
@@ -355,8 +342,8 @@ func shownKey(own *ownKey) string {
 	return connect.KeyPlaceholder
 }
 
-// connectRouters reads the organisation's routers as chat models with no
-// backend and no context window: which model answers is decided per request.
+// connectRouters returns routers as chat models with no backend and no
+// context window, since the model that answers is decided per request.
 func connectRouters(ctx context.Context, c *client, orgID string) ([]policy.Model, error) {
 	routers, err := list[policy.Router](ctx, c, inOrg("/v1/routers", orgID))
 	if err != nil {

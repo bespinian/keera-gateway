@@ -9,36 +9,32 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// window is one budget period's spend, or its count of requests or tokens:
-// the last figure read from the database, plus what this replica charged
-// since.
+// window is one budget period's spend, or count of requests or tokens: the
+// database's last figure plus what this replica charged since.
 type window struct {
 	start time.Time
 	n     int64
 }
 
 // Budgets is the gateway's in-memory view of spend, reconciled with the
-// database every few seconds so the check before each request needs no round
-// trip.
-//
-// The price: across replicas a budget can be overshot by about one refresh
-// interval of traffic. Being exact would cost a round trip per completion.
+// database every few seconds, so the check before each request needs no round
+// trip. Across replicas a budget can be overshot by about one refresh
+// interval of traffic.
 type Budgets struct {
 	mu sync.RWMutex
 	w  map[string]*window
 
 	// prepaid says organisations pay for the deployment's provider keys in
-	// advance, and credit is each one's balance. The same refresh keeps it,
-	// with the same overshoot.
+	// advance, and credit is each one's balance.
 	prepaid bool
 	credit  map[string]credit
-	// held is what requests still running on this replica may take from
-	// each organisation's credit. A reconcile leaves it alone: those
-	// requests have not been charged yet.
+	// held is what running requests on this replica may take from each
+	// organisation's credit. A reconcile leaves it alone, as they are not
+	// charged yet.
 	held map[string]int64
-	// running is the requests still running on this replica, per window of
-	// a scope that counts requests. The database counts a request only once
-	// its row is written, so a reconcile leaves these alone too.
+	// running is the requests running on this replica, per window of a scope
+	// that counts requests. A reconcile leaves these alone too, as they have
+	// no row yet.
 	running map[string]*window
 }
 
@@ -76,9 +72,9 @@ func (b *Budgets) Allow(scopes []policy.Scope, now time.Time) error {
 	return nil
 }
 
-// Charge folds the cost of a completed request into the local view. The usage
-// recorder writes the real row; this keeps the next few seconds honest. A
-// scope that counts requests or tokens is left alone; see Tally.
+// Charge adds the cost of a completed request to the local view until the
+// next reconcile. A scope that counts requests or tokens is left alone; see
+// Tally.
 func (b *Budgets) Charge(scopes []policy.Scope, micros int64, now time.Time) {
 	b.Tally(scopes, policy.MeterCost, micros, now)
 }
@@ -91,15 +87,15 @@ func (b *Budgets) Tally(scopes []policy.Scope, meter policy.Meter, n int64, now 
 	}
 }
 
-// StartRequest counts a request that was let in against the scopes that count
-// requests, until EndRequest. Counted when it starts, so requests that arrive
-// together do not all slip under the limit.
+// StartRequest counts an admitted request against the scopes that count
+// requests, until EndRequest, so requests arriving together cannot all slip
+// under the limit.
 func (b *Budgets) StartRequest(scopes []policy.Scope, now time.Time) {
 	b.addEach(&b.running, scopes, policy.MeterRequests, 1, now)
 }
 
 // addEach adds n to the windows of the scopes that count meter. windows is
-// read under the lock, since a reconcile replaces b.w.
+// read under the lock, as a reconcile replaces b.w.
 func (b *Budgets) addEach(windows *map[string]*window, scopes []policy.Scope,
 	meter policy.Meter, n int64, now time.Time,
 ) {
@@ -138,16 +134,15 @@ func (b *Budgets) EndRequest(scopes []policy.Scope, now time.Time) {
 	}
 }
 
-// counts reports whether any scope counts meter. Most keys have none for most
-// meters, and the lock is shared by every request, so it is taken only when
-// there is something to count.
+// counts reports whether any scope counts meter, so the shared lock is taken
+// only when there is something to count.
 func counts(scopes []policy.Scope, meter policy.Meter) bool {
 	return slices.ContainsFunc(scopes, func(sc policy.Scope) bool { return sc.Meter == meter })
 }
 
-// add adds n to the window at k that starts at start. A window that started
-// earlier is over and is replaced; n for a window already over is dropped,
-// such as a stream's that ends after midnight. The caller holds the lock.
+// add adds n to the window at k that starts at start. An older window is
+// replaced; n for a window already over, such as a stream's that ends after
+// midnight, is dropped. The caller holds the lock.
 func add(windows map[string]*window, k string, start time.Time, n int64) {
 	w, ok := windows[k]
 	switch {
@@ -161,9 +156,8 @@ func add(windows map[string]*window, k string, start time.Time, n int64) {
 }
 
 // reconcile replaces every window with the database's figure and forgets the
-// local charges, which the recorder has written by then. A charge still in the
-// recorder's buffer is briefly uncounted until the next reconcile. Requests
-// still running are not in the database, and stay counted.
+// local charges. A charge still in the recorder's buffer is briefly
+// uncounted. Running requests stay counted.
 func (b *Budgets) reconcile(rows []store.SpendRow) {
 	next := make(map[string]*window, len(rows))
 	for _, r := range rows {
@@ -185,8 +179,8 @@ func (b *Budgets) Spent(t policy.ScopeType, id string, p policy.Period, now time
 	return b.spent(t, id, p, now)
 }
 
-// spent is zero when nothing was spent in the open window. It includes the
-// requests still running. The caller holds the lock.
+// spent is zero when nothing was spent in the open window. It includes
+// running requests. The caller holds the lock.
 func (b *Budgets) spent(t policy.ScopeType, id string, p policy.Period, now time.Time) int64 {
 	k, start := windowKey(t, id, p), p.Start(now)
 	var n int64
@@ -199,13 +193,11 @@ func (b *Budgets) spent(t policy.ScopeType, id string, p policy.Period, now time
 }
 
 // HoldCredit admits a request to the deployment's keys, and holds the most it
-// may cost until ReleaseCredit. It returns what it held, which is what to
-// release. An organisation is admitted when it has credit left that no
-// running request holds, or is billed by invoice. Without payments, every
-// organisation is.
+// may cost until ReleaseCredit. It returns what to release. An organisation is
+// admitted when it has unheld credit left or is billed by invoice. Without
+// payments, every organisation is.
 //
-// Without a hold, a request is only charged when it ends, so any number of
-// requests started together would all see the same credit.
+// Without a hold, requests started together would all see the same credit.
 func (b *Budgets) HoldCredit(orgID string, micros int64) (int64, error) {
 	if !b.prepaid {
 		return 0, nil

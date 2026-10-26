@@ -28,9 +28,8 @@ func chatAlias(url string) policy.Model {
 	}
 }
 
-// The failure the check exists for: the endpoint answers 200, the model
-// produces prose, and `tool_calls` stays empty, which is what a mismatched
-// vLLM tool-call parser looks like. Nothing logs an error.
+// The failure the check exists for: a 200 with prose and empty `tool_calls`,
+// the sign of a mismatched vLLM tool-call parser.
 func TestCheckModelCatchesAToolCallReturnedAsText(t *testing.T) {
 	upstream := httptest.NewServer(sseBackend(
 		`{"model":"keera-code","choices":[{"delta":{"content":"<tool_call>{\"name\": \"get_build_status\""}}]}`,
@@ -66,8 +65,8 @@ func TestCheckModelPassesOnARealToolCall(t *testing.T) {
 	}
 }
 
-// Prose with no tool call at all is a different diagnosis from a mis-parsed
-// call: nothing is misconfigured, the model simply will not drive an agent.
+// Prose with no tool call is not a parser problem: the model just will not
+// drive an agent.
 func TestCheckModelReportsAModelThatCallsNoTool(t *testing.T) {
 	upstream := httptest.NewServer(sseBackend(`{"model":"keera-code","choices":[{"delta":{"content":"I cannot know that."}}]}`))
 	defer upstream.Close()
@@ -83,9 +82,8 @@ func TestCheckModelReportsAModelThatCallsNoTool(t *testing.T) {
 	}
 }
 
-// vLLM started without tool calling refuses every request that offers tools.
-// Clients that send none still work, so the check passes with a note instead
-// of calling the model unusable.
+// vLLM without tool calling refuses every request with tools. Clients that
+// send none still work, so the check passes with a note.
 func TestCheckModelWarnsWhenTheBackendRefusesTools(t *testing.T) {
 	plain := sseBackend(`{"model":"keera-code","choices":[{"delta":{"content":"Hello"}}]}`)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -114,7 +112,7 @@ func TestCheckModelWarnsWhenTheBackendRefusesTools(t *testing.T) {
 }
 
 // A buffered answer is usable but wrong for an editor, so it passes with a
-// note rather than sending an operator after a fault that is not there.
+// note.
 func TestCheckModelWarnsWhenTheBackendDoesNotStream(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -135,9 +133,8 @@ func TestCheckModelWarnsWhenTheBackendDoesNotStream(t *testing.T) {
 	}
 }
 
-// A backend_model the inference plane does not serve is the other silent
-// misconfiguration: vLLM answers as whatever it serves, and only the reply
-// says so.
+// A backend_model the plane does not serve fails silently: vLLM answers as
+// whatever it serves, and only the reply says so.
 func TestCheckModelWarnsWhenTheBackendServesAnotherModel(t *testing.T) {
 	upstream := httptest.NewServer(sseBackend(`{"model":"qwen-2.5-coder","choices":[{"delta":{"tool_calls":` +
 		`[{"index":0,"function":{"name":"get_build_status"}}]}}]}`))
@@ -155,8 +152,7 @@ func TestCheckModelWarnsWhenTheBackendServesAnotherModel(t *testing.T) {
 	}
 }
 
-// A refusal from the inference plane has to arrive as what the inference plane
-// said, not as "check failed".
+// A refusal from the plane is reported in its own words.
 func TestCheckModelSurfacesTheBackendsOwnError(t *testing.T) {
 	for _, kind := range []policy.Kind{policy.KindChat, policy.KindCompletion, policy.KindEmbedding} {
 		for _, body := range []string{
@@ -211,8 +207,7 @@ func TestCheckModelRefusesAModelWithNoBackend(t *testing.T) {
 	}
 }
 
-// An embedding model is checked on the one thing that matters: a vector comes
-// back.
+// An embedding model passes when a vector comes back.
 func TestCheckModelChecksAnEmbeddingModelOnItsOwnTerms(t *testing.T) {
 	var path string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -255,9 +250,7 @@ func TestCheckModelFailsAnEmbeddingModelThatReturnsNoVector(t *testing.T) {
 	}
 }
 
-// The check presents the model's own credential, as the data plane would.
-// Otherwise it could go green against an endpoint that answers real requests
-// with 401.
+// The check sends the model's own credential, as real traffic does.
 func TestCheckModelPresentsTheModelCredential(t *testing.T) {
 	seen := make(chan string, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

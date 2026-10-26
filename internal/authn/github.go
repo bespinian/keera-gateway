@@ -14,33 +14,28 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// GitHubIssuer is the issuer that makes a provider GitHub's. GitHub speaks
-// OAuth but not OpenID Connect: there is no discovery and no id_token, so
-// Keera asks GitHub's API who signed in.
+// GitHubIssuer marks a provider as GitHub. GitHub speaks OAuth but not OpenID
+// Connect, so Keera asks GitHub's API who signed in.
 const GitHubIssuer = "https://github.com"
 
-// IsGitHub reports whether this configuration is for GitHub.
 func (c OIDCConfig) IsGitHub() bool {
 	u, err := url.Parse(c.IssuerURL)
 	return err == nil && u.Host == "github.com"
 }
 
-// githubAPI is where a GitHub provider reads people from.
 type githubAPI struct {
 	base   string
 	client *http.Client
 }
 
-// newGitHub sets up a GitHub provider. web and api are GitHub's addresses,
-// which tests replace.
+// newGitHub takes GitHub's addresses so tests can replace them.
 func newGitHub(cfg OIDCConfig, client *http.Client, web, api string) *OIDC {
 	if client == nil {
 		client = http.DefaultClient
 	}
 	scopes := cfg.Scopes
 	if len(scopes) == 0 {
-		// Only the addresses, since the profile is public. Organisations and
-		// teams only where they decide a role, so nobody is asked for more.
+		// Ask for organisations and teams only where they decide a role.
 		scopes = []string{"user:email"}
 		if cfg.Mapping.UsesGroups() {
 			scopes = append(scopes, "read:org")
@@ -74,15 +69,14 @@ func (o *OIDC) exchangeGitHub(ctx context.Context, code string, f Flow) (Identit
 	if err != nil {
 		return Identity{}, err
 	}
-	// An OAuth app's token does not expire and comes with no refresh token,
-	// so the token itself is what asks GitHub again.
+	// An OAuth app's token does not expire and has no refresh token, so the
+	// token itself is used to ask again.
 	id.RefreshToken = token.AccessToken
 	return id, o.checkGitHub(id)
 }
 
-// recheckGitHub asks GitHub about someone again with the token they signed
-// in with. GitHub answers 401 once the person revoked Keera's access or the
-// account is gone.
+// recheckGitHub asks GitHub again. It answers 401 once access was revoked or
+// the account is gone.
 func (o *OIDC) recheckGitHub(ctx context.Context, token string) (Identity, bool, error) {
 	id, err := o.githubIdentity(ctx, token)
 	if err != nil {
@@ -95,8 +89,8 @@ func (o *OIDC) recheckGitHub(ctx context.Context, token string) (Identity, bool,
 	return id, true, nil
 }
 
-// checkGitHub refuses an identity Keera cannot place, as checkIdentity does
-// for an id_token. Every address githubIdentity picks is one GitHub verified.
+// checkGitHub works like checkIdentity. Every address githubIdentity picks is
+// verified.
 func (o *OIDC) checkGitHub(id Identity) error {
 	if id.Email == "" {
 		return errors.New("this GitHub account has no verified email address Keera " +
@@ -105,8 +99,8 @@ func (o *OIDC) checkGitHub(id Identity) error {
 	return o.checkIdentity(id, map[string]any{"email_verified": true}, "")
 }
 
-// githubIdentity reads the person a token belongs to. A 401 is
-// ErrDirectoryRefused; any other failure says nothing about the person.
+// githubIdentity maps a 401 to ErrDirectoryRefused; other failures say nothing
+// about the person.
 func (o *OIDC) githubIdentity(ctx context.Context, token string) (Identity, error) {
 	var user struct {
 		ID    int64  `json:"id"`
@@ -127,8 +121,7 @@ func (o *OIDC) githubIdentity(ctx context.Context, token string) (Identity, erro
 	if name == "" {
 		name = user.Login
 	}
-	// The id, not the login: a login can be renamed and then taken by
-	// somebody else.
+	// The id, not the login: a login can be renamed and taken by someone else.
 	id := Identity{
 		Provider: o.cfg.Name,
 		Subject:  strconv.FormatInt(user.ID, 10),
@@ -151,16 +144,15 @@ type githubEmail struct {
 	Verified bool   `json:"verified"`
 }
 
-// pickEmail chooses the address to sign someone in with: the primary one if
-// this provider may vouch for it, else the first other verified one it may.
-// People often keep a private primary address and add their work one. Failing
-// both, it is the primary address, so the refusal can name it.
+// pickEmail picks the primary address if this provider may vouch for it, else
+// the first other verified one it may, since people often add a work address.
+// Failing both, it is the primary, so the refusal can name it.
 func (o *OIDC) pickEmail(emails []githubEmail) string {
 	var usable []string
 	primary := ""
 	for _, e := range emails {
 		addr := strings.ToLower(strings.TrimSpace(e.Email))
-		// The noreply address forwards nowhere, so it names nobody.
+		// The noreply address names nobody.
 		if !e.Verified || addr == "" || strings.HasSuffix(addr, "noreply.github.com") {
 			continue
 		}
@@ -179,9 +171,8 @@ func (o *OIDC) pickEmail(emails []githubEmail) string {
 	return primary
 }
 
-// groups lists the organisations someone is in, by login, and their teams, as
-// "org/team". Organisation names are unique on GitHub, so nobody else can
-// create a group of the same name, as a directory admin elsewhere could.
+// groups lists someone's organisations and teams, as "org/team". Organisation
+// names are unique on GitHub, so nobody else can create one of the same name.
 func (g *githubAPI) groups(ctx context.Context, token string) ([]string, error) {
 	var out []string
 	err := g.pages(ctx, token, "/user/orgs", func(raw json.RawMessage) error {
@@ -217,11 +208,9 @@ func (g *githubAPI) groups(ctx context.Context, token string) ([]string, error) 
 	return out, err
 }
 
-// githubMaxPages bounds how far a list is followed. At 100 a page, nobody is in
-// that many organisations or teams.
+// githubMaxPages bounds how far a list is followed, at 100 a page.
 const githubMaxPages = 10
 
-// pages reads every page of a list, handing each to read.
 func (g *githubAPI) pages(ctx context.Context, token, path string, read func(json.RawMessage) error) error {
 	for page := 1; page <= githubMaxPages; page++ {
 		var items []json.RawMessage
@@ -242,7 +231,6 @@ func (g *githubAPI) pages(ctx context.Context, token, path string, read func(jso
 	return nil
 }
 
-// get calls GitHub's API as the person the token belongs to.
 func (g *githubAPI) get(ctx context.Context, token, path string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.base+path, nil)
 	if err != nil {
@@ -265,7 +253,7 @@ func (g *githubAPI) get(ctx context.Context, token, path string, out any) error 
 	case resp.StatusCode == http.StatusUnauthorized:
 		return fmt.Errorf("%w: GitHub no longer accepts the token", ErrDirectoryRefused)
 	case resp.StatusCode != http.StatusOK:
-		// A 403 is usually the rate limit, which says nothing about the person.
+		// A 403 is usually the rate limit.
 		return fmt.Errorf("GitHub answered %s with %s", endpoint, resp.Status)
 	}
 	if err := json.Unmarshal(body, out); err != nil {

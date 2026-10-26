@@ -1,8 +1,6 @@
-# The linter set is named, not left to the default, which grows between
-# golangci-lint releases.
-#
-# "standard" is errcheck, govet, ineffassign, staticcheck and unused. govet is
-# turned off here: `make vet` runs it, because it ships with the toolchain.
+# The linter set is named, as the default grows between releases. "standard"
+# is errcheck, govet, ineffassign, staticcheck and unused. govet is off here
+# because `make vet` runs it.
 version: "2"
 
 linters:
@@ -11,12 +9,10 @@ linters:
     - govet
 
   exclusions:
-    # golangci-lint's default, kept explicit because naming the set above
-    # replaces the defaults.
+    # The default, kept explicit because naming the set replaces the defaults.
     generated: lax
     rules:
-      # Tests ignore errors on purpose, such as a write to a recorder that
-      # cannot fail. Checking each would bury the line being tested.
+      # Tests ignore errors on purpose, such as a write that cannot fail.
       - path: _test\.go
         linters:
           - errcheck

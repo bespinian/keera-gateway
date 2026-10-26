@@ -8,9 +8,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// Every provider fills in the table's values, and the parser's own defaults,
-// for each model it lists. Infomaniak needs a product id, which its own tests
-// cover.
+// Every provider fills in the table's values and the parser's defaults for
+// each model. Infomaniak's product id has its own tests.
 func TestProviderFillsInEverythingButTheAlias(t *testing.T) {
 	for _, p := range Providers() {
 		if p.NeedsProductID {
@@ -43,8 +42,7 @@ func TestProviderFillsInEverythingButTheAlias(t *testing.T) {
 				if !m.Enabled || m.Kind != "chat" {
 					t.Errorf("model = %+v, want an enabled chat alias", m)
 				}
-				// The name survives: it is all that still says where the values
-				// above came from.
+				// The name survives, to say where the values came from.
 				if m.Provider != p.Name {
 					t.Errorf("Provider = %q, want %s", m.Provider, p.Name)
 				}
@@ -54,8 +52,7 @@ func TestProviderFillsInEverythingButTheAlias(t *testing.T) {
 }
 
 func TestProviderDefaultsGiveWayToTheCatalogue(t *testing.T) {
-	// A corporate egress proxy and a department's internal price. Neither
-	// should be overwritten.
+	// An egress proxy and an internal price must not be overwritten.
 	const in = `
 models:
   - alias: keera-frontier
@@ -77,9 +74,8 @@ models:
 	if m.MaxContext != 200_000 {
 		t.Errorf("MaxContext = %d, want 200000", m.MaxContext)
 	}
-	// Overridden in every field, and still that provider's model: the name
-	// records what the entry was declared against. It is folded to lower case,
-	// so a form matching on it matches.
+	// Overridden in every field, and still that provider's model. The name is
+	// folded to lower case.
 	if m.Provider != "anthropic" {
 		t.Errorf("Provider = %q, want anthropic", m.Provider)
 	}
@@ -91,9 +87,7 @@ models:
 }
 
 // A model named through a provider arrives described, because routers choose
-// by description (see docs/routers.md). Without a default, nobody would write
-// them and routers would choose between bare aliases. An entry's own
-// description wins.
+// by description. An entry's own description wins.
 func TestProviderDefaultsADescriptionAnEntryCanRewrite(t *testing.T) {
 	const in = `
 models:
@@ -116,20 +110,18 @@ models:
 	if models[0].Description == "" {
 		t.Error("a provider model was described to nobody; a router offered it sees only its alias")
 	}
-	// The description of the model, not of the provider: two aliases from one
-	// provider are two things a router has to be able to tell apart.
+	// The model's description, not the provider's, so a router can tell two
+	// aliases apart.
 	if models[0].Description == models[2].Description {
 		t.Errorf("claude-opus-5 and claude-haiku-4-5 share a description: %q",
 			models[0].Description)
 	}
-	// Whoever knows what the alias is for wins over the table, as they do for
-	// every other value it fills in.
+	// The entry wins over the table.
 	if got, want := models[1].Description,
 		"the alias every coding agent here is pointed at"; got != want {
 		t.Errorf("Description = %q, want the entry's own %q", got, want)
 	}
-	// A field holding nothing but spaces states nothing, so the default applies
-	// rather than being written over with the whitespace.
+	// A field of only spaces states nothing, so the default applies.
 	if models[2].Description == "" {
 		t.Error("a description of spaces was taken for one somebody wrote")
 	}
@@ -145,8 +137,7 @@ func TestProviderRejectsWhatWouldFailSilentlyAtRuntime(t *testing.T) {
 			wantErr: "unknown provider",
 		},
 		{
-			// The provider's compatible surface is chat only, so this would be
-			// a model that 404s for every request made to it.
+			// The provider serves chat only, so this would always 404.
 			name:    "a surface the provider does not serve",
 			in:      "models:\n  - alias: a\n    provider: anthropic\n    kind: embedding\n    backend_model: claude-opus-5",
 			wantErr: "serves only chat",
@@ -157,8 +148,7 @@ func TestProviderRejectsWhatWouldFailSilentlyAtRuntime(t *testing.T) {
 			wantErr: "model catalogue",
 		},
 		{
-			// A model newer than this binary can be used, but not for free:
-			// its price has to be stated rather than defaulted to nothing.
+			// A model newer than this binary must state its price.
 			name:    "an unpriced model the table has never heard of",
 			in:      "models:\n  - alias: a\n    provider: anthropic\n    backend_model: claude-opus-9",
 			wantErr: "not in the Keera Gateway price table",
@@ -267,8 +257,7 @@ func checkProvider(t *testing.T, p Provider) {
 	if len(p.Kinds) == 0 || len(p.Models) == 0 {
 		t.Errorf("entry = %+v, want a kind and a model", p)
 	}
-	// Every model declared against it takes this location, so it must be one
-	// the catalogue accepts, and it must not claim to be the deployment's own.
+	// Its models take this location, so it must be valid and not onprem.
 	if !policy.ValidLocation(p.Location) || p.Location == policy.LocationOnPrem {
 		t.Errorf("%s's location %q is not a provider's country", p.Name, p.Location)
 	}
@@ -328,8 +317,7 @@ func checkProviderModel(t *testing.T, p Provider, m ProviderModel, seenDescripti
 		}
 	}
 	if m.CacheWriteMicrosPerMTok != 0 && m.CacheWriteMicrosPerMTok <= m.InputMicrosPerMTok {
-		// A write rate is only stated when it is a surcharge; zero already
-		// means the input price.
+		// A write rate is only stated as a surcharge; zero means the input price.
 		t.Errorf("%s's cache-write rate %d is not above its input rate %d",
 			m.ID, m.CacheWriteMicrosPerMTok, m.InputMicrosPerMTok)
 	}
@@ -349,8 +337,7 @@ func checkProviderModel(t *testing.T, p Provider, m ProviderModel, seenDescripti
 	}
 }
 
-// The cached-input rate is filled in and overridden like every other number the
-// table knows: a department with an internal rate pays it for cached tokens too.
+// The cached-input rate is filled in and overridden like every other number.
 func TestProviderFillsInTheCachedInputRate(t *testing.T) {
 	models, err := parseModelFile([]byte(`
 models:
@@ -387,8 +374,7 @@ models:
 }
 
 // A model the table does not know must be priced by hand, but the cached rate
-// is optional: left out, those tokens cost the input price, which errs high
-// rather than low.
+// is optional: left out, it is the input price, which errs high.
 func TestAnUnknownModelNeedsNoCachedRate(t *testing.T) {
 	models, err := parseModelFile([]byte(`
 models:
@@ -410,9 +396,8 @@ models:
 	}
 }
 
-// Infomaniak serves every customer at their own address, so the table's
-// endpoint is a template and the entry supplies the one part of it the
-// provider cannot know.
+// Infomaniak serves every customer at their own address, so the entry
+// supplies the product id.
 func TestProductIDFillsInThePerCustomerEndpoint(t *testing.T) {
 	const in = `
 models:
@@ -433,15 +418,13 @@ models:
 	if m.MaxContext != 100_000 {
 		t.Errorf("MaxContext = %d, want the provider's 100000", m.MaxContext)
 	}
-	// No cached-input rate is published, so there is none to fill in and those
-	// tokens are charged at the input price.
+	// No cached-input rate is published, so the input price applies.
 	if m.CachedInputMicrosPerMTok != 0 {
 		t.Errorf("CachedInputMicrosPerMTok = %d, want 0", m.CachedInputMicrosPerMTok)
 	}
 }
 
-// A deployment sending these prompts through an egress proxy mirrors the path,
-// so the hole is in the same place in an address of its own.
+// An egress proxy mirrors the path, placeholder included.
 func TestProductIDFillsInACatalogueOwnAddressToo(t *testing.T) {
 	const in = `
 models:
@@ -461,8 +444,7 @@ models:
 	}
 }
 
-// An entry that wrote the finished address itself has already answered the
-// question, so it is never asked.
+// An entry that wrote the full address needs no product id.
 func TestAFinishedAddressNeedsNoProductID(t *testing.T) {
 	const in = `
 models:
@@ -482,8 +464,7 @@ func TestProductIDRejectsWhatWouldFailSilentlyAtRuntime(t *testing.T) {
 		in   string
 		want string
 	}{{
-		// Without it the address still has a hole in it, and every request
-		// would go to a URL with braces in the path.
+		// Without it, requests would go to a URL with braces in the path.
 		name: "none given",
 		in: `
 models:
@@ -493,8 +474,7 @@ models:
 `,
 		want: "product_id",
 	}, {
-		// A provider whose endpoint is the same for everybody has nowhere to
-		// put one, so accepting it would be accepting a value that does nothing.
+		// A shared endpoint has nowhere to put one.
 		name: "provider that needs none",
 		in: `
 models:
@@ -505,8 +485,7 @@ models:
 `,
 		want: "takes no product_id",
 	}, {
-		// It is pasted into a URL path, so a slash builds a working-looking
-		// address that is not the one meant.
+		// It goes into a URL path, where a slash would change the address.
 		name: "not safe in a path",
 		in: `
 models:
@@ -541,9 +520,8 @@ models:
 	}
 }
 
-// Where a model runs is the provider's. Without one, a backend inside the
-// network is onprem. An entry may say otherwise, for an endpoint that runs
-// somewhere else.
+// A model runs where its provider is. Without one, a backend inside the
+// network is onprem. An entry may say otherwise.
 func TestLocationComesFromTheProvider(t *testing.T) {
 	models, err := parseModelFile([]byte(`
 models:
@@ -576,8 +554,8 @@ models:
 	}
 }
 
-// A backend on the internet does not say which country it is in, so a model
-// with no provider there must state it rather than be called onprem.
+// A model with no provider and a backend on the internet must state its
+// location.
 func TestAnOutsideBackendWithNoProviderMustStateItsLocation(t *testing.T) {
 	_, err := parseModelFile([]byte(`
 models:
@@ -591,8 +569,8 @@ models:
 	}
 }
 
-// The release date is filled in like the other values the table knows, and an
-// entry's own date wins. It may be written unquoted, as YAML users will.
+// The release date is filled in like the other values, and the entry's own
+// wins. It may be written unquoted.
 func TestReleaseDateComesFromTheTable(t *testing.T) {
 	p, _ := ProviderByName("anthropic")
 	var known ProviderModel
@@ -669,8 +647,7 @@ models:
 	}
 }
 
-// A model priced by prompt length brings its long-prompt prices with it, and
-// the copy is the entry's own: changing it leaves the table alone.
+// A model priced by prompt length gets its own copy of the long-prompt prices.
 func TestProviderFillsInTheLongPromptPrices(t *testing.T) {
 	file := []byte(`
 models:

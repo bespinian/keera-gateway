@@ -66,22 +66,19 @@ func (s *Store) ListPasskeys(ctx context.Context, userID string) ([]Passkey, err
 		FROM passkeys WHERE user_id = $1 ORDER BY created_at, id`, userID)
 }
 
-// UsePasskey records a sign-in with its new signature counter.
-//
-// The counter check is repeated in the statement, so two sign-ins racing with
-// copies of one key cannot both pass. It answers ErrNotFound when it fails.
+// UsePasskey records a sign-in with its new signature counter. The counter
+// check is repeated in the statement, so two racing sign-ins with copies of
+// one key cannot both pass; the loser gets ErrNotFound.
 func (s *Store) UsePasskey(ctx context.Context, id string, signCount uint32) error {
 	return s.execOne(ctx, `UPDATE passkeys SET sign_count = $2, last_used_at = now()
 		WHERE id = $1 AND ($2 = 0 OR sign_count < $2)`, id, int64(signCount))
 }
 
-// ErrLastPasskey is returned for removing someone's only passkey when one
-// has to stay.
+// ErrLastPasskey refuses to remove someone's only passkey when one has to stay.
 var ErrLastPasskey = errors.New("store: that is the person's only passkey")
 
 // DeletePasskey removes a passkey. With keepOne it refuses the owner's last
-// one. The owner's row is locked first, so two removals at once cannot both
-// pass the count.
+// one; the owner's row is locked first, so two removals cannot both pass.
 func (s *Store) DeletePasskey(ctx context.Context, id string, keepOne bool) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var left int
@@ -102,13 +99,12 @@ func (s *Store) DeletePasskey(ctx context.Context, id string, keepOne bool) erro
 	})
 }
 
-// ErrDirectoryAccount is returned for a person whose identity comes from a
-// directory, or from the operator key.
+// ErrDirectoryAccount means the person's identity comes from a directory, or
+// from the operator key.
 var ErrDirectoryAccount = errors.New("store: that person signs in through a directory")
 
-// MakePasskeyAccount marks a person as signing in with passkeys. It works on
-// a person who is one already, or who has not signed in yet; anyone linked to
-// a directory is refused.
+// MakePasskeyAccount marks a person as signing in with passkeys. Anyone linked
+// to a directory is refused.
 func (s *Store) MakePasskeyAccount(ctx context.Context, userID, externalID string) error {
 	err := s.execOne(ctx, `UPDATE users SET external_id = $2
 		WHERE id = $1 AND (external_id IS NULL OR external_id = '' OR external_id = $2)`,
@@ -122,8 +118,8 @@ func (s *Store) MakePasskeyAccount(ctx context.Context, userID, externalID strin
 	return err
 }
 
-// CreatePasskeyLink stores a set-up link. Each person has at most one: a new
-// link replaces the last, so only the newest one handed out works.
+// CreatePasskeyLink stores a set-up link. A new link replaces the person's
+// last one, so only the newest works.
 func (s *Store) CreatePasskeyLink(ctx context.Context, hash []byte, userID string,
 	expires time.Time,
 ) error {
@@ -174,8 +170,8 @@ func (s *Store) TakePasskeyChallenge(ctx context.Context, id string) (userID, ch
 	return userID, challenge, notFound(err)
 }
 
-// deletePasskeys removes everything that lets a person sign in with a
-// passkey, for when they are disabled.
+// deletePasskeys removes everything that lets a disabled person sign in with
+// a passkey.
 func deletePasskeys(ctx context.Context, db querier, userID string) error {
 	for _, table := range []string{"passkeys", "passkey_links", "passkey_challenges"} {
 		if _, err := db.Exec(ctx, "DELETE FROM "+table+" WHERE user_id = $1", userID); err != nil {

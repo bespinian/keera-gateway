@@ -1,9 +1,9 @@
 // Requests: the log of every request, not only the failures, because "my
 // agent's calls never arrived" is answered by the rows that worked.
 //
-// The screen is only the shared log section, so its counts always match a
-// project's or a key's own page. An administrator reads the whole
-// organisation's log, a member only the requests of their own keys.
+// The screen is only the shared log section, so its counts match a project's
+// or key's page. An admin reads the whole organisation's log, a member only
+// their own keys'.
 
 import { h, currentRange, rangePicker, rangeOf } from "../ui.js";
 import { requestLog } from "./requestlog.js";
@@ -16,14 +16,12 @@ export async function requestsView(ctx) {
   const log = await requestLog(ctx, {
     since,
     filters: true,
-    // People open this screen to see what is happening now, so it refreshes
-    // itself instead of being reloaded by hand.
+    // People open this screen to see what is happening now.
     live: true,
-    // The page title already says Requests.
     title: "",
     trail: rangePicker(ctx, since),
   });
-  // The section is written to sit under a chart. Here it is the screen.
+  // The section is made to sit under a chart. Here it is the screen.
   log.style.marginTop = "0";
 
   const tip = advice(readNarrowing(ctx).status);

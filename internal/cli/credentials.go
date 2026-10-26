@@ -11,21 +11,15 @@ import (
 	"time"
 )
 
-// What a signed-in command line keeps, and where.
-//
-// One file holds a sign-in per gateway, keyed by the gateway's URL. The file
-// is a credential: it is written 0600 in a 0700 directory, and replaced by
-// rename so an interrupted write never leaves half a token.
+// One file holds a sign-in per gateway, keyed by URL. It is a credential, so
+// it is written 0600 in a 0700 directory and replaced by rename.
 
-// credentials is the file's contents.
 type credentials struct {
 	Gateways map[string]signIn `json:"gateways"`
-	// Default is the gateway commands talk to when nothing else says which.
-	// The last `keera login` sets it, so one login line is a whole setup.
-	// `keera whoami` says which gateway is in use and why.
+	// Default is the gateway used when nothing else says which. The last
+	// `keera login` sets it.
 	Default string `json:"default,omitempty"`
-	// Orgs is the organisation commands act on at each gateway, keyed like
-	// Gateways. 'keera org switch' sets it.
+	// Orgs is the chosen organisation per gateway. 'keera org switch' sets it.
 	Orgs map[string]string `json:"orgs,omitempty"`
 }
 
@@ -34,14 +28,13 @@ type signIn struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-// expired reports whether this sign-in has run out. The gateway decides;
-// this only saves a request that would fail.
+// expired only saves a request that would fail; the gateway decides.
 func (c signIn) expired() bool {
 	return !c.ExpiresAt.IsZero() && time.Now().After(c.ExpiresAt)
 }
 
-// credentialsPath is the file. KEERA_CONFIG_DIR moves it, for a shared
-// account or a pipeline.
+// credentialsPath can be moved with KEERA_CONFIG_DIR, for a shared account or
+// a pipeline.
 func credentialsPath() (string, error) {
 	if dir := env("KEERA_CONFIG_DIR"); dir != "" {
 		return filepath.Join(dir, "credentials.json"), nil
@@ -54,7 +47,7 @@ func credentialsPath() (string, error) {
 	return filepath.Join(dir, "keera", "credentials.json"), nil
 }
 
-// loadCredentials reads the file. A missing file means never signed in.
+// loadCredentials treats a missing file as never signed in.
 func loadCredentials() (credentials, error) {
 	path, err := credentialsPath()
 	if err != nil {
@@ -77,8 +70,6 @@ func loadCredentials() (credentials, error) {
 	return c, nil
 }
 
-// defaultGateway is the gateway this machine last signed in to, and empty on
-// one that never has.
 func defaultGateway() string {
 	c, err := loadCredentials()
 	if err != nil {
@@ -87,8 +78,8 @@ func defaultGateway() string {
 	return c.Default
 }
 
-// saveSignIn records a sign-in, leaving other gateways alone, and makes this
-// gateway the default: signing in says clearly which one is meant.
+// saveSignIn also makes this gateway the default: signing in says clearly
+// which one is meant.
 func saveSignIn(base string, cred signIn) error {
 	return updateCredentials(func(c *credentials) {
 		c.Gateways[gatewayKey(base)] = cred
@@ -96,8 +87,7 @@ func saveSignIn(base string, cred signIn) error {
 	})
 }
 
-// saveOrg records the organisation commands act on at a gateway. Empty
-// forgets it.
+// saveOrg forgets the choice when orgID is empty.
 func saveOrg(base, orgID string) error {
 	return updateCredentials(func(c *credentials) {
 		if c.Orgs == nil {
@@ -111,16 +101,16 @@ func saveOrg(base, orgID string) error {
 	})
 }
 
-// forgetSignIn removes one gateway's sign-in, and the default with it when it
-// pointed here, so later commands do not go where they cannot sign in.
+// forgetSignIn also drops the default when it pointed here, so later commands
+// do not go where they cannot sign in.
 func forgetSignIn(base string) error {
 	return updateCredentials(func(c *credentials) {
 		delete(c.Gateways, gatewayKey(base))
 		delete(c.Orgs, gatewayKey(base))
 		if c.Default == gatewayKey(base) {
 			c.Default = ""
-			// If exactly one gateway is left, it becomes the default. With more,
-			// picking one would silently change which deployment commands act on.
+			// With more than one left, picking one would silently change which
+			// deployment commands act on.
 			if len(c.Gateways) == 1 {
 				for other := range c.Gateways {
 					c.Default = other
@@ -144,8 +134,7 @@ func updateCredentials(change func(*credentials)) error {
 }
 
 // writeJSONFile replaces path by rename, so nothing reads half of it. The
-// temporary file sits beside it to keep the rename on one filesystem. The
-// file holds a key, so only its owner may read it.
+// temporary file sits beside it to keep the rename on one filesystem.
 func writeJSONFile(path string, v any) error {
 	raw, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
@@ -173,8 +162,8 @@ func writeJSONFile(path string, v any) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-// gatewayKey is the spelling a gateway is filed under, so that a trailing
-// slash or a capital letter does not make one deployment look like two.
+// gatewayKey makes sure a trailing slash or a capital letter does not make one
+// deployment look like two.
 func gatewayKey(base string) string {
 	return strings.ToLower(strings.TrimRight(strings.TrimSpace(base), "/"))
 }

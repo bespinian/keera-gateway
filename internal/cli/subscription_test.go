@@ -30,8 +30,7 @@ func TestSubscriptionEnvMapsEachFamilyToAModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Claude Code asks for a Sonnet too, and the organisation has none, so
-	// that goes to the main model rather than to a name nothing answers. A 1M
+	// The organisation has no Sonnet, so that goes to the main model. A 1M
 	// model carries [1m], or Claude Code would assume 200K.
 	want := map[string]string{
 		"ANTHROPIC_MODEL":                "claude-opus[1m]",
@@ -82,8 +81,8 @@ func TestSetClaudeEnvKeepsTheRestOfTheSettings(t *testing.T) {
 }
 
 func TestAnEmptyValueTakesTheSettingOut(t *testing.T) {
-	// An address in the user's settings would stop Claude Code fetching the
-	// organisation's, so one from an earlier run goes when they set it.
+	// An address left in the user's settings would stop Claude Code fetching
+	// the organisation's, so it is removed.
 	settings := map[string]any{"env": map[string]any{"ANTHROPIC_BASE_URL": "https://gw/api"}}
 	setClaudeEnv(settings, map[string]string{"ANTHROPIC_BASE_URL": ""}, "keera_sk_new")
 	if _, set := settings["env"].(map[string]any)["ANTHROPIC_BASE_URL"]; set {
@@ -223,7 +222,6 @@ var memberKeys = map[string]any{"data": []map[string]any{
 
 var member = identity{UserID: "user_1", Email: "ada@example.ch", Role: "member", OrgID: "org_1"}
 
-// machineKey plans this machine's key and takes the step.
 func machineKey(ctx context.Context, c *client, orgID string, me identity, project string,
 	kind policy.KeyKind,
 ) (createdKey, *store.KeySummary, error) {
@@ -235,9 +233,8 @@ func machineKey(ctx context.Context, c *client, orgID string, me identity, proje
 	return key, step.replaces, err
 }
 
-// Only an administrator issues keys, so a member's first run takes over the
-// key one issued them. The key another machine holds is left alone, or that
-// machine would stop working.
+// A member's first run takes over the key an administrator issued them. The
+// key another machine holds is left alone, or that machine would stop working.
 func TestMachineKeyTakesOverAMembersIssuedKey(t *testing.T) {
 	t.Setenv("KEERA_CONFIG_DIR", t.TempDir())
 	f := newFakeControl(t, map[string]any{
@@ -279,8 +276,7 @@ func TestMachineKeySendsAMemberWithoutAKeyToAnAdministrator(t *testing.T) {
 	}
 }
 
-// A key the CLI issues itself lasts as long as one from 'keera key create', so
-// it does not live for ever because nobody chose.
+// A key the CLI issues expires like one from 'keera key create'.
 func TestMachineKeyIssuedByAnAdministratorExpires(t *testing.T) {
 	t.Setenv("KEERA_CONFIG_DIR", t.TempDir())
 	f := newFakeControl(t, map[string]any{

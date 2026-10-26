@@ -27,9 +27,8 @@ func noVCS(version string) *debug.BuildInfo {
 }
 
 func TestOneCommitReadsTheSameEverywhere(t *testing.T) {
-	// Each build of one commit, clean and dirty: `make build` from a
-	// checkout, `make image` and `make dist` stamping the full hash, and the
-	// flake stamping release=devel and a short one.
+	// One commit, clean and dirty, from `make build`, `make image`,
+	// `make dist` and the flake.
 	for _, tc := range []struct {
 		name              string
 		release, revision string

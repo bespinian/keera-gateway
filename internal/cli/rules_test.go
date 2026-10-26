@@ -30,8 +30,8 @@ func TestParseRules(t *testing.T) {
 }
 
 func TestParseRulesSplitsAtTheLastArrow(t *testing.T) {
-	// The left side is an expression and the right side is a literal, so '=>'
-	// is plausible in the first and not in the second.
+	// '=>' may appear in the expression on the left, not in the literal on the
+	// right.
 	rules, err := parseRules(`a=>b\w+ => [X]`)
 	if err != nil {
 		t.Fatalf("parseRules: %v", err)
@@ -45,8 +45,8 @@ func TestParseRulesSplitsAtTheLastArrow(t *testing.T) {
 }
 
 func TestParseRulesDoesNotReadAReplacementAsARefusal(t *testing.T) {
-	// The word has to end where the word ends, or a redaction token that
-	// begins with it would drop somebody's request.
+	// \b must survive, or a redaction token that begins with the word would be
+	// refused.
 	rules, err := parseRules(`\bx\b => [REFUSED-CREDENTIAL]`)
 	if err != nil {
 		t.Fatalf("parseRules: %v", err)
@@ -77,8 +77,7 @@ func TestParseRulesRejectsWhatItCannotRead(t *testing.T) {
 }
 
 func TestRulesRoundTripThroughTheirTextForm(t *testing.T) {
-	// What somebody reads back has to be what they would write. A file kept in
-	// a repository and pasted into the panel is the same text either way.
+	// What somebody reads back is what they would write.
 	want := []policy.FilterRule{
 		{Pattern: `\bsk-\w+\b`, Replace: "[CREDENTIAL]"},
 		{Pattern: `\bexport\b`, Refuse: true, Reason: "no exports"},
@@ -118,8 +117,7 @@ func TestParseDestinations(t *testing.T) {
 	if ceilings["keera-mid"] != 32000 {
 		t.Errorf("ceiling = %d, want 32000", ceilings["keera-mid"])
 	}
-	// The one with no number takes what is above every ceiling, so it must not
-	// appear here at all.
+	// The one with no number takes everything above every ceiling.
 	if _, bounded := ceilings["keera-frontier"]; bounded {
 		t.Error("a destination written without a ceiling must not get one")
 	}

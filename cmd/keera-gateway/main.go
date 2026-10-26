@@ -1,6 +1,5 @@
 // Command keera-gateway is the Keera Gateway server: the inference data plane
-// and the control plane in one binary. The keera command administers it over
-// the control API.
+// and the control plane in one binary.
 package main
 
 import (

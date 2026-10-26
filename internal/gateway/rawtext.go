@@ -9,24 +9,18 @@ import (
 )
 
 // jsonText is text kept as a JSON string literal, quotes included, as the
-// client wrote it.
-//
-// A JSON string means the same in every API, so text can cross from one to
-// another without being unescaped and escaped again. In a coding agent's
-// request that text - file contents, tool output - is nearly all of it.
-//
-// nil is no text at all; `""` is empty text.
+// client wrote it. A JSON string means the same in every API, so text crosses
+// between them without unescaping, and in a coding agent's request text is
+// nearly everything. nil is no text; `""` is empty text.
 type jsonText []byte
 
 // emptyText is empty text, for a field that must be present.
 var emptyText = jsonText(`""`)
 
-// textOf turns one JSON value into text. null is empty text, as decoding null
-// into a string would give. Anything else that is not a string is an error.
-//
-// A literal that is not valid UTF-8, or that escapes a UTF-16 surrogate, is
-// decoded and written again, which replaces what it cannot carry with U+FFFD.
-// Forwarded as it is, either could be refused by the backend.
+// textOf turns one JSON value into text. null is empty text; any other
+// non-string is an error. A literal with invalid UTF-8 or an escaped UTF-16
+// surrogate is decoded and re-encoded, replacing what it cannot carry with
+// U+FFFD, since the backend could refuse it as is.
 func textOf(raw []byte) (jsonText, error) {
 	raw = bytes.TrimSpace(raw)
 	switch {
@@ -46,9 +40,9 @@ func textOf(raw []byte) (jsonText, error) {
 
 var errNotText = errors.New("not a string")
 
-// escapesSurrogate reports whether a literal has a \uD800 to \uDFFF escape. It
-// also matches a few escapes just below that range, which only costs them the
-// slower path.
+// escapesSurrogate reports whether a literal has a \uD800 to \uDFFF escape.
+// It also matches a few just below that range, which only costs the slower
+// path.
 func escapesSurrogate(raw []byte) bool {
 	return bytes.Contains(raw, []byte(`\ud`)) || bytes.Contains(raw, []byte(`\uD`))
 }
@@ -74,8 +68,8 @@ func (t *jsonText) UnmarshalJSON(raw []byte) error {
 func (t jsonText) isEmpty() bool { return len(t) <= 2 }
 
 // joinTexts joins texts with a blank line between them, leaving out empty
-// ones. The inside of a literal is a valid piece of any literal, so the
-// pieces are put together without decoding them.
+// ones. The inside of a literal is valid in any literal, so nothing is
+// decoded.
 func joinTexts(texts []jsonText) jsonText {
 	var n, kept int
 	var last jsonText

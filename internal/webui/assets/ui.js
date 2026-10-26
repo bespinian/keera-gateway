@@ -1,5 +1,4 @@
-// Small DOM helpers: enough to keep the views declarative. A control panel
-// this size needs no rendering framework.
+// Small DOM helpers that keep the views declarative, without a framework.
 
 /** h builds an element. Children may be nodes, strings, arrays, or null. */
 export function h(tag, props, ...children) {
@@ -66,8 +65,7 @@ export function money(micros) {
 }
 
 /** amount renders integer micro-units without the currency. Small amounts
- *  keep their digits, as in policy.FormatAmount: a per-request cost rounded
- *  to two decimals reads as a bug. */
+ *  keep their digits, as in policy.FormatAmount. */
 export function amount(micros) {
   const v = (micros || 0) / 1e6;
   let s;
@@ -79,8 +77,8 @@ export function amount(micros) {
   return s;
 }
 
-/** listPrice renders a price per million tokens exactly, as `keera model list`
- *  does. It is what gets billed, so 0.125 must not read as 0.13. */
+/** listPrice renders a price per million tokens exactly: it is what gets
+ *  billed, so 0.125 must not read as 0.13. */
 export function listPrice(micros) {
   let s = ((micros || 0) / 1e6).toFixed(6).replace(/0+$/, "");
   const decimals = s.length - s.indexOf(".") - 1;
@@ -102,14 +100,12 @@ export function bytes(n) {
   return `${(n / 1e6).toFixed(1)} MB`;
 }
 
-/** plural picks word for one and many for the rest. many defaults to
- *  word + "s", for words like "sandbox" that differ. */
+/** plural picks word for one and many for the rest. */
 export function plural(n, word, many = word + "s") {
   return n === 1 ? word : many;
 }
 
-/** personName is what a screen calls someone: the name their identity
- *  provider gave, or their address when it gave none. */
+/** personName is someone's name, or their address when they have none. */
 export function personName(u) {
   return u.name || u.email;
 }
@@ -127,8 +123,8 @@ export function capitalise(word) {
   return word ? word[0].toUpperCase() + word.slice(1) : "";
 }
 
-/** duration is how long a task ran, in minutes and hours: nobody reads
- *  "690 s" as eleven and a half minutes. */
+/** duration is how long a task ran, in minutes and hours rather than
+ *  seconds. */
 export function duration(msValue) {
   const secs = Math.round((msValue || 0) / 1000);
   if (secs < 60) return secs + " s";
@@ -139,7 +135,7 @@ export function duration(msValue) {
   return hours + " h" + (mins % 60 ? " " + (mins % 60) + " min" : "");
 }
 
-/** tokens writes a request's tokens in and out, the same on every screen. */
+/** tokens writes a request's tokens in and out. */
 export function tokens(inTokens, outTokens) {
   if (!inTokens && !outTokens) return "-";
   return `${compact(inTokens)} in · ${compact(outTokens)} out`;
@@ -166,8 +162,8 @@ export function date(iso) {
   });
 }
 
-/** releaseDay is a day written as YYYY-MM-DD, such as a model's release date.
- *  It is read as UTC, so it shows the same day in every time zone. */
+/** releaseDay formats a YYYY-MM-DD day. It is read as UTC, so it shows the
+ *  same day in every time zone. */
 export function releaseDay(day) {
   if (!day) return "-";
   return new Date(day + "T00:00:00Z").toLocaleDateString(undefined, {
@@ -178,7 +174,6 @@ export function releaseDay(day) {
   });
 }
 
-/** locationName is where a model runs, in words. */
 export function locationName(loc) {
   const names = { ch: "Switzerland", usa: "USA", onprem: "On-prem" };
   if (!loc) return "-";
@@ -203,8 +198,7 @@ export function ago(iso) {
   return date(iso);
 }
 
-/** brandMark is the product mark. It uses the favicon file, so the two cannot
- *  drift apart. */
+/** brandMark uses the favicon file, so the two cannot drift apart. */
 export function brandMark(size) {
   return h("img", {
     class: "brand-mark",
@@ -231,8 +225,8 @@ export function icon(path) {
   );
 }
 
-/** docsURL is where the user documentation for the signed-in person starts:
- *  managing Keera for an operator or administrator, using it for a member. */
+/** docsURL is where the user docs start: managing Keera for an operator or
+ *  administrator, using it for a member. */
 export function docsURL(ctx) {
   return isAdmin(ctx)
     ? "https://docs.keera.ch/manage"
@@ -261,7 +255,6 @@ export const icons = {
   audit:
     "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M9 13h6M9 17h4",
   orgs: "M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M9 13h.01M9 17h.01M15 9h.01M15 13h.01M15 17h.01",
-  // An open book, for the user documentation.
   docs: "M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z",
   external:
     "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3",
@@ -272,7 +265,6 @@ export const icons = {
   copy: "M20 9h-9a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2zM5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1",
   close: "M18 6L6 18M6 6l12 12",
   menu: "M3 6h18M3 12h18M3 18h18",
-  // A list's two layouts: rows, or a grid of tiles.
   rows: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
   tiles: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z",
   more: "M5 12h.01M12 12h.01M19 12h.01",
@@ -295,8 +287,7 @@ export const icons = {
   // A funnel with a shield: the guardrail that rewrites rather than refuses.
   filters:
     "M21 4H3l7 8.5V19l4 2v-8.5zM17 3l3.5 1.4v3c0 2.2-1.4 4.2-3.5 5-2.1-.8-3.5-2.8-3.5-5v-3z",
-  // The three filter modes, for the tiles that pick one. Rewriting: a pencil
-  // over lines of text.
+  // The three filter modes. Rewriting: a pencil over lines of text.
   rewrite:
     "M4 7h8M4 12h5M4 17h10" +
     "M19.6 4.4a1.5 1.5 0 0 1 0 2.1l-5.8 5.8-2.8.7.7-2.8 5.8-5.8a1.5 1.5 0 0 1 2.1 0z",
@@ -310,8 +301,7 @@ export const icons = {
   route: "M4 6h5l4 6h7M20 12l-3-3m3 3l-3 3M9 6l4 12h7",
   // A plug: the socket an agent's tools come through.
   mcp: "M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4",
-  // The route modes, for the tiles that pick one. Instruction: a model
-  // reading lines of text, with the spark of a decision.
+  // The route modes. Instruction: a model reading text, with a spark.
   instruction:
     "M4 6h11M4 11h7M4 16h5" +
     "M17.5 12l1.1 2.4 2.4 1.1-2.4 1.1-1.1 2.4-1.1-2.4-2.4-1.1 2.4-1.1z",
@@ -351,14 +341,14 @@ export const icons = {
     "M17 5.5c-3 0-3 6.5-3.5 6.5M17 18.5c-3 0-3-6.5-3.5-6.5",
 };
 
-/** providerMarks are the hosted providers' logos as path data, so they are
- *  drawn in currentColor and follow the theme. `wide` draws a mark about twice
- *  as wide as tall smaller. `layers` replaces `path` for a mark with several
- *  shades: paths that do not overlap, each at its own opacity.
+/** providerMarks are the hosted providers' logos as path data, drawn in
+ *  currentColor to follow the theme. `wide` draws a mark about twice as wide
+ *  as tall smaller. `layers` replaces `path` for a mark with several shades:
+ *  paths that do not overlap, each at its own opacity.
  *
  *  Keyed by the provider names in internal/catalog/providers.go. The source
  *  artwork is in internal/webui/marks/, outside assets/ so the binary does not
- *  serve it twice. Name a new mark in marks/NOTICE too. */
+ *  serve it. Name a new mark in marks/NOTICE too. */
 const providerMarks = {
   anthropic: {
     viewBox: "0 0 35 24",
@@ -393,8 +383,7 @@ const providerMarks = {
   },
   infomaniak: {
     viewBox: "0 0 24 24",
-    // A filled tile with the letterform cut out, unlike the other marks. That
-    // is how the logo is meant to look in one colour.
+    // A filled tile with the letter cut out: how the logo looks in one colour.
     path: "M2.4 0A2.395 2.395 0 0 0 0 2.4v19.2C0 22.9296 1.0704 24 2.4 24h19.2c1.3296 0 2.4 -1.0704 2.4 -2.4V2.4C24 1.0704 22.9296 0 21.6 0H10.112v11.7119l3.648 -4.128h6l-4.58 4.3506 4.868 8.1296h-5.52l-2.5938 -5.0211L10.112 16.8v3.264H5.12V0Z",
   },
   openai: {
@@ -417,8 +406,7 @@ const providerMarks = {
   },
 };
 
-/** providerMark is a provider's logo at the size of the text beside it, or
- *  null for a provider this build has no mark for. */
+/** providerMark is a provider's logo at text size, or null if there is none. */
 export function providerMark(name) {
   return drawMark(providerMarks[String(name || "").toLowerCase()]);
 }
@@ -469,8 +457,7 @@ const idpAliases = {
   m365: "microsoft",
 };
 
-/** idpMark is an identity provider's logo at the size of the text beside it,
- *  or null for one this build has no mark for. */
+/** idpMark is an identity provider's logo at text size, or null. */
 export function idpMark(name) {
   const key = String(name || "").toLowerCase();
   return drawMark(idpMarks[idpAliases[key] || key]);
@@ -512,27 +499,25 @@ const clientMarks = {
   },
 };
 
-/** clientMark is a client's logo, or null for one this build has no mark for. */
 export function clientMark(key) {
   return drawMark(clientMarks[key]);
 }
 
-/** The reporting window every screen with a picker shows. All screens share
- *  one remembered value, because readers compare them: a filter's refusals
- *  this afternoon next to the project's traffic this afternoon. */
+/** The reporting windows. All screens share one remembered choice, so readers
+ *  can compare them over the same time. */
 export const RANGES = [
   { label: "24h", since: "24h", long: "Last 24 hours" },
   { label: "7d", since: "168h", long: "Last 7 days" },
   { label: "30d", since: "720h", long: "Last 30 days" },
 ];
 
-/** rangeOf is the entry in RANGES for since, or fallback when none matches. */
+/** rangeOf returns fallback when no entry matches. */
 export function rangeOf(since, fallback) {
   return RANGES.find((r) => r.since === since) || fallback;
 }
 
 /** remembered is a setting kept for this tab, or with lasting for every visit,
- *  or null. A browser that refuses storage reads as nothing kept. */
+ *  or null. */
 export function remembered(key, { lasting } = {}) {
   try {
     return (lasting ? localStorage : sessionStorage).getItem(key);
@@ -541,8 +526,7 @@ export function remembered(key, { lasting } = {}) {
   }
 }
 
-/** remember keeps a setting, or forgets it when value is null. A browser that
- *  refuses storage still gets the change; it just does not last. */
+/** remember keeps a setting, or forgets it when value is null. */
 export function remember(key, value, { lasting } = {}) {
   try {
     const store = lasting ? localStorage : sessionStorage;
@@ -555,16 +539,14 @@ export function remember(key, value, { lasting } = {}) {
 
 const DEFAULT_RANGE = "168h";
 
-/** currentRange is the window in force. Screens read it instead of a default
- *  of their own. */
+/** currentRange is the chosen window. Screens use it, not a default of
+ *  their own. */
 export function currentRange() {
   return remembered("keera.range") || DEFAULT_RANGE;
 }
 
-/** rangePicker is the segmented control that sets it, and reloads the screen.
- *
- *  A screen with a window of its own, like Usage or the audit log, passes its
- *  own ranges and the session key it stores the choice under. */
+/** rangePicker sets the window and reloads the screen. A screen with its own
+ *  window, like Usage, passes its own ranges and session key. */
 export function rangePicker(
   ctx,
   since,
@@ -591,12 +573,11 @@ export function rangePicker(
 }
 
 /** liveControl is the Live switch on a screen that follows the request log.
- *  Its dot shows four states: watching, reconnecting, paused, or stopped,
- *  since a screen that quietly stopped following looks like a quiet afternoon.
+ *  Its dot shows watching, reconnecting, paused or stopped, since a screen
+ *  that quietly stopped looks like one with no traffic.
  *
  *  key remembers the choice for the session, label is for screen readers,
- *  titles explain each state, and words, if given, change the button's text
- *  with the state. */
+ *  titles explain each state, and words change the button text per state. */
 export function liveControl({ key, label, titles, words = {} }) {
   const on = remembered(key) !== "off";
   const blip = h("span", { class: "blip" });
@@ -632,8 +613,7 @@ export function liveControl({ key, label, titles, words = {} }) {
     button.setAttribute("aria-pressed", String(control.on));
     if (listener) listener(control.on);
   });
-  // A hidden tab drops its stream: each open stream costs the control plane
-  // a query per request in its organisation.
+  // A hidden tab drops its stream: each open stream costs a query per request.
   const onVisibility = () => {
     if (!button.isConnected) {
       document.removeEventListener("visibilitychange", onVisibility);
@@ -645,13 +625,11 @@ export function liveControl({ key, label, titles, words = {} }) {
   return control;
 }
 
-/** followRequests keeps the request stream open while a liveControl is on,
- *  and shows its state on the control.
+/** followRequests keeps the request stream open while a liveControl is on.
  *
  *  stream opens the EventSource and is called again on every reconnect, so it
- *  can carry the newest position. onResume, if given, runs when requests may
- *  have been missed: when the control is turned back on, and when a dropped
- *  stream comes back. */
+ *  can carry the newest position. onResume runs when requests may have been
+ *  missed: when the control is turned back on or a dropped stream returns. */
 export function followRequests(ctx, control, stream, { onRequests, onResume }) {
   let source = null;
   const close = () => {
@@ -698,9 +676,9 @@ export function followRequests(ctx, control, stream, { onRequests, onResume }) {
   else control.state("paused");
 }
 
-/** throttled runs fn at most once every ms. A call while it waits is not
- *  lost: fn runs once more after the wait. A failure is swallowed, so the
- *  screen keeps what it shows and the next call tries again. stop ends it. */
+/** throttled runs fn at most once every ms. A call while it waits runs once
+ *  after the wait. A failure is swallowed, so the screen keeps what it shows
+ *  and the next call tries again. */
 export function throttled(fn, ms) {
   let busy = false;
   let again = false;
@@ -715,7 +693,7 @@ export function throttled(fn, ms) {
     try {
       await fn();
     } catch {
-      // Left as it is. The next call tries again.
+      // The next call tries again.
     }
     setTimeout(() => {
       busy = false;
@@ -733,9 +711,9 @@ export function pill(text, tone) {
   return h("span", { class: "pill" + (tone ? " pill-" + tone : "") }, text);
 }
 
-/** rowLink is a row's name as a link to the row's own screen. A table with
- *  `open` opens the row on a click anywhere in it too; the link stays for the
- *  keyboard and for opening it in a new tab. */
+/** rowLink is a row's name as a link to its screen. A table with `open` also
+ *  opens the row on any click in it; the link stays for the keyboard and for
+ *  new tabs. */
 export function rowLink(ctx, path, text, title) {
   return h(
     "a",
@@ -749,8 +727,8 @@ export function rowLink(ctx, path, text, title) {
   );
 }
 
-/** go is a click handler that routes inside the panel instead of reloading
- *  it. The href is still the real path, so the link opens in a new tab. */
+/** go routes inside the panel instead of reloading it. The href stays the
+ *  real path, so the link still opens in a new tab. */
 export function go(ctx, path) {
   return (e) => {
     e.preventDefault();
@@ -758,15 +736,15 @@ export function go(ctx, path) {
   };
 }
 
-/** isAdmin reports whether the signed-in person may change the organisation
- *  they are looking at: an operator, or one of its administrators. */
+/** isAdmin reports whether the signed-in person may change the organisation:
+ *  an operator, or one of its administrators. */
 export function isAdmin(ctx) {
   return !!ctx.state.me.can_admin_org;
 }
 
-/** checkButton is a Check button with its verdict beside it once it has run.
- *  verdict turns what run returns into { label, tone, title, open }: a pill
- *  that opens the full report. The result is not kept, as it is only true now. */
+/** checkButton is a Check button with its verdict beside it once run.
+ *  verdict turns run's result into { label, tone, title, open }: a pill that
+ *  opens the full report. The result is not kept, as it is only true now. */
 export function checkButton(title, run, verdict) {
   const slot = h("span");
   const button = h(
@@ -819,7 +797,7 @@ export function crumb(ctx, path, label) {
   );
 }
 
-/** gone is a detail screen for something that is not there. */
+/** gone is the detail screen for something that is not there. */
 export function gone(ctx, path, label, title, body) {
   return h(
     "div",
@@ -829,8 +807,8 @@ export function gone(ctx, path, label, title, body) {
   );
 }
 
-/** detailHead is the strip atop a detail screen: the link back to its list,
- *  chips, then controls on the right. */
+/** detailHead is the top strip of a detail screen: back link, chips, then
+ *  controls. */
 export function detailHead(ctx, [path, label], chips, controls) {
   return h(
     "div",
@@ -869,8 +847,8 @@ export function busyButton(props, label, run) {
   return button;
 }
 
-/** iconButton is a small button that shows only an icon. title is its
- *  tooltip and, unless label is given, what a screen reader reads. */
+/** iconButton shows only an icon. title is its tooltip and, unless label is
+ *  given, what a screen reader reads. */
 export function iconButton(
   glyph,
   title,
@@ -898,8 +876,7 @@ export function iconButton(
   );
 }
 
-/** csvButton saves what a screen lists as a CSV file. title says what the
- *  file holds. */
+/** csvButton saves what a screen lists as a CSV file. */
 export function csvButton(title, download) {
   return h(
     "button",
@@ -909,8 +886,8 @@ export function csvButton(title, download) {
   );
 }
 
-/** listHead is the strip above a list: an intro, its controls and an add
- *  button. add is { label, onClick }, or null when the reader cannot add. */
+/** listHead is the strip above a list. add is { label, onClick }, or null
+ *  when the reader cannot add. */
 export function listHead(intro, controls, add) {
   return h(
     "div",
@@ -933,8 +910,8 @@ export function listHead(intro, controls, add) {
   );
 }
 
-/** sectionHead is a heading between a page's tables. A text note is set faint
- *  on the right; anything else, such as buttons, goes there as is. */
+/** sectionHead is a heading between tables. A text note shows faint on the
+ *  right; anything else, such as buttons, goes there as is. */
 export function sectionHead(title, note, style) {
   return h(
     "div",
@@ -945,8 +922,7 @@ export function sectionHead(title, note, style) {
   );
 }
 
-/** pct is part of whole as a percentage. Tiny shares keep three decimals,
- *  so they do not round to zero. */
+/** pct keeps three decimals for tiny shares, so they do not round to zero. */
 export function pct(part, whole) {
   if (!whole) return "-";
   const frac = (part || 0) / whole;
@@ -958,7 +934,6 @@ export function stat(label, value, note) {
   return statCard(label, [value], note);
 }
 
-/** moneyStat is a stat for an amount, with the currency first. */
 export function moneyStat(label, micros, note) {
   return statCard(
     label,
@@ -977,9 +952,8 @@ function statCard(label, value, note) {
   );
 }
 
-/** loadMore is the button under a log that adds the next page to the same
- *  table, so the reader keeps their place. next returns how many rows came;
- *  fewer than size means the end, and shows end. */
+/** loadMore adds the next page to the same table, so the reader keeps their
+ *  place. next returns how many rows came; fewer than size shows end. */
 export function loadMore(size, next, end) {
   const label = `Load ${size} more`;
   const wrap = h("div", { style: { marginTop: "12px", textAlign: "center" } });
@@ -1009,7 +983,7 @@ export function loadMore(size, next, end) {
   return wrap;
 }
 
-/** trafficSummary is a row's traffic in two lines: how many, with a pill when
+/** trafficSummary is a row's traffic in two lines: a count, with a pill when
  *  something needs a look, then a faint note. */
 export function trafficSummary(count, noun, flag, note) {
   if (!count) return h("span", { class: "faint nowrap" }, "no traffic");
@@ -1050,43 +1024,39 @@ function toggleBox(t, checked, onChange) {
 /** table renders rows in a card, with search, filters and sorting.
  *
  *  opts:
- *    search       (row) => string - the text the search box matches against.
- *                 Passing it adds the box.
+ *    search       (row) => string - the text the search box matches. Passing
+ *                 it adds the box.
  *    searchLabel  what is being searched, for the placeholder
  *    toggles      [{ label, test, hidden, on, onChange }] - a checkbox that,
  *                 while checked, keeps only the rows test() accepts. hidden()
- *                 instead drops those rows while unchecked, to hide dead rows.
- *                 `on` is whether it starts checked. onChange(checked) is for
- *                 a toggle whose caller fetches a different list.
+ *                 instead drops those rows while unchecked. `on` is whether it
+ *                 starts checked. onChange(checked) is for a toggle whose
+ *                 caller fetches a different list.
  *    choices      [{ label, options: [{ value, label }], test }] - a dropdown
- *                 that keeps only the rows test(row, value) accepts. Its first
- *                 option is "All", which keeps every row.
+ *                 that keeps the rows test(row, value) accepts. Its first
+ *                 option is "All".
  *    sortBy       the label of the column to sort by at first
  *    sortDir      "asc" (the default) or "desc"
  *    rank         { by, set } - for a list the control plane ranks, because
  *                 only part of it is here. A column with a `rank` gets a
  *                 header that calls set(rank). Rows keep the order given.
  *    rowClass     (row) => string - a class for that row's <tr>
- *    open         (row) => path - the row's own screen, which a click anywhere
- *                 on the row opens. Needs `ctx`. Null leaves that row closed.
- *    pick         (row) => void - what a click anywhere on the row does, or
- *                 Enter on it, when the row has no screen of its own, such as
- *                 adding the catalogue's model.
+ *    open         (row) => path - the row's screen, opened by a click anywhere
+ *                 on the row. Needs `ctx`. Null leaves that row closed.
+ *    pick         (row) => void - what a click or Enter on the row does when
+ *                 it has no screen of its own.
  *    pickTitle    what pick does, for the tooltip
  *    emptyTitle / emptyBody
  *    tile         (row) => node - the row as a tile. Passing it adds a switch
- *                 between the table and a grid of tiles, for a list people
- *                 browse more than they compare. Search, filters and sorting
- *                 work the same in both. Tiles show until someone chooses
- *                 the table. Not with `rank`.
+ *                 between the table and a grid of tiles. Tiles show until
+ *                 someone chooses the table. Not with `rank`.
  *
- *  A column with a sortKey gets a header that sorts by it. Searching and
- *  sorting happen here, as most screens hold their whole list. A paged list
- *  passes `rank` instead and its sortKeys are ignored: sorting one page would
- *  rank the wrong rows.
+ *  A column with a sortKey gets a header that sorts by it. Sorting happens
+ *  here, as most screens hold their whole list. A paged list passes `rank`
+ *  instead and its sortKeys are ignored: sorting one page would rank the
+ *  wrong rows.
  *
- *  A column with a `width` keeps it, so the table does not shift when redrawn
- *  with other rows.
+ *  A column with a `width` keeps it, so the table does not shift on redraw.
  */
 export function table(columns, rows, opts = {}) {
   const toggles = opts.toggles || [];
@@ -1191,7 +1161,6 @@ export function table(columns, rows, opts = {}) {
 
   const none = "Nothing matches. Clear the search, or turn a filter off.";
 
-  // clickable makes a row or a tile open its screen, or run pick.
   function clickable(el, row) {
     const path = opts.open ? opts.open(row) : null;
     if (path) openRow(el, opts.ctx, path);
@@ -1199,7 +1168,6 @@ export function table(columns, rows, opts = {}) {
     return el;
   }
 
-  // setLayout shows the table or the tiles, and the controls that go with each.
   function setLayout(tiles) {
     view.tiles = tiles;
     card.hidden = tiles;
@@ -1265,8 +1233,8 @@ export function table(columns, rows, opts = {}) {
     }
   }
 
-  // Tiles have no headers to click, so they sort with a dropdown instead. Both
-  // change the same sort, so switching keeps the order.
+  // Tiles have no headers, so they sort with a dropdown. Both change the same
+  // sort, so switching keeps the order.
   const sortCols = columns.filter((c) => c.sortKey);
   const sortSelect =
     grid && sortCols.length
@@ -1393,8 +1361,8 @@ export function table(columns, rows, opts = {}) {
   if (grid) setLayout(view.tiles);
   else draw();
   const el = toolbar ? h("div", {}, toolbar, card, grid) : card;
-  // The request log pushes new rows onto the array and calls this. Calling
-  // table() again would lose the reader's search and sort.
+  // The request log pushes rows and calls this. Calling table() again would
+  // lose the reader's search and sort.
   el.redraw = draw;
   return el;
 }
@@ -1408,8 +1376,8 @@ function ownClick(e) {
   return !!getSelection().toString();
 }
 
-/** openRow opens a row's screen on a click anywhere in the row, and in a new
- *  tab on a middle or modified click, like the link in it would. */
+/** openRow opens a row's screen on a click anywhere in it, and in a new tab
+ *  on a middle or modified click, like a link. */
 function openRow(el, ctx, path) {
   const open = (e) => {
     if (ownClick(e)) return;
@@ -1423,8 +1391,8 @@ function openRow(el, ctx, path) {
   el.addEventListener("auxclick", open);
 }
 
-/** pickRow runs pick on a click anywhere in the row, and on Enter or Space,
- *  like a button. The row takes the focus, as it has no link to tab to. */
+/** pickRow runs pick on a click in the row, or on Enter or Space. The row
+ *  takes focus, as it has no link to tab to. */
 function pickRow(el, pick, title) {
   el.classList.add("row-opens");
   el.tabIndex = 0;
@@ -1482,8 +1450,8 @@ function cellClass(c) {
   );
 }
 
-/** order sorts by one column's key, with rows that have no value at the bottom
- *  in either direction: a key never used is not the oldest. */
+/** order keeps rows with no value at the bottom in either direction: a key
+ *  never used is not the oldest. */
 function order(key, dir) {
   const missing = (v) => v === null || v === undefined || v === "";
   return (a, b) => {
@@ -1504,9 +1472,8 @@ function order(key, dir) {
 let openMenu = null;
 
 /** menu opens a list of actions next to anchor. Each item is
- *  { label, icon, onClick, hint }, { label, icon, href } for a link that
- *  opens in a new tab, a separator, or a node shown as it is. It closes on a
- *  click outside, on Escape, and after an action. */
+ *  { label, icon, onClick, hint }, { label, icon, href } for a link in a new
+ *  tab, a separator, or a node shown as it is. */
 export function menu(anchor, items, { up = false } = {}) {
   // A second click on the anchor closes its menu.
   if (anchor.getAttribute("aria-expanded") === "true") return closeMenu();
@@ -1589,9 +1556,9 @@ function closeMenu() {
   }
 }
 
-/** place puts a floating element beside its anchor, kept on screen. The page
- *  is zoomed by --ui-scale: measurements come back zoomed, but top and left
- *  are zoomed again when applied, so they are divided by the zoom first. */
+/** place puts a floating element beside its anchor, on screen. The page is
+ *  zoomed by --ui-scale: measurements come back zoomed, but top and left are
+ *  zoomed again when set, so they are divided by the zoom first. */
 function place(el, anchor, up) {
   const a = anchor.getBoundingClientRect();
   const zoom = a.width / anchor.offsetWidth || 1;
@@ -1606,11 +1573,10 @@ function place(el, anchor, up) {
   el.style.left = left / zoom + "px";
 }
 
-/** modal opens a dialog and returns a close function. Without actions, its
- *  footer has only a Close button. */
+/** modal opens a dialog and returns a close function. */
 export function modal({ title, subtitle, body, actions, wide }) {
   const overlay = h("div", { class: "overlay" });
-  // Focus goes back where it came from, so a keyboard user keeps their place.
+  // Focus returns here on close, so a keyboard user keeps their place.
   const opener = document.activeElement;
   let open = true;
   const close = () => {
@@ -1670,15 +1636,15 @@ export function modal({ title, subtitle, body, actions, wide }) {
   overlay.append(card);
   document.body.append(overlay);
 
-  // The actions live in the footer, outside the body's form, so Enter in the
-  // form is wired to the primary action here.
+  // The actions are outside the body's form, so Enter is wired to the primary
+  // action here.
   const form = card.querySelector("form");
   const primary = card.querySelector(
     ".modal-foot .btn-primary, .modal-foot .btn-danger",
   );
   if (form && primary) {
     // A browser submits on Enter only if the form has a submit button or a
-    // single text field. This hidden one comes first, to be the default.
+    // single text field. This hidden one comes first, as the default.
     if (!form.querySelector("[type=submit]")) {
       form.prepend(
         h("button", {
@@ -1695,7 +1661,6 @@ export function modal({ title, subtitle, body, actions, wide }) {
     });
   }
 
-  // The first field that can be typed in, skipping hidden or disabled ones.
   const first = [
     ...card.querySelectorAll(
       "input:not([type=hidden]), select, textarea, button.btn-primary",
@@ -1705,7 +1670,7 @@ export function modal({ title, subtitle, body, actions, wide }) {
   return close;
 }
 
-/** trapTab keeps Tab inside the dialog, for keyboard users. */
+/** trapTab keeps Tab inside the dialog. */
 function trapTab(card, e) {
   const items = [
     ...card.querySelectorAll(
@@ -1730,10 +1695,10 @@ function trapTab(card, e) {
 }
 
 /** formModal is a dialog that does one thing with its primary button.
- *  submit(close) does it, and returns false to keep the dialog open, as after
- *  focusing an empty field. A failure, or a thrown { message } of text or
- *  nodes, shows in the dialog. On success the dialog closes, toasts done (text,
- *  or a function of submit's result) and reloads ctx, each if given. */
+ *  submit(close) returns false to keep the dialog open, as after focusing an
+ *  empty field. A failure, or a thrown { message } of text or nodes, shows in
+ *  the dialog. On success it closes, toasts done (text, or a function of
+ *  submit's result) and reloads ctx, each if given. */
 export function formModal({
   title,
   subtitle,
@@ -1785,8 +1750,8 @@ export function formModal({
   return { close, button };
 }
 
-/** confirm asks before something irreversible. A failed action shows in the
- *  dialog, so a failure is as visible as success. */
+/** confirm asks before something irreversible. A failure shows in the
+ *  dialog. */
 export function confirm({
   title,
   body,
@@ -1804,10 +1769,8 @@ export function confirm({
 }
 
 /** rowActions is a row's edit and delete buttons. Delete asks first, then
- *  runs remove, toasts removed and reloads the page.
- *
- *  body may be a function, for a warning looked up only when the button is
- *  pressed. */
+ *  runs remove, toasts removed and reloads the page. body may be a function,
+ *  for a warning looked up only when pressed. */
 export function rowActions(
   ctx,
   name,
@@ -1870,8 +1833,7 @@ export async function copyText(text) {
   }
 }
 
-// code renders a block to be copied, with its Copy button. Every such block is
-// meant to end up in a file.
+// code renders a block meant for a file, with a Copy button.
 export function code(text) {
   return h(
     "div",
@@ -1891,8 +1853,8 @@ export function secretField(value, ariaLabel) {
       readonly: true,
       value,
       "aria-label": ariaLabel,
-      // Selecting on focus makes copying by hand easy, for when there is no
-      // clipboard: plain http on anything but localhost has none.
+      // Selecting on focus helps copy by hand: plain http on anything but
+      // localhost has no clipboard.
       onFocus: (e) => e.target.select(),
       onClick: (e) => e.target.select(),
     }),
@@ -1916,34 +1878,31 @@ export function banner(tone, ...children) {
   return h("div", { ...props, class: `banner banner-${tone}` }, ...children);
 }
 
-/** showError shows a failure in a dialog's error host and scrolls it into
- *  view: the host is at the top of the scrolling body, out of sight in a tall
- *  dialog. No message clears the host, as before a retry. */
+/** showError shows a failure in a dialog's error host and scrolls to it, as
+ *  it is out of sight in a tall dialog. No message clears the host. */
 export function showError(host, message) {
   if (!message) {
     replace(host);
     return;
   }
   replace(host, banner("bad", message));
-  // "nearest" so a dialog already showing the banner does not jump. Guarded
-  // because jsdom and very old browsers lack it.
+  // "nearest" so a dialog already showing it does not jump. jsdom and very
+  // old browsers lack scrollIntoView.
   if (host.scrollIntoView) {
     host.scrollIntoView({ block: "nearest" });
   }
 }
 
-/** aliasProblem checks the alias rule where the name is typed, mirroring
- *  policy.validName. It must catch an empty alias: as a path segment, it
- *  sends the write to the collection route, which answers 405 with no
- *  message. Returns "" when there is no problem. */
+/** aliasProblem mirrors policy.validName, or returns "". It must catch an
+ *  empty alias: as a path segment, it sends the write to the collection route,
+ *  which answers 405 with no message. */
 export function aliasProblem(alias) {
   if (!alias) return "An alias is required. It is the name clients use.";
   return nameProblem(alias, 64, "An alias");
 }
 
-/** modelAliasProblem is aliasProblem for a model, which may also carry its
- *  provider's name, as in "anthropic/claude-sonnet-4-5". It mirrors
- *  policy.ValidModelAlias. */
+/** modelAliasProblem mirrors policy.ValidModelAlias: a model alias may carry
+ *  its provider's name, as in "anthropic/claude-sonnet-4-5". */
 export function modelAliasProblem(alias) {
   if (!alias) return "An alias is required. It is the name clients use.";
   if (alias.length > 64) return "An alias is at most 64 characters.";
@@ -1956,8 +1915,8 @@ export function modelAliasProblem(alias) {
   return "";
 }
 
-/** takenProblem refuses an alias the organisation already has. Saving is a
- *  PUT, so "add" would otherwise overwrite the entry of that name. */
+/** takenProblem refuses an alias already in use. Saving is a PUT, so "add"
+ *  would otherwise overwrite it. */
 export function takenProblem(entries, alias, noun) {
   return (entries || []).some((e) => e.alias === alias)
     ? `The ${noun} ${alias} already exists. Change it from its row instead.`
@@ -1982,14 +1941,14 @@ function nameProblem(name, max, what) {
   return "";
 }
 
-/** modeTiles asks which mode something works in, as tiles with a sentence
- *  each: a long option list goes unread. Once a mode is chosen the tiles fold
- *  into one row with a Change button.
+/** modeTiles asks for a mode as tiles with a sentence each, since a long
+ *  option list goes unread. Once chosen, the tiles fold into one row with a
+ *  Change button.
  *
  *  modes is a list of { value, icon, name, what }, with an optional mark()
  *  that draws a logo in place of the icon. chosen is the starting value, or
- *  null. onChoose runs after each choice; the caller decides where focus
- *  goes. choose(value) picks a mode from code, as an edit dialog does. */
+ *  null. onChoose runs after each choice; the caller moves focus.
+ *  choose(value) picks a mode from code. */
 export function modeTiles(modes, chosen, onChoose) {
   const tiles = h(
     "div",
@@ -2052,9 +2011,8 @@ function markOf(m) {
 
 let controls = 0;
 
-/** controlID returns the id a label points at, giving the control one if it
- *  has none, so clicking the label focuses it and screen readers name it. el
- *  may wrap the control, as long as it holds only one. */
+/** controlID returns the control's id, giving it one if needed, so its label
+ *  focuses it and screen readers name it. el may wrap a single control. */
 export function controlID(el) {
   if (!(el instanceof Element)) return null;
   const control = el.matches("input, select, textarea")
@@ -2068,7 +2026,7 @@ export function controlID(el) {
 }
 
 /** field renders a labelled control. hint may be a .hint element the caller
- *  keeps to change later, and extra goes below it. */
+ *  changes later; extra goes below it. */
 export function field(label, input, hint, ...extra) {
   return h(
     "div",

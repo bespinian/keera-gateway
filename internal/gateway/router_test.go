@@ -12,9 +12,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// treeHarness is routeHarness with p as the organisation's only router, and
-// two pattern filters it can use: 'redact' takes out a password, 'block'
-// refuses one.
+// treeHarness is routeHarness with p as the only router, and two pattern
+// filters: 'redact' removes a password, 'block' refuses one.
 func treeHarness(t *testing.T, decide func([]string) string, p policy.Router,
 	resolved *policy.Resolved,
 ) *harness {
@@ -42,8 +41,7 @@ func autoStep(id string, branches map[string]*policy.Step) *policy.Step {
 	return s
 }
 
-// lastSent is the body the answering model was sent: the last one the
-// stand-in received.
+// lastSent is the last body the stand-in received.
 func lastSent(h *harness) string {
 	sent := drain(h)
 	if len(sent) == 0 {
@@ -67,9 +65,8 @@ func drain(h *harness) []string {
 
 const secretPrompt = `{"model":"safe","messages":[{"role":"user","content":"deploy with hunter2"}]}`
 
-// The redaction sits on the branch to the hosted model only, which is why a
-// router beats a filter on the key: the local model gets the request as
-// sent, and the route step decides on it unredacted.
+// The redaction is only on the branch to the hosted model: the local model
+// gets the request as sent, and the route step decides on it unredacted.
 func TestRouterFiltersOnlyTheBranchTheRouterChose(t *testing.T) {
 	p := policy.Router{Alias: "safe", Start: autoStep("route", map[string]*policy.Step{
 		"keera-large": {
@@ -116,9 +113,8 @@ func TestRouterFiltersOnlyTheBranchTheRouterChose(t *testing.T) {
 	}
 }
 
-// A spent budget sends the request down its exceeded branch instead of
-// refusing it, and says so on the usage row. Within it, the request is
-// charged to the step.
+// A spent budget sends the request down its exceeded branch, noted on the
+// usage row. Within budget, the request is charged to the step.
 func TestRouterBudgetSendsWhatIsOverItElsewhere(t *testing.T) {
 	p := policy.Router{Alias: "safe", Start: &policy.Step{
 		ID: "cap", Kind: policy.StepBudget, BudgetMicros: 1_000_000, Period: policy.PeriodMonth,
@@ -156,8 +152,7 @@ func TestRouterBudgetSendsWhatIsOverItElsewhere(t *testing.T) {
 	}
 }
 
-// Without an exceeded branch, a spent budget refuses, and names the router,
-// not the key, as what ran out.
+// Without an exceeded branch, a spent budget refuses and names the router.
 func TestRouterBudgetWithoutABranchRefuses(t *testing.T) {
 	p := policy.Router{Alias: "safe", Start: &policy.Step{
 		ID: "cap", Kind: policy.StepBudget, BudgetMicros: 1_000_000, Period: policy.PeriodMonth,
@@ -196,8 +191,7 @@ func TestRouterRateLimitCountsItsOwnStep(t *testing.T) {
 	}
 }
 
-// A filter step that refuses says it was the router's, since no guardrail
-// on the key had anything to do with it.
+// A refusing filter step says it was the router's, not the key's.
 func TestRouterFilterRefusalNamesTheRouter(t *testing.T) {
 	p := policy.Router{Alias: "safe", Start: &policy.Step{
 		ID: "block", Kind: policy.StepFilter, Ref: "block", Next: modelStep("large", "keera-large"),
@@ -218,7 +212,7 @@ func TestRouterFilterRefusalNamesTheRouter(t *testing.T) {
 }
 
 // The key's own filters still run after the router, so a router cannot
-// be used to step around a guardrail.
+// bypass a guardrail.
 func TestTheKeysFiltersStillRunAfterARouter(t *testing.T) {
 	resolved := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, nil, nil, nil)
 	resolved.Filters = []string{"redact"}
@@ -233,8 +227,8 @@ func TestTheKeysFiltersStillRunAfterARouter(t *testing.T) {
 	}
 }
 
-// A filter both the router and the key's guardrail name runs once, as a filter
-// named at two guardrail levels does: once charged, once logged, once listed.
+// A filter named by both the router and the key runs once: charged, logged
+// and listed once.
 func TestAFilterTheRouterRanIsNotRunAgainForTheKey(t *testing.T) {
 	resolved := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, nil, nil, nil)
 	resolved.Filters = []string{"redact"}
@@ -258,8 +252,7 @@ func TestAFilterTheRouterRanIsNotRunAgainForTheKey(t *testing.T) {
 	}
 }
 
-// Route steps can follow one another. The request goes where the last one
-// sends it.
+// Route steps can follow one another. The last one decides.
 func TestRouterChainsRouteSteps(t *testing.T) {
 	p := policy.Router{Alias: "safe", Start: autoStep("first", map[string]*policy.Step{
 		"keera-large": {
@@ -279,14 +272,14 @@ func TestRouterChainsRouteSteps(t *testing.T) {
 	if ev.Router != "safe" || ev.Alias != "keera-small" {
 		t.Errorf("router/alias = %q/%q, want safe/keera-small", ev.Router, ev.Alias)
 	}
-	// The first step's decision was a generation, and it is still paid for.
+	// The first step's decision is still paid for.
 	if ev.CostMicros <= answerOnly(t, h) {
 		t.Errorf("cost = %d, which leaves out the first step's decision", ev.CostMicros)
 	}
 }
 
-// A branch can end at a model other than the one the step chose. The header
-// names the model that answered, not the step's choice.
+// A branch can end at a model other than the step's choice. The header names
+// the model that answered.
 func TestRouterHeaderNamesTheModelABranchEndsAt(t *testing.T) {
 	p := policy.Router{Alias: "safe", Start: autoStep("route", map[string]*policy.Step{
 		"keera-large": modelStep("instead", "keera-small"),
@@ -355,8 +348,7 @@ func TestRoutersAreListedWhereAClientLooksForModels(t *testing.T) {
 }
 
 // On /v1/messages the route step translates the body before a filter on its
-// branch rewrites the client's own. The model still gets the rewrite, not the
-// translation made before it.
+// branch rewrites it. The model still gets the rewrite.
 func TestRouterFilterAfterARouteStepRewritesWhatIsSent(t *testing.T) {
 	p := policy.Router{Alias: "safe", Start: autoStep("route", map[string]*policy.Step{
 		"keera-large": {
@@ -378,9 +370,8 @@ func TestRouterFilterAfterARouteStepRewritesWhatIsSent(t *testing.T) {
 	}
 }
 
-// A trying step whose first choice is down would move on to the next
-// destination. When that one has a branch, moving on would skip the branch,
-// and with it the filter that redacts what goes there. So it is not tried.
+// A trying step does not fail over to a destination with a branch: that
+// would skip the branch's redaction filter.
 func TestRouterNeverFailsOverPastABranch(t *testing.T) {
 	h := chainHarness(t, chainRoute("keera-small", "keera-large"),
 		map[string]int{"small-served": http.StatusServiceUnavailable})
@@ -408,9 +399,8 @@ func TestRouterNeverFailsOverPastABranch(t *testing.T) {
 	}
 }
 
-// A rate limit per day counts in the windows budgets use, so it survives a
-// restart and starts again at midnight UTC. The tokens are counted once the
-// answer says how many there were.
+// A daily rate limit uses the budget windows, so it survives a restart and
+// resets at midnight UTC. Tokens are counted once the answer gives them.
 func TestRouterRateLimitPerDay(t *testing.T) {
 	p := policy.Router{Alias: "safe", Start: &policy.Step{
 		ID: "daily", Kind: policy.StepRateLimit, Requests: 2, Tokens: 1_000_000,
@@ -439,8 +429,8 @@ func TestRouterRateLimitPerDay(t *testing.T) {
 	}
 }
 
-// Without an exceeded branch, a spent daily limit refuses with 429, and says
-// when it starts again, so a client does not retry every second all day.
+// Without an exceeded branch, a spent daily limit refuses with 429 and says
+// when it resets, so a client does not retry all day.
 func TestRouterRateLimitPerDayRefusesUntilItResets(t *testing.T) {
 	p := policy.Router{Alias: "safe", Start: &policy.Step{
 		ID: "daily", Kind: policy.StepRateLimit, Requests: 1, Period: policy.PeriodDay,
@@ -465,9 +455,8 @@ func TestRouterRateLimitPerDayRefusesUntilItResets(t *testing.T) {
 	}
 }
 
-// A system prompt step is added only on its own branch, after the key's own
-// prompt. Like that one, it is added after every filter, so a filter placed
-// after the step neither reads nor rewrites it.
+// A system prompt step applies only on its own branch, after the key's
+// prompt and after every filter, so a later filter never sees it.
 func TestRouterSystemPromptGoesOnlyWhereItsBranchGoes(t *testing.T) {
 	resolved := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"},
 		&policy.Limits{SystemPrompt: new("Be brief.")}, nil, nil)
@@ -527,8 +516,8 @@ func TestRouterMayStartWithASystemPrompt(t *testing.T) {
 	}
 }
 
-// A route step that cannot decide adds its reason to the note an exceeded
-// branch left, so the row still says which limit sent the request there.
+// A route step that cannot decide adds its reason to the exceeded branch's
+// note, so the row still names the limit.
 func TestARouteStepKeepsTheNoteOfTheBranchBeforeIt(t *testing.T) {
 	p := policy.Router{Alias: "safe", Start: &policy.Step{
 		ID: "cap", Kind: policy.StepBudget, BudgetMicros: 1_000_000, Period: policy.PeriodMonth,

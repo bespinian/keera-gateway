@@ -51,7 +51,7 @@ func TestDailyTotalsAgreeWithTheRequestLog(t *testing.T) {
 	dailyTraffic(t, st, f, day)
 
 	// Three whole days read usage_daily; each single day reads the log. Every
-	// grouping has to add up to the same.
+	// grouping must add up the same.
 	for _, groupBy := range GroupBys() {
 		whole, err := st.Usage(ctx, UsageQuery{
 			OrgID: f.orgID, From: day, To: day.AddDate(0, 0, 3),

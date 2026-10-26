@@ -8,28 +8,25 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// Provider is a hosted OpenAI-compatible endpoint Keera Gateway knows by name,
-// so a model needs only an alias, a model id and an API key to use it (and,
-// for Infomaniak, a product id).
+// Provider is a hosted OpenAI-compatible endpoint known by name, so a model
+// needs only an alias, a model id and an API key (and, for Infomaniak, a
+// product id).
 //
-// A provider is a table of defaults, not an adapter: these endpoints already
-// speak the API the gateway forwards. Anthropic and OpenAI are also sent their
-// own APIs untranslated when a client speaks them; the gateway does that by
-// the provider's name. See docs/gateway.md.
+// A provider is a table of defaults, not an adapter. Anthropic and OpenAI are
+// also sent their own APIs untranslated. See docs/gateway.md.
 type Provider struct {
 	Name string `json:"name"`
 	// Endpoint is the OpenAI-compatible base URL, without a trailing slash.
 	// With NeedsProductID it is a template holding {product_id}.
 	Endpoint string `json:"endpoint"`
 	// NeedsProductID says each customer has their own endpoint, as at
-	// Infomaniak. An entry then states `product_id` or writes its own
-	// `backends`.
+	// Infomaniak. An entry then states `product_id` or its own `backends`.
 	NeedsProductID bool `json:"needs_product_id,omitempty"`
 	// CachedInput says the provider publishes a discounted rate for tokens
 	// served from its prompt cache.
 	CachedInput bool `json:"cached_input"`
-	// Location is where the provider serves its models, and so where prompts
-	// go: ch or usa. It is the default for every model declared against it.
+	// Location is where prompts go: ch or usa. It is the default for its
+	// models.
 	Location string `json:"location"`
 	// Kinds are the API surfaces the endpoint serves.
 	Kinds  []policy.Kind   `json:"kinds"`
@@ -38,32 +35,28 @@ type Provider struct {
 	Summary string `json:"summary"`
 }
 
-// ProviderModel is one model the provider serves, with the numbers a catalogue
-// entry would otherwise have to state by hand.
+// ProviderModel is one model the provider serves, with its numbers.
 type ProviderModel struct {
 	ID string `json:"id"`
 	// DisplayName is the model's name for people, such as Claude Haiku 5.5.
 	DisplayName string `json:"display_name"`
 	MaxContext  int    `json:"max_context_tokens"`
-	// ReleaseDate is the day the model came out, as YYYY-MM-DD, or empty when
-	// it is not known.
+	// ReleaseDate is the day the model came out, as YYYY-MM-DD, or empty.
 	ReleaseDate         string `json:"release_date,omitempty"`
 	InputMicrosPerMTok  int64  `json:"input_micros_per_mtok"`
 	OutputMicrosPerMTok int64  `json:"output_micros_per_mtok"`
 	// CachedInputMicrosPerMTok is the published rate for an input token
-	// served from the prompt cache. A coding agent resends its context every
-	// turn, so without it a long session is priced far too high. Zero means
-	// no such rate, and those tokens cost the full input price.
+	// served from the prompt cache. Agents resend their context every turn,
+	// so this matters. Zero means none: the input price applies.
 	CachedInputMicrosPerMTok int64 `json:"cached_input_micros_per_mtok"`
 	// CacheWriteMicrosPerMTok is the published rate for an input token
-	// written to the prompt cache. Zero means no such rate, and a write costs
-	// the input price.
+	// written to the prompt cache. Zero means none: the input price applies.
 	CacheWriteMicrosPerMTok int64 `json:"cache_write_micros_per_mtok,omitempty"`
 	// LongPrompt is the dearer prices for a long prompt, for a model priced
 	// by prompt length.
 	LongPrompt *policy.PriceTier `json:"long_prompt,omitempty"`
 	// Description is the default for an entry that states none, so routers
-	// never choose between bare aliases. An entry's own description wins.
+	// never choose between bare aliases.
 	Description string `json:"description"`
 	// Snapshot is the dated id the maker also names the model by, as in
 	// claude-haiku-4-5-20251001. Claude Code knows such a model only by it.
@@ -72,28 +65,21 @@ type ProviderModel struct {
 
 // providers is the built-in table.
 //
-// Prices are micro-units of CHF per million tokens, at each provider's list
-// price: a starting point for showback, which an entry can override.
+// Prices are micro-CHF per million tokens, at list price; an entry can
+// override them. Last checked against each pricing page on 2026-10-08.
 //
-// Release dates come from each maker's own announcement. An FP8 build takes
-// the date of the model it was made from.
+// Release dates come from each maker's announcement. An FP8 build takes the
+// date of its base model. Retired models are dropped before they retire.
 //
-// Last checked against each pricing page on 2026-10-08. This is not a live
-// feed, so a later price cut is over-charged until the next build.
-//
-// Retired models are dropped before their retirement date: a row for a model
-// nobody can call is worse than none.
-//
-// Descriptions say what the other fields cannot: how big a model is and what
-// it suits. A router reads them beside other providers' models and knows none
-// by id, so they neither rank a model against its siblings nor name one by
-// id. They leave out price, context, age and where the model runs.
+// Descriptions say how big a model is and what it suits. A router reads them
+// beside other providers' models, so they do not compare a model with its
+// siblings or name one by id. They leave out price, context, age and
+// location.
 var providers = []Provider{{
 	Name:    "anthropic",
 	Summary: "Anthropic's own Claude models, on Anthropic's own API.",
-	// Both of Anthropic's APIs live under this address: /v1/messages, which
-	// Messages clients are sent, and the OpenAI-compatible /v1/chat/completions,
-	// which every other client is.
+	// Both of Anthropic's APIs live here: /v1/messages for Messages clients,
+	// and /v1/chat/completions for every other client.
 	Endpoint:    "https://api.anthropic.com/v1",
 	CachedInput: true,
 	Location:    "usa",
@@ -177,9 +163,9 @@ var providers = []Provider{{
 	CachedInput: true,
 	Location:    "usa",
 	Kinds:       []policy.Kind{policy.KindChat},
-	// Past 272k input tokens, OpenAI charges twice as much for input and one
-	// and a half times as much for output on its newer models. From gpt-5.6
-	// on, a cache write costs a quarter more than input; before, nothing more.
+	// Past 272k input tokens, OpenAI's newer models cost twice as much for
+	// input and 1.5 times for output. From gpt-5.6 on, a cache write costs a
+	// quarter more than input; before, the same.
 	Models: []ProviderModel{{
 		ID: "gpt-6-astra", DisplayName: "GPT-6 Astra",
 		MaxContext: 1_050_000, ReleaseDate: "2026-09-03",
@@ -406,9 +392,8 @@ var providers = []Provider{{
 	Endpoint: "https://llm.stoney-cloud.com/v1",
 	Location: "ch",
 	Kinds:    []policy.Kind{policy.KindChat},
-	// Ids are the upstream names, capitals and all, as the endpoint expects.
-	// The Nemotron id is spelled as stepping stone's own documentation calls
-	// it, with NVIDIA in capitals.
+	// Ids are the upstream names, capitals and all. The Nemotron id is spelled
+	// as stepping stone's documentation spells it.
 	Models: []ProviderModel{{
 		ID: "MiniMaxAI/MiniMax-M2.5", DisplayName: "MiniMax M2.5",
 		MaxContext: 192_000, ReleaseDate: "2026-02-12",
@@ -481,11 +466,10 @@ var providers = []Provider{{
 	Endpoint: "https://maas.phoeniqs.com/v1",
 	Location: "ch",
 	Kinds:    []policy.Kind{policy.KindChat},
-	// Ids are Phoeniqs's own names. One keeps its name when the model behind
-	// it gets a minor upgrade, so the release dates are those of the models
-	// served on 2026-10-21: GLM-5.2 for inference-glm5, GLM-5.3-Flash for
-	// inference-glm5-flash and its -compact, and MinerU2.5-Pro-2605 for
-	// inference-miner-u25.
+	// Ids are Phoeniqs's own names, kept across minor upgrades. Release dates
+	// are of the models served on 2026-10-21: GLM-5.2 for inference-glm5,
+	// GLM-5.3-Flash for inference-glm5-flash and its -compact, and
+	// MinerU2.5-Pro-2605 for inference-miner-u25.
 	Models: []ProviderModel{{
 		ID: "inference-glm5", DisplayName: "GLM-5",
 		MaxContext: 131_072, ReleaseDate: "2026-08-28",
@@ -578,9 +562,8 @@ var providers = []Provider{{
 	Endpoint: "https://api.inference.cscs.ch/v1",
 	Location: "ch",
 	Kinds:    []policy.Kind{policy.KindChat},
-	// Ids are the upstream names, capitals and all, as the endpoint expects.
-	// A -thinking id is the same weights with reasoning on and tool calls off,
-	// so it keeps the release date of its model.
+	// Ids are the upstream names, capitals and all. A -thinking id is the same
+	// weights with reasoning on and tool calls off, so it keeps the date.
 	Models: []ProviderModel{{
 		ID: "moonshotai/Kimi-K2.7-Code", DisplayName: "Kimi K2.7 Code",
 		MaxContext: 262_144, ReleaseDate: "2026-06-12",
@@ -634,8 +617,7 @@ var providers = []Provider{{
 	}},
 }}
 
-// Providers returns a copy of the built-in table, so a caller cannot edit the
-// defaults every catalogue is parsed against.
+// Providers returns a copy of the built-in table, so a caller cannot edit it.
 func Providers() []Provider {
 	out := make([]Provider, len(providers))
 	for i, p := range providers {
@@ -686,8 +668,8 @@ func (p Provider) Model(id string) (ProviderModel, bool) {
 	return ProviderModel{}, false
 }
 
-// longPrompt is a copy of the model's long-prompt prices, so a model given
-// them cannot change the table's.
+// longPrompt is a copy of the model's long-prompt prices, so the table stays
+// unchanged.
 func (m ProviderModel) longPrompt() *policy.PriceTier {
 	if m.LongPrompt == nil {
 		return nil
@@ -717,11 +699,8 @@ func joinNames[T any](items []T, name func(T) string) string {
 // deployment knows.
 const productIDPlaceholder = "{product_id}"
 
-// fillProductID writes the product id into the entry's backends and checks
-// that no placeholder is left.
-//
-// It fills every backend, not only the provider's default, because an entry
-// may route through its own egress proxy with the same hole in its path.
+// fillProductID writes the product id into every backend of the entry, which
+// may include its own egress proxy, and checks that no placeholder is left.
 func fillProductID(p Provider, backends []string, productID string) ([]string, error) {
 	productID = strings.TrimSpace(productID)
 	switch {
@@ -729,8 +708,8 @@ func fillProductID(p Provider, backends []string, productID string) ([]string, e
 		return nil, fmt.Errorf("the %s provider serves everybody at the same address and "+
 			"takes no product_id", p.Name)
 	case productID != "" && !ValidProductID(productID):
-		// It goes into a URL path, where a slash or space would build a
-		// different working-looking address.
+		// It goes into a URL path, where a slash or space would change the
+		// address.
 		return nil, fmt.Errorf("product_id %q must be letters, digits, hyphens and "+
 			"underscores: it is written into the endpoint", productID)
 	}
@@ -738,8 +717,7 @@ func fillProductID(p Provider, backends []string, productID string) ([]string, e
 	filled := make([]string, len(backends))
 	for i, b := range backends {
 		filled[i] = b
-		// Without an id the placeholder stays, so the check below reports it
-		// rather than a 404 on an empty path segment later.
+		// Without an id the placeholder stays, for the check below to report.
 		if productID != "" {
 			filled[i] = strings.ReplaceAll(b, productIDPlaceholder, productID)
 		}
@@ -767,8 +745,7 @@ func ValidProductID(id string) bool {
 }
 
 // applyProvider fills in what the named provider implies and the entry did
-// not state. The entry always wins, so a catalogue can point a provider at an
-// egress proxy or set its own internal prices.
+// not state. The entry always wins, such as an egress proxy or its own prices.
 func applyProvider(m Model) (Model, error) {
 	p, found := provider(m.Provider)
 	if !found {
@@ -794,9 +771,8 @@ func applyProvider(m Model) (Model, error) {
 }
 
 // Check refuses a model the provider cannot serve or this build cannot bill:
-// a kind the provider has no endpoint for, or a model missing from the price
-// table that states no prices of its own. Catalogue files and the control API
-// both run it, so neither accepts what the other refuses.
+// a kind with no endpoint, or a model missing from the price table that states
+// no prices. Files and the control API both run it.
 func (p Provider) Check(kind policy.Kind, backendModel string, priced bool) error {
 	if kind != "" && !slices.Contains(p.Kinds, kind) {
 		return fmt.Errorf("provider %s serves only %s, not %q",
@@ -806,8 +782,8 @@ func (p Provider) Check(kind policy.Kind, backendModel string, priced bool) erro
 		// The caller's own check reports it, in terms of this provider.
 		return nil
 	}
-	// A model newer than this build must be priced by hand: a model that
-	// silently costs nothing is one no budget can hold.
+	// A model newer than this build must be priced by hand, or no budget
+	// could hold it.
 	if _, known := p.Model(backendModel); !known && !priced {
 		return fmt.Errorf("%s is not in the Keera Gateway price table for %s "+
 			"(it knows: %s); "+

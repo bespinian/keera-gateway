@@ -6,8 +6,7 @@ import (
 	"testing"
 )
 
-// A PostFinance Checkout account switches payments on, and with it each
-// provider key's calls take from the credit.
+// A PostFinance Checkout account switches payments on.
 func TestAPostFinanceAccountSwitchesPaymentsOn(t *testing.T) {
 	c, err := loadWith(t, valid(map[string]string{
 		"KEERA_PUBLIC_URL":                   "https://keera.example",

@@ -131,7 +131,7 @@ export async function orgsView(ctx) {
 }
 
 // newOrg asks for a new organisation. switchTo moves the panel to it, so the
-// first-run checklist's next step does not still say "pick one".
+// first-run checklist does not still say "pick one".
 export function newOrg(ctx, { switchTo = false } = {}) {
   const name = h("input", {
     class: "input",
@@ -167,8 +167,8 @@ export function newOrg(ctx, { switchTo = false } = {}) {
   });
 }
 
-// liftLimit gives a self-signed-up organisation what it would otherwise get
-// with its first payment.
+// liftLimit gives a self-signed-up organisation what its first payment
+// would.
 function liftLimit(ctx, org) {
   formModal({
     title: `Lift the limit of ${org.name}`,
@@ -206,8 +206,8 @@ function liftLimit(ctx, org) {
   });
 }
 
-// keepOrg updates the shell's copy of the list, which the topbar's switcher
-// reads and reload() does not fetch again.
+// keepOrg updates the shell's copy of the list, which the switcher reads and
+// reload() does not refetch.
 function keepOrg(ctx, id, saved) {
   const i = (ctx.state.orgs || []).findIndex((o) => o.id === id);
   if (i >= 0) ctx.state.orgs[i] = saved;
@@ -251,8 +251,7 @@ function orgSettings(ctx, org) {
 }
 
 // cannotDeleteOwn explains why the operator's own organisation cannot be
-// deleted here: it would take their user and session with it. The button is
-// not hidden, so the operator learns why and what to do.
+// deleted here: it would take their user and session with it.
 function cannotDeleteOwn(org) {
   modal({
     title: `Delete ${org.name}?`,
@@ -269,8 +268,8 @@ function cannotDeleteOwn(org) {
   });
 }
 
-// deleteOrg is the most damaging thing the panel can do, so the modal shows
-// what would go and asks for the organisation's name to be typed.
+// deleteOrg is the most damaging thing the panel can do, so it shows what
+// would go and asks for the name to be typed.
 function deleteOrg(ctx, org) {
   const summary = h("div", { class: "muted" }, "Counting what it holds…");
   const name = h("input", {
@@ -322,14 +321,14 @@ function deleteOrg(ctx, org) {
   });
   button.disabled = true;
 
-  // Loaded after the modal is up, and failing softly: the typed name already
-  // confirms the deletion.
+  // Loaded after the modal is up, and failing softly: the typed name confirms
+  // the deletion.
   Promise.all([
     api.projects(org.id).catch(() => null),
     api.users(org.id).catch(() => null),
     api.keys(org.id).catch(() => null),
   ]).then(([projects, users, keys]) => {
-    // A list that failed to load is not counted, rather than shown as 0.
+    // A list that failed to load is left out, not shown as 0.
     const counts = [
       [projects && (projects.data || []).length, "project"],
       [users && (users.data || []).length, "user"],
@@ -365,9 +364,8 @@ function deleteOrg(ctx, org) {
   });
 }
 
-/** orgNameOf is the name of orgID, or else of the organisation in view. The
- *  fallback is for a name the panel does not have; start says it opens a
- *  sentence. */
+/** orgNameOf is the name of orgID, or of the organisation in view. start
+ *  says it opens a sentence. */
 export function orgNameOf(ctx, orgID, { start = false } = {}) {
   const id = orgID || ctx.orgID || ctx.state.me.org_id;
   const name =
@@ -378,8 +376,7 @@ export function orgNameOf(ctx, orgID, { start = false } = {}) {
 }
 
 /** chooseOrg is shown on a screen that needs one organisation while the
- *  operator views all of them. It carries a picker so nobody hunts for the
- *  switcher. what is the plural of what the screen holds. */
+ *  operator views all of them. what is the plural of what the screen holds. */
 export function chooseOrg(ctx, what) {
   const orgs = ctx.state.orgs || [];
   if (!orgs.length) {

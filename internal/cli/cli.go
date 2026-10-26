@@ -1,6 +1,5 @@
-// Package cli is Keera Gateway's administration command line. It talks to a
-// gateway's control API over HTTP, so it works the same against any
-// deployment, local or remote.
+// Package cli is Keera Gateway's administration command line, over the
+// control API.
 package cli
 
 import (
@@ -13,11 +12,9 @@ import (
 	"github.com/bespinian/keera-gateway/internal/version"
 )
 
-// Run dispatches one invocation. It returns an error rather than exiting, so
-// the entry point owns the exit code.
+// Run returns an error rather than exiting, so the caller owns the exit code.
 func Run(ctx context.Context, args []string) error {
-	// --url and --color mean the same on every command, so they are taken off
-	// first and no command declares them.
+	// --url and --color apply to every command, so they are taken off first.
 	args, err := takeColorMode(args)
 	if err != nil {
 		return err
@@ -59,8 +56,7 @@ func Run(ctx context.Context, args []string) error {
 		return sandboxCmd(ctx, rest)
 	case "guardrail":
 		return guardrailCmd(ctx, rest)
-	// One part of a guardrail each: the same call as 'guardrail set', with
-	// fewer flags to read.
+	// Each sets one part of a guardrail, like 'guardrail set' with fewer flags.
 	case "limit":
 		return facetCmd(ctx, "limit", rest)
 	case "budget":
@@ -96,8 +92,6 @@ func Run(ctx context.Context, args []string) error {
 	}
 }
 
-// versionCmd prints the build version. It refuses arguments rather than
-// ignore them.
 func versionCmd(args []string) error {
 	if done, err := newCmdRun("version", args).parse(); done {
 		return err
@@ -106,19 +100,17 @@ func versionCmd(args []string) error {
 	return nil
 }
 
-// ExitCode is an error that only sets the exit status. What went wrong was
-// already said by the program the command ran, such as ssh.
+// ExitCode only sets the exit status. The program the command ran, such as
+// ssh, has already said what went wrong.
 type ExitCode int
 
 func (e ExitCode) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
 
-// Fail prints a command's error, painting the prefix only when stderr is a
-// terminal.
+// Fail prints a command's error.
 func Fail(err error) {
 	fmt.Fprintln(os.Stderr, styleErr.bad("keera:"), err)
 }
 
-// takeURL moves the global --url from the arguments into urlFlag.
 func takeURL(args []string) ([]string, error) {
 	return takeGlobal(args, "url", func(v string) error {
 		if v == "" {
@@ -126,16 +118,15 @@ func takeURL(args []string) ([]string, error) {
 		}
 		urlFlag = v
 		if !strings.Contains(v, "://") {
-			// People type a bare host, and deployments are served over https.
+			// People type a bare host; deployments are served over https.
 			urlFlag = "https://" + v
 		}
 		return nil
 	})
 }
 
-// takeGlobal takes a global flag (--name value or --name=value) out of args
-// and hands each value to set, so no command can forget to declare it. It
-// stops at "--": the rest belongs to the command being run, as in
+// takeGlobal takes a global flag out of args and hands each value to set. It
+// stops at "--", since the rest belongs to the command being run, as in
 // `keera sandbox ssh box -- git status`.
 func takeGlobal(args []string, name string, set func(string) error) ([]string, error) {
 	out := make([]string, 0, len(args))

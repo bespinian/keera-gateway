@@ -21,12 +21,12 @@ import (
 	"github.com/bespinian/keera-gateway/internal/sandbox"
 )
 
-// GitHub mints installation tokens of a GitHub App: one repository, contents
-// read and write, and nothing else. GitHub fixes their lifetime at an hour, so
-// a sandbox that lives longer asks the gateway for a fresh one.
+// GitHub mints GitHub App installation tokens: one repository, contents read
+// and write, nothing else. They last an hour, so a longer sandbox asks for a
+// fresh one.
 //
-// GitHub cannot revoke such a token without the token itself, which is not
-// kept, so the last one can outlive its sandbox by up to an hour.
+// Revoking one needs the token itself, which is not kept, so the last one can
+// outlive its sandbox by up to an hour.
 type GitHub struct {
 	api   *url.URL
 	web   *url.URL
@@ -164,8 +164,8 @@ func (g *GitHub) appJWT() (string, error) {
 	return unsigned + "." + enc.EncodeToString(sig), nil
 }
 
-// parseRSAKey reads a PEM private key. GitHub hands out PKCS #1; PKCS #8 is
-// what a key converted by another tool usually is.
+// parseRSAKey reads a PEM private key: PKCS #1 from GitHub, or PKCS #8 from a
+// key converted by another tool.
 func parseRSAKey(raw []byte) (*rsa.PrivateKey, error) {
 	block, _ := pem.Decode(raw)
 	if block == nil {

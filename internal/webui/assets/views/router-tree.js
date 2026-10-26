@@ -1,8 +1,8 @@
 // A router's steps as data. No DOM here, so the guardrails dialog can use it
 // without loading the editor.
 //
-// The checks mirror policy.Step.problem. The control plane checks again on
-// save; checking here lets the editor show problems while drawing.
+// The checks mirror policy.Step.problem, so the editor shows problems before
+// the control plane checks again on save.
 
 const MAX_STEPS = 64;
 
@@ -25,8 +25,7 @@ export function passes(kind) {
   return kind === "filter" || kind === "system_prompt" || limits(kind);
 }
 
-/** steps lists every step, each before what follows it, in the order the
- *  gateway walks them. */
+/** steps lists every step in the order the gateway walks them. */
 export function steps(start) {
   const out = [];
   const walk = (s) => {
@@ -42,8 +41,8 @@ export function steps(start) {
   return out;
 }
 
-/** newID names a step. A limit's counters are kept under the id, so it never
- *  changes once made. */
+/** newID names a step. A limit's counters are kept under the id, so it
+ *  never changes. */
 export function newID(start) {
   const taken = new Set(steps(start).map((s) => s.id));
   for (;;) {
@@ -52,7 +51,7 @@ export function newID(start) {
   }
 }
 
-/** summary is the steps along the first path, as one line for a table. */
+/** summary is the first path's steps, as one line for a table. */
 export function summary(start) {
   const out = [];
   for (let s = start; s;) {
@@ -67,8 +66,8 @@ export function summary(start) {
   return out.join(" → ");
 }
 
-/** reaches lists every model the router may send a request to. Allowing the
- *  router allows all of them. */
+/** reaches lists every model the router may send to. Allowing the router
+ *  allows all of them. */
 export function reaches(router) {
   const out = [];
   const add = (alias) => {
@@ -85,8 +84,7 @@ export function reaches(router) {
   return out;
 }
 
-/** usedBy lists the routers with a step that names the organisation's
- *  filter ref. */
+/** usedBy lists the routers with a step that names filter ref. */
 export function usedBy(routers, ref) {
   return (routers || []).filter((p) =>
     steps(p.start).some((s) => s.kind === "filter" && s.ref === ref),
@@ -95,8 +93,8 @@ export function usedBy(routers, ref) {
 
 const ID_SHAPE = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
 
-/** problems maps each step id to what is wrong with it; "" is the router as
- *  a whole. An empty map means it can be saved. refs holds the organisation's
+/** problems maps each step id to what is wrong with it; "" is the whole
+ *  router. An empty map means it can be saved. refs holds the organisation's
  *  models and filters. */
 export function problems(start, refs) {
   const out = new Map();
@@ -155,9 +153,8 @@ function stepProblem(s, refs) {
 }
 
 /** warnings flags a model filter that rewrites the request before a route
- *  step reads it, so the step judges the rewritten text. Pattern filters only
- *  take out secrets, so they don't count. Mirrors policy.Router.Warnings, in
- *  the same words. */
+ *  step reads it. Pattern filters only take out secrets, so they don't count.
+ *  Mirrors policy.Router.Warnings, in the same words. */
 export function warnings(start, filters) {
   const out = [];
   const walk = (s, rewrites) => {
@@ -187,8 +184,7 @@ export function warnings(start, filters) {
   return out;
 }
 
-/** clean drops what the gateway does not read, such as empty limits, so a
- *  saved router says only what it does. */
+/** clean drops what the gateway does not read, such as empty limits. */
 export function clean(s) {
   if (!s) return undefined;
   const out = { id: s.id, kind: s.kind };

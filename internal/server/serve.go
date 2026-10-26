@@ -30,8 +30,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// shutdownGrace is how long in-flight requests get to finish. It is generous
-// because an in-flight request is often an editor mid-completion.
+// shutdownGrace is how long in-flight requests get to finish. Generous, as one
+// is often an editor mid-completion.
 const shutdownGrace = 45 * time.Second
 
 func serve(ctx context.Context) error {
@@ -42,8 +42,7 @@ func serve(ctx context.Context) error {
 	log := newLogger(cfg)
 	setMemoryLimit(log)
 
-	// Read before the database is touched, so a mistake in a file or the key
-	// stops the start before any migration runs.
+	// Read before any migration runs, so a mistake stops the start first.
 	template, err := loadTemplate(cfg, log)
 	if err != nil {
 		return err
@@ -136,23 +135,21 @@ func serve(ctx context.Context) error {
 	wg.Go(func() { ctl.RunPayments(bg) })
 	wg.Go(func() { sweep(bg, reg, limiter, ctl, st, log) })
 	wg.Go(func() { retain(bg, st, cfg, log) })
-	// Its own loop, because it talks to a cluster and the cache sweep must
-	// never wait on one.
+	// Its own loop, so the cache sweep never waits on the cluster.
 	wg.Go(func() { sweepSandboxes(bg, sandboxes, st, log) })
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           routes(gw, ctl),
 		ReadHeaderTimeout: 15 * time.Second,
-		// No write timeout: it would cut off a streamed completion or the
-		// panel's live feed. The client's context and the upstream header
-		// timeout bound requests instead.
+		// No write timeout: it would cut off streams. The client's context and
+		// the upstream header timeout bound requests instead.
 		WriteTimeout: 0,
 		IdleTimeout:  120 * time.Second,
 		BaseContext:  func(net.Listener) context.Context { return bg },
 	}
-	// A live request stream never ends by itself, and Shutdown waits for it.
-	// Ending the streams when shutdown begins avoids waiting out the grace.
+	// Live request streams never end by themselves, so end them when shutdown
+	// begins rather than wait out the grace.
 	srv.RegisterOnShutdown(ctl.Drain)
 
 	errs := make(chan error, 1)
@@ -215,8 +212,7 @@ func loadTemplate(cfg config.Config, log *slog.Logger) (store.OrgTemplate, error
 				return t, fmt.Errorf("%s: '%s' is paid by Claude subscriptions, which are off; "+
 					"set KEERA_CLAUDE_SUBSCRIPTIONS=true or take it out", cfg.ModelsFile, m.Alias)
 			}
-			// Refused here as the control API refuses it, rather than copied
-			// into every new organisation as a model the gateway cannot bill.
+			// Refused as the control API refuses it: the gateway cannot bill it.
 			if err := cfg.Platform.Lock(&models[i]); err != nil {
 				return t, fmt.Errorf("%s: '%s': %w", cfg.ModelsFile, m.Alias, err)
 			}
@@ -270,8 +266,8 @@ func buildSecrets(cfg config.Config) (*secret.Box, error) {
 }
 
 // resealSecrets moves every stored credential to KEERA_SECRET_KEY while
-// KEERA_SECRET_KEY_PREVIOUS is set, so that the previous key can be dropped.
-// A failure is only logged: the previous key still opens what it sealed.
+// KEERA_SECRET_KEY_PREVIOUS is set, so the previous key can be dropped. A
+// failure is only logged: the previous key still works.
 func resealSecrets(ctx context.Context, st *store.Store, secrets *secret.Box, log *slog.Logger) {
 	if !secrets.Rotating() {
 		return
@@ -319,8 +315,8 @@ func buildRegistry(ctx context.Context, st *store.Store, cfg config.Config,
 	return reg, nil
 }
 
-// buildProviders discovers the identity providers. Discovery runs at start, so
-// a typo in an issuer URL fails the start rather than the first sign-in.
+// buildProviders discovers the identity providers at start, so a typo in an
+// issuer URL fails the start rather than the first sign-in.
 func buildProviders(ctx context.Context, cfg config.Config, log *slog.Logger) (authn.Providers, error) {
 	providers, err := authn.NewProviders(ctx, cfg.OIDC, nil)
 	if err != nil {
@@ -342,9 +338,8 @@ func buildProviders(ctx context.Context, cfg config.Config, log *slog.Logger) (a
 }
 
 // warnGoogleGroups warns about a group mapping on Google Workspace, which
-// issues no groups claim, so a mapped group matches nobody. An admin group is
-// worse: it stops roles being assigned anywhere else, so nobody can ever be
-// made an administrator.
+// sends no groups claim, so it matches nobody. A mapped admin group means
+// nobody can ever become an administrator.
 func warnGoogleGroups(p *authn.OIDC, log *slog.Logger) {
 	if !p.IsGoogle() {
 		return
@@ -365,9 +360,8 @@ func warnGoogleGroups(p *authn.OIDC, log *slog.Logger) {
 	}
 }
 
-// routes sends inference and MCP to the gateway handler and everything else
-// (panel, control API, sandbox attach, probes) to the control handler, so a
-// deployment publishes one port. Each handler brings its own middleware.
+// routes sends inference and MCP to the gateway handler and everything else to
+// the control handler, so a deployment publishes one port.
 func routes(gw *gateway.Server, ctl *control.Server) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle(httpx.InferencePrefix+"/", gw.Handler())
@@ -377,8 +371,7 @@ func routes(gw *gateway.Server, ctl *control.Server) http.Handler {
 }
 
 // noInferenceHere answers a client given the panel's address, or the old
-// two-port one, without /api. The panel would answer with its page or a bare
-// 405, which clients report as nothing a person can act on.
+// two-port one, without /api, with an error that says where the API is.
 func noInferenceHere(w http.ResponseWriter, r *http.Request) {
 	msg := "the inference API is at " + httpx.InferencePrefix + r.URL.Path + ", not " + r.URL.Path +
 		": add " + httpx.InferencePrefix + " to the end of the base URL this client was given"
@@ -392,8 +385,8 @@ type limiter interface {
 }
 
 // buildLimiter returns the rate-limit buckets and a function that releases
-// them. They are in memory unless KEERA_REDIS_URL is set. With Redis, all
-// replicas share one allowance, and memory is the fallback.
+// them. With KEERA_REDIS_URL, replicas share one allowance and memory is the
+// fallback.
 func buildLimiter(ctx context.Context, cfg config.Config, mreg *metrics.Registry,
 	log *slog.Logger,
 ) (limiter, func()) {
@@ -404,8 +397,8 @@ func buildLimiter(ctx context.Context, cfg config.Config, mreg *metrics.Registry
 	opt := cfg.Redis
 	rdb := redis.NewClient(opt)
 
-	// Ping once, so an unreachable Redis shows up at start. It is a warning,
-	// not a refusal: limits fall back to per replica, and Redis stays optional.
+	// Ping once, so an unreachable Redis shows at start. Only a warning: limits
+	// fall back to per replica.
 	ping, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	if err := rdb.Ping(ping).Err(); err != nil {
@@ -423,8 +416,8 @@ func buildLimiter(ctx context.Context, cfg config.Config, mreg *metrics.Registry
 	}, log), func() { _ = rdb.Close() }
 }
 
-// sweep bounds the memory the caches hold. Without it a public endpoint keeps
-// one entry per token anyone has ever sent.
+// sweep bounds the caches' memory. Without it, a public endpoint keeps one
+// entry per token anyone ever sent.
 func sweep(ctx context.Context, reg *registry.Registry, limiter limiter,
 	ctl *control.Server, st *store.Store, log *slog.Logger,
 ) {
@@ -443,8 +436,8 @@ func sweep(ctx context.Context, reg *registry.Registry, limiter limiter,
 	})
 }
 
-// every runs fn every d until ctx is done, and once at the start too when
-// first is set.
+// every runs fn every d until ctx is done, and also at the start when first is
+// set.
 func every(ctx context.Context, d time.Duration, first bool, fn func(time.Time)) {
 	if first {
 		fn(time.Now())
@@ -461,13 +454,12 @@ func every(ctx context.Context, d time.Duration, first bool, fn func(time.Time))
 	}
 }
 
-// retentionInterval is how often retention runs. Hourly is plenty for rows
-// kept for months, and a big DELETE beside live traffic should be rare.
+// retentionInterval is how often retention runs: hourly is plenty for rows kept
+// for months.
 const retentionInterval = time.Hour
 
 // retain enforces the retention windows, if any are set. All default to
-// keeping everything: how long to keep usage and audit rows is for finance and
-// compliance to decide, not the gateway.
+// keeping everything: that is for finance and compliance to decide.
 func retain(ctx context.Context, st *store.Store, cfg config.Config, log *slog.Logger) {
 	if cfg.UsageRetention == 0 && cfg.AuditRetention == 0 {
 		log.Info("no retention window is configured; usage events and audit entries " +
@@ -477,14 +469,13 @@ func retain(ctx context.Context, st *store.Store, cfg config.Config, log *slog.L
 	log.Info("retention configured", "usage", retentionLabel(cfg.UsageRetention),
 		"audit", retentionLabel(cfg.AuditRetention))
 
-	// Once at start too, so a deployment that was down catches up now and a
-	// wrong window shows in the log right away.
+	// Once at start too, so a wrong window shows in the log right away.
 	every(ctx, retentionInterval, true, func(time.Time) { purgeOld(ctx, st, cfg, log) })
 }
 
-// purgeOld deletes the usage events and audit entries past their windows, and
-// the sandboxes and keys that ended before the usage window. The daily usage
-// totals are kept for ever: they are small, and long reports read them.
+// purgeOld deletes usage events and audit entries past their windows, and
+// sandboxes and keys that ended before the usage window. Daily usage totals are
+// kept for ever: they are small, and long reports read them.
 func purgeOld(ctx context.Context, st *store.Store, cfg config.Config, log *slog.Logger) {
 	if !myTurn(ctx, st, log, "retention", retentionInterval) {
 		return
@@ -533,9 +524,8 @@ func newLogger(cfg config.Config) *slog.Logger {
 }
 
 // buildSandboxes builds the driver and the manager, or returns nil when no
-// driver is configured. Every failure here fails the start, like OIDC
-// discovery: a missing CRD or podman should show up now, not at the first
-// request.
+// driver is configured. A failure here, such as a missing CRD or podman, fails
+// the start.
 func buildSandboxes(ctx context.Context, st *store.Store, reg *registry.Registry,
 	cfg config.Config, log *slog.Logger,
 ) (*sandbox.Manager, error) {
@@ -548,8 +538,8 @@ func buildSandboxes(ctx context.Context, st *store.Store, reg *registry.Registry
 		return nil, fmt.Errorf("sandbox driver %s: %w", cfg.Sandbox.Driver, err)
 	}
 
-	// Where a sandbox sends inference. Inside a cluster this should be the
-	// in-cluster Service, not the public name behind the load balancer.
+	// Where a sandbox sends inference. In a cluster, use the in-cluster
+	// Service, not the public name.
 	base := cfg.Sandbox.PublicURL
 	if base == "" {
 		base = cfg.PublicURL
@@ -565,8 +555,8 @@ func buildSandboxes(ctx context.Context, st *store.Store, reg *registry.Registry
 	log.Info("sandboxes enabled", "driver", driver.Name(),
 		"isolation", caps.Isolation, "warm", caps.Warm,
 		"namespace", cfg.Sandbox.Namespace, "idle_suspend", cfg.Sandbox.IdleSuspend)
-	// Without a stronger runtime, sandboxes get the same isolation as anything
-	// else on the host, which is weak for running a model's output.
+	// Without a stronger runtime, isolation is weak for running a model's
+	// output.
 	if caps.Isolation == policy.IsolationStandard {
 		log.Warn("no stronger sandbox runtime is mapped, so sandboxes run with the host's own " +
 			"isolation; a class asking for 'isolated' or 'vm' will be refused rather than " +
@@ -589,8 +579,8 @@ func buildSandboxes(ctx context.Context, st *store.Store, reg *registry.Registry
 		PublicURL:   base,
 		IdleSuspend: cfg.Sandbox.IdleSuspend,
 		Git:         git,
-		// A new sandbox key must work on every replica at once, and a revoked
-		// one must stop at once, not a cache lifetime later.
+		// A new or revoked sandbox key must take effect on every replica at
+		// once, not a cache lifetime later.
 		OnKeyChange: func(keyID string) {
 			control.Announce(context.WithoutCancel(ctx), reg, st, log, registry.KeyChange(keyID))
 		},
@@ -638,14 +628,12 @@ func buildSandboxDriver(ctx context.Context, cfg config.Config, log *slog.Logger
 			Log:      log,
 		})
 	}
-	// config refuses an unknown driver, so this is only reached by a new one
-	// added there and not here.
+	// Only reached by a driver added to config but not here.
 	return nil, fmt.Errorf("no driver called %q", cfg.Sandbox.Driver)
 }
 
-// sandboxSweepInterval is how often the sandbox sweep runs. A minute is the
-// granularity of "my sandbox is ready" and "its time is up"; more often would
-// be cluster calls for nothing.
+// sandboxSweepInterval is how often the sandbox sweep runs. A minute is fine
+// enough for "ready" and "time is up".
 const sandboxSweepInterval = time.Minute
 
 // sweepSandboxes runs the sandbox reconcile loop, on one replica at a time.
@@ -653,8 +641,8 @@ func sweepSandboxes(ctx context.Context, m *sandbox.Manager, st *store.Store, lo
 	if m == nil {
 		return
 	}
-	// Once right away too, so a restarted gateway reconciles what it left
-	// running and tears down what expired while it was down.
+	// Once right away too, so a restarted gateway tears down what expired
+	// while it was down.
 	every(ctx, sandboxSweepInterval, true, func(now time.Time) {
 		if myTurn(ctx, st, log, "sandbox-sweep", sandboxSweepInterval) {
 			m.Sweep(ctx, now)

@@ -59,9 +59,8 @@ func TestDeleteOrgTakesItsTenancyAndKeepsItsHistory(t *testing.T) {
 		"SELECT count(*) FROM users",
 		"SELECT count(*) FROM api_keys",
 		"SELECT count(*) FROM sessions",
-		// Policies and the spend roll-up name their scope by plain id, so they
-		// are cleared explicitly - and all three scopes have to go, not only
-		// the org's.
+		// Guardrails and spend name their scope by plain id, so they are
+		// cleared explicitly, for all three scopes.
 		"SELECT count(*) FROM guardrails",
 		"SELECT count(*) FROM spend",
 	} {
@@ -74,9 +73,8 @@ func TestDeleteOrgTakesItsTenancyAndKeepsItsHistory(t *testing.T) {
 		}
 	}
 
-	// Usage and audit outlive the tenant: they are what a finance reader
-	// invoices from and what a compliance reader audits, and the audit log has
-	// to keep the record that this deletion happened.
+	// Usage and audit outlive the tenant, for invoicing and the record of the
+	// deletion.
 	var events, entries int
 	if err := st.pool.QueryRow(ctx, "SELECT count(*) FROM usage_events").Scan(&events); err != nil {
 		t.Fatal(err)
@@ -94,9 +92,8 @@ func TestDeleteOrgTakesItsTenancyAndKeepsItsHistory(t *testing.T) {
 }
 
 func TestTenancyLookupsUsedForAuthorisation(t *testing.T) {
-	// The control plane checks a named project or key against the caller's own
-	// tenant before it reads or writes anything, so these have to answer for a
-	// missing id rather than about one.
+	// The control plane checks a named project or key against the caller's
+	// tenant first, so a missing id must give ErrNotFound.
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 
@@ -106,9 +103,8 @@ func TestTenancyLookupsUsedForAuthorisation(t *testing.T) {
 	if _, err := st.ProjectOrg(ctx, "nobody"); err != ErrNotFound {
 		t.Errorf("ProjectOrg for a missing project gave %v, want ErrNotFound", err)
 	}
-	// KeyOwnerOf decides whether a member may revoke a key, so the
-	// attribution has to come back exactly as stored. The fixture's key is
-	// attributed to nobody, which is the case that must never read as "mine".
+	// KeyOwnerOf decides whether a member may revoke a key. The fixture's key
+	// belongs to nobody, which must never read as "mine".
 	want := KeyOwner{OrgID: f.orgID, ProjectID: f.projectID, Kind: policy.KeyStandard}
 	if o, err := st.KeyOwnerOf(ctx, f.keyID); err != nil || o != want {
 		t.Errorf("KeyOwnerOf = %+v, %v; want %+v", o, err, want)
@@ -147,8 +143,7 @@ func TestTenancyLookupsUsedForAuthorisation(t *testing.T) {
 		t.Errorf("KeyNames = %v, %v", names, err)
 	}
 
-	// A project name is unique inside its organisation, and the error says so
-	// rather than quoting a constraint.
+	// A project name is unique inside its organisation.
 	if _, err := st.CreateProject(ctx, Project{ID: "project_2", OrgID: f.orgID, Name: "Payments Platform"}); !errors.Is(err, ErrProjectNameTaken) {
 		t.Errorf("a duplicate project name = %v, want ErrProjectNameTaken", err)
 	}
@@ -161,9 +156,7 @@ func TestTenancyLookupsUsedForAuthorisation(t *testing.T) {
 	}
 }
 
-// A rename is one column, and the point of the test is everything it did not
-// touch: a key resolves by hash and not by project name, and the guardrails,
-// the spend and the id all stay where they were.
+// A rename leaves the key, guardrails, spend and id as they were.
 func TestUpdateProjectLeavesEverythingThatPointsAtItAlone(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -191,8 +184,7 @@ func TestUpdateProjectLeavesEverythingThatPointsAtItAlone(t *testing.T) {
 		t.Errorf("clearing the description = %+v, %v", cleared, err)
 	}
 
-	// The key still resolves, and it resolves to the same project carrying the
-	// same limits. This is the whole claim the dialog in the panel makes.
+	// The key still resolves to the same project with the same limits.
 	res, err := st.LookupKey(ctx, f.hash)
 	if err != nil {
 		t.Fatalf("LookupKey after the rename: %v", err)
@@ -208,16 +200,15 @@ func TestUpdateProjectLeavesEverythingThatPointsAtItAlone(t *testing.T) {
 		t.Errorf("ProjectNames = %v, %v", names, err)
 	}
 
-	// The name is still one per organisation, and the refusal is the typed one
-	// the control plane turns into a sentence rather than a constraint name.
+	// The name is still unique per organisation.
 	if _, err := st.CreateProject(ctx, Project{ID: "project_2", OrgID: f.orgID, Name: "Data Science"}); err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
 	if _, err := st.UpdateProject(ctx, AnyOrg, "project_2", ProjectChange{Name: new("Payments")}); !errors.Is(err, ErrProjectNameTaken) {
 		t.Errorf("renaming onto a name in use = %v, want ErrProjectNameTaken", err)
 	}
-	// Renaming a project to what it is already called, such as to fix its
-	// capitalisation, is not a collision with itself.
+	// Renaming a project to its own name, such as to fix its capitalisation,
+	// is not a collision.
 	if _, err := st.UpdateProject(ctx, AnyOrg, f.projectID, ProjectChange{Name: new("Payments")}); err != nil {
 		t.Errorf("renaming a project to its own name: %v", err)
 	}
@@ -226,8 +217,7 @@ func TestUpdateProjectLeavesEverythingThatPointsAtItAlone(t *testing.T) {
 	}
 }
 
-// Deleting a project is refused while a key in it still works. The foreign key
-// cascades, so without this check a production job would lose its key.
+// Deleting a project is refused while a key in it still works.
 func TestDeleteProjectIsRefusedWhileAKeyStillWorks(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -241,8 +231,7 @@ func TestDeleteProjectIsRefusedWhileAKeyStillWorks(t *testing.T) {
 	if !errors.As(err, &inUse) {
 		t.Fatalf("DeleteProject with a live key = %v, want ProjectInUseError", err)
 	}
-	// The names are carried because "in use" is not something anybody can
-	// act on and "this credential" is.
+	// The key names are carried, so somebody can act on them.
 	if !slices.Equal(inUse.Keys, []string{"a developer's laptop"}) {
 		t.Errorf("the refusal named %v", inUse.Keys)
 	}
@@ -250,8 +239,8 @@ func TestDeleteProjectIsRefusedWhileAKeyStillWorks(t *testing.T) {
 		t.Errorf("the project went away despite the refusal: %v, %v", names, err)
 	}
 
-	// Revoked, the key is no longer a reason to refuse - but it is still a row
-	// the usage log points at, so the delete detaches it instead of taking it.
+	// A revoked key no longer blocks the delete, but usage still names it, so
+	// it is detached, not deleted.
 	if err := st.RevokeKey(ctx, AnyOrg, f.keyID); err != nil {
 		t.Fatalf("RevokeKey: %v", err)
 	}
@@ -271,8 +260,7 @@ func TestDeleteProjectIsRefusedWhileAKeyStillWorks(t *testing.T) {
 	if projectID != nil {
 		t.Errorf("the revoked key still names project %q", *projectID)
 	}
-	// The guardrails name their scope by plain id with no foreign key to
-	// follow, so nothing would have cleared them.
+	// The guardrails have no foreign key, so they must be cleared explicitly.
 	if _, err := st.GetGuardrail(ctx, policy.ScopeProject, f.projectID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("the project's guardrails outlived it: %v", err)
 	}
@@ -302,8 +290,7 @@ func TestSetupStateCountsWhatAFirstRunHasToCreate(t *testing.T) {
 	}, Credential{}); err != nil {
 		t.Fatal(err)
 	}
-	// A disabled model is not one a client can reach, so it is not a step
-	// somebody has completed.
+	// A disabled model does not count as a completed step.
 	if err := st.UpsertModel(ctx, policy.Model{
 		OrgID: f.orgID, Alias: "keera-off", Kind: policy.KindChat,
 		Backends: []string{"http://vllm:8000/v1"}, BackendModel: "served", Enabled: false,
@@ -327,9 +314,9 @@ func TestSetupStateCountsWhatAFirstRunHasToCreate(t *testing.T) {
 	}
 }
 
-// Adding someone never changes a person who is already there. Otherwise an
-// administrator could rebind a member's subject to an identity of their own
-// and sign in as them, or re-role them past the checks a role change has.
+// Adding someone never changes an existing person. Otherwise an administrator
+// could rebind a member's subject to their own identity, or change their role
+// past the usual checks.
 func TestAddUserLeavesAnExistingPersonAlone(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -354,8 +341,8 @@ func TestAddUserLeavesAnExistingPersonAlone(t *testing.T) {
 	}
 }
 
-// A taken email domain refuses the whole create. An organisation created
-// before the domain was refused would be made a second time on the retry.
+// A taken email domain refuses the whole create, so a retry does not create
+// the organisation twice.
 func TestCreateOrgWithATakenDomainCreatesNothing(t *testing.T) {
 	st, ctx := db(t)
 	if _, err := st.CreateOrg(ctx, Org{
@@ -380,9 +367,8 @@ func TestCreateOrgWithATakenDomainCreatesNothing(t *testing.T) {
 	}
 }
 
-// Names are unique across organisations, ignoring case, on create and on
-// rename alike. A rename and a domain change go in one statement, so a refused
-// domain keeps the old name too.
+// Organisation names are unique, ignoring case. A rename and a domain change
+// go in one statement, so a refused domain keeps the old name too.
 func TestOrgNamesAreUnique(t *testing.T) {
 	st, ctx := db(t)
 	for _, o := range []Org{
@@ -410,7 +396,7 @@ func TestOrgNamesAreUnique(t *testing.T) {
 	if _, err := st.UpdateOrg(ctx, "org_2", OrgChange{Name: &taken}); !errors.Is(err, ErrOrgNameTaken) {
 		t.Errorf("renaming onto a name in use = %v, want ErrOrgNameTaken", err)
 	}
-	// Changing only the capitalisation is not a collision with itself.
+	// Changing only the capitalisation is not a collision.
 	lower := "example bank ag"
 	if _, err := st.UpdateOrg(ctx, "org_1", OrgChange{Name: &lower}); err != nil {
 		t.Errorf("renaming an organisation to its own name in lower case: %v", err)
@@ -435,8 +421,8 @@ func TestOrgNamesAreUnique(t *testing.T) {
 	}
 }
 
-// Every working key is in a project, so a new organisation comes with one,
-// and a key issued without a project goes in the oldest project there is.
+// A new organisation comes with a project, and a key issued without one goes
+// in the oldest.
 func TestAKeyWithoutAProjectGoesInTheOldestOne(t *testing.T) {
 	st, ctx := db(t)
 	if _, err := st.CreateOrg(ctx, Org{ID: "org_1", Name: "Example Bank"}, OrgTemplate{}); err != nil {
@@ -479,8 +465,8 @@ func TestAKeyWithoutAProjectGoesInTheOldestOne(t *testing.T) {
 		t.Errorf("with the first project gone = %+v, %v; want a key in project_zz", key, err)
 	}
 
-	// With no project at all there can be no keys, because only a revoked
-	// key may have none.
+	// With no project there can be no keys, since only a revoked key may have
+	// none.
 	if err := st.RevokeKey(ctx, AnyOrg, key.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -511,7 +497,7 @@ func TestListUsersSaysWhenEachPersonWasLastActive(t *testing.T) {
 		time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("CreateCLIToken: %v", err)
 	}
-	// A request after the sign-in is the later of the two, so it is what shows.
+	// A request after the sign-in is later, so it shows.
 	later := time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond)
 	if err := st.WriteEvents(ctx, []Event{{
 		TS: later, OrgID: f.orgID, ProjectID: f.projectID,
@@ -569,9 +555,8 @@ func TestListUsersSaysWhenEachPersonWasLastActive(t *testing.T) {
 	}
 }
 
-// Every write a tenant's administrator can make is held to their own
-// organisation here as well, so a handler that forgot its check still cannot
-// reach another tenant's rows.
+// Every tenant write is held to its organisation here too, so a handler that
+// forgot its check still cannot reach another tenant's rows.
 func TestAWriteHeldToAnotherOrganisationFindsNothing(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -605,7 +590,7 @@ func TestAWriteHeldToAnotherOrganisationFindsNothing(t *testing.T) {
 				[]byte("hash-of-rotated-key-32-bytes!!!!"))
 			return err
 		},
-		// The one organisation no row is in, which a caller attached to none gets.
+		// An empty orgID matches no row.
 		"RevokeKey with no organisation": func(string) error { return st.RevokeKey(ctx, "", f.keyID) },
 	} {
 		if err := write("org_2"); !errors.Is(err, ErrNotFound) {

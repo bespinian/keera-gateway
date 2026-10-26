@@ -97,8 +97,7 @@ func TestRouterRoundTripAndTheAllowListsThatNameOne(t *testing.T) {
 	if _, err := st.Router(ctx, f.orgID, safe.Alias); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Router after delete = %v, want ErrNotFound", err)
 	}
-	// Deleting it takes it off the allow-lists, so a router added later under
-	// the same alias is not allowed by accident.
+	// Deleting it takes it off the allow-lists.
 	org, err := st.GetGuardrail(ctx, policy.ScopeOrg, f.orgID)
 	if err != nil {
 		t.Fatalf("GetGuardrail: %v", err)
@@ -220,8 +219,8 @@ func TestRouterReportLeavesOutWhatNoStepPlaced(t *testing.T) {
 	}
 }
 
-// The CLI promises that a new router of a deleted one's alias starts from
-// zero, so the delete takes the old limits' counts with it, and only those.
+// A new router with a deleted one's alias starts from zero, so the delete
+// takes the old limits' counts, and only those.
 func TestDeletingARouterForgetsWhatItsLimitsCounted(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)

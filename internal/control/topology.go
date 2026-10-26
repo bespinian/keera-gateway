@@ -14,10 +14,8 @@ import (
 )
 
 // The deployment as a picture: which clients call this gateway, which models
-// they reach, and which of those run outside the customer's boundary. A model
-// in the cluster and one at a hosted provider are one row apart in the
-// catalogue, but mean very different things. A member sees only the traffic of
-// their own keys, like the request log.
+// they reach, and which of those run outside the customer's boundary. A member
+// sees only the traffic of their own keys, like the request log.
 
 // mapClient is one thing that has been calling the gateway. Clients are not
 // registered, so the list is whatever called in the window.
@@ -63,10 +61,10 @@ func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Pri
 		return
 	}
 
-	// Every one of the organisation's models is drawn, even one nobody called:
-	// a quiet hosted model is still a way out of the building. An alias it has
-	// no model for, a typo or a deleted model, is not: there is nowhere to draw
-	// it. Its requests still count on the gateway and the client.
+	// Every model is drawn, even one nobody called: a quiet hosted model is
+	// still a way out of the building. An alias with no model, such as a typo
+	// or a deleted model, has nowhere to be drawn, but its requests still count
+	// on the gateway and the client.
 	out := make([]mapModel, 0, len(models))
 	drawn := make(map[string]bool, len(models))
 	for _, m := range models {
@@ -109,9 +107,8 @@ func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Pri
 		"clients":     clients,
 		"models":      out,
 		"flows":       flows,
-		// Requests per second over the last minute, newest first. Seconds
-		// ago rather than times, so a browser clock that is off does not
-		// matter.
+		// Requests per second over the last minute, newest first. Seconds ago,
+		// not times, so a wrong browser clock does not matter.
 		"last_minute": recent,
 	})
 }

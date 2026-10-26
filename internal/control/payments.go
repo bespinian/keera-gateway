@@ -37,9 +37,8 @@ const (
 	maxTopUp = 10_000_000_000
 )
 
-// The transaction fee on every card payment, for what the payment costs: CHF
-// 0.18 plus 1.55% of the credit, the percentage at least CHF 0.20. It is paid
-// on top and not credited.
+// The fee on every card payment: CHF 0.18 plus 1.55% of the credit, the
+// percentage at least CHF 0.20. It is paid on top and not credited.
 const (
 	feeFixed   = 180_000
 	feeBP      = 155
@@ -72,8 +71,7 @@ func (s *Server) creditAccount(w http.ResponseWriter, r *http.Request, p *authn.
 		return
 	}
 	// Someone back from the payment page sees the payment now, not when the
-	// webhook arrives. PostFinance gets a few seconds; after that the page
-	// shows the payment as pending.
+	// webhook arrives. After a few seconds the page shows it as pending.
 	settleCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	s.settleRecent(settleCtx, orgID)
 	cancel()
@@ -368,9 +366,9 @@ func (s *Server) listPayments(w http.ResponseWriter, r *http.Request, p *authn.P
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// paymentReceipt is the invoice PostFinance renders for a paid payment, as a
-// PDF. It is read anew each time, so a change to the space's invoice template
-// shows in every receipt. A grant has none: nobody paid for it.
+// paymentReceipt is the PDF invoice PostFinance renders for a paid payment. It
+// is read each time, so a change to the invoice template shows in every
+// receipt. A grant has none: nobody paid for it.
 func (s *Server) paymentReceipt(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	pay := s.payments(w)
 	if pay == nil || !s.requireAdmin(w, p) {
@@ -457,10 +455,10 @@ func (s *Server) grantCredit(w http.ResponseWriter, r *http.Request, p *authn.Pr
 	httpx.WriteJSON(w, http.StatusCreated, g)
 }
 
-// postFinanceWebhook is told by PostFinance that a transaction changed. The
-// call is not trusted: it only names a transaction, which is read back over
-// the authenticated API. Only a pending or failed payment of Keera's is read,
-// since a payment given up on can still be paid late.
+// postFinanceWebhook handles PostFinance saying a transaction changed. The call
+// is not trusted: it only names a transaction, which is read back over the
+// authenticated API. Only a pending or failed Keera payment is read, since a
+// failed one can still be paid late.
 func (s *Server) postFinanceWebhook(w http.ResponseWriter, r *http.Request) {
 	pay := s.opts.Payments
 	if pay == nil {
@@ -498,9 +496,8 @@ func (s *Server) postFinanceWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// settle reads a payment's transaction, and ends the payment if the
-// transaction has ended. A failed one is read too: one given up on can still
-// be paid.
+// settle reads a payment's transaction, and ends the payment if the transaction
+// has ended. A failed payment is read too, since it can still be paid.
 func (s *Server) settle(ctx context.Context, pm store.Payment) error {
 	if pm.State == store.PaymentPaid || pm.TransactionID == 0 {
 		return nil
@@ -592,9 +589,9 @@ func (s *Server) refreshCredit(ctx context.Context) {
 const paymentsEvery = 30 * time.Second
 
 // RunPayments charges the saved cards of accounts that ran low, and settles
-// payments whose webhook never came, until ctx ends. Every replica runs it,
-// but they take turns, so each round one replica looks. A payment is still
-// credited once, whether the webhook or this check gets there first.
+// payments whose webhook never came, until ctx ends. Replicas take turns, so
+// one looks each round. A payment is credited once, whether the webhook or this
+// check gets there first.
 func (s *Server) RunPayments(ctx context.Context) {
 	if s.opts.Payments == nil {
 		return

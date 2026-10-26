@@ -10,30 +10,26 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// The text form of a pattern filter's rules, of a size route step's ceilings,
-// and of a header step's values.
-// The wire carries them as JSON; people edit and review them as text, so the
-// command line reads and prints that text.
+// The text form of filter rules, size ceilings and header values. The wire
+// carries JSON, but people edit and review text.
 
-// ruleSeparator divides a rule's expression from what it becomes. The last
-// one counts, because '=>' can appear in an expression but rarely in a
-// replacement. Both sides are trimmed, so arrows can be lined up.
+// ruleSeparator splits a rule at its last occurrence, because '=>' can appear
+// in an expression but rarely in a replacement. Both sides are trimmed.
 const ruleSeparator = "=>"
 
-// ruleRefuseToken is the right-hand side that drops the request instead of
-// replacing the match. It is the word a model filter answers with too.
+// ruleRefuseToken drops the request instead of replacing the match. A model
+// filter answers with it too.
 const ruleRefuseToken = "REFUSE"
 
-// parseRules reads a pattern filter's rules out of their text form. One rule
-// per line, blank lines and '#' comments ignored:
+// parseRules reads one rule per line, ignoring blank lines and '#' comments:
 //
 //	# what must never leave, whatever it is asked for
 //	(?i)\bsk-[a-z0-9]{20,}\b        => [CREDENTIAL]
 //	\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b => [IBAN]
 //	(?i)\bexport all customers\b    => REFUSE: that moves the customer list out
 //
-// A refusing rule may carry the sentence the sender is given, after a colon.
-// Everything else is a replacement, inserted literally.
+// A refusal may carry a sentence for the sender after a colon. Anything else
+// is a literal replacement.
 func parseRules(text string) ([]policy.FilterRule, error) {
 	var out []policy.FilterRule
 	for i, line := range strings.Split(text, "\n") {
@@ -69,15 +65,13 @@ func parseRules(text string) ([]policy.FilterRule, error) {
 	return out, nil
 }
 
-// cutRefusal reads a right-hand side that refuses, and the sentence after it.
 func cutRefusal(s string) (reason string, ok bool) {
 	if len(s) < len(ruleRefuseToken) ||
 		!strings.EqualFold(s[:len(ruleRefuseToken)], ruleRefuseToken) {
 		return "", false
 	}
 	rest := s[len(ruleRefuseToken):]
-	// The token alone, or followed by a separator and a sentence. A
-	// replacement that only starts with the word is not a refusal.
+	// A replacement that only starts with the word is not a refusal.
 	switch {
 	case rest == "":
 		return "", true
@@ -96,7 +90,7 @@ func cutRefusal(s string) (reason string, ok bool) {
 	return "", false
 }
 
-// formatRules prints rules in the form parseRules reads, arrows lined up.
+// formatRules prints what parseRules reads, arrows lined up.
 func formatRules(rules []policy.FilterRule) []string {
 	width := 0
 	for _, r := range rules {
@@ -116,8 +110,7 @@ func formatRules(rules []policy.FilterRule) []string {
 	return out
 }
 
-// parseDestinations reads a route step's destinations, and a size step's
-// ceilings beside them:
+// parseDestinations reads destinations and a size step's ceilings:
 //
 //	--destinations keera-speed:4000,keera-frontier
 //
@@ -150,8 +143,8 @@ func parseDestinations(spec string) ([]string, map[string]int, error) {
 	return aliases, ceilings, nil
 }
 
-// parseValues reads which value of a header step's header sends a request
-// where, and the destinations in the order they were written:
+// parseValues returns where each header value sends a request, and the
+// destinations in written order:
 //
 //	--values cheap=keera-speed,hard=keera-frontier
 func parseValues(spec string) (map[string]string, []string, error) {
@@ -178,7 +171,7 @@ func parseValues(spec string) (map[string]string, []string, error) {
 	return values, dests, nil
 }
 
-// parseTokenCount reads a ceiling in tokens, where 'k' means a thousand.
+// parseTokenCount reads 'k' as a thousand.
 func parseTokenCount(s string) (int, error) {
 	mult := 1
 	if rest, ok := strings.CutSuffix(strings.ToLower(s), "k"); ok {
@@ -195,7 +188,7 @@ func parseTokenCount(s string) (int, error) {
 	return n * mult, nil
 }
 
-// formatTokenCount is parseTokenCount's inverse, so '32k' prints as '32k'.
+// formatTokenCount is parseTokenCount's inverse.
 func formatTokenCount(n int) string {
 	if n >= 1000 && n%1000 == 0 {
 		return strconv.Itoa(n/1000) + "k"

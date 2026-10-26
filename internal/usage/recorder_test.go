@@ -12,20 +12,16 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// The usage log is what a deployment bills from, so these tests ask what it
-// does when it cannot write.
-//
-// A database that is down must not stop inference, so events are dropped
-// rather than block. That is only fine while what is dropped is counted, and
-// nothing is dropped unless the buffer is really full. An accepted event was
-// already charged against a budget, so the shutdown drain still writes it.
+// The usage log is billed from, so these tests cover what happens when it
+// cannot write. A database that is down must not stop inference, so events
+// are dropped, but only when the buffer is full, and counted. An accepted
+// event was already charged, so the shutdown drain still writes it.
 
 // recorded is a Writer that keeps what it was given.
 type recorded struct {
 	mu     sync.Mutex
 	events []store.Event
-	// fail, while set, is returned instead of writing: a database that is
-	// unreachable rather than slow.
+	// fail, while set, is returned instead of writing.
 	fail error
 	// block, while non-nil, holds a write until it is closed.
 	block chan struct{}
@@ -62,8 +58,8 @@ func (r *recorded) batches() int {
 	return r.calls
 }
 
-// run starts a recorder and returns it with the function that stops it and
-// waits for the drain to finish.
+// run starts a recorder and returns it with a function that stops it and waits
+// for the drain.
 func run(t *testing.T, w Writer, opts Options) (*Recorder, func()) {
 	t.Helper()
 	r := NewRecorder(w, opts, slog.New(slog.DiscardHandler))
@@ -82,12 +78,10 @@ func event(id string) store.Event {
 }
 
 func TestEverythingAcceptedBeforeShutdownIsStillWritten(t *testing.T) {
-	// Each of these was already charged against a budget, so dropping it on the
-	// way out would bill an organisation for requests its usage report does not
-	// show.
+	// These were already charged, so dropping them would bill for requests the
+	// usage report does not show.
 	w := &recorded{}
-	// A flush interval longer than the test, so the only thing that can write
-	// these is the drain itself.
+	// Only the drain can write them.
 	r, stop := run(t, w, Options{FlushInterval: time.Hour, BatchSize: 1000})
 
 	for i := range 200 {
@@ -107,11 +101,9 @@ func TestEverythingAcceptedBeforeShutdownIsStillWritten(t *testing.T) {
 }
 
 func TestTheDrainKeepsWritingAfterTheRequestContextIsGone(t *testing.T) {
-	// The drain needs a context of its own: on the cancelled one every write
-	// would fail at once, which is the same as not draining.
-	//
-	// The context is checked during the write, not after: Run cancels the drain
-	// context on its way out, so a later check would pass on a broken recorder.
+	// The drain needs its own context: on the cancelled one every write fails.
+	// It is checked during the write, because Run cancels the drain context on
+	// its way out.
 	w := &contextWriter{}
 	r, stop := run(t, w, Options{FlushInterval: time.Hour})
 	r.Record(event("a"))
@@ -129,8 +121,8 @@ func TestTheDrainKeepsWritingAfterTheRequestContextIsGone(t *testing.T) {
 	}
 }
 
-// contextWriter reports the state of the context a write was made on, as it was
-// at the moment of the write.
+// contextWriter records the state of a write's context at the time of the
+// write.
 type contextWriter struct {
 	mu       sync.Mutex
 	err      error
@@ -154,9 +146,8 @@ func (c *contextWriter) atWrite() (wrote, deadline bool, err error) {
 }
 
 func TestAFullBufferDropsAndCountsRatherThanBlockingInference(t *testing.T) {
-	// A small buffer and a wedged writer: a database that stopped answering.
-	// Record must not block longer than BlockFor, as it runs on the way out of
-	// a completion, and a stalled database would become stalled inference.
+	// A small buffer and a wedged writer. Record runs at the end of a
+	// completion, so it must not block longer than BlockFor.
 	w := &recorded{block: make(chan struct{})}
 	defer close(w.block)
 
@@ -178,15 +169,14 @@ func TestAFullBufferDropsAndCountsRatherThanBlockingInference(t *testing.T) {
 	if r.Dropped() == 0 {
 		t.Error("a wedged database and a full buffer dropped nothing; Record blocked instead")
 	}
-	// Generous: twenty calls that each waited indefinitely would not come back
-	// at all.
+	// Generous: calls that waited forever would not come back at all.
 	if limit := 20 * 20 * time.Millisecond * 3; elapsed > limit {
 		t.Errorf("twenty records took %v, want well under %v", elapsed, limit)
 	}
 }
 
-// hangWriter is a connection that stopped answering: a write only ends when
-// its context does.
+// hangWriter is a connection that stopped answering: a write ends only with its
+// context.
 type hangWriter struct{}
 
 func (hangWriter) WriteEvents(ctx context.Context, _ []store.Event) error {
@@ -195,8 +185,7 @@ func (hangWriter) WriteEvents(ctx context.Context, _ []store.Event) error {
 }
 
 func TestAHungWriteIsGivenUpAfterWriteTimeout(t *testing.T) {
-	// Without a bound, one hung connection stops the only writer until TCP
-	// gives up, and every request after that waits for buffer space.
+	// Without a bound, one hung connection stops the only writer.
 	r, _ := run(t, hangWriter{}, Options{
 		BatchSize: 1, FlushInterval: time.Millisecond, WriteTimeout: 20 * time.Millisecond,
 	})
@@ -212,8 +201,7 @@ func TestAHungWriteIsGivenUpAfterWriteTimeout(t *testing.T) {
 }
 
 func TestAFullBufferDropsAtOnceWhileWritesAreFailing(t *testing.T) {
-	// The buffer will not drain soon while the database refuses writes, so
-	// waiting BlockFor for space would only add latency to every request.
+	// While writes fail, waiting BlockFor for space would only add latency.
 	w := &recorded{fail: errors.New("connection refused")}
 	r, _ := run(t, w, Options{
 		Buffer: 1, BatchSize: 1, FlushInterval: time.Millisecond, BlockFor: time.Minute,
@@ -248,8 +236,7 @@ func TestAFullBufferDropsAtOnceWhileWritesAreFailing(t *testing.T) {
 }
 
 func TestAnEventIsNeverDroppedWhileThereIsRoomForIt(t *testing.T) {
-	// BlockFor is a last resort: a recorder whose writer keeps up must not drop
-	// anything.
+	// A writer that keeps up must not drop anything.
 	w := &recorded{}
 	r, stop := run(t, w, Options{Buffer: 4096, BatchSize: 64, FlushInterval: time.Millisecond})
 
@@ -267,8 +254,7 @@ func TestAnEventIsNeverDroppedWhileThereIsRoomForIt(t *testing.T) {
 }
 
 func TestAFailedWriteIsCountedAsLostAndNotAsWritten(t *testing.T) {
-	// A refused batch is gone, as there is no retry by design, so it must count
-	// as dropped, not as written.
+	// A refused batch is not retried, so it counts as dropped.
 	w := &recorded{fail: errors.New("connection refused")}
 	r, stop := run(t, w, Options{FlushInterval: time.Millisecond, BatchSize: 10})
 
@@ -286,8 +272,7 @@ func TestAFailedWriteIsCountedAsLostAndNotAsWritten(t *testing.T) {
 }
 
 func TestAFullBatchIsWrittenWithoutWaitingForTheTimer(t *testing.T) {
-	// Otherwise a busy gateway's log would lag a flush interval per batch, and
-	// the buffer would fill until it overflowed.
+	// Otherwise a busy gateway would lag a flush interval per batch.
 	w := &recorded{}
 	r, stop := run(t, w, Options{BatchSize: 10, FlushInterval: time.Hour})
 
@@ -302,8 +287,7 @@ func TestAFullBatchIsWrittenWithoutWaitingForTheTimer(t *testing.T) {
 	if got := len(w.seen()); got != 50 {
 		t.Fatalf("wrote %d events without the timer firing, want 50", got)
 	}
-	// Five batches of ten, not fifty writes of one: the batching is the reason
-	// this package exists.
+	// Five batches of ten, not fifty writes of one.
 	if got := w.batches(); got != 5 {
 		t.Errorf("made %d round trips for 50 events at a batch size of 10, want 5", got)
 	}
@@ -311,8 +295,7 @@ func TestAFullBatchIsWrittenWithoutWaitingForTheTimer(t *testing.T) {
 }
 
 func TestAPartialBatchIsWrittenWhenTheTimerFires(t *testing.T) {
-	// A quiet deployment's events must not wait in a half-full batch, or a
-	// gateway serving one request an hour would have an empty usage report.
+	// A quiet deployment's events must not wait in a half-full batch.
 	w := &recorded{}
 	r, stop := run(t, w, Options{BatchSize: 1000, FlushInterval: 5 * time.Millisecond})
 	r.Record(event("a"))
@@ -328,8 +311,7 @@ func TestAPartialBatchIsWrittenWhenTheTimerFires(t *testing.T) {
 }
 
 func TestAnIdleRecorderMakesNoRoundTrips(t *testing.T) {
-	// The ticker fires whether or not anything arrived. Writing empty batches
-	// would be a query per interval per replica on an idle deployment.
+	// The ticker fires on an idle deployment too: write no empty batches.
 	w := &recorded{}
 	_, stop := run(t, w, Options{FlushInterval: time.Millisecond})
 	time.Sleep(50 * time.Millisecond)
@@ -341,8 +323,8 @@ func TestAnIdleRecorderMakesNoRoundTrips(t *testing.T) {
 }
 
 func TestTheDefaultsAreTheOnesTheCommentsPromise(t *testing.T) {
-	// A deployment that tunes nothing gets these, and the buffer is the whole
-	// margin between a slow database and lost billing data.
+	// The defaults: the buffer is all that stands between a slow database and
+	// lost billing data.
 	var o Options
 	o.setDefaults()
 
@@ -373,8 +355,7 @@ func TestTheDefaultsAreTheOnesTheCommentsPromise(t *testing.T) {
 }
 
 func TestWaitReturnsOnlyOnceEverythingIsWritten(t *testing.T) {
-	// The server calls Wait during shutdown to stay up until the log is
-	// flushed. A Wait that returned early would let the process exit mid-drain.
+	// The server calls Wait on shutdown, so it must not return mid-drain.
 	w := &recorded{}
 	r, stop := run(t, w, Options{FlushInterval: time.Hour, BatchSize: 1000})
 	for range 500 {

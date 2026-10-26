@@ -14,12 +14,9 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// Probe is what one model check found.
-//
-// It targets a silent failure: when the vLLM tool-call parser does not match
-// the model, the call comes back as text in `content` with `tool_calls` empty.
-// The endpoint answers 200, nothing logs an error, and the agent never edits
-// a file.
+// Probe is what one model check found. It targets a silent failure: when the
+// vLLM tool-call parser does not match the model, the call comes back as text
+// in `content` with `tool_calls` empty, and nothing logs an error.
 type Probe struct {
 	Alias string `json:"alias"`
 	// Backend is the base URL that answered, for a model with several.
@@ -28,20 +25,19 @@ type Probe struct {
 	Reachable bool `json:"reachable"`
 	Status    int  `json:"status,omitempty"`
 	// Streamed means the response arrived as server-sent events. A buffering
-	// ingress turns the stream into one delivery at the end.
+	// ingress delivers the stream all at once at the end.
 	Streamed bool `json:"streamed"`
-	// ToolCalls is the one that matters: given a tool and a question only it
-	// can answer, the model's call came back in `tool_calls`.
+	// ToolCalls is the key result: the model's call came back in
+	// `tool_calls`.
 	ToolCalls bool `json:"tool_calls"`
-	// ToolCallAsText means the model called the tool and the parser returned
-	// it as prose: the misconfiguration worth naming.
+	// ToolCallAsText means the parser returned the model's tool call as
+	// prose.
 	ToolCallAsText bool `json:"tool_call_as_text"`
-	// ToolsOff means the backend refuses any request that offers tools, as
-	// vLLM does without --enable-auto-tool-choice. Clients that send no tools
-	// still work, so the check asked again without them.
+	// ToolsOff means the backend refuses any request with tools, as vLLM does
+	// without --enable-auto-tool-choice. The check then asks without them.
 	ToolsOff bool `json:"tools_off,omitempty"`
 	// Served is the model id the backend answered with. It catches a
-	// backend_model the inference plane does not serve.
+	// backend_model the plane does not serve.
 	Served     string `json:"served_model,omitempty"`
 	TTFTMillis int64  `json:"ttft_ms,omitempty"`
 	TotalMS    int64  `json:"total_ms,omitempty"`
@@ -50,21 +46,21 @@ type Probe struct {
 	Error    string   `json:"error,omitempty"`
 	Warnings []string `json:"warnings,omitempty"`
 	// NoCredit says the model is on the deployment's key and the
-	// organisation has no credit for it, so it was not called.
+	// organisation has no credit, so it was not called.
 	NoCredit bool `json:"no_credit,omitempty"`
-	// OK is the summary: it answered, and a chat model made a usable tool
-	// call, or its backend refuses tools and plain chat works (ToolsOff).
+	// OK means it answered, and a chat model made a usable tool call, or its
+	// backend refuses tools and plain chat works (ToolsOff).
 	OK bool `json:"ok"`
 }
 
-// probeTimeout bounds one check. A model still loading its weights will not
-// answer in time, which is itself useful to know.
+// probeTimeout limits one check. A model still loading its weights will not
+// answer in time, which is useful to know.
 const probeTimeout = 30 * time.Second
 
-// CheckModel exercises one model end to end, with the same client,
-// credentials and round-robin as real traffic. It skips serve: a check is not
-// a tenant's request, so it has no rate limit, budget or usage event. On the
-// deployment's key it needs credit and is billed, like any call there.
+// CheckModel tests one model end to end, with the same client, credentials
+// and round-robin as real traffic. It skips serve, so there is no rate limit,
+// budget or usage event. On the deployment's key it needs credit and is
+// billed.
 func (s *Server) CheckModel(ctx context.Context, m policy.Model) Probe {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
@@ -98,8 +94,8 @@ func (s *Server) CheckModel(ctx context.Context, m policy.Model) Probe {
 	}
 }
 
-// toolProbe is the tool the check offers. No model can answer it from its own
-// knowledge, so prose instead of a call is a real failure.
+// toolProbe is the tool the check offers. No model can answer it on its own,
+// so prose instead of a call is a real failure.
 var toolProbe = []map[string]any{{
 	"type": "function",
 	"function": map[string]any{
@@ -117,8 +113,7 @@ func (s *Server) checkChat(ctx context.Context, m policy.Model, p Probe) Probe {
 	start := time.Now()
 	resp := s.probeCall(ctx, m, "/chat/completions", chatProbe(m, true), &p)
 	if resp == nil && toolsOff(p) {
-		// A backend that refuses tools still works for clients that send
-		// none, so ask again without them.
+		// A backend that refuses tools still works without them.
 		p = Probe{Alias: p.Alias, ToolsOff: true}
 		start = time.Now()
 		resp = s.probeCall(ctx, m, "/chat/completions", chatProbe(m, false), &p)
@@ -152,8 +147,7 @@ func (s *Server) checkChat(ctx context.Context, m policy.Model, p Probe) Probe {
 	}
 	p.Sample = sample(text)
 
-	// The function's name in the prose means the parser does not match the
-	// model.
+	// The function's name in the prose means the parser does not match.
 	p.ToolCallAsText = !p.ToolCalls && strings.Contains(text, "get_build_status")
 
 	switch {
@@ -195,14 +189,13 @@ func chatProbe(m policy.Model, tools bool) map[string]any {
 	return body
 }
 
-// toolsOff reports vLLM's refusal of a request that offers tools when it was
-// started without tool calling.
+// toolsOff reports vLLM refusing tools because it was started without tool
+// calling.
 func toolsOff(p Probe) bool {
 	return p.Status == http.StatusBadRequest && strings.Contains(p.Error, "--enable-auto-tool-choice")
 }
 
-// probeMessage is the part of a chat message, or of a streamed delta, that a
-// check reads.
+// probeMessage is the part of a chat message or streamed delta a check reads.
 type probeMessage struct {
 	Content   string `json:"content"`
 	ToolCalls []struct {
@@ -250,8 +243,7 @@ func (r *probeReply) scan(chunk []byte) {
 	}
 }
 
-// chatWarnings collects what is worth saying about a chat check that
-// otherwise passed. None of these is a failure on its own.
+// chatWarnings collects notes on a chat check that passed. None is a failure.
 func chatWarnings(p Probe, m policy.Model) []string {
 	var out []string
 	if p.ToolsOff {
@@ -267,8 +259,8 @@ func chatWarnings(p Probe, m policy.Model) []string {
 	return append(out, servedWarnings(p, m)...)
 }
 
-// servedWarnings is the warning every kind of check can give. The completion
-// and embedding checks ask for no stream, so they must not warn about one.
+// servedWarnings is the warning every kind of check can give. Completion and
+// embedding checks ask for no stream, so they do not warn about one.
 func servedWarnings(p Probe, m policy.Model) []string {
 	if p.Served != "" && m.BackendModel != "" && p.Served != m.BackendModel {
 		return []string{fmt.Sprintf("the backend answered as %q, not %q - check the "+
@@ -277,16 +269,16 @@ func servedWarnings(p Probe, m policy.Model) []string {
 	return nil
 }
 
-// decisionProbe is the question a decision model's check asks. The answer
-// is obvious, so a wrong one says the model is not reading what it is sent.
+// decisionProbe is the question a decision model's check asks. The answer is
+// obvious, so a wrong one means the model is not reading its input.
 var decisionProbe = decisionQuestion{
 	Type:         "choice",
 	Instructions: "Which language is this text written in?",
 	Criteria:     map[string]string{"A": "English", "B": "Go source code"},
 }
 
-// checkDecision asks one question with an obvious answer. There is no stream
-// or tool call to check: routers and gates read one answer.
+// checkDecision asks one question with an obvious answer. Routers and gates
+// read one answer, so there is no stream or tool call to check.
 func (s *Server) checkDecision(ctx context.Context, m policy.Model, p Probe) Probe {
 	body, ok := s.probeAnswer(ctx, m, decisionPath,
 		decisionBody(m, decisionProbe, []string{"func Add(a, b int) int { return a + b }"}), &p)
@@ -360,7 +352,7 @@ func (s *Server) checkEmbedding(ctx context.Context, m policy.Model, p Probe) Pr
 	return p
 }
 
-// probeCall sends a check's request and records which backend answered, and
+// probeCall sends a check's request and records which backend answered and
 // its status. It returns nil when the check is over, with p.Error saying why.
 func (s *Server) probeCall(ctx context.Context, m policy.Model, path string,
 	request map[string]any, p *Probe,
@@ -377,8 +369,8 @@ func (s *Server) probeCall(ctx context.Context, m policy.Model, path string,
 	}
 	p.Reachable, p.Status = true, resp.StatusCode
 	if resp.StatusCode < 300 {
-		// Billed at its ceiling: a check reads too little of the answer to
-		// find the usage record, and it is small either way.
+		// Billed at its maximum: a check may not read far enough to find the
+		// usage record, and the cost is small.
 		output, _ := request["max_tokens"].(int)
 		if line, ok := m.Bill(policy.Tokens{
 			Input:  len(payload) / bytesPerToken,
@@ -430,7 +422,7 @@ func (s *Server) probeBody(resp *http.Response, p *Probe) ([]byte, bool) {
 }
 
 // upstreamComplaint renders a refusal as its status and the backend's
-// message, if any. The caller adds the subject ("the backend", "its model").
+// message, if any. The caller adds the subject.
 func upstreamComplaint(body []byte, status int) string {
 	if msg := upstreamText(body); msg != "" {
 		return strconv.Itoa(status) + ": " + sample(msg)
@@ -438,9 +430,8 @@ func upstreamComplaint(body []byte, status int) string {
 	return strconv.Itoa(status)
 }
 
-// unreachable explains a failed connection. Usually it is a first start:
-// vLLM loads weights for minutes before it listens, and saying so saves a
-// needless restart.
+// unreachable explains a failed connection. Usually vLLM is still loading
+// weights, which takes minutes; saying so saves a needless restart.
 func unreachable(err error) string {
 	if err == nil {
 		return ""
@@ -453,8 +444,8 @@ func unreachable(err error) string {
 	return "the backend could not be reached: " + err.Error()
 }
 
-// sample is the start of s, short enough for a report. It cuts between
-// characters, never inside one.
+// sample is the start of s, short enough for a report, cut between
+// characters.
 func sample(s string) string {
 	return shorten(strings.TrimSpace(s), 400)
 }

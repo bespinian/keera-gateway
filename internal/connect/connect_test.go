@@ -29,8 +29,7 @@ func TestTitleIsTheLabelAModelPickerShows(t *testing.T) {
 // one is the single model most tests render with.
 var one = []Model{{Alias: "keera-code"}}
 
-// A person correcting the base URL in the panel leaves a trailing slash
-// behind, which would otherwise reach a config as "…//v1".
+// A trailing slash on the base URL must not end up as "…//v1".
 func TestRenderTrimsATrailingSlashFromTheBase(t *testing.T) {
 	c, _ := Find(Clients(), "curl")
 	got := c.Render("https://keera.example.ch///", one)
@@ -42,8 +41,7 @@ func TestRenderTrimsATrailingSlashFromTheBase(t *testing.T) {
 // two is a key that may call a model and a router.
 var two = []Model{{Alias: "keera-code", MaxContext: 32_768}, {Alias: "auto"}}
 
-// A placeholder that survives Render is a config the developer has to edit,
-// which is what this package exists to prevent.
+// A placeholder that survives Render is a config the developer has to edit.
 func TestNoTemplateLeavesAPlaceholderBehind(t *testing.T) {
 	for _, c := range Clients() {
 		for _, text := range map[string]string{
@@ -58,8 +56,7 @@ func TestNoTemplateLeavesAPlaceholderBehind(t *testing.T) {
 	}
 }
 
-// Each entry must carry enough to be rendered by a caller that does not know
-// which client it is, as both the panel and the CLI walk this list.
+// Each entry must render without the caller knowing which client it is.
 func TestEveryClientIsCompleteEnoughToRender(t *testing.T) {
 	if len(Clients()) == 0 {
 		t.Fatal("the catalogue is empty")
@@ -86,15 +83,13 @@ func TestEveryClientIsCompleteEnoughToRender(t *testing.T) {
 			t.Errorf("%s's template names neither {{models}} nor {{aliases}}", c.ID)
 		}
 	}
-	// The cURL entry is the one that answers for a client nobody wrote an
-	// entry for, so its absence is a regression rather than a choice.
+	// The cURL entry covers every client without its own entry.
 	if _, found := Find(Clients(), "curl"); !found {
 		t.Error("the catalogue has no cURL entry")
 	}
 }
 
-// A JSON template has to still be JSON once it is filled in. A comma dropped
-// while editing one of these is not otherwise caught by anything.
+// A JSON template must still be JSON once filled in.
 func TestJSONTemplatesRenderToValidJSON(t *testing.T) {
 	for _, c := range Clients() {
 		if c.Lang != "json" {
@@ -128,9 +123,9 @@ func TestConfigsReadTheKeyFromTheEnvironment(t *testing.T) {
 	}
 }
 
-// TOML has no parser in the standard library, so this checks what a hand-edited
-// template gets wrong: a line that is neither a section nor a setting, and, for
-// Codex, a top-level setting below a section, which TOML reads as part of it.
+// With no TOML parser in the standard library, this checks the usual mistakes:
+// a line that is neither a section nor a setting, and a top-level setting
+// below a section, which TOML reads as part of it.
 func TestTOMLTemplatesRenderToTOML(t *testing.T) {
 	for _, c := range Clients() {
 		if c.Lang != "toml" {
@@ -164,8 +159,7 @@ func TestTOMLTemplatesRenderToTOML(t *testing.T) {
 	}
 }
 
-// A client configured by a file says which file, and one run from the shell
-// says nothing rather than guessing at a shell profile.
+// A client configured by a file names it; one run from the shell names none.
 func TestAFileClientNamesItsFile(t *testing.T) {
 	for _, key := range []string{"opencode", "pi", "codex", "claude-code"} {
 		c, found := Find(Clients(), key)
@@ -181,9 +175,8 @@ func TestAFileClientNamesItsFile(t *testing.T) {
 	}
 }
 
-// Claude Code is the one client whose base URL is the gateway's root rather
-// than its /v1: it appends the path itself, and a base carrying /v1 sends it to
-// /v1/v1/messages.
+// Claude Code's base URL is the gateway's root, not its /v1: it appends the
+// path itself.
 func TestClaudeCodeTakesTheGatewayRoot(t *testing.T) {
 	c, _ := Find(Clients(), "claude-code")
 	rendered := c.Render("https://keera.example.ch", one)
@@ -192,9 +185,7 @@ func TestClaudeCodeTakesTheGatewayRoot(t *testing.T) {
 	}
 }
 
-// Clients used side by side must describe the same model. They once did not:
-// one pinned a temperature and another an output cap, so an alias behaved
-// differently per editor.
+// Clients used side by side must describe the same model alike.
 func TestFileClientsStateTheSameWindow(t *testing.T) {
 	const maxContext = 200_000
 	window, output := Limits(maxContext)
@@ -223,8 +214,7 @@ func TestFileClientsStateTheSameWindow(t *testing.T) {
 	if model.Limit.Context != window {
 		t.Errorf("opencode declares context %d, want %d", model.Limit.Context, window)
 	}
-	// OpenCode is the one client that is given an answer length, because its
-	// schema takes context and output together or neither.
+	// Only OpenCode gets an answer length: its schema takes both or neither.
 	if model.Limit.Output != output {
 		t.Errorf("opencode declares output %d, want %d", model.Limit.Output, output)
 	}
@@ -249,28 +239,24 @@ func TestFileClientsStateTheSameWindow(t *testing.T) {
 	if got, _ := entry["contextWindow"].(float64); int(got) != window {
 		t.Errorf("pi declares context %v, want %d", entry["contextWindow"], window)
 	}
-	// The sandbox image writes this template to ~/.pi/agent/models.json and Pi
-	// expands the variable itself. That keeps a sandbox's credential in its
-	// environment, not in a file on a volume that outlives a suspend.
+	// The sandbox image writes this to ~/.pi/agent/models.json and Pi expands
+	// the variable, so the credential stays out of files on the volume.
 	if got := p.Providers.Keera.APIKey; got != "${KEERA_API_KEY}" {
 		t.Errorf("pi apiKey = %q; the sandbox image relies on Pi expanding this "+
 			"from the environment", got)
 	}
-	// Pi sends no User-Agent of its own, so without the header its requests
-	// are unidentified.
+	// Pi sends no User-Agent of its own.
 	if got := Identify(p.Providers.Keera.Headers[ClientHeader], ""); got != "pi" {
 		t.Errorf("pi's requests are identified as %q, want pi", got)
 	}
 
-	// Pi's schema needs no answer length, and the catalogue records none, so
-	// none is invented.
+	// Pi needs no answer length, so none is invented.
 	if _, stated := entry["maxTokens"]; stated {
 		t.Errorf("pi states an answer length the catalogue does not know: %v", entry["maxTokens"])
 	}
 }
 
-// A key's every model is in the config, the first as the default, so the
-// developer can switch between them without editing it.
+// Every model of a key is in the config, the first as the default.
 func TestEveryModelOfTheKeyIsConfigured(t *testing.T) {
 	for _, c := range Clients() {
 		rendered := c.Render("https://keera.example.ch", two)
@@ -315,10 +301,8 @@ func TestEveryModelOfTheKeyIsConfigured(t *testing.T) {
 	}
 }
 
-// Claude Code's block is the settings `keera connect claude-code` writes:
-// every family Claude Code asks for by Anthropic's name goes to a model the
-// key may use, a 1M model says so, and each Anthropic model is told apart by
-// every id it goes by.
+// Claude Code's block: every family goes to a model the key may use, a 1M
+// model says so, and each Anthropic model is named by every id it goes by.
 func TestClaudeCodeGetsTheSettingsConnectWrites(t *testing.T) {
 	models := []Model{
 		{
@@ -363,8 +347,7 @@ func TestClaudeCodeGetsTheSettingsConnectWrites(t *testing.T) {
 	}
 }
 
-// Only the client whose schema demands one is given an answer length. The
-// others state the window and leave the length to their own defaults.
+// Only the client whose schema demands one is given an answer length.
 func TestOnlyOpenCodeStatesAnAnswerLength(t *testing.T) {
 	for _, c := range Clients() {
 		rendered := c.Render("https://keera.example.ch", []Model{{Alias: "keera-code", MaxContext: 200_000}})
@@ -378,9 +361,7 @@ func TestOnlyOpenCodeStatesAnAnswerLength(t *testing.T) {
 	}
 }
 
-// The window a config states is the one the deployment gives, because the
-// gateway refuses a prompt that exceeds it - and an answer is a fraction of
-// that, because the rest of the window is the conversation so far.
+// A config states the deployment's window, and an answer is a fraction of it.
 func TestLimitsFollowTheModelsWindow(t *testing.T) {
 	tests := []struct {
 		maxContext int
@@ -401,8 +382,7 @@ func TestLimitsFollowTheModelsWindow(t *testing.T) {
 	}
 }
 
-// No entry pins a temperature: a reasoning model refuses a request that sets
-// one.
+// No entry pins a temperature: reasoning models refuse one.
 func TestNoClientPinsATemperature(t *testing.T) {
 	for _, c := range Clients() {
 		if strings.Contains(c.Render("https://keera.example.ch", one), "temperature") {

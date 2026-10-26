@@ -8,16 +8,15 @@ import (
 	"github.com/bespinian/keera-gateway/internal/auth"
 )
 
-// Both sides compute the challenge on their own - the command line to publish
-// it, the gateway to check the verifier - so they must agree, and on real S256.
+// The CLI and the gateway compute the challenge separately, so they must agree
+// on real S256.
 func TestTheProofKeyIsTheSameOnBothSides(t *testing.T) {
 	verifier := NewCLIVerifier()
 	challenge := CLIChallenge(verifier)
 	if CLIChallenge(verifier) != challenge {
 		t.Error("the same verifier produced two challenges")
 	}
-	// 32 bytes, unpadded base64url: the shape the control plane checks before
-	// it sends anybody to a browser.
+	// 32 bytes, unpadded base64url, as the control plane checks.
 	if len(challenge) != 43 {
 		t.Errorf("challenge = %q (%d characters), want 43", challenge, len(challenge))
 	}
@@ -31,8 +30,7 @@ func TestTheProofKeyIsTheSameOnBothSides(t *testing.T) {
 	}
 }
 
-// A leaked credential should be recognisable at a glance, and as this one
-// rather than an API key, which admits its holder to something else.
+// A leaked token should be recognisable at a glance, and not as an API key.
 func TestACommandLineTokenSaysWhatItIs(t *testing.T) {
 	token, hash := NewCLIToken()
 	if !strings.HasPrefix(token, CLITokenPrefix) {
@@ -51,8 +49,7 @@ func TestACommandLineTokenSaysWhatItIs(t *testing.T) {
 	}
 }
 
-// The code is short-lived and single-use, but it crosses a URL, so it is stored
-// as a hash like every other credential here.
+// The code crosses a URL, so it is stored as a hash like every credential.
 func TestAOneTimeCodeIsStoredAsAHash(t *testing.T) {
 	code, hash := NewCLICode()
 	if string(auth.Hash(code)) != string(hash) {

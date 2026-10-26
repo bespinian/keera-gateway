@@ -30,20 +30,16 @@ func keyFor(t *testing.T, keyID, body string, kind policy.Kind, headers ...strin
 // goBody is a chat that opens with "go".
 const goBody = `{"model":"keera-code","messages":[{"role":"user","content":"go"}]}`
 
-// stated is keyFor for goBody with the gateway's own header set, which is what
-// most of these tests mean by "the client named it".
+// stated is keyFor for goBody with the gateway's own header set.
 func stated(t *testing.T, keyID, id string) string {
 	t.Helper()
 	return keyFor(t, keyID, goBody, policy.KindChat, httpx.SessionHeader, id)
 }
 
-// The property the whole report rests on: every call an agent makes working
-// through one task hashes to the same key, and calls belonging to anything else
-// do not.
+// Every call of one task hashes to the same key, and other calls do not.
 func TestOneTasksCallsShareASessionKey(t *testing.T) {
-	// Turn one of a task, and the same task once the agent has read a file,
-	// called a tool and been given the result. What is identical between them
-	// is the opening prompt and nothing else.
+	// Turn one of a task, and a later turn after a tool call. Only the
+	// opening prompt is the same.
 	first := `{"model":"keera-code","messages":[
 		{"role":"system","content":"You are a coding agent. The date is 2026-09-09."},
 		{"role":"user","content":"rename Widget to Gadget across the repo"}]}`
@@ -65,8 +61,8 @@ func TestOneTasksCallsShareASessionKey(t *testing.T) {
 			"session that changes key mid-task is not a session", continued, opening)
 	}
 
-	// A different task, and the same task from another key, are both other
-	// sessions: one key's session must never be joinable by another.
+	// A different task, and the same task from another key, are other
+	// sessions.
 	other := strings.Replace(first, "rename Widget to Gadget", "add a health endpoint", 1)
 	if keyFor(t, "key_1", other, policy.KindChat) == opening {
 		t.Error("two different opening prompts hash to one session")
@@ -75,9 +71,8 @@ func TestOneTasksCallsShareASessionKey(t *testing.T) {
 		t.Error("the same prompt from two keys hashes to one session")
 	}
 
-	// A changed system prompt does not start a new session. Agents put the
-	// date, working directory and git branch there, so only the opening user
-	// message is hashed.
+	// A changed system prompt keeps the session: agents put the date and git
+	// branch there, so only the opening user message is hashed.
 	moved := strings.Replace(first, "2026-09-09", "2026-09-10", 1)
 	if keyFor(t, "key_1", moved, policy.KindChat) != opening {
 		t.Error("a system prompt that mentions today's date starts a new session " +
@@ -95,8 +90,7 @@ func TestAClientCanNameItsOwnSession(t *testing.T) {
 	if !store.StatedSession(named) {
 		t.Errorf("%q does not read as a key the client stated", named)
 	}
-	// The header wins over the conversation, so two tasks that open with the
-	// same word stay apart.
+	// The header wins, so two tasks that open alike stay apart.
 	if same := stated(t, "key_1", "task-43"); same == named {
 		t.Error("two stated sessions with the same opening prompt hash to one")
 	}
@@ -104,15 +98,13 @@ func TestAClientCanNameItsOwnSession(t *testing.T) {
 	if other := stated(t, "key_2", "task-42"); other == named {
 		t.Error("one key can name another key's session")
 	}
-	// Only a hash of the id is stored, so a client may put its own
-	// conversation id in the header without it being kept.
+	// Only a hash of the id is stored.
 	if strings.Contains(named, "task-42") {
 		t.Errorf("the session key %q carries the client's id verbatim", named)
 	}
 }
 
-// There is no standard header, so the ones in use are read as one: a task cut
-// in half by a spelling would be worse than no header at all.
+// There is no standard header, so the ones in use are read as one.
 func TestEveryConventionForNamingASessionIsReadAsOne(t *testing.T) {
 	want := stated(t, "key_1", "task-42")
 
@@ -131,8 +123,7 @@ func TestEveryConventionForNamingASessionIsReadAsOne(t *testing.T) {
 		}
 	}
 
-	// A request carrying two of them is a client and a proxy both having an
-	// opinion. This gateway's own header is the one to believe.
+	// With two of them, from a client and a proxy, the gateway's own wins.
 	both := keyFor(t, "key_1", goBody, policy.KindChat,
 		"X-Keera-Session", "task-42", "X-Session-Id", "something-else")
 	if both != want {
@@ -140,8 +131,7 @@ func TestEveryConventionForNamingASessionIsReadAsOne(t *testing.T) {
 			"gateway's own header names", both)
 	}
 
-	// An empty header names nothing. It falls through to the conversation
-	// rather than putting every request that carries it into one session.
+	// An empty header names nothing, so the conversation decides.
 	empty := keyFor(t, "key_1", goBody, policy.KindChat, "X-Session-Id", "   ")
 	if store.StatedSession(empty) {
 		t.Errorf("an empty session header was read as a stated session (%q)", empty)
@@ -151,8 +141,7 @@ func TestEveryConventionForNamingASessionIsReadAsOne(t *testing.T) {
 	}
 }
 
-// Only a conversation has a session: labelling the other surfaces would fill
-// reports with one-request tasks.
+// Only chat has a session.
 func TestOnlyTheChatSurfacesGetASession(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -186,8 +175,8 @@ func TestOnlyTheChatSurfacesGetASession(t *testing.T) {
 	}
 }
 
-// The walk runs on every chat request, so a body the inference plane would
-// accept must not fail here.
+// The walk runs on every chat request, so a body the plane accepts must not
+// fail here.
 func TestTheOpeningPromptIsFoundInWhateverShapeItArrives(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -244,8 +233,7 @@ func TestTheOpeningPromptIsFoundInWhateverShapeItArrives(t *testing.T) {
 	}
 }
 
-// An enormous opening prompt is hashed to a bound rather than in full, so the
-// cost of labelling a request does not follow a field the client controls.
+// Only the start of a huge opening prompt is hashed, so the cost stays small.
 func TestAnEnormousOpeningPromptIsHashedToABound(t *testing.T) {
 	body := `{"model":"keera-code","messages":[{"role":"user","content":"` +
 		strings.Repeat("a", store.MaxSessionInput+1000) + `"}]}`
@@ -254,8 +242,7 @@ func TestAnEnormousOpeningPromptIsHashedToABound(t *testing.T) {
 	}
 }
 
-// The session goes on the usage row even when a guardrail refused the request:
-// that is exactly the task somebody comes looking for.
+// The session goes on the usage row even when a guardrail refused the request.
 func TestTheUsageRowCarriesTheSessionEvenWhenTheRequestIsRefused(t *testing.T) {
 	h := newHarness(t, jsonBackend(`{"id":"1","choices":[{"message":{"content":"hi"}}],`+
 		`"usage":{"prompt_tokens":10,"completion_tokens":2}}`), nil, nil)
@@ -271,8 +258,8 @@ func TestTheUsageRowCarriesTheSessionEvenWhenTheRequestIsRefused(t *testing.T) {
 		t.Fatal("the usage row of a served chat request carries no session")
 	}
 
-	// The same task, now asking for a model this key may not use. It is
-	// refused before it is forwarded, and it has to stay part of the task.
+	// The same task, asking for a model this key may not use. The refusal
+	// stays part of the task.
 	refused := h.post(t, "/v1/chat/completions",
 		`{"model":"nothing-serves-this","messages":[`+opening+`,`+
 			`{"role":"assistant","content":"done"},{"role":"user","content":"again"}]}`)
@@ -287,8 +274,7 @@ func TestTheUsageRowCarriesTheSessionEvenWhenTheRequestIsRefused(t *testing.T) {
 	}
 }
 
-// Both chat surfaces reach the same models through the same guardrails, so one
-// conversation on either is one task.
+// One conversation on either chat surface is one task.
 func TestTheTwoChatSurfacesAgreeOnTheSession(t *testing.T) {
 	h := newHarness(t, jsonBackend(`{"id":"1","choices":[{"message":{"content":"hi"}}],`+
 		`"usage":{"prompt_tokens":10,"completion_tokens":2}}`), nil, nil)
@@ -315,9 +301,8 @@ func TestTheTwoChatSurfacesAgreeOnTheSession(t *testing.T) {
 }
 
 func TestTheOpeningOfAnUntranslatedBodyIsTheTranslations(t *testing.T) {
-	// An untranslated request must get the key its translation would give:
-	// the translation drops what changes between turns, and keys must not
-	// change with the destination.
+	// An untranslated request gets the same key its translation would, so
+	// keys do not change with the destination.
 	cases := []struct {
 		name string
 		surf surface

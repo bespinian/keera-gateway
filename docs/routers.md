@@ -152,6 +152,13 @@ Its whole cost is then charged to that limit, the model's answer and its
 filters and decisions included. A request that took the exceeded branch is not
 counted against that limit.
 
+The router's report shows how much of each budget, and of each rate limit per
+day or month, is used in its current window: `keera router report`, the
+router's screen in the panel, or `limits` in
+`GET /control/v1/routers/{alias}/report`. These are the counts the gateway
+checks against, so they can be a few seconds ahead of the database. A rate
+limit per minute is left out, because it refills as it goes.
+
 ## Rewriting before a route step
 
 A route step can be placed after a filter that rewrites the request. Then it

@@ -39,8 +39,8 @@ func claudeCodeRoutes(extra map[string]any) map[string]any {
 	return routes
 }
 
-// The whole developer set-up is one command: the key left for them is
-// activated for this machine and written where Claude Code reads it.
+// The pending key is activated for this machine and written where Claude Code
+// reads it.
 func TestConnectClaudeCodeActivatesAPendingKeyAndWritesTheSettings(t *testing.T) {
 	quiet(t)
 	t.Setenv("KEERA_CONFIG_DIR", t.TempDir())
@@ -120,7 +120,7 @@ func TestConnectClaudeCodePrintIssuesNoKey(t *testing.T) {
 	}
 }
 
-// The operator key is nobody, so it cannot hold this machine's key.
+// The operator key belongs to nobody, so it cannot hold this machine's key.
 func TestConnectClaudeCodeRefusesTheOperatorKey(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, connectRoutes("https://keera.example.ch/api", nil))
@@ -148,8 +148,8 @@ func thisMachinesKey(t *testing.T, kind string) map[string]any {
 	}
 }
 
-// Replacing the machine's key revokes the one Claude Code holds, so a model the
-// key may not use is caught before that, not after.
+// Replacing the key revokes the one Claude Code holds, so a model the key may
+// not use is caught first.
 func TestConnectClaudeCodeKeepsTheKeyWhenItMayNotUseTheModel(t *testing.T) {
 	quiet(t)
 	t.Setenv("KEERA_CONFIG_DIR", t.TempDir())
@@ -173,8 +173,7 @@ func TestConnectClaudeCodeKeepsTheKeyWhenItMayNotUseTheModel(t *testing.T) {
 	}
 }
 
-// An expired key is when people run this again, so it is replaced, not
-// refused for not being active.
+// An expired key is replaced, not refused for not being active.
 func TestConnectClaudeCodeReplacesAnExpiredKey(t *testing.T) {
 	quiet(t)
 	t.Setenv("KEERA_CONFIG_DIR", t.TempDir())
@@ -200,8 +199,8 @@ func TestConnectClaudeCodeReplacesAnExpiredKey(t *testing.T) {
 	}
 }
 
-// The Keera key a run without --subscription wrote would be sent instead of
-// the Claude sign-in, so --subscription takes it out.
+// A Keera key written by an earlier run would be sent instead of the Claude
+// sign-in, so --subscription removes it.
 func TestConnectClaudeCodeSubscriptionRemovesTheKeeraKey(t *testing.T) {
 	quiet(t)
 	t.Setenv("KEERA_CONFIG_DIR", t.TempDir())
@@ -246,7 +245,7 @@ func TestConnectClaudeCodeSubscriptionRemovesTheKeeraKey(t *testing.T) {
 }
 
 // A new key's models are only known once it is issued, so a key that may not
-// use the model asked for is revoked again rather than left behind.
+// use the model is revoked again.
 func TestConnectClaudeCodeRevokesANewKeyThatMayNotUseTheModel(t *testing.T) {
 	quiet(t)
 	t.Setenv("KEERA_CONFIG_DIR", t.TempDir())

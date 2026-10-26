@@ -27,8 +27,8 @@ func (s *Store) CreateSession(ctx context.Context, hash []byte, userID, csrf str
 	return err
 }
 
-// SessionUser is a session joined to the person it belongs to. It is one query
-// because it runs on every request the browser makes.
+// SessionUser is a session joined to its person, in one query because it runs
+// on every browser request.
 type SessionUser struct {
 	Session   Session
 	User      User
@@ -36,7 +36,7 @@ type SessionUser struct {
 }
 
 // LookupSession resolves a session cookie. An expired session, or one of a
-// disabled person, is reported as missing, so no caller has to check either.
+// disabled person, is reported as missing.
 func (s *Store) LookupSession(ctx context.Context, hash []byte) (SessionUser, error) {
 	var su SessionUser
 	dest := append([]any{&su.Session.CSRF, &su.Session.CreatedAt}, userTargets(&su.User)...)
@@ -54,9 +54,9 @@ func (s *Store) DeleteSession(ctx context.Context, hash []byte) error {
 	return err
 }
 
-// DeleteUserSessions signs one user row out of every browser and machine, in
-// its organisation only, as a role change or a revocation needs. That includes
-// pending command-line sign-ins, since their code could still mint a token.
+// DeleteUserSessions signs one user row out everywhere, in its organisation
+// only, as after a role change. That includes pending command-line sign-ins,
+// whose code could still mint a token.
 func (s *Store) DeleteUserSessions(ctx context.Context, userID string) error {
 	return deleteUserSessions(ctx, s.pool, userID)
 }
@@ -66,13 +66,13 @@ func deleteUserSessions(ctx context.Context, db querier, userID string) error {
 }
 
 // DeletePersonSessions signs a person out everywhere, in every organisation
-// they are in: the answer to a lost laptop.
+// they are in, such as after a lost laptop.
 func (s *Store) DeletePersonSessions(ctx context.Context, userID string) error {
 	return deleteSessionsWhere(ctx, s.pool, `SELECT id FROM users WHERE id = $1
 		OR external_id = (SELECT external_id FROM users WHERE id = $1)`, userID)
 }
 
-// deleteSessionsWhere ends the sign-ins of the users rows users selects.
+// deleteSessionsWhere ends the sign-ins of the user rows users selects.
 func deleteSessionsWhere(ctx context.Context, db querier, users string, args ...any) error {
 	for _, table := range []string{"sessions", "cli_codes", "cli_tokens"} {
 		if _, err := db.Exec(ctx, "DELETE FROM "+table+" WHERE user_id IN ("+users+")",
@@ -100,13 +100,11 @@ func (s *Store) moveSignIn(ctx context.Context, table string, hash []byte, userI
 		UPDATE `+table+` SET user_id = $2 WHERE id = $1 AND expires_at > now()`, hash, userID)
 }
 
-// PurgeExpired removes sessions, sign-in and sign-up flows and passkey links
-// that have run out. Every lookup already filters on expiry, so this mostly
-// keeps the tables small.
+// PurgeExpired removes expired sessions, sign-in and sign-up flows and passkey
+// links. Lookups already check expiry, so this mostly keeps the tables small.
 //
-// It also removes the refresh token of an identity no enabled row uses any
-// more, so a directory credential does not outlive the accounts it was kept
-// for. Turned on again, the person signs in again, which stores a new one.
+// It also removes the refresh token of an identity no enabled row uses, so a
+// directory credential does not outlive its accounts.
 func (s *Store) PurgeExpired(ctx context.Context) error {
 	for _, table := range []string{
 		"sessions", "login_flows", "cli_codes", "cli_tokens",
@@ -127,22 +125,19 @@ type LoginFlow struct {
 	State    string
 	Verifier string
 	Nonce    string
-	// Provider names the identity provider this login started against. The
-	// callback reads it to pick the right client, so all providers can share
-	// one redirect URI.
+	// Provider names the identity provider this login started with, so all
+	// providers can share one redirect URI.
 	Provider   string
 	RedirectTo string
-	// CLIRedirect is the loopback address a command line is waiting on, empty
-	// for a sign-in to the panel. CLIChallenge is the S256 challenge whose
-	// verifier redeems the code, and CLIState is what the command line checks
-	// the callback against.
+	// CLIRedirect is the loopback address a command line waits on, empty for
+	// the panel. CLIChallenge is the S256 challenge whose verifier redeems the
+	// code, and CLIState is what the command line checks the callback against.
 	CLIRedirect  string
 	CLIChallenge string
 	CLIState     string
 }
 
-// CLI reports whether this flow was started by a command line rather than by
-// somebody opening the panel.
+// CLI reports whether a command line started this flow.
 func (f LoginFlow) CLI() bool { return f.CLIRedirect != "" }
 
 // CreateLoginFlow records the PKCE verifier and nonce for a login about to be
@@ -156,7 +151,6 @@ func (s *Store) CreateLoginFlow(ctx context.Context, f LoginFlow, expires time.T
 	return err
 }
 
-// loginFlowColumns are the columns scanLoginFlow reads.
 const loginFlowColumns = `state, verifier, nonce, provider, redirect_to,
 	cli_redirect, cli_challenge, cli_state`
 
@@ -175,17 +169,15 @@ func (s *Store) TakeLoginFlow(ctx context.Context, state string) (LoginFlow, err
 		RETURNING `+loginFlowColumns, state))
 }
 
-// LoginFlowByState reads a flow without using it up. A passkey sign-in from
-// the command line reads its challenge this way before the browser asks for
-// the passkey, and a password sign-in reads its flow so a mistyped password
-// does not end it.
+// LoginFlowByState reads a flow without using it up, as a command-line passkey
+// sign-in needs, and so a mistyped password does not end a password sign-in.
 func (s *Store) LoginFlowByState(ctx context.Context, state string) (LoginFlow, error) {
 	return scanLoginFlow(s.pool.QueryRow(ctx, `SELECT `+loginFlowColumns+`
 		FROM login_flows WHERE state = $1 AND expires_at > now()`, state))
 }
 
-// UserByExternalID finds the row of an identity its person used last. A
-// person in several organisations has one row in each.
+// UserByExternalID finds an identity's most recently used row. A person in
+// several organisations has one row in each.
 func (s *Store) UserByExternalID(ctx context.Context, externalID string) (User, error) {
 	u, err := scanUser(s.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users
 		WHERE external_id = $1
@@ -208,14 +200,14 @@ type Membership struct {
 	OrgName string `json:"org_name"`
 	Role    string `json:"role"`
 	// Invited means the organisation added the person's address and no
-	// identity has taken that row yet. Switching to it takes it.
+	// identity has taken that row yet.
 	Invited  bool `json:"invited,omitempty"`
 	Disabled bool `json:"-"`
 }
 
-// Memberships lists the organisations of an identity, the one used last
-// first. With invitations, the rows other organisations made for email and
-// nobody has taken yet are listed too; disabled ones are no invitation.
+// Memberships lists an identity's organisations, the last used first. With
+// invitations, it also lists untaken, enabled rows other organisations made
+// for email.
 func (s *Store) Memberships(ctx context.Context, externalID, email string,
 	invitations bool,
 ) ([]Membership, error) {
@@ -242,7 +234,7 @@ func (s *Store) ExternalIDsFor(ctx context.Context, email string) ([]string, err
 }
 
 // AcceptInvitation links an identity to the row an organisation made for its
-// address. The row's role stands. ErrNotFound means there is no such row, or
+// address, keeping the row's role. ErrNotFound means there is no such row, or
 // it was withdrawn or taken meanwhile.
 func (s *Store) AcceptInvitation(ctx context.Context, orgID, email, name, externalID string) (User, error) {
 	return takeInvitation(ctx, s.pool, orgID, email, name, externalID)
@@ -286,7 +278,6 @@ func (s *Store) SetUserRole(ctx context.Context, orgID, userID, role string) err
 		userID, role, orgID)
 }
 
-// orgWhere reads the one organisation the rest of the query picks.
 func (s *Store) orgWhere(ctx context.Context, rest string, args ...any) (Org, error) {
 	o, err := scanOrg(s.pool.QueryRow(ctx, orgColumns+" FROM orgs "+rest, args...))
 	return o, notFound(err)
@@ -302,8 +293,8 @@ func (s *Store) OrgByID(ctx context.Context, orgID string) (Org, error) {
 	return s.orgWhere(ctx, "WHERE id = $1", orgID)
 }
 
-// OnlyOrg returns the single organisation, if there is exactly one. Dedicated
-// and on-premises deployments have one, and need no domain mapping.
+// OnlyOrg returns the single organisation, if there is exactly one, as in
+// dedicated and on-premises deployments.
 func (s *Store) OnlyOrg(ctx context.Context) (Org, error) {
 	return s.orgWhere(ctx, "WHERE (SELECT count(*) FROM orgs) = 1")
 }
@@ -314,8 +305,7 @@ func (s *Store) FirstOrg(ctx context.Context) (Org, error) {
 	return s.orgWhere(ctx, "ORDER BY created_at, id LIMIT 1")
 }
 
-// ErrDomainTaken is returned when another organisation already has the domain.
-// One domain maps to one tenant, so a second claim is refused.
+// ErrDomainTaken means another organisation already has the domain.
 var ErrDomainTaken = errors.New("store: that email domain belongs to another organisation")
 
 // Link identifies the person behind a sign-in.
@@ -329,26 +319,21 @@ type Link struct {
 	Role       string
 }
 
-// ErrEmailTaken is returned when a sign-in would have to take over a person who
-// is already bound to a different subject, from another provider or the same
-// one.
+// ErrEmailTaken means a sign-in would take over a person already bound to a
+// different subject.
 var ErrEmailTaken = errors.New("store: that address already belongs to a different identity")
 
 // LinkUser creates or updates the person behind an identity in one
-// organisation, matching first on the provider's subject and then on the
-// email address.
+// organisation, matching on the subject first and then on email.
 //
-// The email match lets an organisation create its people in advance: the
-// first sign-in adopts the row instead of adding a duplicate. A row that
-// already has another subject is refused: matching on email alone would let
-// another directory's user, or a reused address, take over the account and
-// its role.
+// The email match lets the first sign-in adopt a row made in advance. A row
+// that already has another subject is refused, so a reused address or another
+// directory's user cannot take over the account and its role.
 func (s *Store) LinkUser(ctx context.Context, newID string, l Link) (User, error) {
 	u, err := scanUser(s.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users
 		WHERE org_id = $1 AND external_id = $2`, l.OrgID, l.ExternalID))
 	if err == nil {
 		if !strings.EqualFold(u.Email, l.Email) || u.Name != l.Name {
-			// Every organisation the person is in follows the directory.
 			if err := s.followDirectory(ctx, l.ExternalID, l.Email, l.Name); err != nil {
 				return u, err
 			}
@@ -359,8 +344,8 @@ func (s *Store) LinkUser(ctx context.Context, newID string, l Link) (User, error
 		return User{}, err
 	}
 
-	// The guard is in the conflict clause, not a separate read, so two
-	// sign-ins racing on one address cannot both pass it.
+	// The guard is in the conflict clause, not a separate read, so two racing
+	// sign-ins cannot both pass it.
 	u, err = scanUser(s.pool.QueryRow(ctx, `INSERT INTO users (id, org_id, email, name, external_id, role)
 		VALUES ($1,$2,$3,$4,$5,$6)
 		ON CONFLICT (org_id, email) DO UPDATE

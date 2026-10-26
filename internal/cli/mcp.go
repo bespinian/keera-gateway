@@ -12,8 +12,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// mcpFlags are the fields of an MCP server, as flags. Each one left out means
-// "leave this as it is", so `keera mcp set` can change one field.
+// mcpFlags are an MCP server's fields. A flag left out keeps its value, so
+// `keera mcp set` can change one field.
 type mcpFlags struct {
 	endpoint    string
 	description string
@@ -36,7 +36,6 @@ func registerMCPFlags(fs *flag.FlagSet) *mcpFlags {
 	return f
 }
 
-// mcpPut is the body of PUT /v1/mcp-servers/{alias}.
 type mcpPut struct {
 	URL         string  `json:"url"`
 	Description string  `json:"description"`
@@ -47,7 +46,6 @@ type mcpPut struct {
 
 func mcpCmd(ctx context.Context, args []string) error {
 	m := &mcpRun{aliasRun: newAliasRun("mcp", "mcp-servers", "MCP server", args)}
-	// A server cannot be added without its endpoint.
 	m.addHint += " --endpoint <url>"
 	m.f, m.calls = registerMCPFlags(m.fs), registerCallFlags(m.fs)
 	m.fs.BoolVar(&m.f.disabled, "disabled", false, "add the server without serving it yet")
@@ -75,7 +73,6 @@ func mcpCmd(ctx context.Context, args []string) error {
 	}
 }
 
-// mcpRun is one 'keera mcp' invocation.
 type mcpRun struct {
 	*aliasRun
 	f     *mcpFlags
@@ -88,8 +85,8 @@ func (m *mcpRun) find(ctx context.Context, alias string) (policy.MCPServer, erro
 	return findAlias(ctx, m.aliasRun, alias, mcpAlias)
 }
 
-// save is 'add' and 'set': 'set' reads the server first, so a flag left out
-// keeps what is there.
+// save is 'add' and 'set'. 'set' reads the server first, so a flag left out
+// keeps its value.
 func (m *mcpRun) save(ctx context.Context) error {
 	f, alias := m.f, m.fs.Arg(0)
 	cur, err := startPut(ctx, m.aliasRun, alias, policy.MCPServer{Enabled: !f.disabled}, mcpAlias)
@@ -149,7 +146,6 @@ func (m *mcpRun) delete(ctx context.Context) error {
 	return m.deleteEntry(ctx, srv.Alias, lines)
 }
 
-// callFlags narrow 'keera mcp calls'.
 type callFlags struct {
 	server, tool string
 	who          *who
@@ -169,7 +165,6 @@ func registerCallFlags(fs *flag.FlagSet) *callFlags {
 	return f
 }
 
-// toolCalls is 'keera mcp calls', the tool-call log.
 func (m *mcpRun) toolCalls(ctx context.Context) error {
 	c, f := m.c, m.calls
 	q, err := reportQuery(ctx, c, m.orgID, f.who, f.since,
@@ -206,9 +201,9 @@ func (m *mcpRun) toolCalls(ctx context.Context) error {
 	})
 }
 
-// connect prints how to point the common clients at one server through
-// the gateway. Codex and an mcp.json read the key from the environment; the
-// Claude Code line has the shell expand it, so Claude Code stores it.
+// connect prints how to point common clients at one server. Codex and an
+// mcp.json read the key from the environment; the Claude Code line has the
+// shell expand it, so Claude Code stores it.
 func (m *mcpRun) connect(ctx context.Context) error {
 	alias := m.fs.Arg(0)
 	if _, err := m.find(ctx, alias); err != nil {
@@ -258,8 +253,7 @@ func printMCPServer(w *table, m policy.MCPServer) {
 	show(w, "enabled", yesNo(m.Enabled))
 }
 
-// mcpCredential says whether a server's credential is stored, never what it
-// is.
+// mcpCredential says whether a credential is stored, never what it is.
 func mcpCredential(m policy.MCPServer) string {
 	if m.HasAPIKey {
 		return "stored"
@@ -284,8 +278,6 @@ func printToolSummary(w *table, rows []store.ToolSummary) {
 	}
 }
 
-// outcomeWord paints a tool call's outcome. The word says the same without
-// the colour.
 func outcomeWord(o store.ToolOutcome) string {
 	switch o {
 	case store.ToolOK:

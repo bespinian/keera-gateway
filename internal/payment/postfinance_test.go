@@ -165,8 +165,8 @@ func TestAnInvoiceArrivesAsAPDF(t *testing.T) {
 	}
 }
 
-// Keera serves the document from its own address, so anything but a PDF,
-// such as a page that runs script, is not passed on.
+// Keera serves the document from its own origin, so only a PDF is passed on,
+// never a page that runs script.
 func TestAnInvoiceThatIsNotAPDFIsRefused(t *testing.T) {
 	c := testClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{

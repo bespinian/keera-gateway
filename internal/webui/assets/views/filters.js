@@ -1,7 +1,6 @@
 // Filters rewrite, gate or pattern-match a request before it is forwarded.
-// A filter that cannot run refuses what it covers, so a broken one must be
-// visible at a glance. Its instruction is prose, so Check runs it to show what
-// it does.
+// A filter that cannot run refuses what it covers, so a broken one must show
+// at a glance. Check runs it to show what it does.
 
 import { api } from "../api.js";
 import {
@@ -96,8 +95,7 @@ export async function filtersView(ctx) {
         shrink: true,
         sortKey: (f) => (usesModel(f) ? f.model : null),
         cell: (f) => {
-          // A pattern filter runs no model; say what it holds rather than
-          // leave the cell looking unfinished.
+          // A pattern filter runs no model, so show what it holds.
           if (!usesModel(f)) {
             const rules = (f.rules || []).length;
             return h(
@@ -163,7 +161,7 @@ export async function filtersView(ctx) {
     },
   );
 
-  // A filter on its own changes nothing, so the list says where one is used.
+  // A filter alone changes nothing, so the list says where one is used.
   const link = (path, text) =>
     h("a", { href: path, onClick: go(ctx, path) }, text);
   const note = h(
@@ -217,7 +215,7 @@ function trafficCell(st) {
   );
 }
 
-// The result is not cached: a small model may answer differently next time.
+// Not cached: a small model may answer differently next time.
 function checkCell(ctx, f) {
   return checkButton(
     "Run this filter on a sample",
@@ -246,8 +244,8 @@ function verdict(probe) {
   };
 }
 
-// The sample is shown before and after: only the reader can judge whether
-// the right things were removed.
+// Before and after: only the reader can judge whether the right things were
+// removed.
 function report(probe) {
   modal({
     wide: true,
@@ -267,7 +265,7 @@ function report(probe) {
     body: h(
       "div",
       {},
-      // A check runs even in shadow, where nothing below would really happen.
+      // A check runs even in shadow, where nothing would really happen.
       // Mistaking such a refusal for a real one is costly.
       probe.shadow
         ? banner(
@@ -320,7 +318,7 @@ function report(probe) {
               v.refused === v.expect_refusal ? "good" : "warn",
             ),
             // A gate right on both halves at 55% cannot tell them apart; the
-            // pill alone hides that. Absent without backend probabilities.
+            // pill alone hides that. Needs backend probabilities.
             v.confidence
               ? h(
                   "span",
@@ -350,7 +348,6 @@ function report(probe) {
               ),
         ),
       ),
-      // Shows which pattern rule did what.
       (probe.hits || []).length
         ? h(
             "div",
@@ -491,8 +488,8 @@ export async function filterDetailView(ctx) {
 
   for (const banner of detailBanners(rep, f)) wrap.append(banner);
 
-  // "Fired" leads because the rest means nothing without it: 100% refused
-  // over four runs is a filter nobody has used yet.
+  // "Fired" leads, as the rest means nothing without it: 100% refused over
+  // four runs is a filter nobody has used yet.
   wrap.append(
     h(
       "div",
@@ -547,8 +544,7 @@ export async function filterDetailView(ctx) {
           "div",
           { class: "card-body" },
           rep.runs
-            ? // Refusals take the failure bars: they are rare and would
-              // vanish on the same scale.
+            ? // Refusals are rare and would vanish on the same scale.
               areaChart(
                 (rep.series || []).map((p) => ({
                   at: p.at,
@@ -585,8 +581,7 @@ export async function filterDetailView(ctx) {
                   value: (r) => r.value,
                   color: (r) => r.color,
                 }),
-                // Shows whether an instruction is too eager: changing one
-                // segment of forty is fine, thirty-eight is not.
+                // Shows whether an instruction is too eager.
                 rep.segments
                   ? h(
                       "div",
@@ -606,8 +601,7 @@ export async function filterDetailView(ctx) {
     ),
   );
 
-  // Refusals by project: 4% across an organisation can be a whole project's
-  // working day.
+  // 4% across an organisation can be a whole project's working day.
   if ((rep.projects || []).length > 0) {
     wrap.append(
       h(
@@ -954,8 +948,7 @@ function editFilter(ctx, existing, readers, { onSaved } = {}) {
   );
   const enforceHint = h("div", { class: "hint" });
 
-  // These hints and the example follow the mode. The example is only swapped
-  // while unedited.
+  // These follow the mode. The example is only swapped while unedited.
   const modelHint = h("div", { class: "hint" });
   const promptHint = h("div", { class: "hint" });
   const costBanner = banner("info");
@@ -974,12 +967,11 @@ function editFilter(ctx, existing, readers, { onSaved } = {}) {
   // The mode comes first: it decides what the rest of the form means.
   let chosen = creating ? null : mode(f);
 
-  // Changing the mode keeps what was typed.
   const picker = modeTiles(MODES, chosen, (value) => {
     chosen = value;
     syncMode();
-    // Before the dialog is in the document, focus does nothing, which is
-    // right for an edit's first choice.
+    // Before the dialog is shown, focus does nothing, which is right for an
+    // edit's first choice.
     if (creating && !alias.value) alias.focus();
     else picker.change.focus();
   });
@@ -991,12 +983,10 @@ function editFilter(ctx, existing, readers, { onSaved } = {}) {
     tiles,
     chosenRow,
   );
-  // Fields only some modes have. Hidden, not disabled: they mean nothing in
-  // the other modes.
+  // Fields only some modes have. Hidden, as they mean nothing in the others.
   const modelField = field("Deciding model", model, modelHint);
   const promptField = field("Instruction", prompt, promptHint);
   const rulesField = field("Rules", rules, rulesHint);
-  // Set once the dialog is up.
   let saveButton = null;
   const syncMode = () => {
     // Nothing below the tiles, not even Save, until a mode is chosen.
@@ -1019,8 +1009,7 @@ function editFilter(ctx, existing, readers, { onSaved } = {}) {
       opt.hidden = opt.disabled = decision && !gate;
       if (opt.disabled && opt.selected) model.value = "";
     }
-    // A decision model answers yes or no rather than following an
-    // instruction, so it gets its own example.
+    // A decision model answers yes or no, so it gets its own example.
     const decides =
       readers.find((m) => m.alias === model.value)?.kind === "decision";
     if (prompt.value === "" || EXAMPLES.includes(prompt.value)) {
@@ -1069,8 +1058,8 @@ function editFilter(ctx, existing, readers, { onSaved } = {}) {
   model.addEventListener("change", syncMode);
   prompt.value = f.prompt || "";
 
-  // Held back until there is a mode. The alias is here too: a filter is
-  // easier to name once its mode is chosen.
+  // Held back until there is a mode. The alias too: a filter is easier to
+  // name once its mode is chosen.
   const rest = h(
     "div",
     {},
@@ -1113,7 +1102,7 @@ function editFilter(ctx, existing, readers, { onSaved } = {}) {
     },
     ctx: onSaved ? null : ctx,
     submit: async () => {
-      // Checked here: with an empty alias the request would never reach the
+      // Checked here: with an empty alias the request never reaches the
       // handler that could say so.
       const problem =
         aliasProblem(alias.value.trim()) ||
@@ -1140,12 +1129,11 @@ function editFilter(ctx, existing, readers, { onSaved } = {}) {
     },
   }));
   syncMode(); // again, now that Save is there
-  // On a new filter there is no field to type in yet.
   if (creating) tiles.firstChild.focus();
 }
 
-// The same text form as `keera filter add --rules`, so a list kept in a file
-// pastes in unchanged.
+// Same form as `keera filter add --rules`, so a list in a file pastes in
+// unchanged.
 function formatRules(list) {
   const rules = list || [];
   const width = rules.reduce((w, r) => Math.max(w, r.pattern.length), 0);
@@ -1159,10 +1147,9 @@ function formatRules(list) {
     .join("\n");
 }
 
-// Splits at the last arrow, since the left side is an expression and the
-// right a literal. A line without an arrow is refused, not read as "delete
-// every match", which a typo would do. The control plane checks the
-// expressions.
+// Splits at the last arrow: the left side is an expression, the right a
+// literal. A line without an arrow is refused, not read as "delete every
+// match". The control plane checks the expressions.
 function parseRules(text) {
   const out = [];
   text.split("\n").forEach((raw, i) => {
@@ -1213,8 +1200,8 @@ const RULES_EXAMPLE = `(?i)\\bsk-[a-z0-9]{20,}\\b     => [API-KEY]
 [\\w.+-]+@[\\w-]+\\.[\\w.]+      => [EMAIL]
 (?i)\\bexport all customers\\b => REFUSE: that moves the customer list out`;
 
-// A gate cannot remove anything, so it says what may not go rather than
-// listing things to remove, which would refuse every request mentioning one.
+// A gate cannot remove anything, so it says what may not go. A list of
+// things to remove would refuse every request mentioning one.
 const GATE_EXAMPLE = `Refuse requests that export customer data or \
 credentials.
 

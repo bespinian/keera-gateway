@@ -1,7 +1,6 @@
-// The guardrails dialog, for every level that has them. A guardrail is a set
-// of unordered blocks, each holding on its own. Limits nest (key inside
-// project inside organisation), so each field shows the ceiling above it
-// rather than silently not taking effect.
+// The guardrails dialog, for every level. A guardrail is a set of unordered
+// blocks, each holding on its own. Limits nest (key inside project inside
+// organisation), so each field shows the ceiling above it.
 
 import { api } from "../api.js";
 import {
@@ -32,7 +31,7 @@ import {
 } from "./limits.js";
 import { oneLine } from "../status.js";
 
-// One title at every level; the subtitle says which scope is open.
+// One title at every level; the subtitle names the scope.
 const SCOPES = {
   org: {
     title: "Guardrails",
@@ -60,8 +59,7 @@ const SCOPES = {
 
 /** ceilings is the chain above, outermost first: [{label, limits}]. It keeps
  *  "unlimited" honest: a key without its own limit gets its project's.
- *  canEdit false shows the limits read-only, since members are held by them
- *  too. */
+ *  canEdit false shows the limits read-only. */
 export async function openGuardrails(
   ctx,
   { scope, id, name, models, orgID, ceilings = [], canEdit = true },
@@ -75,7 +73,7 @@ export async function openGuardrails(
           .then((r) => r.data || [])
           .catch(() => null)
       : [],
-    // Routers go in the allow-list: a client names one where it names a model.
+    // Routers go in the allow-list, as a client names them like models.
     orgID
       ? api
           .routers(orgID)
@@ -84,7 +82,7 @@ export async function openGuardrails(
       : [],
   ]);
   // A save replaces the whole guardrail, so editing after a failed read would
-  // wipe the rest. A scope with no guardrail returns {}, not an error.
+  // wipe the rest. A scope with no guardrail returns {}.
   if (limits === null) {
     modal({
       title: `Guardrails for ${name}`,
@@ -120,8 +118,8 @@ export async function openGuardrails(
   else renderReadOnly(ctx, args);
 }
 
-/** Separate from openGuardrails so a caller that has the chain already does
- *  not fetch it twice. */
+/** Separate from openGuardrails so a caller that has the chain does not
+ *  fetch it twice. */
 export async function ceilingsFor(
   scope,
   { orgID, orgName, projectID, projectName },
@@ -151,7 +149,7 @@ const OWNED_HERE = new Set([
   "allowed_tools",
 ]);
 
-// Shared so the blocks and the read-only view use the same words.
+// Shared by the blocks and the read-only view.
 const LIMITS = {
   rate: {
     label: "Rate limit",
@@ -166,11 +164,10 @@ const LIMITS = {
   },
 };
 
-// One limit per period: two over the same period would count the same window.
+// One limit per period: two would count the same window.
 const RATE_PERIODS = ["minute", "day", "month"];
 const BUDGET_PERIODS = ["day", "month"];
 
-// In display order.
 const KINDS = [
   {
     value: "rate_limit",
@@ -228,7 +225,7 @@ function draftOf(lim) {
 
 /** Limits by period, then the rest. */
 function blocksOf(d) {
-  // fallback is the period of a limit that has none.
+  // fallback is the period for a limit without one.
   const byPeriod = (list, periods, fallback) =>
     [...list].sort(
       (a, b) =>
@@ -290,8 +287,7 @@ function render(
     ctx,
     models,
     filters: filters || [],
-    // Told apart from an organisation without filters, so a failed read does
-    // not mark every filter as missing.
+    // So a failed read does not mark every filter as missing.
     filtersLost: filters === null,
     ceilings,
     orgID,
@@ -299,8 +295,7 @@ function render(
     draft: draftOf(lim),
   };
 
-  // The dialog shows either the blocks or one block's form, to avoid stacking
-  // a second dialog.
+  // The dialog shows the blocks or one block's form, not a second dialog.
   const grid = h("div", { class: "gr-blocks" });
   const blocksPane = h(
     "div",
@@ -404,8 +399,7 @@ function render(
     );
     blocksPane.hidden = true;
     editPane.hidden = false;
-    // Saving now would store this block half done, so wait until it is
-    // applied or dropped.
+    // Saving now would store this block half done.
     foot().hidden = true;
     save.disabled = true;
     if (b) choose(b.kind);
@@ -425,7 +419,7 @@ function render(
   };
 
   const form = h("form", {}, blocksPane, editPane);
-  // Enter applies the open block, as the dialog's Save would otherwise.
+  // Enter applies the open block instead of saving.
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     if (apply) apply();
@@ -447,7 +441,7 @@ function render(
 }
 
 /** A PUT replaces the whole guardrail, so fields the blocks do not set are
- *  carried through. */
+ *  kept. */
 function saved(lim, env) {
   const d = env.draft;
   const out = {};
@@ -640,8 +634,7 @@ function blockFields(env, kind, b) {
     };
   }
   if (kind === "filter") {
-    // Picked from a list, not typed: an unknown alias would refuse every
-    // request, and the control plane refuses to store one.
+    // Picked, not typed: an unknown alias would refuse every request.
     const usable = env.filters.filter(
       (f) => !d.filters.includes(f.alias) || (b && f.alias === b.alias),
     );
@@ -682,8 +675,8 @@ function blockFields(env, kind, b) {
     };
   }
   if (kind === "models") {
-    // Ticked from the catalogue. An alias the dialog has no box for, such as
-    // a disabled model, is kept: nobody unticked it.
+    // An alias with no box here, such as a disabled model, is kept: nobody
+    // unticked it.
     const had = d.allowed_models;
     const boxes = env.models.map((m) =>
       h(
@@ -696,8 +689,7 @@ function blockFields(env, kind, b) {
         }),
         h("span", { class: "mono" }, m.alias),
         m.router
-          ? // A router grants every model its steps may send to, whatever
-            // this list says.
+          ? // A router grants every model its steps may send to.
             h(
               "span",
               {
@@ -735,8 +727,8 @@ function blockFields(env, kind, b) {
       },
     };
   }
-  // MCP tools are typed rather than ticked: the gateway does not list every
-  // server's tools, and the control plane refuses a server it does not know.
+  // MCP tools are typed, as the gateway does not list every server's tools.
+  // The control plane refuses an unknown server.
   const tools = h("input", {
     class: "input mono",
     placeholder: "github/search_code, jira",
@@ -758,15 +750,14 @@ function blockFields(env, kind, b) {
   };
 }
 
-/** For somebody who may not change the guardrails. Unlike a disabled form,
- *  which would show only this scope's values, each line combines every level
- *  and names the one that decided. */
+/** For someone who may not change the guardrails. Unlike a disabled form,
+ *  each line combines every level and names the one that decided. */
 function renderReadOnly(
   ctx,
   { scope, name, models, filters, ceilings, limits, orgName },
 ) {
   const meta = SCOPES[scope] || SCOPES.project;
-  // Outermost first: the order limits combine in and prompts are sent in.
+  // Outermost first: the order limits combine and prompts are sent in.
   const levels = [...ceilings, { label: name, limits: limits || {} }];
 
   modal({
@@ -879,19 +870,16 @@ function modelsValue(levels, models, orgName) {
   );
 }
 
-/** Names the levels that removed models, so a short list reads as
- *  somebody's decision. */
+/** Names the levels that removed models, so a short list reads as someone's
+ *  decision. */
 function narrowedBy(levels) {
   const said = levels.filter((lv) => lv.limits && lv.limits.allowed_models);
   if (!said.length) return "Every model the organisation has.";
   return `Narrowed by ${said.map((lv) => lv.label).join(", then ")}.`;
 }
 
-/** Every level's rate limits rather than one number: each may have its own
- *  period, and each has to hold. */
-/** levelsValue lists what texts says of each level's limits, with the level
- *  that set it, or none when no level sets any. Limits of every level hold,
- *  so none is left out. */
+/** levelsValue lists each level's limits as texts reads them, with the level
+ *  that set them, or none. Every level's limits hold, so none is left out. */
 function levelsValue(levels, texts, none) {
   const said = levels.flatMap((lv) =>
     texts(lv.limits).map((text) => ({ text, from: lv.label })),
@@ -929,8 +917,8 @@ function budgetTexts(lim) {
   return ((lim && lim.budgets) || []).map(budgetText);
 }
 
-/** In full, in the order sent: only the full text tells the reader what is
- *  added to their requests. */
+/** In full, in the order sent: only the full text says what is added to
+ *  requests. */
 function promptsValue(levels) {
   const said = levels.filter((lv) => lv.limits && lv.limits.system_prompt);
   if (!said.length) {
@@ -984,7 +972,7 @@ function filtersValue(levels, known) {
   );
 }
 
-/** So an administrator does not add a filter twice. */
+/** So an admin does not add a filter twice. */
 function inheritedFilters(ceilings) {
   const said = ceilings.filter(
     (c) => c.limits && (c.limits.filters || []).length,
@@ -1030,8 +1018,7 @@ function describe(lim) {
   return bits.join(" · ") || "nothing set";
 }
 
-/** A prompt is appended to these, so seeing them avoids repeating the
- *  wording. */
+/** A prompt is appended to these, so seeing them avoids repeating them. */
 function inheritedPrompts(ceilings) {
   const said = ceilings.filter((c) => c.limits && c.limits.system_prompt);
   if (!said.length) return null;

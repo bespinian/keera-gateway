@@ -42,7 +42,6 @@ func TestRoutesSendEachPathToTheRightPlane(t *testing.T) {
 		// The spec needs none, and is not the panel's shell.
 		{"the API description", http.MethodGet, "/openapi.json", http.StatusOK},
 
-		// The inference plane.
 		{"openai chat", http.MethodPost, "/api/v1/chat/completions", http.StatusUnauthorized},
 		{"openai completions", http.MethodPost, "/api/v1/completions", http.StatusUnauthorized},
 		{"openai embeddings", http.MethodPost, "/api/v1/embeddings", http.StatusUnauthorized},
@@ -85,8 +84,8 @@ func TestPanelURLNeedsThePanel(t *testing.T) {
 	}
 }
 
-// A client given the panel's address used to get the panel's page back, which
-// an SDK fails to parse.
+// A client given the panel's address must not get the panel's page, which an
+// SDK cannot parse.
 func TestAClientWithoutTheAPIPrefixIsToldWhereItIs(t *testing.T) {
 	w := httptest.NewRecorder()
 	noInferenceHere(w, httptest.NewRequest(http.MethodPost, "/v1/messages", nil))

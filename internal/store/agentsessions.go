@@ -8,53 +8,43 @@ import (
 	"time"
 )
 
-// The session log: the usage table read as tasks rather than as calls.
+// The session log reads the usage table as tasks rather than calls. A session
+// is a run of one conversation's requests (same session_key) with no long idle
+// gap.
 //
-// A coding agent makes many calls to carry out one task. A session is a run of
-// one conversation's requests with no long idle gap: the conversation is the
-// session_key on each row, and the gap separates one task from the next.
-//
-// Nothing is stored per session. Runs are cut at read time, which keeps the
-// write path a single insert, lets the gap change after the fact, and works
-// across replicas, since every gateway derives the same key.
+// Nothing is stored per session. Runs are cut at read time, which keeps writes
+// to a single insert, lets the gap change later, and works across replicas.
 
-// DefaultSessionGap is how long a conversation may go quiet before the next
-// request on it starts a new session. Much shorter splits a task whenever
-// somebody is interrupted; much longer joins separate tasks.
+// DefaultSessionGap is how long a conversation may go quiet before its next
+// request starts a new session. Shorter splits interrupted tasks; longer joins
+// separate ones.
 const DefaultSessionGap = 30 * time.Minute
 
 // A session key is a hash with a one-character prefix saying where it came
-// from: named by the client, or derived from the opening prompt. It is a
-// prefix, not a column, because it never changes within a session and the
-// table gains a row per request.
+// from. It is a prefix, not a column, to keep the largest table small.
 const (
 	statedPrefix  = "c" // the client named it
 	derivedPrefix = "p" // derived from the conversation's opening prompt
 )
 
-// statedSessionKey builds the key for a session the client named, from a hash
-// already computed.
+// statedSessionKey builds the key for a session the client named.
 func statedSessionKey(hash string) string { return statedPrefix + hash }
 
 // DerivedSessionKey builds the key for a session derived from the opening
-// prompt, from a hash already computed.
+// prompt.
 func DerivedSessionKey(hash string) string { return derivedPrefix + hash }
 
 // MaxSessionInput bounds how much of a payload is hashed into a session key,
-// so the cost per request stays predictable when a client sends a huge field.
-// Two conversations that match for 128 KiB and then differ are told apart by
-// the idle gap anyway.
+// so a huge field does not make hashing slow. Conversations that only differ
+// later are still told apart by the idle gap.
 const MaxSessionInput = 128 << 10
 
-// SessionHash derives a session hash. The gateway computes it for each
-// request, and a sandbox, through StatedSessionKeyFor, for the session id it
-// will send. One copy keeps the two from drifting apart.
+// SessionHash derives a session hash. The gateway and sandboxes (through
+// StatedSessionKeyFor) share it, so the two cannot drift apart.
 //
 // The kind is mixed in so a stated id and an opening prompt with the same bytes
-// still differ. The zero separator is a byte no id or JSON document contains.
-//
-// It keeps 12 bytes of SHA-256 (16 characters encoded): enough to avoid
-// collisions within one tenant, and short on the largest table.
+// still differ. The zero byte separator appears in no id or JSON document.
+// 12 bytes of SHA-256 avoid collisions within a tenant and stay short.
 func SessionHash(keyID, kind string, payload []byte) string {
 	if len(payload) > MaxSessionInput {
 		payload = payload[:MaxSessionInput]
@@ -68,8 +58,7 @@ func SessionHash(keyID, kind string, payload []byte) string {
 	return base64.RawURLEncoding.EncodeToString(sum.Sum(nil)[:12])
 }
 
-// The kinds mixed in: a session the client named, and one derived from the
-// opening prompt.
+// The session kinds SessionHash mixes in.
 const (
 	SessionKindStated  = "stated"
 	SessionKindOpening = "opening"
@@ -84,25 +73,23 @@ func StatedSessionKeyFor(keyID, stated string) string {
 // StatedSession reports whether the client named this session itself.
 func StatedSession(key string) bool { return strings.HasPrefix(key, statedPrefix) }
 
-// AgentSession is one run of requests that carried out one task. It is not
-// called Session because that name is already a browser sign-in.
+// AgentSession is one run of requests that carried out one task. Session
+// already names a browser sign-in.
 type AgentSession struct {
-	// ID is the id of the session's first request. Sessions have no stored id,
-	// so this is how one is addressed, and a link to it stays stable.
+	// ID is the id of the session's first request, since sessions have no
+	// stored id.
 	ID int64 `json:"id"`
-	// SessionKey is the conversation, as the gateway hashed it. The same key days
-	// later is the same conversation resumed or its opening prompt sent again.
+	// SessionKey is the conversation, as the gateway hashed it.
 	SessionKey string `json:"session_key"`
-	// Stated is true when the client named the session itself, rather than it
-	// being inferred. It tells a reader how far to trust the grouping.
+	// Stated is true when the client named the session rather than it being
+	// inferred, so the grouping can be trusted more.
 	Stated bool `json:"stated"`
 
 	StartedAt time.Time `json:"started_at"`
 	// EndedAt is when the last request finished, not when it started.
 	EndedAt time.Time `json:"ended_at"`
 
-	Requests int64 `json:"requests"`
-	// The four outcomes, counted as everywhere else in this log.
+	Requests    int64 `json:"requests"`
 	OK          int64 `json:"ok"`
 	Failed      int64 `json:"failed"`
 	Refused     int64 `json:"refused"`
@@ -113,31 +100,25 @@ type AgentSession struct {
 	CostMicros   int64 `json:"cost_micros"`
 	TTFTMedianMS int64 `json:"ttft_median_ms"`
 
-	// Models is every alias the session used.
 	Models []string `json:"models"`
 
 	ProjectID string `json:"project_id,omitempty"`
 	UserID    string `json:"user_id,omitempty"`
 	KeyID     string `json:"key_id,omitempty"`
 
-	// LastStatus and LastError are how the session ended: the final request's
-	// status and, if any, the error its client got. Showing them in the list
-	// saves opening each session to find the one that failed.
+	// LastStatus and LastError are the final request's status and error.
 	LastStatus int    `json:"last_status"`
 	LastError  string `json:"last_error,omitempty"`
 }
 
 func (a AgentSession) Duration() time.Duration { return a.EndedAt.Sub(a.StartedAt) }
 
-// Sort is the order a log is read in: the request log or the session list.
-// Each offers its own rankings; a ranking a list does not offer reads as
-// SortRecent.
+// Sort is the order the request log or session list is read in. A sort a list
+// does not offer reads as SortRecent.
 type Sort string
 
-// The rankings put the most expensive, the longest-running and the slowest
-// first, where a list by time would bury them.
 const (
-	// SortRecent is newest first, which is what a screen opens on.
+	// SortRecent is newest first.
 	SortRecent Sort = ""
 	// SortCost is the most expensive first.
 	SortCost Sort = "cost"
@@ -149,13 +130,13 @@ const (
 	SortDuration Sort = "duration"
 	// SortFirstToken is the slowest first token first. Requests only.
 	SortFirstToken Sort = "ttft"
-	// sortOldest is internal. AgentSessionAt uses it to find one session by its
-	// start with the same query that lists them all.
+	// sortOldest lets AgentSessionAt find one session with the same query that
+	// lists them all.
 	sortOldest Sort = "oldest"
 )
 
-// sessionOrder maps a sort to its ORDER BY, which keeps the caller's string out
-// of the SQL text.
+// sessionOrder maps a sort to its ORDER BY, keeping the caller's string out of
+// the SQL.
 var sessionOrder = map[Sort]string{
 	SortRecent:   "started_at DESC, id DESC",
 	sortOldest:   "started_at ASC, id ASC",
@@ -169,38 +150,31 @@ func SessionSorts() []Sort {
 	return []Sort{SortRecent, SortCost, SortTokens, SortRequests, SortDuration}
 }
 
-// AgentSessionQuery narrows the session report. The zero value is "this
-// tenant's most recent sessions".
+// AgentSessionQuery narrows the session report.
 type AgentSessionQuery struct {
 	OrgID string
-	// ReportScope's ProjectID, UserID and KeyID apply before the runs are cut:
-	// a session belongs to one key, so they drop whole sessions. Its Alias
-	// applies after, so a session that used two models is not split.
+	// ProjectID, UserID and KeyID apply before runs are cut, which drops whole
+	// sessions. Alias applies after, so a session using two models is not split.
 	ReportScope
-	// SessionKey narrows to one conversation.
 	SessionKey string
-	// Holder keeps the list to the sessions of one person's keys, whatever
-	// else is narrowed. It is how a member reads it. Unlike UserID, it also
-	// narrows the filter choices.
+	// Holder keeps only one person's sessions, for a member reading the list.
+	// Unlike UserID, it also narrows the filter choices.
 	Holder string
-	// Outcome keeps the sessions holding at least one request with that
-	// outcome. OutcomeOK keeps those where every request was served.
+	// Outcome keeps sessions with at least one request of that outcome.
+	// OutcomeOK keeps those where every request was served.
 	Outcome Outcome
-	// Status and StatusClass match how the session ended: the status of its
-	// last request, exactly or by its first digit. Unlike the outcome, this
-	// puts each session under one value only.
+	// Status and StatusClass match the status of the last request, exactly or
+	// by its first digit.
 	Status      int
 	StatusClass int
 
 	From time.Time
 	To   time.Time
-	// Gap is the idle threshold. The caller always sets it: the control
-	// server owns the deployment's value.
+	// Gap is the idle threshold. The caller always sets it.
 	Gap  time.Duration
 	Sort Sort
 	// Before pages backwards on the id of the session's first request. It only
-	// works as a cursor under SortRecent, where id order and time order match;
-	// under a ranking it would skip rows.
+	// works under SortRecent, where id order and time order match.
 	Before int64
 	Limit  int
 }
@@ -212,24 +186,19 @@ func (q *AgentSessionQuery) setDefaults() {
 	}
 }
 
-// sessionCTE cuts the usage rows into sessions. The list, the totals and a
-// single session all start here.
+// sessionCTE cuts the usage rows into sessions. `ev` adds each row's idle gap,
+// `runs` numbers the sessions by counting gaps, and `grouped` makes one row per
+// session.
 //
-// `ev` is the rows in scope, each with how long its conversation was quiet
-// before it. `runs` numbers the sessions by counting the gaps so far.
-// `grouped` turns each run into the row a reader sees.
+// The window starts one gap early, and sessions that ended in that margin are
+// dropped in the HAVING, so a task already running when the window opened is
+// not cut short. A longer task is still cut; AgentSessionAt walks back to its
+// real start.
 //
-// The window starts one gap early, and sessions that ended inside that margin
-// are dropped in the HAVING. Without it, a task already running when the
-// window opened would show only its last part. A task running for longer than
-// the margin is still cut; AgentSessionAt walks back to its real start.
-//
-// Rows are ordered by (ts, id), so ties always cut the same way. `SELECT *` in
-// `ev` avoids a second column list to keep in step with requestColumns.
+// Rows are ordered by (ts, id), so ties always cut the same way.
 //
 // It takes $1..$9: org, from, to, gap seconds, key, project, user, key id and
-// alias. matched takes $10 and $11, the status filters. What follows supplies
-// its own parameters from $12 on.
+// alias. matched takes $10 and $11. Later parameters start at $12.
 var sessionCTE = `
 	WITH ev AS (
 	    SELECT *, EXTRACT(EPOCH FROM (ts - lag(ts)
@@ -279,10 +248,9 @@ var sessionCTE = `
 	       AND bool_or($9 = '' OR alias = $9)
 	)`
 
-// sessionOutcomes maps an outcome to its condition on a session, which keeps
-// the caller's string out of the SQL text. A session holds requests of every
-// outcome, so it matches one when it holds a request with it, and is served
-// when it holds no other.
+// sessionOutcomes maps an outcome to its condition on a session. A session
+// matches an outcome when any of its requests has it, and is OK when none
+// has another.
 var sessionOutcomes = map[Outcome]string{
 	OutcomeAny:         "TRUE",
 	OutcomeOK:          "failed + refused + interrupted = 0",
@@ -305,9 +273,8 @@ func (q AgentSessionQuery) matched() string {
 	    AND ($11 = 0 OR last_status / 100 = $11))`
 }
 
-// args returns the values sessionCTE and matched read, in their order. The
-// holder takes the place of the person: a member who names anybody else is
-// refused before the query is built.
+// args returns the values sessionCTE and matched read, in their order. Holder
+// replaces UserID: a member who names anybody else is refused earlier.
 func (q AgentSessionQuery) args() []any {
 	user := q.UserID
 	if q.Holder != "" {
@@ -347,8 +314,7 @@ func (s *Store) AgentSessions(ctx context.Context, q AgentSessionQuery) ([]Agent
 		append(q.args(), q.Before, q.Limit)...)
 }
 
-// AgentSessionTotals is what a window of sessions adds up to, over the whole
-// window rather than the page being read.
+// AgentSessionTotals adds up a whole window of sessions, not just one page.
 type AgentSessionTotals struct {
 	Sessions int64 `json:"sessions"`
 	// Unhappy is how many of them hold something that did not deliver.
@@ -357,25 +323,20 @@ type AgentSessionTotals struct {
 	InputTokens  int64 `json:"input_tokens"`
 	OutputTokens int64 `json:"output_tokens"`
 	CostMicros   int64 `json:"cost_micros"`
-	// Medians, not means, because one runaway session would skew a mean. The
-	// maximums below show how far the worst one went.
+	// Medians, not means, so one runaway session does not skew them.
 	RequestsMedian   int64 `json:"requests_median"`
 	DurationMedianMS int64 `json:"duration_median_ms"`
 	CostMedianMicros int64 `json:"cost_median_micros"`
-	// LongestRequests and CostliestMicros are the runaway: the session worth
-	// opening.
+	// LongestRequests and CostliestMicros show the worst session.
 	LongestRequests int64 `json:"longest_requests"`
 	CostliestMicros int64 `json:"costliest_micros"`
-	// Outcomes counts the sessions by outcome, whichever outcome q asks for,
-	// so the screen can offer each with its count. The rest of these totals
-	// are over the outcome asked for.
+	// Outcomes counts sessions by every outcome, so the screen can show each
+	// count. The other totals cover only the outcome asked for.
 	Outcomes RequestOutcomes `json:"outcomes"`
 }
 
-// AgentSessionSummary counts the sessions in one window.
-//
-// It ignores q's paging and sort, so the totals do not change as somebody
-// scrolls. That is why it walks the rows again rather than adding up the page.
+// AgentSessionSummary counts the sessions in one window. It ignores q's paging
+// and sort, so the totals do not change while scrolling.
 func (s *Store) AgentSessionSummary(ctx context.Context,
 	q AgentSessionQuery,
 ) (AgentSessionTotals, error) {
@@ -409,11 +370,11 @@ func (s *Store) AgentSessionSummary(ctx context.Context,
 }
 
 // AgentSessionFilters counts the sessions in the window by model, key, project,
-// person and last status, as RequestFilters counts the requests. A session that
-// used two models counts under both.
+// person and last status, like RequestFilters. A session that used two models
+// counts under both.
 //
-// Only the tenant, the holder, the outcome and the time bounds of q are read,
-// so the screen still offers the other values after one is picked.
+// It reads only q's tenant, holder, outcome and time bounds, so the screen
+// still offers other values after one is picked.
 func (s *Store) AgentSessionFilters(ctx context.Context,
 	q AgentSessionQuery,
 ) (RequestFacets, error) {
@@ -428,17 +389,12 @@ func (s *Store) AgentSessionFilters(ctx context.Context,
 		ORDER BY facet, 3 DESC, value`, q.args()...)
 }
 
-// AgentSessionAt is the session holding any one of its requests, together with
-// all of its requests. A reader usually arrives from one row in the request
-// log.
-//
-// The summary comes from the same query that lists sessions, so a session on
-// its own screen always matches its row in a list.
+// AgentSessionAt returns the session holding a request, with all its requests.
+// It uses the same query as the list, so both always match.
 func (s *Store) AgentSessionAt(ctx context.Context, orgID string, requestID int64,
 	gap time.Duration,
 ) (AgentSession, []Request, error) {
-	// The organisation is read back rather than filtered on, so a request of
-	// another tenant is simply not found, as with every other scoped read.
+	// A request of another tenant is not found, as with every scoped read.
 	var (
 		key   string
 		ts    time.Time
@@ -459,8 +415,7 @@ func (s *Store) AgentSessionAt(ctx context.Context, orgID string, requestID int6
 		return AgentSession{}, nil, notFound(err)
 	}
 
-	// Starting at the session's own start, the first session in ascending
-	// order is this one.
+	// Starting at its own start, the first session in ascending order is this one.
 	sessions, err := s.AgentSessions(ctx, AgentSessionQuery{
 		OrgID: owner, SessionKey: key, From: start, Gap: gap, Sort: sortOldest, Limit: 1,
 	})
@@ -479,8 +434,7 @@ func (s *Store) AgentSessionAt(ctx context.Context, orgID string, requestID int6
 }
 
 // sessionStart is when the session holding a request at ts began: the last
-// gap at or before it. It scans one conversation's rows, which is one small
-// index range.
+// gap at or before it. It scans one small index range.
 func (s *Store) sessionStart(ctx context.Context, orgID, key string, ts time.Time,
 	gap time.Duration,
 ) (time.Time, error) {
@@ -497,9 +451,7 @@ func (s *Store) sessionStart(ctx context.Context, orgID, key string, ts time.Tim
 }
 
 // agentSessionRequests reads the requests of the session beginning at start,
-// oldest first, because a task is read from beginning to end.
-//
-// Every row before start is excluded, so the session to keep is run 1.
+// oldest first. Rows before start are excluded, so the session is run 1.
 func (s *Store) agentSessionRequests(ctx context.Context, orgID, key string,
 	start time.Time, gap time.Duration,
 ) ([]Request, error) {

@@ -7,27 +7,23 @@ import (
 )
 
 // ClientHeader is where a client may state its own name. It wins over the
-// User-Agent, because a tool built on an HTTP library looks like that library,
-// or sends none at all, as Pi does.
+// User-Agent, which may name only an HTTP library, or be missing, as from Pi.
 const ClientHeader = "X-Keera-Client"
 
 // maxClientName bounds the stored name, since the client chooses it.
 const maxClientName = 32
 
-// agents maps User-Agent product tokens to client keys.
-//
-// An entry without a label takes it from the connect catalogue, so a client
-// has one name on every screen. An unknown client is named by its own product
-// token.
+// agents maps User-Agent product tokens to client keys. An entry without a
+// label takes it from the connect catalogue. An unknown client is named by its
+// own product token.
 var agents = []struct {
 	key   string
 	label string
 	// products are User-Agent product tokens (the part before the slash),
 	// matched whole. A substring match would put "openapi" under Pi.
 	products []string
-	// generic marks a runtime or library rather than a tool. It counts only
-	// when nothing more specific matched: "python-requests/2.32 aider/0.60" is
-	// Aider.
+	// generic marks a runtime or library. It counts only when nothing more
+	// specific matched: "python-requests/2.32 aider/0.60" is Aider.
 	generic bool
 }{
 	{key: "pi", products: []string{"pi", "pi-agent"}},
@@ -41,8 +37,8 @@ var agents = []struct {
 	}},
 	{key: "aider", label: "Aider", products: []string{"aider"}},
 	{key: "keera", label: "Keera CLI", products: []string{"keera", "keera-cli"}},
-	// The panel's playground states its name in the header. Its User-Agent is
-	// the operator's browser, which says nothing about the deployment.
+	// The panel's playground names itself in the header: its User-Agent is a
+	// browser.
 	{key: "keera-playground", label: "Keera Playground"},
 	// Keera Chat sends through the playground route and names itself there.
 	{key: "keera-chat", label: "Keera Chat"},
@@ -71,12 +67,8 @@ var agents = []struct {
 }
 
 // Identify names the client behind a request: from the stated header if set,
-// otherwise from the User-Agent. It returns "" when the request says nothing,
-// which some HTTP libraries do.
-//
-// It lives beside the connect catalogue so both use the same client names; a
-// name that differed would be two clients in every report. It is not a
-// security boundary: a User-Agent is whatever the client says.
+// otherwise from the User-Agent, or "". It lives beside the catalogue so both
+// use the same names. It is not a security boundary.
 func Identify(stated, userAgent string) string {
 	// A stated name is one name, maybe with a version: "My Editor/1.2".
 	head, _, _ := strings.Cut(stated, "/")
@@ -86,8 +78,8 @@ func Identify(stated, userAgent string) string {
 		}
 		return name
 	}
-	// A known tool wins over a runtime, and a runtime over an unknown name,
-	// whatever order the tokens come in: "node/22 undici/6" is Node.
+	// A known tool wins over a runtime, and a runtime over an unknown name, in
+	// any order: "node/22 undici/6" is Node.
 	var fallback, first string
 	for _, p := range products(userAgent) {
 		key, generic, ok := match(p)
@@ -106,8 +98,7 @@ func Identify(stated, userAgent string) string {
 	return first
 }
 
-// ClientLabel is how a client key is shown. An unknown key is shown as it is,
-// since it is the client's own name for itself.
+// ClientLabel is how a client key is shown. An unknown key is shown as it is.
 func ClientLabel(key string) string {
 	if key == "" {
 		return "Unidentified"
@@ -136,10 +127,8 @@ func match(product string) (key string, generic, ok bool) {
 	return "", false, false
 }
 
-// products returns the cleaned product tokens of a User-Agent, in order.
-//
-// Comments in parentheses are skipped at any depth, or "claude-cli/1.0.0
-// (external, cli)" could be named after the platform in its comment.
+// products returns the cleaned product tokens of a User-Agent, in order,
+// skipping comments in parentheses at any depth.
 func products(ua string) []string {
 	var out []string
 	depth := 0
@@ -175,8 +164,7 @@ func products(ua string) []string {
 }
 
 // clean turns a client-written name into a report key: lower case, product
-// token characters only, and bounded. A result with no letter or digit is no
-// name.
+// token characters only, and bounded. No letter or digit means no name.
 func clean(s string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(strings.TrimSpace(s)) {

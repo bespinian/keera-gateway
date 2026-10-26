@@ -191,7 +191,7 @@ func TestScopeStatesKeepALevelsLimitsTogether(t *testing.T) {
 		t.Fatalf("scopes = %+v, want the organisation and the key", got)
 	}
 	org := got[0]
-	wantRates := []accessRate{
+	wantRates := []AccessRate{
 		{Requests: 60, Period: policy.PeriodMinute},
 		{Requests: 1000, Tokens: 5_000_000, Period: policy.PeriodDay},
 	}

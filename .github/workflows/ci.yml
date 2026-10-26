@@ -1,11 +1,6 @@
-# Every commit must be formatted, pass the linters, build, and pass both halves
-# of the test suite.
-#
-# The halves are separate jobs. The unit tests need nothing and answer in under
-# a minute. The integration tests need Postgres and Redis to cover what no fake
-# does: the schema and queries, Postgres notifications, and the Redis Lua. They
-# skip silently without the KEERA_TEST_* variables, so they get a job that sets
-# them.
+# Every commit must be formatted, pass the linters, build, and pass the unit
+# and integration tests. The integration tests need Postgres and Redis and
+# skip without the KEERA_TEST_* variables, so they get their own job.
 name: CI
 
 on:
@@ -15,15 +10,14 @@ on:
 permissions:
   contents: read
 
-# A new push to a branch cancels the run for the previous one. Not on main, so
-# every commit there keeps its result.
+# A new push to a branch cancels the previous run, except on main.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
-  # The gateway builds without cgo, so the tests do too. The race detector needs
-  # it, so the steps that use it turn it back on.
+  # No cgo, like the gateway. The race detector needs it, so its steps turn it
+  # back on.
   CGO_ENABLED: "0"
 
 jobs:
@@ -37,8 +31,7 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # Before the linters: formatting is a one-command fix, and a lint report on
-      # a file about to be reformatted is not worth reading.
+      # Before the linters: formatting is a one-command fix.
       - name: Check formatting
         run: make fmt-check
 
@@ -51,8 +44,7 @@ jobs:
         with:
           version: v2.15
 
-      # The fastest way to find out that a platform-specific file does not
-      # compile.
+      # Catches a platform-specific file that does not compile.
       - name: Build
         run: make build
 
@@ -60,7 +52,7 @@ jobs:
         with:
           node-version: 24
 
-      # The panel's JavaScript has no build step to catch a syntax error.
+      # The panel's JavaScript has no build step.
       - name: Check the panel's JavaScript
         run: make check-js
 
@@ -89,8 +81,7 @@ jobs:
       KEERA_TEST_DATABASE_URL: postgres://keera:keera@127.0.0.1:5432/keera_test?sslmode=disable
       KEERA_TEST_REDIS_URL: redis://127.0.0.1:6379/0
 
-    # The same major versions the Makefile uses, pinned so an upstream change
-    # does not look like a change in this repository broke CI.
+    # The same major versions the Makefile uses, pinned.
     services:
       postgres:
         image: postgres:18
@@ -100,8 +91,7 @@ jobs:
           POSTGRES_DB: keera_test
         ports:
           - 5432:5432
-        # Otherwise the first test can connect before Postgres listens, which
-        # fails about one run in three.
+        # Otherwise the first test can connect before Postgres listens.
         options: >-
           --health-cmd "pg_isready -U keera -d keera_test"
           --health-interval 5s
@@ -125,13 +115,11 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # The same target a developer runs. With both variables set it uses the
-      # services above and starts nothing.
+      # With both variables set, this uses the services above.
       - name: Test
         run: make test-integration
 
-      # These tests skip without the two variables, so a typo in either would
-      # give a green job that ran nothing. This checks that they ran.
+      # A typo in either variable would skip every test, so check they ran.
       - name: Confirm the integration tests actually ran
         run: |
           if go test -count=1 -run TestMigrateIsIdempotentAndSafeInParallel -v ./internal/store/ 2>&1 | grep -q SKIP; then

@@ -1,6 +1,5 @@
-// Package server is the Keera Gateway server: it wires the inference data plane
-// and the control plane together and serves them from one listener, told apart
-// by path.
+// Package server wires the inference and control planes together and serves
+// them from one listener.
 package server
 
 import (
@@ -40,8 +39,8 @@ required:
 Every other setting is in docs/install.md and the pages it links.
 `
 
-// Run dispatches one invocation. It returns an error rather than exiting, so
-// the entry point owns the exit code.
+// Run dispatches one invocation. It returns an error, so the entry point owns
+// the exit code.
 func Run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		fmt.Print(usageText)

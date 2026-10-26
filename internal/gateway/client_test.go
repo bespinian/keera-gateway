@@ -10,8 +10,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// Every report is drawn from the usage row, so a client missing from it can
-// never be shown. The client table itself is tested in internal/connect.
+// Reports are drawn from the usage row, so the client must be on it. The client
+// table is tested in internal/connect.
 func TestTheUsageEventNamesWhatSentTheRequest(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -42,8 +42,7 @@ func TestTheUsageEventNamesWhatSentTheRequest(t *testing.T) {
 			}
 			req.Header.Set("Authorization", "Bearer "+testKey)
 			req.Header.Set("Content-Type", "application/json")
-			// Go's client sends one of its own unless it is told otherwise, and
-			// an empty string is how it is told.
+			// An empty string stops Go's client sending its own.
 			req.Header.Set("User-Agent", tc.agent)
 			if tc.stated != "" {
 				req.Header.Set(connect.ClientHeader, tc.stated)
@@ -65,8 +64,8 @@ func TestTheUsageEventNamesWhatSentTheRequest(t *testing.T) {
 	}
 }
 
-// A request the gateway refuses is still a request that happened, and "which
-// editor is getting all the 403s" is exactly what somebody asks about one.
+// A refused request still records its client, to answer "which editor is
+// getting all the 403s".
 func TestARefusedRequestStillNamesItsClient(t *testing.T) {
 	h := newHarness(t, jsonBackend(`{}`), nil, nil)
 	h.budgets.err = &policy.ErrBudgetExceeded{

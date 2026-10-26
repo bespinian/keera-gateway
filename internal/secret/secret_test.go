@@ -27,8 +27,7 @@ func TestRoundTrip(t *testing.T) {
 		t.Errorf("Open = %q, want the credential back", got)
 	}
 
-	// Two seals of the same credential must not be the same bytes, or the
-	// models table tells a reader which models share a key.
+	// Equal ciphertexts would show which models share a key.
 	again := b.Seal("keera-frontier", credential)
 	if bytes.Equal(sealed, again) {
 		t.Error("sealing twice produced identical ciphertext")

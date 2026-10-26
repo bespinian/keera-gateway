@@ -1,12 +1,11 @@
 # The Keera sandbox image.
 #
-# The toolchain is installed in the image, not fetched on start: an air-gapped
-# cluster cannot reach a package index, so such a sandbox would never be ready.
+# The toolchain is installed in the image, not fetched on start, so it works in
+# an air-gapped cluster.
 #
-# It is a base. A deployment builds its own on top with the languages, language
-# servers and internal certificates its engineers need, and sets it as a sandbox
-# class's image. This layer owns what the gateway depends on: the user, the home
-# directory, sshd, the coding agent, and the entrypoint.
+# It is a base. A deployment builds its own on top with the languages, tools
+# and certificates it needs. This layer owns what the gateway depends on: the
+# user, the home directory, sshd, the coding agent, and the entrypoint.
 #
 #   make sandbox-image
 #   podman build -t registry.internal/keera/sandbox-base:1 sandbox
@@ -17,10 +16,8 @@ FROM docker.io/library/alpine:3.24
 
 # The sandbox user is keera, uid 1000, with its home at /home/keera.
 #
-# Fixed, because the home volume is provisioned with this uid as its fsGroup: a
-# uid that changed between versions could not write to its home after an
-# upgrade. Both drivers and sshd_config hard-code the same uid and home, so
-# none can change here alone.
+# Fixed, because the home volume uses this uid as its fsGroup. Both drivers and
+# sshd_config hard-code the same uid and home, so none can change alone.
 
 # No locale package: musl is UTF-8 throughout and has no locales to configure.
 ENV LANG=C.UTF-8 \
@@ -52,11 +49,9 @@ RUN apk add --no-cache \
 
 # The Pi coding agent, pinned with everything under it.
 #
-# Pinned so two sandboxes of the same class run the same software. Pi's npm
-# package does not pin its dependencies, so the lockfile in sandbox/pi does. To
-# update Pi, change the version in sandbox/pi/package.json and run
-# `npm install --package-lock-only` there. --ignore-scripts because Pi needs no
-# install scripts, so nothing else runs code at build time.
+# The lockfile in sandbox/pi pins Pi's dependencies. To update Pi, change the
+# version in sandbox/pi/package.json and run `npm install --package-lock-only`
+# there. --ignore-scripts, so nothing runs code at build time.
 COPY pi/package.json pi/package-lock.json /opt/pi/
 RUN npm ci --prefix /opt/pi --omit=dev --ignore-scripts \
  && npm cache clean --force \
@@ -65,18 +60,16 @@ RUN npm ci --prefix /opt/pi --omit=dev --ignore-scripts \
 
 RUN addgroup -g 1000 keera \
  && adduser -u 1000 -G keera -h /home/keera -s /bin/bash -D -H keera \
- # The home directory exists in the image so it is a mount point with the right
- # owner. Otherwise the volume arrives owned by root and the entrypoint cannot
- # write the file that makes the sandbox reachable.
+ # The home directory exists in the image so the volume mounts with the right
+ # owner, not root.
  && mkdir -p /home/keera \
  && chown 1000:1000 /home/keera
 
 # sshd needs somewhere to write its runtime state, and a host key.
 #
 # The host key is the same for every sandbox from this image. That is fine: the
-# connection goes through the gateway's authenticated attach surface to an
-# address the gateway dialled itself, so the host key proves nothing. That is
-# why `keera sandbox ssh` and `keera sandbox config` turn host-key checking off.
+# connection goes through the gateway's authenticated attach surface, so the
+# host key proves nothing, and `keera sandbox ssh` turns checking off.
 RUN mkdir -p /run/sshd /etc/ssh/keera \
  && ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/keera/ssh_host_ed25519_key \
  && chown -R 1000:1000 /run/sshd /etc/ssh/keera
@@ -89,6 +82,5 @@ COPY --chmod=0755 git-credential-keera /usr/local/bin/git-credential-keera
 USER 1000
 WORKDIR /home/keera
 
-# tini reaps the processes people and agents leave behind. Without it a
-# long-lived sandbox gathers zombies until it cannot fork.
+# tini reaps leftover processes, so zombies do not pile up.
 ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/keera-sandbox"]

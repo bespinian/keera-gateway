@@ -18,35 +18,30 @@ import (
 )
 
 type ManagerOptions struct {
-	// PublicURL is the gateway's base URL as reached from inside a sandbox.
-	// Empty leaves inference unconfigured: fine for an engineer, useless for
-	// an agent. It is a startup warning, not an error.
+	// PublicURL is the gateway's URL as seen from inside a sandbox. Empty
+	// leaves inference unconfigured, which an agent cannot work without.
 	PublicURL string
 	// IdleSuspend is how long an engineer's sandbox may sit unused before it
-	// is suspended. Zero never suspends. The volume is kept, so resuming takes
-	// seconds. Agent sandboxes are never suspended: they wait for nothing.
+	// is suspended. Zero never suspends. Agent sandboxes are never suspended.
 	IdleSuspend time.Duration
-	// Git mints the credential a sandbox checks out with. Nil makes asking
-	// for a repository a clear refusal.
+	// Git mints repository credentials. Nil refuses any repository.
 	Git GitMinter
-	// OnKeyChange is called with a key's id after it is minted or revoked, so
-	// the gateway's cache drops it at once and a new sandbox works right away.
+	// OnKeyChange is called after a key is minted or revoked, so the
+	// gateway's cache drops it at once.
 	OnKeyChange func(keyID string)
 	Log         *slog.Logger
 }
 
-// Manager owns the sandboxes of one deployment. It sits between the control
-// plane and the driver: it checks a request against the class and the
-// guardrail, mints the key and repository credential, writes the row and calls
-// the driver, and undoes what it minted if the driver fails. Its sweep ends
-// sandboxes whose time is up and keeps the running time current.
+// Manager sits between the control plane and the driver. It checks a request,
+// mints the key and repository credential, writes the row and calls the
+// driver, and undoes what it minted if the driver fails. Its sweep ends
+// sandboxes whose time is up.
 type Manager struct {
 	st     *store.Store
 	driver Driver
 	opts   ManagerOptions
 	log    *slog.Logger
-	// pruneOnce clears the pools left from when warm pools were on. See
-	// reconcilePools.
+	// pruneOnce clears pools left from when warm pools were on.
 	pruneOnce sync.Once
 }
 
@@ -58,27 +53,23 @@ func NewManager(st *store.Store, driver Driver, opts ManagerOptions) *Manager {
 	return &Manager{st: st, driver: driver, opts: opts, log: opts.Log}
 }
 
-// Driver returns this deployment's driver, for showing what is available.
 func (m *Manager) Driver() Driver { return m.driver }
 
-// ErrRefused is a request this deployment will not carry out, with the reason.
-// There is one type because every refusal ends up as a sentence in a
-// developer's terminal.
+// ErrRefused is a request this deployment will not carry out, with the reason
+// a developer reads.
 type ErrRefused struct {
 	Reason string
-	// Invalid marks a request that can never succeed as sent, such as a bad
-	// name. Otherwise the refusal depends on state, which can change.
+	// Invalid marks a request that can never succeed as sent. Otherwise the
+	// refusal depends on state, which can change.
 	Invalid bool
 }
 
 func (e *ErrRefused) Error() string { return e.Reason }
 
-// Refuse is an *ErrRefused with a formatted reason.
 func Refuse(format string, args ...any) error {
 	return &ErrRefused{Reason: fmt.Sprintf(format, args...)}
 }
 
-// Invalid is Refuse for a request that is wrong in itself.
 func Invalid(format string, args ...any) error {
 	return &ErrRefused{Reason: fmt.Sprintf(format, args...), Invalid: true}
 }
@@ -88,39 +79,32 @@ type CreateRequest struct {
 	OrgID     string
 	ProjectID string
 	UserID    string
-	// Owner is the address the sandbox belongs to. It is stamped into the
-	// cluster and copied onto the row.
-	Owner string
-	Name  string
-	Class string
-	// Purpose decides the lifecycle. Empty means an engineer's sandbox.
+	Owner     string
+	Name      string
+	Class     string
+	// Purpose empty means an engineer's sandbox.
 	Purpose policy.Purpose
-	// TTL is the lifetime asked for. Zero means the class default. Anything
-	// above the class's or the policy's ceiling is clamped, not refused.
+	// TTL zero means the class default. More than a ceiling is clamped, not
+	// refused.
 	TTL time.Duration
-	// Repo and Branch are what to check out. Empty means an empty sandbox.
+	// Repo and Branch are what to check out, if anything.
 	Repo   string
 	Branch string
-	// Task is the instruction an agent sandbox starts on. It is passed in the
-	// environment and never stored: it is the developer's own prose about
-	// their code.
+	// Task is an agent's instruction. It goes in the environment and is never
+	// stored: it is the developer's own prose about their code.
 	Task string
-	// AuthorizedKeys are the ssh public keys that may open a shell, in
-	// practice the caller's own. The attach surface authenticates first, so
-	// this is a second lock against anything else the network policy lets
-	// reach the pod. An engineer's sandbox with none is refused.
+	// AuthorizedKeys may open a shell. The attach surface authenticates
+	// first, so this is a second lock. An engineer's sandbox with none is
+	// refused.
 	AuthorizedKeys []string
-	// Limits is the caller's resolved sandbox guardrail: the organisation's,
-	// narrowed by the project's.
-	Limits policy.ResolvedSandbox
-	// Env is extra environment from the caller. A resume after expiry drops
-	// it. It cannot name a KEERA_ variable, or a caller could point a sandbox
-	// at another endpoint.
+	Limits         policy.ResolvedSandbox
+	// Env is extra environment from the caller, dropped on a resume after
+	// expiry. It cannot name a KEERA_ variable, or a caller could point a
+	// sandbox at another endpoint.
 	Env map[string]string
 }
 
-// Create makes one sandbox. A refusal leaves nothing live behind: a key or
-// repository credential made before a later check refuses is revoked at once.
+// Create makes one sandbox. A refusal leaves nothing live behind.
 func (m *Manager) Create(ctx context.Context, req CreateRequest) (store.Sandbox, error) {
 	if req.Purpose == "" {
 		req.Purpose = policy.PurposeEngineer
@@ -133,7 +117,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (store.Sandbox,
 	expires := time.Now().Add(clampTTL(class, req.TTL, req.Limits)).UTC()
 
 	sbID := id.New("sbx")
-	// Decided once and stored on the row (see Backing).
+	// Decided once and stored on the row.
 	backing := backingFor(class, req.Purpose, m.driver.Capabilities().Warm)
 	ref := Ref{ID: sbID, Name: req.Name, Backing: backing}
 
@@ -155,8 +139,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (store.Sandbox,
 	if req.Repo != "" {
 		row.Repo, row.GitCredentialID = s.git.Repo, s.git.ID
 	}
-	// An agent sandbox is one task, so it states its session instead of
-	// leaving the gateway to infer one.
+	// An agent sandbox is one task, so it states its session.
 	if req.Purpose == policy.PurposeAgent {
 		row.SessionKey = store.StatedSessionKeyFor(s.keyID, sbID)
 	}
@@ -171,23 +154,19 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (store.Sandbox,
 		}
 		return store.Sandbox{}, err
 	}
-	// The key is usable from now on, so the cache must drop before the
-	// sandbox starts.
+	// The cache must drop the key before the sandbox starts.
 	m.changed(s.keyID)
 
-	// Not the caller's context: a client that hangs up during, say, an image
-	// pull would leave a machine behind that its row does not know about. Each
-	// driver bounds its own calls.
+	// Not the caller's context: a client that hangs up mid-create would leave
+	// a machine its row does not know about. Drivers bound their own calls.
 	dctx := context.WithoutCancel(ctx)
 	status, err := m.driver.Create(dctx, specFor(ref, class, req, s.env, expires))
 	if err != nil {
-		// Keep the row, marked failed: why a sandbox could not be made is the
-		// most useful thing to record. The key is still revoked.
+		// Keep the row, marked failed, to record why. The key is still revoked.
 		m.fail(ctx, row.ID, err)
 		m.undo(ctx, s)
-		// A failed agent sandbox is not swept again, so whatever the create
-		// left behind goes now. An engineer's stays live until it is
-		// terminated, which removes the machine too.
+		// A failed agent sandbox is not swept again, so clean up now. An
+		// engineer's stays live until terminated.
 		if req.Purpose == policy.PurposeAgent {
 			if terr := m.driver.Terminate(dctx, ref); terr != nil && !errors.Is(terr, ErrNotFound) {
 				m.log.Warn("sandbox: removing what a failed create left failed",
@@ -202,7 +181,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (store.Sandbox,
 	return row, nil
 }
 
-// specFor is what the driver gets for a sandbox, at creation and at revival.
+// specFor is used at creation and at revival.
 func specFor(ref Ref, class policy.SandboxClass, req CreateRequest, env map[string]string,
 	expires time.Time,
 ) Spec {
@@ -213,9 +192,8 @@ func specFor(ref Ref, class policy.SandboxClass, req CreateRequest, env map[stri
 	}
 }
 
-// backingFor decides whether a new sandbox is claimed from its class's warm
-// pool. Only an engineer's is: pool members are started before anybody asks,
-// as engineer sandboxes that wait for sshd, and an agent runs no sshd.
+// backingFor claims only an engineer's sandbox from the warm pool: pool members
+// wait for sshd, and an agent runs no sshd.
 func backingFor(class policy.SandboxClass, p policy.Purpose, warm bool) Backing {
 	if warm && class.Warm > 0 && p == policy.PurposeEngineer {
 		return BackingClaim
@@ -223,9 +201,8 @@ func backingFor(class policy.SandboxClass, p policy.Purpose, warm bool) Backing 
 	return BackingSandbox
 }
 
-// admit runs the checks in the order of the questions: is the request valid,
-// does the class exist, may this purpose and scope use it, can the driver
-// deliver it, is there room. It returns the class.
+// admit checks the request, the class, the scope, the driver and the quota,
+// and returns the class.
 func (m *Manager) admit(ctx context.Context, req CreateRequest) (policy.SandboxClass, error) {
 	if !req.Purpose.Valid() {
 		return policy.SandboxClass{}, Invalid("%q is not a purpose; a sandbox is for an 'engineer' "+
@@ -237,7 +214,7 @@ func (m *Manager) admit(ctx context.Context, req CreateRequest) (policy.SandboxC
 			"letters, digits and interior hyphens", req.Name)
 	}
 	// Some KEERA_ values are set only in some sandboxes, and the caller's would
-	// fill the gap. KEERA_BASE_URL, for one, decides where the key is sent.
+	// fill the gap. KEERA_BASE_URL decides where the key is sent.
 	for name := range req.Env {
 		if strings.HasPrefix(name, "KEERA_") {
 			return policy.SandboxClass{}, Invalid("%s is set by the gateway; a sandbox's own "+
@@ -284,8 +261,7 @@ func (m *Manager) admit(ctx context.Context, req CreateRequest) (policy.SandboxC
 	return class, nil
 }
 
-// clampTTL is the lifetime a sandbox gets: what was asked for, within the
-// class's ceiling and the policy's.
+// clampTTL keeps want within the class's and the policy's ceiling.
 func clampTTL(class policy.SandboxClass, want time.Duration, limits policy.ResolvedSandbox) time.Duration {
 	ttl := class.TTLFor(want)
 	if ceiling := limits.MaxTTL(); ceiling > 0 && ttl > ceiling {
@@ -294,13 +270,11 @@ func clampTTL(class policy.SandboxClass, want time.Duration, limits policy.Resol
 	return ttl
 }
 
-// checkQuota refuses a sandbox that would take the organisation or the project
-// past its limit. There is no per-key quota: each key is minted for one
-// sandbox.
+// checkQuota refuses a sandbox that would take the organisation or project
+// past its limit. Each key is minted for one sandbox, so there is no key quota.
 //
-// Each count is held to its own level's limit. req.Limits is the tightest of
-// all levels, right for the project, but a project capped at two must not cap
-// its whole organisation at two.
+// Each count is held to its own level's limit: req.Limits is the tightest, but
+// a project capped at two must not cap its organisation at two.
 func (m *Manager) checkQuota(ctx context.Context, req CreateRequest) error {
 	orgLimit := req.Limits.MaxSandboxes
 	if req.ProjectID != "" {
@@ -338,18 +312,18 @@ func (m *Manager) checkQuota(ctx context.Context, req CreateRequest) error {
 	return nil
 }
 
-// mintKey issues the sandbox's API key, attributed to whoever asked for it,
-// so its usage lands on their budget and reports like anything else they do.
+// mintKey issues the sandbox's API key in the caller's name, so its usage
+// lands on their budget.
 func (m *Manager) mintKey(ctx context.Context, req CreateRequest, expires time.Time) (
 	secret, keyID string, err error,
 ) {
 	secret, hash, prefix := auth.Generate()
 	info := store.KeyInfo{
 		ID: id.New("key"), OrgID: req.OrgID, ProjectID: req.ProjectID, UserID: req.UserID,
-		// Named after the sandbox, so a request in the log leads back to it.
+		// So a request in the log leads back to the sandbox.
 		Name:   "sandbox/" + req.Name,
 		Prefix: prefix,
-		// Expires with the sandbox, so even a missed revocation is bounded.
+		// So even a missed revocation is bounded.
 		ExpiresAt: &expires,
 	}
 	if _, err := m.st.CreateKey(ctx, info, hash); err != nil {
@@ -358,7 +332,7 @@ func (m *Manager) mintKey(ctx context.Context, req CreateRequest, expires time.T
 	return secret, info.ID, nil
 }
 
-// started is what a starting sandbox was given.
+// started is what a starting sandbox was given, for undo.
 type started struct {
 	orgID string
 	keyID string
@@ -366,9 +340,9 @@ type started struct {
 	git   GitCredential
 }
 
-// start gives a starting sandbox, new or revived, its key, its environment
-// and, with a repository, its repository credential. On a failure nothing is
-// left live; after it, the caller runs undo if a later step fails.
+// start gives a new or revived sandbox its key, environment and repository
+// credential. On failure nothing is left live; the caller runs undo if a
+// later step fails.
 func (m *Manager) start(ctx context.Context, req CreateRequest, row store.Sandbox,
 	expires time.Time,
 ) (started, error) {
@@ -377,8 +351,7 @@ func (m *Manager) start(ctx context.Context, req CreateRequest, row store.Sandbo
 			"(KEERA_SANDBOX_GIT_FORGE), so a sandbox cannot check out %s; create an "+
 			"empty one and bring the code in yourself", req.Repo)
 	}
-	// Minted now, so it expires and is revoked with the sandbox. Nobody sees
-	// it: it goes into the sandbox's environment only.
+	// Nobody sees it: it goes only into the sandbox's environment.
 	secret, keyID, err := m.mintKey(ctx, req, expires)
 	if err != nil {
 		return started{}, err
@@ -393,7 +366,6 @@ func (m *Manager) start(ctx context.Context, req CreateRequest, row store.Sandbo
 	return s, nil
 }
 
-// undo revokes what a sandbox that did not start was given.
 func (m *Manager) undo(ctx context.Context, s started) {
 	ctx = context.WithoutCancel(ctx)
 	if err := m.st.RevokeKey(ctx, s.orgID, s.keyID); err != nil {
@@ -404,8 +376,7 @@ func (m *Manager) undo(ctx context.Context, s started) {
 	m.revokeCredential(ctx, s.git.Repo, s.git.ID)
 }
 
-// Dial opens a connection to a port on a running sandbox, for the attach
-// surface.
+// Dial is for the attach surface.
 func (m *Manager) Dial(ctx context.Context, sb store.Sandbox, port int) (net.Conn, error) {
 	if !sb.Purpose.Attachable() {
 		return nil, Refuse("sandbox %s is an agent's; nothing attaches to one. Its whole claim "+
@@ -431,8 +402,8 @@ func (m *Manager) observe(ctx context.Context, sbID string, status Status) {
 	}
 }
 
-// observeFrom is observe for what the driver said about sb as it was read. A
-// row somebody changed in the meantime keeps their change.
+// observeFrom records a driver status for sb as it was read. A row changed in
+// the meantime keeps its change.
 func (m *Manager) observeFrom(ctx context.Context, sb store.Sandbox, status Status) {
 	if err := m.st.ObserveSandboxFrom(ctx, sb.ID, sb.State, store.SandboxObservation{
 		State: status.State, Detail: status.Detail,
@@ -450,9 +421,9 @@ func (m *Manager) fail(ctx context.Context, sbID string, cause error) {
 	}
 }
 
-// release gives back what a sandbox held while it ran: its running clock, its
-// key and its repository credential. It comes before the new state is
-// recorded, since the clock only counts a sandbox the row still shows running.
+// release stops the running clock and revokes the key and repository
+// credential. It runs before the new state is recorded, since the clock only
+// counts a sandbox the row shows running.
 func (m *Manager) release(ctx context.Context, sb store.Sandbox) {
 	m.stopClock(ctx, sb.ID)
 	m.revokeKey(ctx, sb)

@@ -18,7 +18,7 @@ import (
 )
 
 // The sandbox half of the control API. internal/sandbox does the work; this
-// decides who may do what and maps refusals to status codes.
+// decides who may do what.
 //
 // Unlike elsewhere, an administrator may see and terminate every sandbox in
 // their organisation (their quota, their bill), but may not open a shell in
@@ -51,9 +51,8 @@ func orgLimited(w http.ResponseWriter, why, orgName string) {
 }
 
 // listSandboxClasses is open to anyone in the organisation: a developer needs
-// the class names to ask for a machine. It also returns the limits of the
-// project a sandbox lands in by default, so a client can grey out what
-// creating one there would refuse.
+// the class names. It also returns the limits of the default project, so a
+// client can grey out what would be refused there.
 func (s *Server) listSandboxClasses(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	orgID, ok := s.queryOrg(w, r, p)
 	if !ok {
@@ -160,9 +159,9 @@ func (s *Server) mayUseImage(ctx context.Context, class policy.SandboxClass) (bo
 }
 
 // mayKeepWarm reports whether a class may have its warm pool. An organisation
-// that signed itself up gets none until its first payment, as with sandboxes.
-// It may keep the pool a class was copied with, so a class read can still be
-// written back; the sweep makes no pool for it either way.
+// that signed itself up gets none until its first payment. It may keep a pool
+// the class was copied with, so a class read can be written back; the sweep
+// makes no pool for it either way.
 func (s *Server) mayKeepWarm(ctx context.Context, class policy.SandboxClass) (bool, error) {
 	org, err := s.st.OrgByID(ctx, class.OrgID)
 	if err != nil || !org.Limited {
@@ -373,9 +372,9 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request, p *authn.
 		s.failSandbox(w, err)
 		return
 	}
-	// The task stays out of the audit log. It describes the developer's own
-	// code, which this product promises not to keep, and audit entries are
-	// kept for years.
+	// The task stays out of the audit log: it describes the developer's own
+	// code, which Keera promises not to keep, and audit entries are kept for
+	// years.
 	s.auditf(r, p, orgID, "sandbox.create", "sandbox", sb.ID, map[string]any{
 		"name": sb.Name, "class": sb.Class, "purpose": sb.Purpose,
 		"isolation": sb.Isolation, "expires_at": sb.ExpiresAt, "repo": sb.Repo,

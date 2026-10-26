@@ -12,12 +12,11 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// The tests that need no Redis: what happens when the configured Redis cannot
-// be reached. The buckets are a brake, not a ledger, so the gateway keeps
-// serving with the per-replica ones underneath.
+// Tests that need no Redis: what happens when it cannot be reached. The
+// gateway keeps serving with the per-replica buckets.
 
-// deadScripter answers every script with an error, which is what a Redis that
-// is down, unreachable or too slow looks like from here.
+// deadScripter answers every script with an error, like a Redis that is down
+// or too slow.
 type deadScripter struct {
 	err   error
 	calls int
@@ -72,8 +71,7 @@ type counter struct{ n int }
 func (c *counter) RateLimitFallback() { c.n++ }
 
 func TestRedisFallsBackToTheLocalBucketsWhenItCannotBeReached(t *testing.T) {
-	// A Redis outage must cost the coordination and nothing else: the limits
-	// bind per replica again, as with no Redis configured at all.
+	// A Redis outage only costs the coordination: limits bind per replica.
 	seen := &counter{}
 	r := NewRedis(&deadScripter{err: errors.New("dial tcp: connection refused")},
 		New(), RedisOptions{Metrics: seen}, nil)
@@ -95,8 +93,8 @@ func TestRedisFallsBackToTheLocalBucketsWhenItCannotBeReached(t *testing.T) {
 }
 
 func TestRedisIsNotTriedAgainRightAfterItFailed(t *testing.T) {
-	// Each try costs a request the whole timeout while Redis is down. After
-	// one failure the limiter decides locally for a while without trying.
+	// After one failure the limiter decides locally for a while, so requests
+	// do not each wait out the timeout.
 	dead := &deadScripter{err: errors.New("i/o timeout")}
 	seen := &counter{}
 	r := NewRedis(dead, New(), RedisOptions{Metrics: seen}, nil)
@@ -124,9 +122,7 @@ func TestRedisIsNotTriedAgainRightAfterItFailed(t *testing.T) {
 }
 
 func TestRedisFallsBackForChargeAndTheHeadersFollow(t *testing.T) {
-	// A token charge that cannot reach Redis is charged locally, so the
-	// headers must read the same buckets, not an empty view of Redis that
-	// would report the whole allowance left.
+	// A charge made locally must show in the headers too.
 	r := NewRedis(&deadScripter{err: errors.New("i/o timeout")}, New(), RedisOptions{}, nil)
 	now := time.Now()
 
@@ -140,9 +136,7 @@ func TestRedisFallsBackForChargeAndTheHeadersFollow(t *testing.T) {
 }
 
 func TestRedisAnswersAnUnknownKeyFromTheLocalBuckets(t *testing.T) {
-	// Remaining and Retry read what the last decision saw rather than paying a
-	// round trip. A key no decision has touched has no such answer, and an
-	// invented one would be worse than the local number.
+	// A key no decision has touched is answered from the local buckets.
 	r := NewRedis(&deadScripter{err: errors.New("down")}, New(), RedisOptions{}, nil)
 	now := time.Now()
 	if got := r.Remaining("never-seen|rpm", 60, now); got != 60 {
@@ -153,11 +147,9 @@ func TestRedisAnswersAnUnknownKeyFromTheLocalBuckets(t *testing.T) {
 	}
 }
 
-// The tests against a real Redis: the part no fake can cover, the Lua deciding
-// one batch atomically for two replicas at once.
+// Tests against a real Redis, for the Lua scripts.
 
-// redisFor returns a client, and a limiter whose keys are unique to this test
-// so that a shared Redis does not make one test's traffic another's.
+// redisFor returns a client, and a limiter whose keys are unique to this test.
 func redisFor(t *testing.T) (*redis.Client, string) {
 	t.Helper()
 	url := os.Getenv("KEERA_TEST_REDIS_URL")
@@ -199,8 +191,7 @@ func TestRedisKeepsTheLimiterContract(t *testing.T) {
 }
 
 func TestRedisSpendsOneAllowanceAcrossReplicas(t *testing.T) {
-	// Two gateways, one limit of 10: between them they get ten requests, not
-	// ten each.
+	// Two gateways, one limit of 10: ten requests between them, not each.
 	rdb, prefix := redisFor(t)
 	a, b := replica(t, rdb, prefix), replica(t, rdb, prefix)
 	now := time.Now()
@@ -231,9 +222,8 @@ func TestRedisSpendsOneAllowanceAcrossReplicas(t *testing.T) {
 }
 
 func TestRedisAnEarlierClockDoesNotRefillTheBucket(t *testing.T) {
-	// A long stream is charged minutes after the bucket was last touched, and
-	// replicas' clocks differ. If an earlier time were stored, the next
-	// request would refill from it and the debt would vanish.
+	// A long stream is charged late, and clocks differ. Storing an earlier
+	// time would let the next request refill the debt away.
 	rdb, prefix := redisFor(t)
 	r := replica(t, rdb, prefix)
 	now := time.Now()
@@ -258,8 +248,7 @@ func TestRedisAnEarlierClockDoesNotRefillTheBucket(t *testing.T) {
 }
 
 func TestRedisChargeAllChargesEveryBucketLikeMemory(t *testing.T) {
-	// One round trip charges every scope's bucket, and must leave each as the
-	// in-memory limiter would.
+	// One round trip charges every bucket, as the in-memory limiter would.
 	rdb, prefix := redisFor(t)
 	r := replica(t, rdb, prefix)
 	l := New()
@@ -288,9 +277,7 @@ func TestRedisChargeAllChargesEveryBucketLikeMemory(t *testing.T) {
 }
 
 func TestRedisChargeFromOneReplicaBindsTheOther(t *testing.T) {
-	// Tokens are charged when a request ends, by whichever replica served it.
-	// Every replica must feel the charge, or a load-balanced client has no
-	// limit.
+	// A charge made by one replica must bind on every replica.
 	rdb, prefix := redisFor(t)
 	a, b := replica(t, rdb, prefix), replica(t, rdb, prefix)
 	now := time.Now()
@@ -302,8 +289,7 @@ func TestRedisChargeFromOneReplicaBindsTheOther(t *testing.T) {
 }
 
 func TestRedisHeadersFollowTheDecision(t *testing.T) {
-	// Remaining is read from what the decision learned, so it must be what
-	// Redis holds, including a charge another replica made.
+	// Remaining must include a charge another replica made.
 	rdb, prefix := redisFor(t)
 	a, b := replica(t, rdb, prefix), replica(t, rdb, prefix)
 	now := time.Now()
@@ -323,8 +309,7 @@ func TestRedisHeadersFollowTheDecision(t *testing.T) {
 }
 
 func TestRedisBucketsExpireOnTheirOwn(t *testing.T) {
-	// No replica owns the Redis keys, so nothing sweeps them. A TTL one full
-	// refill long keeps short-lived keys from staying in Redis for ever.
+	// Nothing sweeps the Redis keys, so they need a TTL.
 	rdb, prefix := redisFor(t)
 	r := replica(t, rdb, prefix)
 	now := time.Now()
@@ -341,8 +326,7 @@ func TestRedisBucketsExpireOnTheirOwn(t *testing.T) {
 }
 
 func TestRedisAgreesWithTheInMemoryLimiter(t *testing.T) {
-	// Switching Redis on must not change how the limits behave: the same calls,
-	// decided both ways.
+	// Switching Redis on must not change how the limits behave.
 	rdb, prefix := redisFor(t)
 	r := replica(t, rdb, prefix)
 	l := New()
@@ -369,13 +353,11 @@ func TestRedisAgreesWithTheInMemoryLimiter(t *testing.T) {
 	}
 }
 
-// liveScripter is a Redis that answers, to test the bookkeeping around a round
-// trip without one. It returns the scripts' shape, a token count in
-// thousandths, not their arithmetic, which is tested against a real server.
+// liveScripter is a fake Redis that answers, to test the bookkeeping around a
+// round trip. It returns the scripts' shape, not their arithmetic.
 type liveScripter struct{ tokens int64 }
 
-// cmd answers as whichever script was asked for. Both can send exactly one
-// key, so they are told apart by the digest EvalSha is given.
+// cmd answers as whichever script was asked for, told apart by digest.
 func (l *liveScripter) cmd(ctx context.Context, sha string, keys []string) *redis.Cmd {
 	c := redis.NewCmd(ctx)
 	out := make([]any, 0, len(keys)+1)
@@ -390,8 +372,7 @@ func (l *liveScripter) cmd(ctx context.Context, sha string, keys []string) *redi
 }
 
 func (l *liveScripter) Eval(ctx context.Context, script string, keys []string, _ ...any) *redis.Cmd {
-	// Run falls back to EVAL with the source when a digest is not cached, so
-	// this has to recognise the same script written out in full.
+	// Run falls back to EVAL with the full source when a digest is not cached.
 	sha := chargeScript.Hash()
 	if script != chargeSource {
 		sha = ""
@@ -422,11 +403,8 @@ func (l *liveScripter) ScriptLoad(ctx context.Context, _ string) *redis.StringCm
 }
 
 func TestRedisSweepReleasesTheViewsAndTheBucketsUnderThem(t *testing.T) {
-	// The buckets in Redis expire on their own; the views in front of them do
-	// not, so without a sweep the map grows with every key ever presented.
-	//
-	// A swept key is answered from the local buckets again, like a key no
-	// decision has touched.
+	// Redis buckets expire on their own; the views must be swept. A swept key
+	// is answered from the local buckets again.
 	r := NewRedis(&liveScripter{tokens: 7000}, New(), RedisOptions{}, nil)
 	now := time.Now()
 
@@ -435,15 +413,13 @@ func TestRedisSweepReleasesTheViewsAndTheBucketsUnderThem(t *testing.T) {
 		t.Fatalf("Remaining = %d, want 7 from what the round trip saw", got)
 	}
 
-	// Still inside the idle window: a bucket in use is not swept out from
-	// under the headers that are reading it.
+	// Still inside the idle window: a bucket in use is kept.
 	r.Sweep(time.Hour, now.Add(time.Minute))
 	if got := r.Remaining("org|rpm", 60, now); got != 7 {
 		t.Errorf("Remaining = %d after a sweep that should have kept it, want 7", got)
 	}
 
-	// Past it: the view goes, and the answer comes from the local buckets,
-	// which have seen nothing and so report a full allowance.
+	// Past it: the local buckets, which have seen nothing, report it full.
 	r.Sweep(time.Hour, now.Add(2*time.Hour))
 	if got := r.Remaining("org|rpm", 60, now); got != 60 {
 		t.Errorf("Remaining = %d after the view was swept, want the local 60", got)
@@ -451,26 +427,20 @@ func TestRedisSweepReleasesTheViewsAndTheBucketsUnderThem(t *testing.T) {
 }
 
 func TestRedisSweepKeepsAViewTheHeadersAreStillReading(t *testing.T) {
-	// Reading a view marks it seen. A key still read for response headers
-	// must not be swept, or the next read would fall through to the local
-	// buckets and report a full allowance for a nearly spent bucket.
-	//
-	// Every bucket refills completely in a minute, so the test stays inside
-	// one: past that, the view and a full bucket are the same number.
+	// Reading a view marks it seen, or a nearly spent bucket would be swept
+	// and read as full. The test stays within a minute, the full refill time.
 	r := NewRedis(&liveScripter{tokens: 3000}, New(), RedisOptions{}, nil)
 	now := time.Now()
 	charge(r, "org|tpm", 600, 1, now)
 
-	// Ten seconds on, the view says three tokens refilled at ten a second. The
-	// local buckets, which have seen nothing, would say 600.
+	// Ten seconds on, the view's 3 tokens have refilled by 100, at ten a
+	// second. The local buckets would say 600.
 	read := now.Add(10 * time.Second)
 	if got := r.Remaining("org|tpm", 600, read); got != 103 {
 		t.Fatalf("Remaining = %d, want 103 from the view", got)
 	}
 
-	// Idle is measured from that read, not from the decision. Twenty seconds
-	// after the charge is ten after the read, so a fifteen second window keeps
-	// it.
+	// Idle counts from the read, not the decision, so a 15s window keeps it.
 	r.Sweep(15*time.Second, now.Add(20*time.Second))
 	if got := r.Remaining("org|tpm", 600, now.Add(20*time.Second)); got != 203 {
 		t.Errorf("Remaining = %d after the sweep, want 203: the view a header "+
@@ -479,8 +449,7 @@ func TestRedisSweepKeepsAViewTheHeadersAreStillReading(t *testing.T) {
 }
 
 func TestRedisSweepAlsoBoundsTheLocalBucketsUnderneath(t *testing.T) {
-	// The fallback limiter fills while Redis is down. Sweeping only the views
-	// would let it grow unbounded just when it is most in use.
+	// The fallback limiter fills while Redis is down, so it is swept too.
 	local := New()
 	r := NewRedis(&deadScripter{err: errors.New("down")}, local, RedisOptions{}, nil)
 	now := time.Now()

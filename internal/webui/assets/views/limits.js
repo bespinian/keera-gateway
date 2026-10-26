@@ -1,9 +1,8 @@
-// Rate limits and budgets, as the guardrails dialog and a router's steps both
-// show and edit them.
+// Rate limits and budgets, for the guardrails dialog and a router's steps.
 
 import { h, num, compact, money, date, meter, field } from "../ui.js";
 
-// PER is how a rate limit's period reads after a slash, as in 60 req/min.
+// As in 60 req/min.
 const PER = { minute: "min", day: "day", month: "month" };
 
 /** rateShort is one rate limit for a list of chips, such as "120 req/min". */
@@ -20,15 +19,42 @@ export function budgetShort(b) {
   return `${money(b.budget_micros)} / ${b.period || "month"}`;
 }
 
-/** budgetText says one budget, such as "CHF 50.00 per month". */
+/** budgetText is one budget, such as "CHF 50.00 per month". */
 export function budgetText(b) {
   return `${money(b.budget_micros)} per ${b.period || "month"}`;
 }
 
-/** budgetUse is how much of a budget is spent: a meter that warns from 80%,
- *  the amounts, and when it resets. */
-export function budgetUse(b) {
-  const frac = b.spend_micros / b.budget_micros;
+/** budgetUse is a meter that warns from 80%, the amounts, and when it
+ *  resets. full says what happens once it is spent. */
+export function budgetUse(
+  b,
+  full = "used up, so requests are refused until it resets",
+) {
+  return use(
+    b.spend_micros / b.budget_micros,
+    `${money(b.spend_micros)} of ${budgetText(b)}`,
+    b.resets_at ? ` · resets ${date(b.resets_at)}` : "",
+    full,
+  );
+}
+
+/** rateUse is a rate limit per day or month, shown as budgetUse shows a
+ *  budget. */
+export function rateUse(r, full) {
+  const parts = [];
+  let frac = 0;
+  for (const [limit, used, unit] of [
+    [r.requests, r.requests_used || 0, "requests"],
+    [r.tokens, r.tokens_used || 0, "tokens"],
+  ]) {
+    if (!(limit > 0)) continue;
+    parts.push(`${num(used)} of ${num(limit)} ${unit}`);
+    frac = Math.max(frac, used / limit);
+  }
+  return use(frac, `${parts.join(", ")} per ${r.period}`, "", full);
+}
+
+function use(frac, text, resets, full) {
   const tone = frac >= 1 ? "bad" : frac >= 0.8 ? "warn" : "";
   return h(
     "div",
@@ -42,16 +68,16 @@ export function budgetUse(b) {
     h(
       "span",
       { class: "muted small" },
-      `${money(b.spend_micros)} of ${budgetText(b)}`,
-      b.resets_at ? ` · resets ${date(b.resets_at)}` : "",
-      frac >= 1 ? " · used up, so requests are refused until it resets" : "",
+      text,
+      resets,
+      frac >= 1 ? ` · ${full}` : "",
     ),
   );
 }
 
-/** rateFields edits a rate limit, counted per one of periods, the first
- *  being the default. hint goes under the period. read throws when neither
- *  count is set, and leaves out the one that is not. */
+/** rateFields edits a rate limit; the first of periods is the default.
+ *  read throws when neither count is set, and leaves out the one that is
+ *  not. */
 export function rateFields(cur, periods, hint) {
   const requests = numberInput(cur.requests, "60");
   const tokens = numberInput(cur.tokens, "200000");
@@ -81,8 +107,8 @@ export function rateFields(cur, periods, hint) {
   };
 }
 
-/** budgetFields edits a budget, as rateFields does a rate limit. hint goes
- *  under both fields, which share a row. */
+/** budgetFields edits a budget, like rateFields. hint goes under both
+ *  fields. */
 export function budgetFields(cur, periods, hint) {
   const amount = amountInput(cur.budget_micros);
   const period = periodSelect(periods, cur.period || periods[0]);
@@ -123,13 +149,12 @@ function numberInput(value, placeholder) {
   });
 }
 
-/** whole reads a number input as a count, or 0 when it holds none. */
+/** whole returns 0 for an empty input. */
 function whole(input) {
   const v = parseInt(input.value, 10);
   return Number.isFinite(v) && v > 0 ? v : 0;
 }
 
-/** amountInput is a budget's amount in francs. */
 function amountInput(micros) {
   return h("input", {
     class: "input",
@@ -141,8 +166,7 @@ function amountInput(micros) {
   });
 }
 
-/** amountOf reads an amountInput in micros, or throws when it is not above
- *  zero. */
+/** amountOf returns micros, or throws when not above zero. */
 function amountOf(input) {
   const v = parseFloat(input.value);
   if (!Number.isFinite(v) || v <= 0) {

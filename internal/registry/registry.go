@@ -6,8 +6,8 @@
 // LISTEN/NOTIFY, so a revoked key stops working within a round trip.
 //
 // In a database outage everything but keys stays as last loaded. A key works
-// until its cache entry expires (30 seconds by default); failures are not
-// cached, so after that the key is refused as control_plane_unavailable.
+// until its cache entry expires (30 seconds by default), then is refused as
+// control_plane_unavailable.
 package registry
 
 import (
@@ -32,24 +32,23 @@ import (
 type Options struct {
 	// TTL is how long a resolved key is reused before it is read again.
 	TTL time.Duration
-	// NegativeTTL is the same for keys that did not resolve. It is short but
-	// not zero, so a flood of invalid keys is not a flood of queries.
+	// NegativeTTL is the same for keys that did not resolve. Short but not
+	// zero, so a flood of invalid keys is not a flood of queries.
 	NegativeTTL time.Duration
 	// SpendRefresh is how often cached spend is reconciled with the database.
 	SpendRefresh time.Duration
-	// Secrets opens the credentials stored against models and MCP servers.
-	// It is required.
+	// Secrets opens the credentials of models and MCP servers. Required.
 	Secrets *secret.Box
 	// Platform is the deployment's own provider keys. A model they cover is
-	// sent with that key, to the provider's endpoint, at its list prices.
+	// sent with that key to the provider's endpoint, at list prices.
 	Platform catalog.Platform
 	// Prepaid says organisations pay for those keys in advance, so one
 	// without credit cannot use them.
 	Prepaid bool
 }
 
-// The defaults of the settings behind Options. internal/config reads them
-// from here, so the environment and a zero Options mean the same.
+// The defaults behind Options. internal/config reads them from here, so the
+// environment and a zero Options agree.
 const (
 	DefaultTTL          = 30 * time.Second
 	DefaultSpendRefresh = 10 * time.Second
@@ -71,8 +70,7 @@ func (o *Options) setDefaults() {
 // notify, in case one was missed.
 const refreshEvery = time.Minute
 
-// Source is what the registry reads through. It is an interface so the cache
-// behaviour can be tested without Postgres.
+// Source is what the registry reads through. Tests use one without Postgres.
 type Source interface {
 	LookupKey(ctx context.Context, hash []byte) (*policy.Resolved, error)
 	LoadModels(ctx context.Context) ([]policy.Model, error)
@@ -90,9 +88,9 @@ type Source interface {
 	Listen(ctx context.Context, channel string, fn func(payload string)) error
 }
 
-// Change is what a policy notify carries: what changed, so each replica drops
-// no more than it must. anyChange, and anything this version does not know,
-// means anything may have.
+// Change is what a policy notify carries, so each replica drops no more than
+// it must. anyChange, and anything this version does not know, means anything
+// may have changed.
 type Change string
 
 // anyChange drops every cached key and reloads models, filters, routers and
@@ -105,8 +103,7 @@ const (
 )
 
 // OrgChange is a change inside one organisation, such as a model or a
-// guardrail. It drops that organisation's keys and reloads its models,
-// filters, routers and MCP servers, and no other's.
+// guardrail. It drops and reloads that organisation's keys and things only.
 func OrgChange(id string) Change { return Change(orgChange + id) }
 
 func (c Change) org() (string, bool) {
@@ -114,9 +111,9 @@ func (c Change) org() (string, bool) {
 	return id, ok && id != ""
 }
 
-// KeyChange is a change to one key only, such as its creation or revocation.
-// It drops that key alone and reloads nothing: a sandbox starting or stopping
-// must not cost every active key a query.
+// KeyChange is a change to one key, such as its creation or revocation. It
+// drops that key alone and reloads nothing, so a sandbox starting or stopping
+// does not cost every active key a query.
 func KeyChange(id string) Change { return Change(keyChange + id) }
 
 func (c Change) key() (string, bool) {
@@ -137,8 +134,7 @@ type Registry struct {
 	opts  Options
 	log   *slog.Logger
 
-	// models, filters, routers and MCP servers are keyed by org, then by
-	// alias. All four are read on the inference path.
+	// models, filters, routers and MCP servers are keyed by org, then alias.
 	models  atomic.Pointer[map[string]map[string]policy.Model]
 	filters atomic.Pointer[map[string]map[string]policy.Filter]
 	routers atomic.Pointer[map[string]map[string]policy.Router]
@@ -147,15 +143,15 @@ type Registry struct {
 	mu   sync.RWMutex
 	keys map[string]entry
 
-	// gen is bumped on every control-plane change. Entries from an older
-	// generation are ignored, which drops them all without walking the map.
+	// gen is bumped on every control-plane change. Older entries are ignored,
+	// which drops them all without walking the map.
 	gen atomic.Uint64
 	// drops is bumped, under mu, each time one key is dropped. A query that
 	// started before is not cached, since it may have read the old row.
 	drops uint64
 
 	// reload wakes the reload loop. It holds one request, so a burst of
-	// changes costs one reload, not one each. pending says what to reload.
+	// changes costs one reload. pending says what to reload.
 	reload  chan struct{}
 	pendMu  sync.Mutex
 	pending pending
@@ -168,7 +164,7 @@ type Registry struct {
 }
 
 // New builds a registry and loads everything once, so a gateway that starts
-// successfully is a gateway that can serve.
+// can serve.
 func New(ctx context.Context, st Source, opts Options, log *slog.Logger) (*Registry, error) {
 	opts.setDefaults()
 	r := &Registry{
@@ -199,8 +195,7 @@ func (r *Registry) Run(ctx context.Context) {
 }
 
 // keepPolicy reloads what changes ask for, and everything every refreshEvery.
-// After New it is the only writer of models, filters, routers and MCP
-// servers, so reloading one organisation never races a full reload.
+// It is the only writer after New, so reloads never race.
 func (r *Registry) keepPolicy(ctx context.Context) {
 	t := time.NewTicker(refreshEvery)
 	defer t.Stop()
@@ -239,8 +234,7 @@ type pending struct {
 	orgs map[string]struct{}
 }
 
-// want adds what c makes stale to the next reload. A key change reloads
-// nothing.
+// want adds what c makes stale to the next reload.
 func (r *Registry) want(c Change) {
 	if _, ok := c.key(); ok {
 		return
@@ -260,8 +254,8 @@ func (r *Registry) want(c Change) {
 	}
 }
 
-// refreshPending runs the reloads asked for so far. What fails is asked for
-// again, so the next wake or tick retries it.
+// refreshPending runs the reloads asked for so far. Failures are retried on
+// the next wake or tick.
 func (r *Registry) refreshPending(ctx context.Context) error {
 	r.pendMu.Lock()
 	p := r.pending
@@ -286,8 +280,7 @@ func (r *Registry) refreshPending(ctx context.Context) error {
 }
 
 // listen holds a dedicated connection on the notify channel. Losing it is not
-// fatal: the timer-based refresh still bounds staleness, so the loop just
-// reconnects.
+// fatal: the timer still bounds staleness, and the loop reconnects.
 func (r *Registry) listen(ctx context.Context) {
 	for ctx.Err() == nil {
 		if err := r.listenOnce(ctx); err != nil && ctx.Err() == nil {
@@ -300,9 +293,8 @@ func (r *Registry) listen(ctx context.Context) {
 	}
 }
 
-// listenOnce reloads on its own goroutine, not here, so a burst of
-// notifications is not a queue of reloads, and a revoked key behind it is
-// dropped at once.
+// listenOnce leaves reloads to their own goroutine, so a burst of
+// notifications does not queue reloads, and a revoked key is dropped at once.
 func (r *Registry) listenOnce(ctx context.Context) error {
 	return r.store.Listen(ctx, store.NotifyChannel, func(payload string) {
 		c := Change(payload)
@@ -318,8 +310,7 @@ func (r *Registry) listenOnce(ctx context.Context) error {
 }
 
 // Forget drops the cached keys a change makes stale. It is called on notify,
-// and directly by the control plane, so its own process does not wait for the
-// notification.
+// and directly by the control plane so its own process need not wait.
 func (r *Registry) Forget(c Change) {
 	if id, ok := c.key(); ok {
 		r.dropKeys(func(k policy.Key) bool { return k.ID == id })
@@ -329,13 +320,11 @@ func (r *Registry) Forget(c Change) {
 		r.dropKeys(func(k policy.Key) bool { return k.OrgID == id })
 		return
 	}
-	// Every cached key is dropped by moving on a generation.
 	r.gen.Add(1)
 }
 
 // dropKeys drops the entries of the keys that match. Unknown keys are cached
-// by hash only, so one that turns valid waits out NegativeTTL, which is
-// short.
+// by hash only, so one that turns valid waits out the short NegativeTTL.
 func (r *Registry) dropKeys(match func(policy.Key) bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -348,9 +337,8 @@ func (r *Registry) dropKeys(match func(policy.Key) bool) {
 }
 
 // refreshAll reloads models, MCP servers, filters and routers in one pass.
-// They name each other, so all four are read before any is replaced, as in
-// refreshOrg: renewing only part could refuse a request for a link that
-// exists. A failure changes nothing until the next pass.
+// They name each other, so all four are read before any is replaced. A
+// failure changes nothing until the next pass.
 func (r *Registry) refreshAll(ctx context.Context) error {
 	limited, err := r.store.LimitedOrgs(ctx)
 	if err != nil {
@@ -386,9 +374,8 @@ func (r *Registry) refreshAll(ctx context.Context) error {
 }
 
 // refreshOrg reloads one organisation's models, MCP servers, filters and
-// routers, and leaves every other organisation's as they are. All four are
-// read before any is replaced, so a failure changes nothing. An
-// organisation that was deleted reads as empty, which removes it.
+// routers. All four are read before any is replaced, so a failure changes
+// nothing. A deleted organisation reads as empty, which removes it.
 func (r *Registry) refreshOrg(ctx context.Context, orgID string) error {
 	limited := map[string]string{}
 	org, err := r.store.OrgByID(ctx, orgID)
@@ -429,8 +416,8 @@ func (r *Registry) refreshOrg(ctx context.Context, orgID string) error {
 }
 
 // replaceOrg swaps in a new index with one organisation's things replaced by
-// list. The other organisations' maps are shared with the old index, which is
-// safe because no index is ever changed in place.
+// list. The others are shared with the old index, which is never changed in
+// place.
 func replaceOrg[T any](into *atomic.Pointer[map[string]map[string]T], orgID string, list []T,
 	alias func(*T) string,
 ) {
@@ -453,12 +440,10 @@ func (r *Registry) Filter(orgID, alias string) (policy.Filter, bool) {
 	return find(&r.filters, orgID, alias)
 }
 
-// replaceAll swaps in a new index of list, by org and then by alias. key names
+// replaceAll swaps in a new index of list, by org and then alias. key names
 // where each one goes, and may first finish it, such as by opening its
-// credential.
-//
-// The index is replaced whole, never changed in place, so a request reading
-// the old one is never half-way through an update.
+// credential. The index is never changed in place, so readers never see half
+// an update.
 func replaceAll[T any](into *atomic.Pointer[map[string]map[string]T], list []T,
 	key func(*T) (org, alias string),
 ) {
@@ -498,9 +483,8 @@ func sortedValues[T any](byAlias map[string]T) []T {
 	return out
 }
 
-// finishModel gives a model as stored its credential, and holds it back if
-// its organisation is limited. limited maps each limited organisation to its
-// name.
+// finishModel gives a stored model its credential, and holds it back if its
+// organisation is limited. limited maps each limited organisation to its name.
 func (r *Registry) finishModel(m *policy.Model, limited map[string]string) {
 	if r.opts.Platform.Covers(*m) {
 		r.usePlatformKey(m)
@@ -513,11 +497,11 @@ func (r *Registry) finishModel(m *policy.Model, limited map[string]string) {
 	}
 }
 
-// openToLimited reports whether an organisation that signed itself up and has
-// not paid yet may use a model: one billed from its credit before it is used,
-// or one on a public address, which costs this deployment nothing. A model on
-// the deployment's key without payments would be billed after the fact, to
-// somebody nobody knows, so it waits too.
+// openToLimited reports whether a self-signed-up organisation that has not
+// paid yet may use a model: one paid from its credit up front, or one on a
+// public address, which costs the deployment nothing. A model on the
+// deployment's key without payments would be billed later to a stranger, so
+// it waits too.
 func (r *Registry) openToLimited(m policy.Model) bool {
 	if m.PlatformKey {
 		return r.opts.Prepaid
@@ -526,12 +510,10 @@ func (r *Registry) openToLimited(m policy.Model) bool {
 }
 
 // usePlatformKey sends a model with the deployment's own key for its
-// provider. A key the organisation stored before is never sent then: the
-// endpoint is the provider's, not the one it was entered for.
+// provider, never a key the organisation stored before.
 //
-// The endpoint and prices are set again here, not only when the model is
-// saved, so a row written before the key was configured cannot send the key
-// elsewhere or bill below list price.
+// The endpoint and prices are set again here, so a row saved before the key
+// was configured cannot send it elsewhere or bill below list price.
 func (r *Registry) usePlatformKey(m *policy.Model) {
 	if err := r.opts.Platform.Lock(m); err != nil {
 		// Left without a key, so the provider refuses it and nothing is
@@ -555,9 +537,9 @@ func (r *Registry) finishMCP(m *policy.MCPServer, limited map[string]string) {
 	}
 }
 
-// MCPSecretName is what an MCP server's credential is sealed against. It
-// carries the organisation, so it can never be opened as another tenant's,
-// and its own prefix, so never as a model's of the same alias.
+// MCPSecretName is what an MCP server's credential is sealed against. The
+// organisation and prefix keep it from opening as another tenant's or as a
+// model's of the same alias.
 func MCPSecretName(orgID, alias string) string { return "mcp:" + orgID + ":" + alias }
 
 // MCPServer implements policy.Source.
@@ -570,12 +552,9 @@ func (r *Registry) MCPServer(orgID, alias string) (policy.MCPServer, bool) {
 // tenant's or as an MCP server's.
 func ModelSecretName(orgID, alias string) string { return "model:" + orgID + ":" + alias }
 
-// open decrypts one stored credential, once per refresh rather than once per
-// request, or logs why it cannot and returns nothing.
-//
-// A credential that cannot be opened is dropped, not fatal. A gateway whose
-// KEERA_SECRET_KEY changed still starts, so the organisation's administrators
-// can sign in and set the credential again. It is logged every refresh.
+// open decrypts one stored credential, once per refresh, or logs why it
+// cannot and returns nothing. That is not fatal, so after a KEERA_SECRET_KEY
+// change the gateway still starts and administrators can set it again.
 func (r *Registry) open(name string, ciphertext []byte) string {
 	plaintext, err := r.opts.Secrets.Open(name, ciphertext)
 	if err != nil {
@@ -596,8 +575,7 @@ func (r *Registry) refreshSpend(ctx context.Context) error {
 }
 
 // RefreshCredit reads every organisation's credit now. The control plane
-// calls it when a payment comes in, so the organisation does not wait for
-// the next refresh.
+// calls it when a payment comes in.
 func (r *Registry) RefreshCredit(ctx context.Context) error {
 	if !r.opts.Prepaid {
 		return nil
@@ -626,13 +604,12 @@ type call struct {
 	err      error
 }
 
-// maxLookups caps the key queries that run at once. The database pool is
-// shared with usage writes and the control plane, and a flood of made-up keys
-// must not take all of it.
+// maxLookups caps the key queries that run at once, so a flood of made-up keys
+// cannot take the shared database pool.
 const maxLookups = 4
 
-// errLookupsBusy is what a caller gets who shared a query that never got a
-// slot, because the one who started it hung up first.
+// errLookupsBusy is for a caller who shared a query that never got a slot,
+// because its starter hung up first.
 var errLookupsBusy = errors.New("registry: too many key lookups at once")
 
 // Resolve implements policy.Source.
@@ -651,14 +628,13 @@ func (r *Registry) Resolve(ctx context.Context, presented string) (*policy.Resol
 		return e.resolved, e.err
 	}
 
-	// Concurrent misses on one key share one query, so many editors starting
-	// at once do not become many database round trips.
+	// Concurrent misses on one key share one query.
 	c := &call{done: make(chan struct{})}
 	if actual, loaded := r.inflight.LoadOrStore(ck, c); loaded {
 		return wait(ctx, actual.(*call))
 	}
-	// Waiting for a slot ends when this caller hangs up, so a flood holds
-	// no more goroutines than it holds connections.
+	// Waiting for a slot ends when this caller hangs up, so a flood holds no
+	// more goroutines than connections.
 	select {
 	case r.lookups <- struct{}{}:
 	case <-ctx.Done():
@@ -667,8 +643,8 @@ func (r *Registry) Resolve(ctx context.Context, presented string) (*policy.Resol
 		close(c.done)
 		return nil, ctx.Err()
 	}
-	// The query runs on its own context: others may be waiting on it, and
-	// the first caller hanging up must not fail them all.
+	// Its own context: others may be waiting, and must not fail when the
+	// first caller hangs up.
 	go r.lookup(context.WithoutCancel(ctx), hash, ck, gen, drops, c)
 	return wait(ctx, c)
 }
@@ -710,9 +686,9 @@ func wait(ctx context.Context, c *call) (*policy.Resolved, error) {
 	}
 }
 
-// remember caches an answer, never a database failure: an outage must not pin
-// a rejection in memory. Nor an answer read before a key was dropped, which
-// may be that key as it was.
+// remember caches an answer, never a database failure, so an outage does not
+// pin a rejection. Nor an answer read before a key was dropped, which may be
+// stale.
 func (r *Registry) remember(ck string, gen, drops uint64, c *call) {
 	if c.err != nil && !isKeyRejection(c.err) {
 		return
@@ -736,8 +712,8 @@ func isKeyRejection(err error) bool {
 		errors.Is(err, policy.ErrKeyPending)
 }
 
-// Sweep drops expired entries. Without it the key map would grow with every
-// token ever presented, including every scan of a public endpoint.
+// Sweep drops expired entries, or the key map would grow with every token ever
+// presented.
 func (r *Registry) Sweep() {
 	now := time.Now()
 	gen := r.gen.Load()

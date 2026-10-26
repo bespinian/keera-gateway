@@ -5,10 +5,8 @@ import (
 	"time"
 )
 
-// The event log read as a map of the deployment: which clients connect to
-// which models. One report carries the total, one row per client, one per
-// model and one per pair. They come from a single query, so the edges always
-// add up to the nodes they join.
+// The topology map shows which clients connect to which models. It comes from
+// a single query, so the edges always add up to the nodes they join.
 
 // Cell is the set of numbers every node and edge of the map carries.
 type Cell struct {
@@ -16,14 +14,12 @@ type Cell struct {
 	InputTokens  int64 `json:"input_tokens"`
 	OutputTokens int64 `json:"output_tokens"`
 	CostMicros   int64 `json:"cost_micros"`
-	// Refused is every 4xx: what a guardrail stopped, or a request that could
-	// not be taken. Failed is every 5xx: what the inference plane could not
-	// answer. One is working as configured and the other is a fault, so they
-	// are counted apart. The request log splits them the same way.
+	// Refused is every 4xx and Failed every 5xx, counted apart because one is
+	// the configuration working and the other a fault.
 	Refused int64 `json:"refused"`
 	Failed  int64 `json:"failed"`
-	// TTFTMedianMS is the median wait for the first token. A median, because
-	// one very slow request should not move it.
+	// TTFTMedianMS is the median wait for the first token, so one very slow
+	// request does not move it.
 	TTFTMedianMS int64 `json:"ttft_median_ms"`
 }
 
@@ -46,8 +42,7 @@ func cellTargets(c *Cell) []any {
 
 // Flow is the traffic between one client and one model: an edge of the map.
 type Flow struct {
-	// Client is empty for requests whose sender did not name itself. They are
-	// drawn as a client like any other.
+	// Client is empty for requests whose sender did not name itself.
 	Client string `json:"client"`
 	Alias  string `json:"alias"`
 	Cell
@@ -61,21 +56,19 @@ type FlowReport struct {
 	Flows   []Flow          `json:"flows"`
 }
 
-// Flows aggregates one organisation's window into the four readings the map
-// draws. A holder keeps it to the requests of that person's keys.
+// Flows aggregates one organisation's window for the map: the total, per
+// client, per model and per pair. A holder keeps it to that person's keys.
 //
-// GROUPING SETS does it in one pass. The coarser rows are computed by the
-// database, not summed here, because a median cannot be added up from the
-// medians of its parts.
+// GROUPING SETS does it in one pass. The database computes the coarser rows,
+// because medians cannot be added up.
 func (s *Store) Flows(ctx context.Context, orgID, holder string, from, to time.Time) (FlowReport, error) {
 	rep := FlowReport{
 		Clients: map[string]Cell{},
 		Models:  map[string]Cell{},
 		Flows:   []Flow{},
 	}
-	// grouping() is 1 for a column the row aggregates over. It is the only way
-	// to tell "every client" from "the client with no name": both arrive as an
-	// empty string.
+	// grouping() is 1 for a column the row aggregates over. It tells "every
+	// client" from "the client with no name", which are both empty.
 	rows, err := s.pool.Query(ctx, `
 		SELECT COALESCE(client, ''), COALESCE(alias, ''),
 		       grouping(client), grouping(alias), `+cellColumns+`
@@ -112,14 +105,13 @@ func (s *Store) Flows(ctx context.Context, orgID, holder string, from, to time.T
 }
 
 // lastMinuteLookback is how far back LastMinute looks for requests that
-// finished in the last minute. A request that ran longer is not counted.
+// finished in the last minute. Longer requests are not counted.
 const lastMinuteLookback = 15 * time.Minute
 
 // LastMinute counts the requests that finished in the minute before now, one
-// count per second: the first is the last second. The map starts its live
-// rate from it, which would otherwise need a minute to fill. A request counts
-// when it finished, not when it started, because that is when the live
-// stream shows it.
+// count per second, the last second first, so the map's live rate need not
+// wait a minute to fill. A request counts when it finished, as in the live
+// stream.
 func (s *Store) LastMinute(ctx context.Context, orgID, holder string, now time.Time) ([]int64, error) {
 	counts := make([]int64, 60)
 	rows, err := s.pool.Query(ctx, `
@@ -142,8 +134,7 @@ func (s *Store) LastMinute(ctx context.Context, orgID, holder string, now time.T
 		if err := rows.Scan(&ago, &n); err != nil {
 			return nil, err
 		}
-		// Another replica's clock can be a little ahead, which puts a request
-		// in the future. It just finished.
+		// Another replica's clock can be a little ahead.
 		counts[max(ago, 0)] += n
 	}
 	return counts, rows.Err()
@@ -159,8 +150,7 @@ type ClientUse struct {
 }
 
 // ClientUses lists which clients called with one person's keys in a window,
-// and through which key, most recent first. It is the Clients screen: a
-// developer's own view of what they have connected.
+// and through which key, most recent first.
 func (s *Store) ClientUses(ctx context.Context, orgID, userID string, from, to time.Time) ([]ClientUse, error) {
 	src, from, to := sourceFor(from, to)
 	last := "max(ts)"

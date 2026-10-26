@@ -10,8 +10,8 @@ import (
 	"testing"
 )
 
-// readWith reads body as it would arrive with the given Content-Encoding, and
-// returns what was read, or the status of the refusal.
+// readWith reads body sent with the given Content-Encoding, and returns it or
+// the refusal's status.
 func readWith(t *testing.T, encoding string, body []byte, limit int64) ([]byte, int) {
 	t.Helper()
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/chat/completions", bytes.NewReader(body))

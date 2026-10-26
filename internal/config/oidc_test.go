@@ -14,8 +14,7 @@ func TestNoProviderIsNotAnError(t *testing.T) {
 	}
 }
 
-// A provider without its secret is refused by the name of the setting, which
-// is the one an operator has to set.
+// A provider without its secret is refused by the setting's name.
 func TestAProviderWithoutItsSecretNamesTheSetting(t *testing.T) {
 	t.Setenv("KEERA_OIDC_PROVIDERS", "google")
 	t.Setenv("KEERA_OIDC_GOOGLE_ISSUER", "https://accounts.google.com")
@@ -27,9 +26,8 @@ func TestAProviderWithoutItsSecretNamesTheSetting(t *testing.T) {
 	}
 }
 
-// The hosted deployment: two directories, one callback, and group names that
-// are per-directory because the same role is a name on Google and an object
-// GUID on Entra.
+// Two directories, one callback, and group names per directory: a name on
+// Google, an object GUID on Entra.
 func TestEachProviderReadsItsOwnSettings(t *testing.T) {
 	t.Setenv("KEERA_OIDC_PROVIDERS", "google,entra")
 	t.Setenv("KEERA_OPERATORS", "ada@example.ch")
@@ -51,8 +49,7 @@ func TestEachProviderReadsItsOwnSettings(t *testing.T) {
 	}
 	google, entra := got[0], got[1]
 
-	// The callback is shared. It can be, because the callback recognises a
-	// flow by its state rather than by the address it came back to.
+	// The callback is shared: it recognises a flow by its state.
 	for _, p := range got {
 		if p.RedirectURL != "https://keera.example.ch/control/auth/callback" {
 			t.Errorf("%s redirect = %q, want the shared one", p.Name, p.RedirectURL)
@@ -62,8 +59,8 @@ func TestEachProviderReadsItsOwnSettings(t *testing.T) {
 		}
 	}
 
-	// The client and its secret are never shared: two providers on one client
-	// would sign people in against the wrong directory rather than fail.
+	// The client and its secret are never shared, or people could sign in
+	// against the wrong directory.
 	if google.ClientID == entra.ClientID || google.ClientSecret == entra.ClientSecret {
 		t.Error("two providers ended up on one client")
 	}
@@ -110,9 +107,8 @@ func TestProviderLabelCanBeSet(t *testing.T) {
 	}
 }
 
-// Sign-up makes whoever creates an organisation its administrator. An admin
-// group decides that role for the whole gateway, so the two together would
-// take it away again at the next sign-in.
+// Sign-up makes the creator of an organisation its administrator, which an
+// admin group would take away at the next sign-in.
 func TestSignUpIsRefusedAlongsideAnAdminGroup(t *testing.T) {
 	t.Setenv("KEERA_OIDC_PROVIDERS", "google,entra")
 	t.Setenv("KEERA_OIDC_GOOGLE_ISSUER", "https://accounts.google.com")
@@ -141,9 +137,8 @@ func TestSignUpIsRefusedAlongsideAnAdminGroup(t *testing.T) {
 	}
 }
 
-// Anyone who signs up runs an organisation, and an organisation chooses where
-// its models are, so the operator has to say what inside the network it may
-// reach.
+// Anyone who signs up chooses where their models are, so the operator must say
+// what inside the network they may reach.
 func TestSignUpNeedsPrivateHostsSet(t *testing.T) {
 	t.Setenv("KEERA_OIDC_PROVIDERS", "google")
 	t.Setenv("KEERA_OIDC_GOOGLE_ISSUER", "https://accounts.google.com")
@@ -162,7 +157,7 @@ func TestSignUpNeedsPrivateHostsSet(t *testing.T) {
 }
 
 // Any GitHub account can sign in to an OAuth App, so a GitHub provider must
-// say whose addresses it signs in, even when it is the only one.
+// name its domains, even when it is the only one.
 func TestGitHubNeedsDomains(t *testing.T) {
 	t.Setenv("KEERA_OIDC_PROVIDERS", "github")
 	t.Setenv("KEERA_OIDC_GITHUB_ISSUER", "https://github.com")
@@ -229,8 +224,8 @@ func TestLDAPProvider(t *testing.T) {
 	}
 }
 
-// A group DN holds commas, so an LDAP directory's group lists are split on
-// semicolons. An OpenID Connect provider's stay comma-separated.
+// A group DN holds commas, so LDAP group lists are split on semicolons. OpenID
+// Connect ones stay comma-separated.
 func TestLDAPGroupsAreWholeDNs(t *testing.T) {
 	t.Setenv("KEERA_OIDC_PROVIDERS", "corp,okta")
 	t.Setenv("KEERA_OIDC_CORP_ISSUER", "ldaps://dc1.corp.example.ch")

@@ -1,7 +1,6 @@
-// Package secret encrypts the credentials Keera Gateway has to read back:
-// hosted provider API keys, MCP server credentials and sign-in refresh
-// tokens. Keys Keera issues are only hashed. The encryption key lives only in
-// the process environment, so a database dump holds ciphertext, not a working
+// Package secret encrypts the credentials the gateway must read back: hosted
+// provider API keys, MCP server credentials and sign-in refresh tokens. The key
+// lives only in the environment, so a database dump holds no working
 // credential.
 package secret
 
@@ -16,16 +15,15 @@ import (
 
 type Box struct {
 	aead cipher.AEAD
-	// previous are the keys before this one, which still open what they
-	// sealed while it is re-sealed with this one. See Reseal.
+	// previous keys still open what they sealed until it is re-sealed. See
+	// Reseal.
 	previous []cipher.AEAD
 }
 
 // minKeyLen is a floor: hashing does not make a short key harder to guess.
 const minKeyLen = 16
 
-// New is a box that seals with key, and opens what key or any of previous
-// sealed.
+// New returns a box that seals with key and opens what key or previous sealed.
 func New(key string, previous ...string) (*Box, error) {
 	aead, err := newAEAD(key)
 	if err != nil {
@@ -98,7 +96,6 @@ func (b *Box) open(name string, sealed []byte) (string, bool, error) {
 			return string(out), i == 0, nil
 		}
 	}
-	// The key or the row changed. Either way the fix is to set the
-	// credential again.
+	// The key or the row changed. Either way, set the credential again.
 	return "", false, errors.New("secret: cannot decrypt with the configured key")
 }

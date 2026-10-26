@@ -14,14 +14,12 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// The driver against a fake API server that answers in the CRD's shapes. The
-// tests assert on the JSON the driver sends and how it reads the answers.
+// The driver against a fake API server that answers in the CRD's shapes.
 
 type fakeAPI struct {
 	t    *testing.T
 	srv  *httptest.Server
 	objs map[string]json.RawMessage
-	// seen records every request, so a test can assert what was called.
 	seen []request
 }
 
@@ -78,17 +76,15 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 	return f
 }
 
-// put seeds an object at a path, for the read paths.
 func (f *fakeAPI) put(path, body string) { f.objs[path] = json.RawMessage(body) }
 
-// The paths the fake stores objects at, written out so the tests pin them.
+// Written out so the tests pin the paths.
 const (
 	sandboxesPath = "/apis/agents.x-k8s.io/v1beta1/namespaces/sandboxes/sandboxes/"
 	claimsPath    = "/apis/extensions.agents.x-k8s.io/v1beta1/namespaces/sandboxes/sandboxclaims/"
 )
 
-// driver builds a driver against the fake. The fake is plain HTTP, so TLS is
-// never used; Insecure just means no CA bundle is needed.
+// driver uses Insecure only so no CA bundle is needed; the fake is plain HTTP.
 func (f *fakeAPI) driver(t *testing.T, opts KubernetesOptions) *Kubernetes {
 	t.Helper()
 	opts.Kube = KubeConfig{Server: f.srv.URL, Token: "test", Insecure: true}
@@ -181,7 +177,7 @@ func TestCreateBuildsTheObject(t *testing.T) {
 		`"automountServiceAccountToken":false`,
 		`"runAsNonRoot":true`,
 		`"drop":["ALL"]`,
-		// Whose it is, for a platform engineer looking at a busy node.
+		// Whose it is.
 		`"keera.dev/org":"org_1"`,
 		`"keera.dev/owner":"dev@example.ch"`,
 	} {
@@ -197,8 +193,7 @@ func TestCreateBuildsTheObject(t *testing.T) {
 }
 
 func TestCreateSortsTheEnvironment(t *testing.T) {
-	// The same spec must give the same object, or the controller sees a
-	// change on every reconcile.
+	// The same spec must give the same object, or the controller sees a change.
 	f := newFakeAPI(t)
 	k := f.driver(t, KubernetesOptions{})
 	spec := Spec{
@@ -340,7 +335,7 @@ func TestStatusNotFound(t *testing.T) {
 }
 
 func TestTerminateIsIdempotent(t *testing.T) {
-	// A user's terminate and the sweep race, and the loser must not fail.
+	// A user and the sweep may race, and the loser must not fail.
 	f := newFakeAPI(t)
 	k := f.driver(t, KubernetesOptions{})
 	if err := k.Terminate(context.Background(), Ref{ID: "sbx_gone", Name: "gone"}); err != nil {
@@ -395,8 +390,8 @@ func TestExtendMovesShutdownTime(t *testing.T) {
 	}
 }
 
-// An expired sandbox's key was revoked, so reviving it has to put the new key
-// into the pod template, move its end and start it, all on the same object.
+// Reviving puts the new key into the pod template, moves the end and starts
+// it, all on the same object.
 func TestReviveReplacesTheEnvironment(t *testing.T) {
 	f := newFakeAPI(t)
 	k := f.driver(t, KubernetesOptions{})
@@ -475,8 +470,7 @@ func TestValidPort(t *testing.T) {
 	}
 }
 
-// A sandbox runs unprivileged and cannot bind a privileged port. sshd on 22
-// once failed this way, and the sandbox looked like it never started.
+// A sandbox cannot bind a privileged port. sshd on 22 once failed this way.
 func TestTheShellPortIsUnprivileged(t *testing.T) {
 	if PortSSH < 1024 {
 		t.Fatalf("PortSSH = %d; a sandbox cannot bind a privileged port", PortSSH)
@@ -484,7 +478,7 @@ func TestTheShellPortIsUnprivileged(t *testing.T) {
 }
 
 func TestMibQuantity(t *testing.T) {
-	// Gi where it divides evenly, as people write it in the catalogue.
+	// Gi where it divides evenly.
 	cases := map[int]string{1024: "1Gi", 16384: "16Gi", 512: "512Mi", 1536: "1536Mi"}
 	for in, want := range cases {
 		if got := mibQuantity(in); got != want {

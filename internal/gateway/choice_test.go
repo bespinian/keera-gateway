@@ -7,8 +7,7 @@ import (
 	"testing"
 )
 
-// completion builds the envelope a plane serving logprobs answers with: one
-// token, and the alternatives it was chosen from.
+// completion builds a completion with one token and its logprob alternatives.
 func completion(sampled string, alternatives ...[2]any) string {
 	tops := make([]string, 0, len(alternatives))
 	for _, alt := range alternatives {
@@ -23,8 +22,7 @@ func completion(sampled string, alternatives ...[2]any) string {
 		sampled, sampled, sampledLogprob, strings.Join(tops, ","))
 }
 
-// The reading a router's speed rests on: one token, and the answer is whichever
-// of the offered letters took the most of it.
+// The answer is whichever offered letter took the most probability.
 func TestAChoiceIsReadOutOfTheLettersAlone(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -39,8 +37,7 @@ func TestAChoiceIsReadOutOfTheLettersAlone(t *testing.T) {
 			n:    2, want: 1, share: 0.99,
 		},
 		{
-			// What the model would rather have written is not a destination,
-			// so a model that opens with '<think>' still chooses.
+			// A model that opens with '<think>' still chooses.
 			name: "a token that is not a letter is not in the running",
 			raw: completion("<think>", [2]any{"<think>", -0.1}, [2]any{"A", -4.0},
 				[2]any{"B", -6.0}),
@@ -57,23 +54,20 @@ func TestAChoiceIsReadOutOfTheLettersAlone(t *testing.T) {
 			n:    2, want: 1, share: 0.99,
 		},
 		{
-			// Two spellings of one answer are one answer, and splitting them
-			// would let a third letter win with less of the model behind it.
+			// Two spellings of one answer add up, or a third letter could win.
 			name: "both spellings of a letter count for it",
 			raw: completion("A", [2]any{"A", -1.0}, [2]any{"a", -1.0},
 				[2]any{"B", -0.9}),
 			n: 2, want: 0, share: 0.64,
 		},
 		{
-			// A destination that was not offered cannot be chosen, however
-			// much the model wanted it.
+			// A destination that was not offered cannot be chosen.
 			name: "a letter past the end of the list is not a destination",
 			raw:  completion("C", [2]any{"C", -0.01}, [2]any{"A", -5.0}),
 			n:    2, want: 0, share: 1,
 		},
 		{
-			// 'Absolutely' begins with an A, and reading it as one would place
-			// somebody's request by a coincidence of spelling.
+			// 'Absolutely' is not a vote for A.
 			name: "a word starting with a letter is not that letter",
 			raw:  completion("Absolutely", [2]any{"Absolutely", -0.01}),
 			n:    2, want: -1,
@@ -111,23 +105,22 @@ func TestAChoiceIsReadOutOfTheLettersAlone(t *testing.T) {
 	}
 }
 
-// The shares are what somebody checking a router reads, so they have to be a
-// distribution over the offered destinations rather than raw model output.
+// The shares are a distribution over the offered destinations, not raw model
+// output.
 func TestTheSharesOfAChoiceAddUp(t *testing.T) {
 	raw := completion("A", [2]any{"A", -0.7}, [2]any{"B", -0.9}, [2]any{"C", -2.5})
 	_, share, ok := readChoice([]byte(raw), 3)
 	if !ok {
 		t.Fatal("no choice was read")
 	}
-	// Three destinations the model can barely tell apart: the winner takes
-	// well under all of it, which is the state this number exists to show.
+	// The model can barely tell three destinations apart, so the winner's
+	// share is low.
 	if share < 0.3 || share > 0.6 {
 		t.Errorf("share = %.3f, want the winner of a close three-way choice", share)
 	}
 }
 
-// A decision is meant to be the same twice. Nothing in a tie says which was
-// meant, so the same tie has to resolve the same way rather than by map order.
+// The same tie must resolve the same way each time, not by map order.
 func TestATieIsBrokenTheSameWayEveryTime(t *testing.T) {
 	raw := completion("A", [2]any{"A", -1.0}, [2]any{"B", -1.0}, [2]any{"C", -1.0})
 	for range 50 {
@@ -138,8 +131,7 @@ func TestATieIsBrokenTheSameWayEveryTime(t *testing.T) {
 	}
 }
 
-// Nobody has more destinations than letters, but such a router must not
-// silently lose destinations.
+// A router with more destinations than letters must not lose any.
 func TestTooManyDestinationsAreNotLettered(t *testing.T) {
 	if labelled(nil) {
 		t.Error("a router with nothing to offer was lettered")
@@ -152,8 +144,7 @@ func TestTooManyDestinationsAreNotLettered(t *testing.T) {
 	}
 }
 
-// ALLOW and REFUSED begin differently, so any prefix the tokeniser hands back
-// tells them apart.
+// ALLOW and REFUSED begin differently, so any token prefix tells them apart.
 func TestAVerdictIsReadOffTheWordsAGateAlreadyAnswers(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -168,8 +159,7 @@ func TestAVerdictIsReadOffTheWordsAGateAlreadyAnswers(t *testing.T) {
 			allow: true, share: 0.99, read: true,
 		},
 		{
-			// A tokeniser may split the word anywhere, and every piece of it
-			// still means the word.
+			// A tokeniser may split the word anywhere.
 			name:  "however the tokeniser split it",
 			raw:   completion("REF", [2]any{"REF", -0.01}, [2]any{"AL", -5.0}),
 			allow: false, share: 0.99, read: true,
@@ -185,16 +175,14 @@ func TestAVerdictIsReadOffTheWordsAGateAlreadyAnswers(t *testing.T) {
 			allow: true, share: 0.99, read: true,
 		},
 		{
-			// The point of the mode: the model thought first, and what it was
-			// going to think is not a verdict, so it is not weighed as one.
+			// A model that thinks first still gives a verdict.
 			name: "a model that opens with something else entirely",
 			raw: completion("<think>", [2]any{"<think>", -0.05}, [2]any{"ALLOW", -3.0},
 				[2]any{"REFUSED", -7.0}),
 			allow: true, share: 0.98, read: true,
 		},
 		{
-			// 'Absolutely' begins with an A, and letting a request past on that
-			// would be a guardrail deciding by spelling.
+			// 'Absolutely' is not ALLOW.
 			name: "a word that merely starts with the same letter",
 			raw:  completion("Absolutely", [2]any{"Absolutely", -0.01}),
 			read: false,
@@ -224,8 +212,7 @@ func TestAVerdictIsReadOffTheWordsAGateAlreadyAnswers(t *testing.T) {
 	}
 }
 
-// A gate that can barely tell the two answers apart has to read as one, which
-// is the whole reason the number is kept.
+// A gate that can barely tell the two answers apart must show it.
 func TestAVerdictReportsWhenItWasNearlyAToss(t *testing.T) {
 	raw := completion("ALLOW", [2]any{"ALLOW", -0.65}, [2]any{"REFUSED", -0.75})
 	allow, share, ok := readVerdict([]byte(raw))

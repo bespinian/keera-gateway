@@ -10,15 +10,14 @@ import (
 )
 
 // limitFields are a guardrail's columns, in the order limitTargets reads them
-// and limitValues writes them. Every query over them is built from this list,
-// so a new limit is one entry here and one in each of those two.
+// and limitValues writes them. A new limit needs an entry here and in both.
 var limitFields = []string{
 	"allowed_models", "rate_limits", "budgets", "system_prompt", "filters",
 	"max_sandboxes", "max_sandbox_ttl_seconds", "sandbox_classes",
 	"max_sandbox_cpu_millis", "max_sandbox_memory_mib", "allowed_tools", "allowed_repos",
 }
 
-// limitColumns is a guardrail row as policy.Limits holds it, read from a table
+// limitColumns is a guardrail row as policy.Limits holds it, from a table
 // aliased p.
 var limitColumns = "p." + strings.Join(limitFields, ", p.")
 
@@ -62,8 +61,8 @@ func limitValues(lim policy.Limits) []any {
 	}
 }
 
-// jsonList writes an empty list as NULL. The driver would send a nil slice as
-// JSON null, which the column's check refuses.
+// jsonList writes an empty list as NULL, since the driver would send a nil
+// slice as JSON null, which the column's check refuses.
 func jsonList[T any](list []T) any {
 	if len(list) == 0 {
 		return nil
@@ -90,17 +89,15 @@ func (s *Store) PutGuardrail(ctx context.Context, scopeType policy.ScopeType, sc
 }
 
 // LockReferences holds off every other holder in one organisation until
-// unlock is called. A save that checks what it names exists holds it, and so
-// does a delete that checks nothing names what it deletes, so the check still
-// holds when the write after it is made. Without it, a guardrail saved during
-// a delete could name a filter that is gone, and refuse every request.
+// unlock is called. Saves that check what they name exists, and deletes that
+// check nothing names what they delete, hold it, so the check still holds at
+// the write. Otherwise a guardrail saved during a delete could name a missing
+// filter and refuse every request.
 //
 // The lock lives in a transaction that writes nothing, so a lost connection
-// or a failed rollback cannot leave it held.
-//
-// That transaction holds a connection, and the holder's checks need another.
-// So at most half the pool holds one at a time: with every connection held by
-// a holder or a waiter, no holder could ever finish.
+// cannot leave it held. That transaction holds a connection and the checks
+// need another, so at most half the pool may hold one, or no holder could
+// finish.
 func (s *Store) LockReferences(ctx context.Context, orgID string) (unlock func(), err error) {
 	select {
 	case s.referenceSlots <- struct{}{}:
@@ -129,14 +126,12 @@ func (s *Store) LockReferences(ctx context.Context, orgID string) (unlock func()
 type GuardrailRef struct {
 	ScopeType policy.ScopeType `json:"scope_type"`
 	ScopeID   string           `json:"scope_id"`
-	// Name is what that scope is called, so a refusal can name the project rather
-	// than show an id.
+	// Name is what that scope is called, so a refusal can show a name, not an id.
 	Name string `json:"name"`
 }
 
-// scopesNaming lists the guardrails inside one organisation that name alias.
-// match is the SQL condition, with alias as $2; it is always a constant from
-// this package.
+// scopesNaming lists the guardrails in one organisation that name alias.
+// match is the SQL condition, with alias as $2; it is always a constant.
 func (s *Store) scopesNaming(ctx context.Context, match, orgID, alias string) ([]GuardrailRef, error) {
 	return queryAll(ctx, s.pool, scanGuardrailRef, `
 		SELECT p.scope_type, p.scope_id, COALESCE(o.name, pr.name, k.name, p.scope_id)
@@ -155,10 +150,9 @@ func scanGuardrailRef(r row) (GuardrailRef, error) {
 	return fs, err
 }
 
-// MCPServerUsers lists the guardrails inside one organisation whose tool
-// allow-list names an MCP server, for all its tools or one of them. It is read
-// before a deletion, as FilterUsers is: a guardrail naming a missing server
-// cannot be saved again.
+// MCPServerUsers lists the guardrails in one organisation whose tool
+// allow-list names an MCP server or one of its tools, to check before a
+// deletion: a guardrail naming a missing server cannot be saved again.
 func (s *Store) MCPServerUsers(ctx context.Context, orgID, alias string) ([]GuardrailRef, error) {
 	return s.scopesNaming(ctx,
 		"EXISTS (SELECT 1 FROM unnest(p.allowed_tools) e WHERE split_part(e, '/', 1) = $2)",
@@ -172,15 +166,15 @@ func scanFilter(r row) (policy.Filter, error) {
 	var f policy.Filter
 	err := r.Scan(&f.OrgID, &f.Alias, &f.Model, &f.Mode, &f.Shadow, &f.Prompt, &f.Rules,
 		&f.Description, &f.CreatedAt, &f.UpdatedAt)
-	// No rules is always nil, so callers only ever see one form of "none".
+	// No rules is always nil, so callers see one form of "none".
 	if len(f.Rules) == 0 {
 		f.Rules = nil
 	}
 	return f, err
 }
 
-// LoadFilters reads every organisation's filters, for the gateway's cache.
-// Nothing on the inference path may wait on Postgres.
+// LoadFilters reads every organisation's filters, for the gateway's cache, so
+// the inference path never waits on Postgres.
 func (s *Store) LoadFilters(ctx context.Context) ([]policy.Filter, error) {
 	return queryAll(ctx, s.pool, scanFilter, filterColumns+" FROM filters ORDER BY org_id, alias")
 }
@@ -201,8 +195,7 @@ func (s *Store) UpsertFilter(ctx context.Context, f policy.Filter) (policy.Filte
 	if f.Mode == "" {
 		f.Mode = policy.FilterModeRewrite
 	}
-	// Marshalled here because the driver would send a nil slice as JSON null,
-	// which the column's check refuses.
+	// Marshalled here because the driver would send a nil slice as JSON null.
 	own := f.Rules
 	if own == nil {
 		own = []policy.FilterRule{}
@@ -228,17 +221,16 @@ func (s *Store) DeleteFilter(ctx context.Context, orgID, alias string) error {
 	return s.execOne(ctx, "DELETE FROM filters WHERE org_id = $1 AND alias = $2", orgID, alias)
 }
 
-// FilterUsers lists the guardrails inside one organisation that name a filter.
-//
-// It is read before a deletion. A guardrail that names a missing filter
-// refuses every request, so removing a filter in use would break a project.
+// FilterUsers lists the guardrails in one organisation that name a filter, to
+// check before a deletion: a guardrail naming a missing filter refuses every
+// request.
 func (s *Store) FilterUsers(ctx context.Context, orgID, alias string) ([]GuardrailRef, error) {
 	return s.scopesNaming(ctx, "$2 = ANY (p.filters)", orgID, alias)
 }
 
-// AllowInOrg adds alias to an organisation's allowed models, if its guardrail
-// keeps that list. Adding a model means wanting to use it; without this it
-// would start out refused. It reports whether the list changed.
+// AllowInOrg adds alias to an organisation's allowed models, if it keeps that
+// list, so a new model is not refused from the start. It reports whether the
+// list changed.
 func (s *Store) AllowInOrg(ctx context.Context, orgID, alias string) (bool, error) {
 	tag, err := s.pool.Exec(ctx, `UPDATE guardrails
 		SET allowed_models = array_append(allowed_models, $2)

@@ -1,12 +1,9 @@
 // The filters and rankings the request log and the session list share.
-//
-// Readers move between the two mid-question ("which task failed", then "which
-// call"), so both narrow the same way and the choices carry over.
+// Readers move between the two mid-question, so the choices carry over.
 
 import { h, num, remembered, remember } from "../ui.js";
 import { statusLabel } from "../status.js";
 
-/** namesFrom returns the id-to-name maps a log response carries. */
 export function namesFrom(res) {
   return {
     keys: res.key_names || {},
@@ -21,8 +18,8 @@ export function addNames(names, res) {
   }
 }
 
-// The lenses on the log. "All" leads: often the answer is that the calls
-// arrived and were served, which a log of failures cannot show.
+// "All" leads: often the answer is that the calls were served, which a log
+// of failures cannot show.
 //
 // On a session list, a lens keeps the tasks with at least one such request,
 // and "Success" the tasks where every request was.
@@ -34,12 +31,12 @@ const OUTCOMES = [
   { key: "interrupted", label: "Interrupted", of: (c) => c.interrupted },
 ];
 
-// Remembered on its own: only a project's, key's or model's screen offers the
-// outcome. The Requests and Sessions screens filter by status instead.
+// Remembered on its own: only an entity's screen offers the outcome. The
+// Requests and Sessions screens filter by status instead.
 const OUTCOME_KEY = "keera.log.outcome";
 
-// One list of filters, so reading, drawing and clearing cannot drift apart.
-// On the session list, a session's status is that of its last request.
+// One list, so reading, drawing and clearing cannot drift apart. A session's
+// status is that of its last request.
 const NARROWINGS = [
   {
     param: "status",
@@ -73,11 +70,9 @@ const NARROWINGS = [
   },
 ];
 
-// The status classes, offered above the exact statuses: people ask both "which
-// was the 402" and "did anything fail", without knowing the exact code.
-//
-// The control plane reads `value` as a class. `holds` makes the same split
-// over the facet counts, so a class shows its row count like a status does.
+// Status classes, above the exact statuses: people ask "did anything fail"
+// without knowing the code. The control plane reads `value` as a class;
+// `holds` splits the facet counts the same way.
 const STATUS_CLASSES = [
   { value: "5xx", label: "Server errors (5xx)", holds: (s) => s >= 500 },
   {
@@ -93,8 +88,7 @@ function statusFilterLabel(v) {
   return cls ? cls.label : `${v} - ${statusLabel(Number(v))}`;
 }
 
-// statusOptions draws classes and exact statuses as two groups. A class is
-// listed only when the window has rows in it, so it never selects nothing.
+// statusOptions lists a class only when the window has rows in it.
 function statusOptions(counts, selected) {
   const groups = STATUS_CLASSES.map((c) => ({
     ...c,
@@ -111,7 +105,7 @@ function statusOptions(counts, selected) {
       `${statusFilterLabel(c.value)} (${num(c.count)})`,
     ),
   );
-  // Kept with (0), as in narrowSelect, or nobody could see the filter is set.
+  // Kept with (0), as in narrowSelect.
   if (
     selected &&
     !groups.some((c) => c.value === selected) &&
@@ -144,8 +138,7 @@ function statusOptions(counts, selected) {
   ].filter(Boolean);
 }
 
-/** narrowings leaves out the user filter for a member, who sees only their
- *  own requests. */
+/** narrowings leaves out the user filter for a member. */
 function narrowings(ctx) {
   return NARROWINGS.filter(
     (n) => n.param !== "user_id" || ctx.state.me.can_admin_org,
@@ -154,7 +147,6 @@ function narrowings(ctx) {
 
 const narrowKey = (param) => "keera.log." + param;
 
-/** readNarrowing returns the remembered filters, as query parameters. */
 export function readNarrowing(ctx) {
   const out = {};
   for (const n of narrowings(ctx))
@@ -166,15 +158,13 @@ function clearNarrowing() {
   for (const n of NARROWINGS) remember(narrowKey(n.param), null);
 }
 
-/** setOutcome is used by the failure pill on an entity's chart, to point the
- *  log below at the rows it counted. */
+/** setOutcome points the log at the rows a failure pill counted. */
 export function setOutcome(outcome) {
   remember(OUTCOME_KEY, outcome);
 }
 
-/** openFailed points the Requests screen at the 5xx rows the dashboard's
- *  failure count counts. It clears the other filters, because that count is
- *  over the whole organisation and a leftover filter would show fewer rows. */
+/** openFailed points the Requests screen at the dashboard's 5xx rows. It
+ *  clears the other filters, which would show fewer rows than the count. */
 export function openFailed() {
   clearNarrowing();
   remember(narrowKey("status"), "5xx");
@@ -184,9 +174,8 @@ export function currentOutcome() {
   return remembered(OUTCOME_KEY) || "";
 }
 
-/** outcomeSeg is the row of lenses with their counts. `retally` takes the
- *  control plane's fresh counts from the live stream, never a running total
- *  kept here, so they cannot drift from what a reload would show. */
+/** outcomeSeg is the row of lenses with their counts. `retally` takes fresh
+ *  counts from the stream, not a running total, so they cannot drift. */
 export function outcomeSeg(ctx, outcome, counts) {
   const shown = { ...counts };
   const tallies = new Map();
@@ -224,8 +213,7 @@ export function outcomeSeg(ctx, outcome, counts) {
 }
 
 /** narrowRow is the filters of a screen with no scope. Each keeps its value
- *  when another one or the range changes, because combining them is usually
- *  the point. */
+ *  when another or the range changes, as combining them is the point. */
 export function narrowRow(ctx, narrowed, facets, names, lead = null) {
   const list = narrowings(ctx);
   return h(
@@ -252,7 +240,7 @@ export function narrowRow(ctx, narrowed, facets, names, lead = null) {
 }
 
 /** ranking is a list's ranking, remembered under key, in the form table()
- *  takes as `rank`. Each list has its own key, as each offers other rankings. */
+ *  takes as `rank`. */
 export function ranking(ctx, key) {
   return {
     by: remembered(key) || "",
@@ -263,8 +251,8 @@ export function ranking(ctx, key) {
   };
 }
 
-/** rankedNote goes under a ranked list that filled its page. Paging works
- *  only in time order, so the rest is reached by narrowing. */
+/** rankedNote goes under a full ranked page. Paging works only in time order,
+ *  so the rest is reached by narrowing. */
 export function rankedNote(count, what) {
   return h(
     "div",
@@ -274,12 +262,10 @@ export function rankedNote(count, what) {
   );
 }
 
-// narrowSelect is one filter. It lists only the values in the window, with
-// their counts, so two hundred keys do not bury the four that were used.
-//
-// A selected value that no longer occurs is kept with (0), or nobody could see
-// the filter is applied. A filter with fewer than two values is left out,
-// unless it is set, so it can be cleared.
+// narrowSelect lists only the values in the window, with their counts, so
+// unused keys do not bury the used ones. A selected value that no longer
+// occurs is kept with (0), so the filter still shows as set. A filter with
+// fewer than two values is left out, unless it is set.
 function narrowSelect(ctx, n, selected, counts, names) {
   if (!selected && counts.length < 2) return null;
   const label = (v) => (n.name ? n.name(v, names) : v);

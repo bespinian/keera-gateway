@@ -1,6 +1,6 @@
 // My clients: the coding agents that call the gateway with the reader's keys,
 // and how to add one. Connect client fills in the key's models, so what is
-// copied works as it is.
+// copied works as is.
 
 import { api, chatTargets } from "../api.js";
 import {
@@ -30,11 +30,10 @@ import {
   field,
 } from "../ui.js";
 
-// The control plane fills in the configuration blocks with the same code
-// `keera connect` runs, so the panel and the command line agree. See
-// internal/connect.
+// The control plane fills in the config blocks with the same code `keera
+// connect` runs, so the panel and the CLI agree. See internal/connect.
 
-// One fetch per page load. A changed catalogue shows after a reload.
+// One fetch per page load.
 let catalogue;
 
 function loadClients() {
@@ -47,7 +46,7 @@ function loadClients() {
           holdsKey: String(c.template || "").includes("{{key}}"),
         })),
       (err) => {
-        // A failure is not cached, so a reload can try again.
+        // Not cached, so a reload can try again.
         catalogue = null;
         throw err;
       },
@@ -75,8 +74,7 @@ export function keyModels(targets, allowed) {
 }
 
 /** usableKeys drops subscription keys: they work only from Claude Code
- *  signed in to a Claude plan, which `keera connect claude-code
- *  --subscription` sets up. */
+ *  signed in to a Claude plan. */
 export function usableKeys(a) {
   return (a.keys || []).filter(
     (k) => k.state === "active" && k.kind !== "subscription",
@@ -168,9 +166,9 @@ export async function clientsView(ctx) {
 }
 
 /** openConnectClient opens Connect client from another screen. Without a key
- *  or a client to offer, it goes to My clients, which says why. created is a
- *  key whose secret was just shown, which the setup fills in. It resolves to
- *  whether the dialog opened. */
+ *  or client to offer, it goes to My clients, which says why. created is a
+ *  key whose secret was just shown. It resolves to whether the dialog
+ *  opened. */
 export async function openConnectClient(ctx, button, created = null) {
   button.disabled = true;
   let catalogue, a;
@@ -196,12 +194,11 @@ export async function openConnectClient(ctx, button, created = null) {
   return addClient(ctx, catalogue, keys, button, created && created.key);
 }
 
-/** addClient asks which client to set up, then shows its setup for one of the
- *  reader's keys. secret, when given, replaces the placeholder. It resolves to
- *  whether the dialog opened. */
+/** addClient asks which client to set up, then shows its setup for one of
+ *  the reader's keys. secret replaces the placeholder. It resolves to whether
+ *  the dialog opened. */
 async function addClient(ctx, catalogue, keys, button, secret = null) {
-  // Every key here is in the reader's own organisation, so one read covers
-  // them all.
+  // Every key is in the reader's organisation, so one read covers them all.
   button.disabled = true;
   let targets;
   try {
@@ -220,12 +217,12 @@ async function addClient(ctx, catalogue, keys, button, secret = null) {
     secret,
   };
 
-  // Only what depends on the key or the client is rebuilt when they change,
-  // so the select keeps its focus.
+  // Only what depends on the key or client is rebuilt, so the select keeps
+  // its focus.
   const models = h("div", { class: "hint" });
   const steps = h("div");
-  // Each key's blocks are read once. A later choice that is drawn first is
-  // not overwritten by an earlier, slower answer.
+  // Each key's blocks are read once. A slower, earlier answer does not
+  // overwrite a later choice.
   const rendered = new Map();
   let drawing = 0;
   const redraw = async () => {
@@ -274,8 +271,7 @@ async function addClient(ctx, catalogue, keys, button, secret = null) {
     ),
   );
 
-  // The key is the only choice after the client: the models follow from it,
-  // and the gateway address comes from the control plane.
+  // The key is the only choice after the client: the models follow from it.
   const setup = h(
     "div",
     { hidden: true },
@@ -360,8 +356,7 @@ export function noKey(ctx, a) {
       ),
     );
   }
-  // A key issued without a user still works, but nothing links it to the
-  // reader, so it is not counted here.
+  // A key without a user works, but nothing links it to the reader.
   const unlinked =
     "A key you already have may not be linked to you. It still works, but " +
     "it does not show here.";
@@ -393,8 +388,8 @@ export function noModel() {
 
 function instructions(ctx, state, block, placeholder) {
   const { client, key, secret } = state;
-  // A block that holds the key shows it by its prefix once its secret is
-  // gone. It sits in a JSON or TOML string.
+  // Once the secret is gone, a block shows the key's prefix. It sits in a
+  // JSON or TOML string.
   const shown = JSON.stringify(secret || `${key.prefix}…`).slice(1, -1);
   const config = block.config.replaceAll(placeholder, shown);
   const rotate = [
@@ -467,8 +462,8 @@ function instructions(ctx, state, block, placeholder) {
             ? [
                 "Save this as ",
                 h("code", {}, client.path),
-                // A path outside the home directory is a new file, so there
-                // is nothing to merge into.
+                // A path outside the home directory is a new file, with
+                // nothing to merge into.
                 client.path.startsWith("~/")
                   ? ". If the file exists, merge these settings into it " +
                     "instead of replacing it."

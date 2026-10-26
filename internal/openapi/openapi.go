@@ -22,8 +22,8 @@ import (
 //go:embed openapi.yaml
 var source []byte
 
-// The paths it is served at, on the root like /healthz, because it describes
-// more than the control API.
+// Served on the root, like /healthz, because it covers more than the control
+// API.
 const (
 	YAMLPath = "/openapi.yaml"
 	JSONPath = "/openapi.json"
@@ -51,8 +51,8 @@ func JSON() http.Handler { return serve("application/json", func(r rendered) []b
 
 type rendered struct{ yaml, json []byte }
 
-// render runs once. A spec that does not parse is a build mistake, which the
-// tests catch, so the server only answers 500 for it rather than not start.
+// render runs once. A spec that does not parse is a build mistake the tests
+// catch, so the server answers 500 rather than fail to start.
 var render = sync.OnceValues(func() (rendered, error) {
 	doc, err := Spec()
 	if err != nil {
@@ -79,8 +79,7 @@ func serve(contentType string, pick func(rendered) []byte) http.Handler {
 			return
 		}
 		w.Header().Set("Content-Type", contentType)
-		// Anyone may generate a client from it, from a page on another origin
-		// too. It holds nothing that is not in the source.
+		// Any origin may read it: it holds nothing that is not in the source.
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		_, _ = w.Write(pick(r))
 	})

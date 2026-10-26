@@ -1,6 +1,5 @@
-// Package gateway is Keera Gateway's inference data plane: it authenticates a
-// request, enforces the guardrails of its key, forwards it to the inference
-// plane, and accounts for what it cost.
+// Package gateway is the inference data plane: it authenticates a request,
+// enforces its key's guardrails, forwards it, and accounts for the cost.
 package gateway
 
 import (
@@ -28,40 +27,37 @@ import (
 type Budgeter interface {
 	Allow(scopes []policy.Scope, now time.Time) error
 	Charge(scopes []policy.Scope, micros int64, now time.Time)
-	// Tally counts tokens against the scopes that count them: a rate limit
-	// per day or month.
+	// Tally counts tokens against daily and monthly rate limits.
 	Tally(scopes []policy.Scope, meter policy.Meter, n int64, now time.Time)
-	// StartRequest counts a request against the scopes that count requests
-	// while it runs, and EndRequest once it has ended, with the same now.
+	// StartRequest counts a running request against the scopes that count
+	// requests. EndRequest undoes it, with the same now.
 	StartRequest(scopes []policy.Scope, now time.Time)
 	EndRequest(scopes []policy.Scope, now time.Time)
 	// Spent reports what one budget window has been charged so far. It feeds
-	// the budget headers, so a client sees a limit coming before it is refused.
+	// the budget headers, so a client sees a limit coming.
 	Spent(t policy.ScopeType, id string, p policy.Period, now time.Time) int64
 	// HoldCredit reports whether an organisation may use the deployment's
-	// provider keys, which it may pay for in advance (see docs/billing.md),
-	// and holds the most a request may cost until ReleaseCredit. It returns
-	// what it held.
+	// provider keys (prepaid, see docs/billing.md), and holds the most a
+	// request may cost until ReleaseCredit. It returns what it held.
 	HoldCredit(orgID string, micros int64) (int64, error)
 	ReleaseCredit(orgID string, micros int64)
 	// ChargeCredit takes a request's use of those keys from the credit.
 	ChargeCredit(orgID string, micros int64)
 }
 
-// Limiter is the token buckets a request is decided against.
-//
-// The buckets live in memory or in Redis. How the two differ, including when
-// Redis is down, is the limiter's business, not this package's.
+// Limiter is the token buckets a request is decided against. They live in
+// memory or in Redis; how those differ is the limiter's concern.
 type Limiter interface {
 	// Admit decides every requirement at once, charging the ones that take a
-	// unit only if all of them hold, and returns the index of the first that
-	// failed, or -1.
+	// unit only if all hold. It returns the index of the first that failed,
+	// or -1.
 	Admit(reqs []ratelimit.Requirement, now time.Time) int
 	// ChargeAll takes n units from every bucket after the fact, ignoring
-	// Take. Token limits are paid this way: their cost is known only at the end.
+	// Take. Token limits are paid this way, since their cost is known only at
+	// the end.
 	ChargeAll(reqs []ratelimit.Requirement, n float64, now time.Time)
-	// Remaining feeds the response headers on every request, so it must be
-	// cheap. Retry is asked only for a refused request.
+	// Remaining runs on every request, so it must be cheap. Retry is asked
+	// only for a refused request.
 	Remaining(key string, perMinute int, now time.Time) int
 	Retry(key string, perMinute int, now time.Time) time.Duration
 }
@@ -73,15 +69,14 @@ type Sink interface {
 
 // Options tunes the data plane.
 type Options struct {
-	// MaxBodyBytes caps a request. Coding agents send large contexts, so this
-	// is generous by default and exists to stop a client exhausting memory.
+	// MaxBodyBytes caps a request. Coding agents send large contexts, so it
+	// is generous; it only stops a client exhausting memory.
 	MaxBodyBytes int64
 	// MaxResponseBytes caps a buffered upstream response, and one event of a
 	// streamed one.
 	MaxResponseBytes int64
-	// UpstreamHeaderTimeout bounds how long the inference plane may take to
-	// begin responding. It must not bound the response itself: a streamed
-	// completion legitimately runs for minutes.
+	// UpstreamHeaderTimeout limits how long the inference plane may take to
+	// start responding. Not the whole response: a stream can run for minutes.
 	UpstreamHeaderTimeout time.Duration
 	// UpstreamDeny is the addresses the gateway never connects to. Nil denies
 	// nothing; the setting's default is DefaultUpstreamDeny. See egress.go.
@@ -91,8 +86,7 @@ type Options struct {
 	LimitPrivate bool
 	PrivateHosts []string
 	// PanelURL is the control panel as a developer's browser reaches it. When
-	// set, a refusal says where to go and look. Without a panel, it says
-	// nothing rather than name an address that does not answer.
+	// set, a refusal says where to look.
 	PanelURL string
 	// ClaudeSubscriptions lets subscription keys through. Off, they are
 	// refused, and so is every subscription model, which only they reach.
@@ -100,7 +94,7 @@ type Options struct {
 }
 
 // The defaults of the settings behind Options. internal/config reads them
-// from here, so the environment and a zero Options mean the same.
+// from here, so the environment and a zero Options agree.
 const (
 	DefaultMaxBodyBytes          = 32 << 20
 	DefaultMaxResponseBytes      = 64 << 20
@@ -129,30 +123,25 @@ type Server struct {
 	sink    Sink
 	metrics *metrics.Registry
 	client  *http.Client
-	// publicClient is for an organisation that signed itself up and has not
-	// paid yet. It also refuses private addresses, so such an organisation
-	// cannot reach the deployment's network, even through a public name that
-	// resolves into it.
+	// publicClient is for a self-signed-up organisation that has not paid
+	// yet. It refuses private addresses, even behind a public name.
 	publicClient *http.Client
 	// keyClient is for models on the deployment's key. A hosted provider may
-	// send nothing until the whole answer is done, so it gets as long as an
-	// answer whose client left is read; cutting it short would lose an answer
-	// the deployment pays for.
+	// send nothing until the answer is done, so it gets as long as readOnFor;
+	// cutting it short would lose an answer the deployment pays for.
 	keyClient *http.Client
 	log       *slog.Logger
 	opts      Options
 
 	rr sync.Map // model key -> *atomic.Uint64, for round-robin over backends
-	// load is what this process has seen of each destination, for
-	// latency and least-busy route steps. See load.go.
-	load *loads
-	// patterns caches compiled pattern filter rules. See pattern.go.
+	// load is what this process has seen of each destination, for latency
+	// and least-busy route steps. See load.go.
+	load     *loads
 	patterns patternCache
-	// noLogprobs names the models whose backend turned out not to serve
-	// logprobs, so routers ask them for a name instead and gates read only
-	// the words. Every model starts out absent: a self-hosted plane serves
-	// logprobs, and finding out otherwise costs one wasted request per
-	// process. See choice.go.
+	// noLogprobs names models whose backend does not serve logprobs, so
+	// routers ask them for a name and gates read only the words. Models start
+	// absent: a self-hosted plane serves logprobs, and finding out otherwise
+	// costs one wasted request per process. See choice.go.
 	noLogprobs sync.Map // model key -> struct{}
 }
 
@@ -161,8 +150,6 @@ func New(src policy.Source, budgets Budgeter, limiter Limiter, sink Sink,
 	m *metrics.Registry, opts Options, log *slog.Logger,
 ) *Server {
 	opts.setDefaults()
-	// An organisation's requests connect as KEERA_UPSTREAM_DENY and
-	// KEERA_UPSTREAM_PRIVATE say.
 	open := newDialer(denyDial(opts.UpstreamDeny, "KEERA_UPSTREAM_DENY blocks it"))
 	orgDial := open.DialContext
 	if opts.LimitPrivate {
@@ -195,8 +182,8 @@ func upstreamClient(headerTimeout time.Duration,
 	dial func(context.Context, string, string) (net.Conn, error),
 ) *http.Client {
 	return &http.Client{
-		// No client timeout: a stream may run longer than any value worth
-		// setting. The request context cancels it when the client leaves.
+		// No client timeout: a stream may run for a long time. The request
+		// context cancels it when the client leaves.
 		Transport: &http.Transport{
 			Proxy:               http.ProxyFromEnvironment,
 			DialContext:         dial,
@@ -208,8 +195,8 @@ func upstreamClient(headerTimeout time.Duration,
 			DisableCompression:    true,
 			ResponseHeaderTimeout: headerTimeout,
 		},
-		// A redirect is answered, not followed. Followed, it would take the
-		// request and its credential to an address nobody configured.
+		// A redirect is not followed, or it would take the request and its
+		// credential to an address nobody configured.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 }
@@ -230,8 +217,7 @@ func (s *Server) clientFor(limited bool) *http.Client {
 }
 
 // Handler returns the inference routes. They carry httpx.InferencePrefix, so
-// the handler can be mounted on the root mux as-is and r.URL.Path stays the
-// path the client actually asked for.
+// the handler mounts on the root mux as is and r.URL.Path stays the client's.
 func (s *Server) Handler() http.Handler {
 	return httpx.Middleware(s.log, s.mux())
 }
@@ -245,23 +231,22 @@ func (s *Server) mux() *httpx.Mux {
 	mux.Handle("POST "+httpx.InferencePrefix+"/v1/chat/completions", s.inference(chatSurface))
 	mux.Handle("POST "+httpx.InferencePrefix+"/v1/completions", s.inference(completionSurface))
 	mux.Handle("POST "+httpx.InferencePrefix+"/v1/embeddings", s.inference(embeddingSurface))
-	// The Anthropic-shaped surface: the same chat models and guardrails in
-	// another format. Clients post to /api/v1/messages?beta=true, and the
-	// query string is not part of the match.
+	// The Anthropic-shaped surface. Clients post to
+	// /api/v1/messages?beta=true; the query string is not matched.
 	mux.Handle("POST "+httpx.InferencePrefix+"/v1/messages", s.inference(messagesSurface))
 	mux.HandleFunc("POST "+httpx.InferencePrefix+"/v1/messages/count_tokens", s.countTokens)
 	mux.Handle("POST "+httpx.InferencePrefix+"/v1/responses", s.inference(responsesSurface))
-	// MCP servers, behind the same keys. See mcp.go.
+	// See mcp.go.
 	mux.HandleFunc("POST "+httpx.InferencePrefix+"/mcp/{alias}", s.mcpPost)
 	mux.HandleFunc("GET "+httpx.InferencePrefix+"/mcp/{alias}", s.mcpForward)
 	mux.HandleFunc("DELETE "+httpx.InferencePrefix+"/mcp/{alias}", s.mcpForward)
 	mux.HandleFunc("GET "+httpx.InferencePrefix+"/v1/models", s.listModels)
-	// The rest of the path, because a model alias may hold a slash, as in
+	// The rest of the path, because an alias may hold a slash, as in
 	// "anthropic/claude-sonnet-4-5", and not every client escapes it.
 	mux.HandleFunc("GET "+httpx.InferencePrefix+"/v1/models/{alias...}", s.getModel)
-	// A warm-up probe some Anthropic-shaped clients send. The path is doubled
-	// because the client appends /api/hello to a base URL that already ends
-	// in /api. Answering it keeps a meaningless 404 out of the access log.
+	// A warm-up probe some Anthropic-shaped clients send, appending
+	// /api/hello to a base URL already ending in /api. Answering it keeps a
+	// pointless 404 out of the access log.
 	mux.HandleFunc("HEAD "+httpx.InferencePrefix+"/api/hello", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -273,11 +258,9 @@ func (s *Server) mux() *httpx.Mux {
 	return mux
 }
 
-// authenticate resolves the presented key, answering in the shape the caller's
-// surface speaks.
-//
-// The key is read from KeyHeader first, because then Authorization carries the
-// caller's Claude sign-in instead. See subscription.go.
+// authenticate resolves the presented key, answering errors in the caller's
+// shape. KeyHeader is read first, because then Authorization carries the
+// caller's Claude sign-in. See subscription.go.
 func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, sh shape) (*policy.Resolved, bool) {
 	presented := strings.TrimSpace(r.Header.Get(KeyHeader))
 	inHeader := presented != ""
@@ -285,8 +268,8 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, sh shape) 
 	switch {
 	case inHeader:
 	case claudeSignIn(r):
-		// Claude Code signed in to a Claude plan, and pointed here without a
-		// Keera key: the administrator set the address for everyone.
+		// Claude Code signed in to a Claude plan, pointed here without a
+		// Keera key.
 		msg := "this request carries a Claude sign-in but no Keera key; to use Claude Code " +
 			"through Keera Gateway, " + connectHint
 		if !s.opts.ClaudeSubscriptions {
@@ -298,9 +281,8 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, sh shape) 
 	default:
 		presented, err = auth.FromHeader(r.Header.Get("Authorization"))
 		if err != nil {
-			// Some clients send the key as X-Api-Key instead of a bearer token,
-			// depending on a setting. Reading both saves a 401 that is hard to
-			// explain from inside an editor.
+			// Some clients send the key as X-Api-Key instead of a bearer
+			// token, depending on a setting.
 			if k := strings.TrimSpace(r.Header.Get("X-Api-Key")); k != "" {
 				presented, err = k, nil
 			}
@@ -333,8 +315,8 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, sh shape) 
 		sh.writeError(w, http.StatusUnauthorized, "invalid_request_error", "invalid_api_key",
 			"the API key provided is not valid")
 	case errors.Is(err, policy.ErrKeyRevoked):
-		// Revoked and expired look the same to the developer (it worked
-		// yesterday), so both say what to do next.
+		// Revoked and expired look the same to the developer, so both say
+		// what to do next.
 		sh.writeError(w, http.StatusUnauthorized, "invalid_request_error", "revoked_api_key",
 			s.advise("this API key has been revoked; ask whoever administers your "+
 				"organisation to issue a new one"))
@@ -368,10 +350,9 @@ func (s *Server) inference(surf surface) http.HandlerFunc {
 	}
 }
 
-// ServeChat forwards one chat completion for a key the caller did not present
-// itself: the panel's playground, which names one of the user's keys by id. It
-// goes through the same rate limits, budgets and billing as that key's own
-// requests.
+// ServeChat forwards one chat completion for a key the caller did not
+// present: the panel's playground, which names a key by id. It goes through
+// the same limits, budgets and billing as that key's own requests.
 func (s *Server) ServeChat(w http.ResponseWriter, r *http.Request, res *policy.Resolved) {
 	// No auth span: the control plane authorised this caller, not this handler.
 	s.serve(w, r, res, chatSurface, newTrace())

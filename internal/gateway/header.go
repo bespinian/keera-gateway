@@ -14,18 +14,13 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// A header step places a request where one of its headers says, so the
-// client's own code chooses: an app that knows a request is confidential, or
-// cheap, says so with a value the administrator mapped to a destination.
-//
-// It costs nothing and reads no text. The client chooses, so it is no
-// boundary: a header cannot keep data in the cluster. It only picks between
-// destinations the router allows anyway, and the branch of the one it picks
-// still runs.
+// A header step routes by a request header whose values the administrator
+// mapped to destinations, so the client's code chooses. It costs nothing and
+// reads no text. Since the client chooses, it is not a boundary: it only picks
+// between destinations the router allows anyway.
 
-// byHeader places a request by the value of the step's header. Like an
-// instruction step's choice, it is the only destination tried: the client
-// asked for that one.
+// byHeader routes by the step's header. The chosen destination is the only
+// one tried.
 func (s *Server) byHeader(rt policy.Route, h http.Header) (routeDecision, *refusal) {
 	d := routeDecision{outcome: store.RouterChose}
 	sent := h.Values(rt.Header)
@@ -60,8 +55,8 @@ func (s *Server) byHeader(rt policy.Route, h http.Header) (routeDecision, *refus
 	return d, nil
 }
 
-// headerUndecided refuses a request whose header names no destination. It is
-// the client's to fix, so it is a 400 that lists what it may send.
+// headerUndecided refuses a request whose header names no destination, with a
+// 400 that lists the values the client may send.
 func headerUndecided(rt policy.Route, why string) *refusal {
 	return &refusal{
 		status: http.StatusBadRequest,
@@ -72,8 +67,7 @@ func headerUndecided(rt policy.Route, why string) *refusal {
 	}
 }
 
-// quoteValue quotes what a client sent, cut short: it goes into an error and
-// the request log.
+// quoteValue quotes and shortens a client's value for an error and the log.
 func quoteValue(v string) string {
 	const limit = 64
 	if len(v) > limit {
@@ -82,9 +76,7 @@ func quoteValue(v string) string {
 	return strconv.Quote(v)
 }
 
-// checkHeader asks each destination of a header step whether it is there.
-// Where a request goes depends only on its header, so the values beside each
-// destination are the step's whole behaviour.
+// checkHeader checks that each destination of a header step answers.
 func (s *Server) checkHeader(ctx context.Context, rt policy.Route) RouteProbe {
 	p := RouteProbe{Step: rt.Step, Mode: rt.Mode}
 	p.Destinations, p.Dropped = s.sortDestinations(rt)
@@ -113,7 +105,6 @@ func (s *Server) checkHeader(ctx context.Context, rt policy.Route) RouteProbe {
 	return p
 }
 
-// headerReading says which values send a request to alias.
 func headerReading(rt policy.Route, alias string) string {
 	values := policy.ValuesTo(rt.Values, alias)
 	if alias == rt.Fallback {

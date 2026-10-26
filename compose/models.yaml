@@ -1,10 +1,9 @@
 # The models each new organisation starts with.
 #
-# The gateway reads this file on every start. A new organisation gets a copy of
-# every model here, its own to change. Existing organisations are not changed;
-# `keera model apply` adds the models to one. Clients ask for `alias`, never a
-# model id or URL, so the backend can be swapped or moved to a remote sovereign
-# endpoint without any developer changing anything.
+# Read on every start. A new organisation gets its own copy of every model
+# here. Existing organisations are not changed; `keera model apply` adds the
+# models to one. Clients ask for `alias`, never a model id or URL, so the
+# backend can change without developers changing anything.
 models:
   - alias: keera-speed
     kind: chat
@@ -16,20 +15,17 @@ models:
     backend_model: keera-speed
     max_context_tokens: 16384
     # What this model is for, in a sentence. Clients see it on /v1/models, and
-    # routers read it to choose a model, so write it for that. See
-    # docs/routers.md.
+    # routers choose by it. See docs/routers.md.
     description: >-
       Fast and served inside this cluster. Short edits, syntax questions,
       renames, commit messages and everyday work.
-    # Micro-units of CHF per million tokens. 0 means not billed, as a dedicated
-    # or on-premises deployment wants: there the numbers are for showback, not
-    # invoices.
+    # Micro-units of CHF per million tokens. 0 means not billed, as on a
+    # dedicated or on-premises deployment.
     input_micros_per_mtok: 0
     output_micros_per_mtok: 0
 
   # Keera Decider: Laya, a classifier served by laya-serve. A decision model
-  # returns a probability per answer and writes no text, so only routers and
-  # gate filters use it, and no client can name it. See
+  # writes no text, so only routers and gate filters use it, not clients. See
   # docs/gateway.md#decision-models.
   - alias: keera-decider
     kind: decision
@@ -38,39 +34,35 @@ models:
       - http://keera-decider:8000/v1
     # The Laya checkpoint: english, multilingual or typed-decisions.
     backend_model: english
-    # Sent to Laya as max_len, so it reads exactly what the gateway measured.
-    # On CPU, 2048 tokens take about five seconds and 512 about one. A gate
-    # refuses a longer request; a router sends it to its fallback.
+    # Sent to Laya as max_len. On CPU, 2048 tokens take about five seconds and
+    # 512 about one. A gate refuses a longer request; a router sends it to its
+    # fallback.
     max_context_tokens: 2048
     description: >-
       Decides, does not write. A classifier for routers and gate filters.
     input_micros_per_mtok: 0
     output_micros_per_mtok: 0
 
-# A hosted model, for work a small local model cannot do, or to try things out
-# before there are GPUs. `provider` fills in the endpoint, context window, list
-# prices, description, release date and location; `keera model catalogue` shows
-# what it knows. Uncomment and restart. Each new organisation then gets the
-# model, and its administrator stores the key:
+# A hosted model, for work a small local model cannot do, or before there are
+# GPUs. `provider` fills in the endpoint, context window, prices, description,
+# release date and location; see `keera model catalogue`. Uncomment and
+# restart, then each organisation's administrator stores the key:
 #
 #   keera model set keera-frontier --api-key @-
 #
 # Prompts sent to this model leave your infrastructure. Read docs/providers.md
-# before offering one to developers, and put a budget on the projects that may
-# use it.
+# first, and put a budget on the projects that may use it.
 #  - alias: keera-frontier
 #    provider: anthropic
 #    backend_model: claude-opus-5-5
-#    # Without this, the provider's own description is used, which is enough
-#    # for a router. Set it to say what the alias is for.
+#    # Optional: the provider's description is used otherwise.
 #    description: >-
 #      Hosted outside this cluster and expensive. Design, multi-step reasoning
 #      and whole-system questions. Must not be sent client data.
 
 # The same without leaving Switzerland: Infomaniak serves open-weight models
-# from its own data centres. An entry needs your AI Service's product id as
-# well as a key, both in the Infomaniak console under AI Tools. Store the key
-# as above.
+# from its own data centres. It needs your AI Service's product id and a key,
+# both in the Infomaniak console under AI Tools.
 #  - alias: keera-swiss
 #    provider: infomaniak
 #    product_id: "100234"
@@ -80,8 +72,8 @@ models:
 #      whole-system questions where the prompt may leave this cluster but not
 #      the country.
 
-# With two models of different capability and cost, let a router pick per
-# request (see docs/routers.md). It reads each candidate's `description`:
+# With two models, let a router pick per request by each `description` (see
+# docs/routers.md):
 #
 #   keera router add auto --model keera-speed \
 #     --destinations keera-speed,keera-frontier \

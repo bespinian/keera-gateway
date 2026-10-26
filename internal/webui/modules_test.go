@@ -16,14 +16,13 @@ var (
 		`(?m)^export\s+(?:async\s+)?(?:function\*?|const|let|class)\s+([A-Za-z_$][\w$]*)`)
 	// listedExport is `export { a, b as c }`.
 	listedExport = regexp.MustCompile(`(?m)^export\s*\{([^}]*)\}`)
-	// otherExport is what the two above cannot read. Should the panel start
-	// to use one, this test has to learn it first.
+	// otherExport is a form the two above cannot read. This test must learn
+	// it before the panel uses one.
 	otherExport = regexp.MustCompile(`(?m)^export\s+(?:default|\*)`)
 )
 
-// A name imported from a module that does not export it is a SyntaxError in
-// the browser: the whole panel is a blank page, and nothing fails at build
-// time, since there is no build.
+// Importing a name a module does not export is a SyntaxError in the browser:
+// the whole panel is blank, and with no build step nothing catches it earlier.
 func TestEveryImportedNameIsExported(t *testing.T) {
 	modules := map[string]string{}
 	if err := fs.WalkDir(assets, "assets", func(p string, d fs.DirEntry, err error) error {

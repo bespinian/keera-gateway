@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/bespinian/keera-gateway/internal/control"
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
@@ -35,8 +37,7 @@ func guardedRouter() policy.Router {
 	}}
 }
 
-// plain makes the printers write no escapes, whatever an earlier test's Run
-// decided for this process.
+// plain turns colour off, whatever an earlier test's Run decided.
 func plain(t *testing.T) {
 	t.Helper()
 	was := style
@@ -64,8 +65,8 @@ func TestStepTreeDrawsEveryBranch(t *testing.T) {
 	}
 }
 
-// A limit with no exceeded branch refuses, so the steps after it stay on the
-// same line of the tree rather than under a lone 'within'.
+// A limit with no exceeded branch keeps the next steps in line rather than
+// under a lone 'within'.
 func TestStepTreeKeepsALimitWithoutBranchesInLine(t *testing.T) {
 	plain(t)
 	start := &policy.Step{
@@ -82,8 +83,7 @@ func TestStepTreeKeepsALimitWithoutBranchesInLine(t *testing.T) {
 	}
 }
 
-// A system prompt is shown by its start, on one line, and a daily limit says
-// its period.
+// A system prompt shows its start on one line; a daily limit says its period.
 func TestStepTreeShowsAPromptAndAPeriod(t *testing.T) {
 	plain(t)
 	start := &policy.Step{
@@ -106,8 +106,7 @@ func TestStepTreeShowsAPromptAndAPeriod(t *testing.T) {
 }
 
 // A branch for a destination the route step no longer has is still drawn, so
-// an administrator can see it and take it out. A size step's branches say
-// what each one takes.
+// it can be seen and removed. A size step's branches say what each one takes.
 func TestStepTreeShowsABranchForAGoneDestination(t *testing.T) {
 	plain(t)
 	start := &policy.Step{
@@ -180,8 +179,8 @@ func TestReadRouterFileTakesAStepOrAWholeRouter(t *testing.T) {
 	if err := readRouterFile(step, &p); err == nil {
 		t.Error("a JSON array was read as a router")
 	}
-	// The control plane refuses a field it does not know, so the file is
-	// read the same way rather than losing a misspelt branch.
+	// Unknown fields are refused, as the control plane does, so a misspelt
+	// branch is not lost.
 	if err := os.WriteFile(step, []byte(`{"kind":"rate_limit","requests":5,
 		"exceded":{"kind":"model","ref":"m"}}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -245,8 +244,8 @@ func TestRouterAddWithOneRouteStep(t *testing.T) {
 	}
 }
 
-// On 'set', the route flags change one route step of the stored tree and keep
-// the rest of it. With two route steps, --step says which.
+// On 'set', the route flags change one route step and keep the rest. With two
+// route steps, --step says which.
 func TestRouterSetChangesOneRouteStep(t *testing.T) {
 	quiet(t)
 	stored := map[string]any{"alias": "guarded", "start": map[string]any{
@@ -295,9 +294,8 @@ func toStrings(v any) []string {
 	return out
 }
 
-// Only a step that decides has a fallback or a deciding model, and the control
-// plane would refuse either elsewhere, so the flags are refused rather than
-// dropped.
+// Only a deciding step has a fallback or a deciding model, so the flags are
+// refused elsewhere rather than dropped.
 func TestRouterDecidingFlagsNeedADecidingStep(t *testing.T) {
 	newFakeControl(t, map[string]any{"GET /v1/routers": map[string]any{"data": []any{}}})
 	t.Setenv("KEERA_ORG", "org_1")
@@ -312,8 +310,8 @@ func TestRouterDecidingFlagsNeedADecidingStep(t *testing.T) {
 	}
 }
 
-// Without --destinations, a header step's destinations are where its values
-// send, and the fallback.
+// Without --destinations, a header step's destinations are its values'
+// targets and the fallback.
 func TestRouterAddWithAHeaderStep(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
@@ -374,5 +372,42 @@ func TestPrintRoutersNamesWhereEachSends(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("listing lacks %q:\n%s", want, got)
 		}
+	}
+}
+
+// The limits show even when nothing called the router in the window, since a
+// monthly budget can be spent by traffic older than it.
+func TestPrintRouterReportShowsWhatEachLimitUsed(t *testing.T) {
+	plain(t)
+	rtr := guardedRouter()
+	var buf bytes.Buffer
+	w := newTable(&buf)
+	printRouterReport(w, "guarded", 24*time.Hour, routerReportResponse{
+		Router: &rtr,
+		Limits: []control.RouterLimit{
+			{Step: "hosted-budget", Budget: &control.AccessBudget{
+				BudgetMicros: 50_000_000, SpendMicros: 50_000_000, Period: policy.PeriodMonth,
+			}},
+			{Step: "daily", Rate: &control.AccessRate{
+				Requests: 100, RequestsUsed: 25, Tokens: 5000, TokensUsed: 4500, Period: policy.PeriodDay,
+			}},
+		},
+	})
+	if err := w.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"nothing named this router",
+		"CHF 50.00 (100%)", "CHF 50.00 per month",
+		"25 req, 4500 tok (90%)", "100 req, 5000 tok per day",
+		"hosted-budget is used up: it sends requests down its exceeded branch",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("report lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "daily is used up") {
+		t.Errorf("a limit at 90%% is called used up:\n%s", got)
 	}
 }

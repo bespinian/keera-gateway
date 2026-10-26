@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-// The registry in help.go says which flags each subcommand reads, and each
-// command's FlagSet says which flags exist. These tests keep the two in step.
+// These tests keep the flags in help.go's registry and each command's FlagSet
+// in step.
 
 // A flag a command declares and no verb claims is one nobody can use.
 func TestEveryFlagIsDocumented(t *testing.T) {
@@ -45,8 +45,8 @@ func TestEveryFlagIsDocumented(t *testing.T) {
 	}
 }
 
-// The other direction: writeFlags silently drops a flag the registry claims
-// and the command does not declare.
+// writeFlags silently drops a flag the registry claims and the command does
+// not declare.
 func TestSubcommandHelpNamesItsFlags(t *testing.T) {
 	for _, c := range commands {
 		for _, sub := range c.subs {
@@ -92,14 +92,13 @@ func TestOverviewNamesEveryCommand(t *testing.T) {
 			t.Errorf("the overview does not name %q", c.name)
 		}
 	}
-	// It is the screen for somebody who has just installed this, so its
-	// length is part of its job.
+	// Somebody who has just installed this reads it, so it must stay short.
 	if lines := strings.Count(out, "\n"); lines > 40 {
 		t.Errorf("the overview is %d lines; it is meant to be read without scrolling", lines)
 	}
 }
 
-// The names Run accepts are spelled as a list, because a switch cannot be read.
+// The names Run accepts are listed here, because a switch cannot be read.
 func TestEveryDispatchedCommandIsRegistered(t *testing.T) {
 	dispatched := []string{
 		"org", "orgs", "project", "projects", "user", "users", "key", "keys",
@@ -150,8 +149,7 @@ func TestSuggest(t *testing.T) {
 		"guardrai": "guardrail",
 		"keys":     "key",
 		"sesions":  "session",
-		// Nothing near enough: a guess here would read as the tool having
-		// misunderstood rather than as help.
+		// Nothing near enough: a guess would read as a misunderstanding.
 		"deploy": "",
 	}
 	for typed, want := range cases {
@@ -170,7 +168,7 @@ func TestSuggestSub(t *testing.T) {
 	}
 }
 
-// Including the spelling somebody actually types: a bare host with no scheme.
+// Including a bare host with no scheme, as people type it.
 func TestTakeURL(t *testing.T) {
 	t.Cleanup(func() { urlFlag = "" })
 	cases := []struct {
@@ -234,8 +232,8 @@ func TestHelpHidesDefaultsThatMeanNotGiven(t *testing.T) {
 	}
 }
 
-// A wrong count of arguments is answered with the line help.go prints, before
-// anything is sent, so the two cannot drift.
+// A wrong count of arguments gets the usage line help.go prints, before
+// anything is sent.
 func TestUsageComesFromTheRegistry(t *testing.T) {
 	newFakeControl(t, map[string]any{})
 	for _, tc := range []struct {

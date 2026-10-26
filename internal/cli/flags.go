@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// cmdRun is what every command starts with: the client, the flags, and the
-// verb. A command declares its own flags on fs, then calls parse.
+// cmdRun is what every command starts with. A command declares its own flags
+// on fs, then calls parse.
 type cmdRun struct {
 	c        *client
 	fs       *flag.FlagSet
@@ -21,23 +21,18 @@ type cmdRun struct {
 	// verb is the verb as typed until parse, and its own name after.
 	verb string
 	args []string
-	// rest is args without the verb.
 	rest []string
 
-	// org is the organisation the command acts on: --org where a command
-	// has it, else the one 'keera org switch' chose, else empty.
+	// org is --org, else the one 'keera org switch' chose, else empty.
 	org string
 
-	// The flags many commands share. Every command declares them, and help.go
-	// says which verbs take them.
+	// Shared flags. help.go says which verbs take them.
 	orgFlag string
 	yes     bool
 	asJSON  bool
 }
 
-// newCmdRun takes the verb off args, when cmd has verbs, and declares the
-// shared flags --org, --yes and --json. Few verbs take --org: the others act
-// on the organisation 'keera org switch' chose.
+// newCmdRun takes the verb off args and declares --org, --yes and --json.
 func newCmdRun(cmd string, args []string) *cmdRun {
 	entry, _ := find(cmd)
 	r := &cmdRun{c: newClient(), cmd: cmd, hasVerbs: len(entry.subs) > 0, args: args, rest: args}
@@ -52,17 +47,15 @@ func newCmdRun(cmd string, args []string) *cmdRun {
 	return r
 }
 
-// reword gives a flag another description on one verb, where it means more
-// or less there than on the others. Help prints the description of the verb
-// asked about, so 'add' does not offer to clear what it creates.
+// reword gives a flag another description on one verb, so that, for example,
+// 'add' does not offer to clear what it creates.
 func (r *cmdRun) reword(verb, name, usage string) {
 	if verbAsked(r.cmd, r.args) == verb {
 		r.fs.Lookup(name).Usage = usage
 	}
 }
 
-// parse reads the verb and the flags. done means there is nothing left to
-// run: help was asked for and printed, or err says what was wrong.
+// parse reports done when help was printed or err is set.
 func (r *cmdRun) parse() (done bool, err error) {
 	if want, ok := wantsHelp(r.args); ok {
 		return true, printHelp(r.fs, r.cmd, want)
@@ -78,8 +71,7 @@ func (r *cmdRun) parse() (done bool, err error) {
 	return err != nil, err
 }
 
-// verbAsked is the verb args name, run or asked about in a request for help,
-// by its own name. It is empty when args name none that cmd has.
+// verbAsked returns the verb's own name, also in a request for help, or "".
 func verbAsked(cmd string, args []string) string {
 	name, _ := split(args)
 	if want, ok := wantsHelp(args); ok {
@@ -90,13 +82,10 @@ func verbAsked(cmd string, args []string) string {
 	return s.name
 }
 
-// parseVerb reads one verb's flags and arguments, going by its entry in
-// help.go. It refuses a verb the command does not have, a flag the verb does
-// not read and the wrong number of arguments, all before anything is sent.
-//
-// It returns the verb's own name, so a dispatcher needs one case per verb
-// rather than one per spelling. No verb at all is the listing, where the
-// command has one.
+// parseVerb checks the verb, its flags and its argument count against
+// help.go before anything is sent. It returns the verb's own name, so a
+// dispatcher needs one case per verb, not per spelling. No verb is the
+// listing.
 func parseVerb(fs *flag.FlagSet, cmd, typed string, args []string) (string, error) {
 	c, ok := find(cmd)
 	if !ok {
@@ -115,8 +104,7 @@ func parseVerb(fs *flag.FlagSet, cmd, typed string, args []string) (string, erro
 	return s.name, parseChecked(fs, args, c.name+" "+s.name, s.flags, s.args)
 }
 
-// parseCmd is parseVerb for a command with no verbs, which takes its flags
-// and arguments directly.
+// parseCmd is parseVerb for a command with no verbs.
 func parseCmd(fs *flag.FlagSet, cmd string, args []string) error {
 	c, ok := find(cmd)
 	if !ok {
@@ -125,9 +113,8 @@ func parseCmd(fs *flag.FlagSet, cmd string, args []string) error {
 	return parseChecked(fs, args, c.name, c.flags, c.args)
 }
 
-// parseChecked parses args and holds them to the flags and the argument
-// spec help.go gives for "keera <name>". A shared FlagSet would otherwise
-// accept another verb's flag and quietly drop it.
+// parseChecked holds args to help.go's flags and argument spec. A shared
+// FlagSet would otherwise accept another verb's flag and quietly drop it.
 func parseChecked(fs *flag.FlagSet, args []string, name string, flags []string, spec string) error {
 	if err := parse(fs, args); err != nil {
 		return fmt.Errorf("%w (see: keera help %s)", err, name)
@@ -148,9 +135,8 @@ func parseChecked(fs *flag.FlagSet, args []string, name string, flags []string, 
 	return nil
 }
 
-// argCount reads how many arguments an argument spec such as
-// "<scope> [<id>]" allows. hi is -1 when there is no limit, as after
-// "[-- <command>]". "[flags]" is not an argument.
+// argCount reads a spec such as "<scope> [<id>]". hi is -1 when there is no
+// limit, as after "[-- <command>]".
 func argCount(spec string) (lo, hi int) {
 	for part := range strings.FieldsSeq(spec) {
 		switch {
@@ -167,8 +153,7 @@ func argCount(spec string) (lo, hi int) {
 	return lo, hi
 }
 
-// changesSomething reports whether any flag was given other than those that
-// only pick the target or the output.
+// changesSomething ignores flags that only pick the target or the output.
 func changesSomething(fs *flag.FlagSet) bool {
 	set := false
 	fs.Visit(func(fl *flag.Flag) {
@@ -181,26 +166,21 @@ func changesSomething(fs *flag.FlagSet) bool {
 	return set
 }
 
-// nothingToChange refuses a 'set' given no flag that changes anything. Sent
-// anyway, it would write the entry back as it was, with an audit entry for it.
+// nothingToChange refuses an empty 'set', which would only add an audit entry.
 func nothingToChange(name string) error {
 	return fmt.Errorf("nothing to change; pass a flag to change (see: keera help %s)", name)
 }
 
-// given reports whether the flag was on the command line, so an empty value
-// can clear what is stored rather than be read as left out.
+// given lets an empty value clear what is stored rather than read as left out.
 func given(fs *flag.FlagSet, name string) bool {
 	found := false
 	fs.Visit(func(fl *flag.Flag) { found = found || fl.Name == name })
 	return found
 }
 
-// parse reads a subcommand's flags, before or after the positional
-// arguments. Go's flag package stops at the first non-flag, so
-// "keera guardrail set project payments --requests 60" is reordered before parsing.
-//
-// A bad flag comes back as an error for Run to print, worded the way the rest
-// of the CLI names flags, instead of the flag package printing the whole help.
+// parse accepts flags after positional arguments, which Go's flag package
+// does not, by reordering them first. A bad flag comes back as an error
+// rather than the flag package printing the whole help.
 func parse(fs *flag.FlagSet, args []string) error {
 	fs.SetOutput(io.Discard)
 	err := fs.Parse(reorder(fs, args))
@@ -217,7 +197,7 @@ func reorder(fs *flag.FlagSet, args []string) []string {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 
-		// Everything after "--" is positional by definition.
+		// Everything after "--" is positional.
 		if arg == "--" {
 			positional = append(positional, args[i+1:]...)
 			break
@@ -232,7 +212,6 @@ func reorder(fs *flag.FlagSet, args []string) []string {
 		if strings.ContainsRune(name, '=') {
 			continue // --flag=value carries its own value
 		}
-		// A non-boolean flag takes the next argument with it.
 		if f := fs.Lookup(name); f != nil && !isBoolFlag(f) && i+1 < len(args) {
 			i++
 			flags = append(flags, args[i])
@@ -246,18 +225,16 @@ func isBoolFlag(f *flag.Flag) bool {
 	return ok && b.IsBoolFlag()
 }
 
-// durationFlag is a duration that also takes days, such as 7d: report windows
-// and lifetimes are thought of in days, and Go's own duration stops at hours.
+// durationFlag also takes days, such as 7d, which Go's duration does not.
 type durationFlag time.Duration
 
-// durationVar declares a duration flag that reads and prints days.
 func durationVar(fs *flag.FlagSet, p *time.Duration, name string, value time.Duration, usage string) {
 	*p = value
 	fs.Var((*durationFlag)(p), name, usage)
 }
 
-// String prints whole days as days, so a default reads 7d rather than
-// 168h0m0s. A zero or negative value means not given, and prints as 0.
+// String prints 7d rather than 168h0m0s. A zero or negative value means not
+// given, and prints as 0.
 func (d *durationFlag) String() string {
 	if d == nil || *d <= 0 {
 		return "0"
@@ -277,8 +254,7 @@ func (d *durationFlag) Set(s string) error {
 	return nil
 }
 
-// parseDuration reads a Go duration, optionally led by a number of days:
-// 7d, 1d12h and 90m all work.
+// parseDuration accepts 7d, 1d12h and 90m.
 func parseDuration(s string) (time.Duration, error) {
 	bad := errors.New("not a duration such as 7d, 8h or 30m")
 	days, rest, found := strings.Cut(s, "d")
@@ -304,7 +280,6 @@ func parseDuration(s string) (time.Duration, error) {
 	return v, nil
 }
 
-// opposites refuses two flags that undo each other.
 func opposites(a, b string) error {
 	return fmt.Errorf("--%s and --%s are opposites; pass one of them", a, b)
 }

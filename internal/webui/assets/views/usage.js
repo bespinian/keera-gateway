@@ -20,7 +20,7 @@ import { orgNameOf } from "./orgs.js";
 const GROUPS = [
   { key: "project", label: "Project" },
   { key: "model", label: "Model" },
-  // What sent the requests. The Live map draws the same rows.
+  // The Live map draws the same rows.
   { key: "client", label: "Client" },
   { key: "key", label: "Key" },
   { key: "user", label: "User" },
@@ -30,9 +30,8 @@ const GROUPS = [
 // Offered only across every organisation: inside one it is a single row.
 const ORG_GROUP = { key: "org", label: "Organisation" };
 
-// The shared windows plus a quarter, as a chargeback is read over a month or
-// a quarter. Kept apart from the shared choice, so a quarter does not carry
-// over to the dashboard.
+// The shared windows plus a quarter, for chargebacks. Kept apart from the
+// shared choice, so a quarter does not carry over to the dashboard.
 const RANGES = [
   ...SHARED_RANGES,
   { label: "90d", since: "2160h", long: "Last 90 days" },
@@ -47,22 +46,20 @@ export async function usageView(ctx) {
 
   const res = await api.usage(ctx.orgID, groupBy, since);
   const rows = res.data || [];
-  // Every grouping resolves to a name: a report by key or user with raw ids is
-  // one nobody can act on.
+  // Every grouping resolves to a name: raw ids are no use to anyone.
   const names = {
     project: res.project_names || {},
     key: res.key_names || {},
     user: res.user_names || {},
     client: res.client_names || {},
   };
-  // A user is shown by name when they have one, with the address under it.
   const fullNames = groupBy === "user" ? res.user_full_names || {} : {};
   const nameOf = (id) => fullNames[id] || names[groupBy]?.[id];
   const total = rows.reduce((a, r) => a + r.cost_micros, 0);
   const requests = rows.reduce((a, r) => a + r.requests, 0);
 
   // Only served requests are counted, but the cost adds up every row: a
-  // refused or failed one can still have paid for a filter or router call.
+  // refused one may still have paid for a filter or router call.
   ctx.setSubtitle(
     `${compact(requests)} served ${plural(requests, "request")} · ${money(total)}`,
   );
@@ -89,7 +86,6 @@ export async function usageView(ctx) {
     ),
     h("div", { class: "spacer" }),
     rangePicker(ctx, since, { ranges: RANGES, key: "keera.usage.range" }),
-    // A chargeback is reconciled in a spreadsheet.
     csvButton("Download this report as CSV", () =>
       api.download("/v1/usage", {
         org_id: ctx.orgID,
@@ -99,8 +95,8 @@ export async function usageView(ctx) {
     ),
   );
 
-  // A row with no group is real traffic: a key with no project, or the
-  // operator key. A dash would read as a bug.
+  // A row with no group is real traffic, such as the operator key. A dash
+  // would read as a bug.
   const nothing =
     groupBy === "project"
       ? "No project"
@@ -110,8 +106,7 @@ export async function usageView(ctx) {
           ? "Unidentified client"
           : "-";
 
-  // The busiest groups each get a line and the rest share one, so the chart
-  // stays readable over hundreds of keys.
+  // The busiest groups each get a line and the rest share one.
   const lineName = (l) => {
     if (l.other) return "Other";
     if (groupBy === "day") return "Served";
@@ -145,8 +140,7 @@ export async function usageView(ctx) {
   const label = (r) => {
     if (!r.group) return h("span", { class: "faint" }, nothing);
     if (r.org_id) {
-      // Across every organisation, two of them can each have a model of the
-      // same alias, so the row names whose it is.
+      // Across organisations, two can have a model of the same alias.
       return h(
         "div",
         { class: "stack" },
@@ -175,7 +169,7 @@ export async function usageView(ctx) {
     }
     const named = nameOf(r.group);
     if (!named) {
-      // An id with no name is one whose row is gone, such as a deleted user.
+      // An id with no name is gone, such as a deleted user.
       return h(
         "span",
         { class: "stack" },
@@ -191,8 +185,7 @@ export async function usageView(ctx) {
       "div",
       { class: "stack" },
       h("span", {}, named),
-      // Under the name, a user's address, or the id, unless it is the name
-      // itself, as for an unrecognised client.
+      // Under the name, a user's address, or the id unless it is the name.
       groupBy === "user"
         ? fullNames[r.group]
           ? h(
@@ -213,8 +206,7 @@ export async function usageView(ctx) {
 
   const body = table(
     [
-      // A fixed width, so the first column does not jump when the grouping
-      // changes.
+      // So the first column does not jump when the grouping changes.
       {
         label: groups.find((g) => g.key === groupBy).label,
         width: "36%",
@@ -259,8 +251,7 @@ export async function usageView(ctx) {
     ],
     rows,
     {
-      // Most used first. Days stay in date order, which is the question a
-      // grouping by day asks.
+      // Most used first. Days stay in date order.
       sortBy: groupBy === "day" ? null : "Requests",
       sortDir: "desc",
       emptyTitle: "Nothing in this period",

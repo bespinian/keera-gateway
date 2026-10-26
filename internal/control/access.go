@@ -25,8 +25,8 @@ type accessScope struct {
 	// ID is sent so a developer can quote it to an administrator.
 	ID      string         `json:"id"`
 	Name    string         `json:"name,omitempty"`
-	Rates   []accessRate   `json:"rates,omitempty"`
-	Budgets []accessBudget `json:"budgets,omitempty"`
+	Rates   []AccessRate   `json:"rates,omitempty"`
+	Budgets []AccessBudget `json:"budgets,omitempty"`
 	// SystemPrompt is this level's own instruction, not the joined chain, so
 	// the developer sees who added what to their requests.
 	SystemPrompt string `json:"system_prompt,omitempty"`
@@ -35,9 +35,9 @@ type accessScope struct {
 	Filters []string `json:"filters,omitempty"`
 }
 
-// accessRate is one rate limit of a level. Per day or month, the Used fields
+// AccessRate is one rate limit of a level. Per day or month, the Used fields
 // say how much is gone.
-type accessRate struct {
+type AccessRate struct {
 	Requests     int64         `json:"requests,omitempty"`
 	Tokens       int64         `json:"tokens,omitempty"`
 	Period       policy.Period `json:"period"`
@@ -45,7 +45,8 @@ type accessRate struct {
 	TokensUsed   int64         `json:"tokens_used,omitempty"`
 }
 
-type accessBudget struct {
+// AccessBudget is one budget of a level, and what is spent of it.
+type AccessBudget struct {
 	BudgetMicros int64         `json:"budget_micros"`
 	SpendMicros  int64         `json:"spend_micros"`
 	Period       policy.Period `json:"period"`
@@ -241,7 +242,7 @@ func (s *Server) scopeStates(res *policy.Resolved, orgName string,
 		if sc.BudgetMicros > 0 {
 			// The gateway's own spend figure, not a fresh query: the budget is
 			// enforced against it.
-			st.Budgets = append(st.Budgets, accessBudget{
+			st.Budgets = append(st.Budgets, AccessBudget{
 				BudgetMicros: sc.BudgetMicros, Period: sc.Period,
 				SpendMicros: s.reg.Budgets().Spent(sc.Type, sc.ID, sc.Period, now),
 				ResetsAt:    sc.Period.Next(now),
@@ -269,7 +270,7 @@ func (s *Server) levelState(res *policy.Resolved, sc policy.Scope, orgName strin
 		st.Name = keyName
 	}
 	if sc.RPM > 0 || sc.TPM > 0 {
-		st.Rates = append(st.Rates, accessRate{
+		st.Rates = append(st.Rates, AccessRate{
 			Requests: int64(sc.RPM), Tokens: int64(sc.TPM), Period: policy.PeriodMinute,
 		})
 	}
@@ -279,9 +280,9 @@ func (s *Server) levelState(res *policy.Resolved, sc policy.Scope, orgName strin
 		if q.Type != sc.Type || !strings.HasPrefix(q.ID, sc.ID+"|") {
 			continue
 		}
-		i := slices.IndexFunc(st.Rates, func(r accessRate) bool { return r.Period == q.Period })
+		i := slices.IndexFunc(st.Rates, func(r AccessRate) bool { return r.Period == q.Period })
 		if i < 0 {
-			st.Rates = append(st.Rates, accessRate{Period: q.Period})
+			st.Rates = append(st.Rates, AccessRate{Period: q.Period})
 			i = len(st.Rates) - 1
 		}
 		used := s.reg.Budgets().Spent(q.Type, q.ID, q.Period, now)

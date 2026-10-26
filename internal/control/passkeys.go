@@ -77,10 +77,9 @@ func (s *Server) withPasskeysSignedOut(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// readSignedOutJSON reads the body of a route used before signing in, such as
-// a passkey or password sign-in. It must be JSON by its content type: a
-// cross-site form cannot send that, so another site cannot sign a browser in
-// to an account of its choosing.
+// readSignedOutJSON reads the body of a route used before signing in. It must
+// be JSON by content type: a cross-site form cannot send that, so another site
+// cannot sign a browser in to an account of its choosing.
 func readSignedOutJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "application/json" {
 		httpx.WriteError(w, http.StatusUnsupportedMediaType, "invalid_request_error", "",
@@ -599,9 +598,8 @@ func (s *Server) issuePasskeyLink(r *http.Request, p *authn.Principal,
 }
 
 // mayVouchFor checks that the caller may create a passkey account for this
-// address. The address is only as good as whoever typed it, so an
-// administrator may only use their organisation's domain. An operator may use
-// any.
+// address. Nobody proved the address, so an administrator may only use their
+// organisation's domain. An operator may use any.
 func (s *Server) mayVouchFor(w http.ResponseWriter, r *http.Request, p *authn.Principal,
 	orgID, email string,
 ) bool {

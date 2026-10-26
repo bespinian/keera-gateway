@@ -20,9 +20,9 @@ type Org struct {
 	// EmailDomain places a first sign-in in the right tenant. Empty in a
 	// deployment that has only one organisation.
 	EmailDomain string `json:"email_domain,omitempty"`
-	// Limited is set on an organisation somebody created by signing up, until
-	// it pays once or an operator lifts it. Until then its models may not run
-	// on the deployment's own machines, and it gets no sandboxes.
+	// Limited is set on a self-signed-up organisation until it pays once or an
+	// operator lifts it. Until then its models may not run on the deployment's
+	// own machines, and it gets no sandboxes.
 	Limited   bool      `json:"limited,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -37,8 +37,7 @@ type Project struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// defaultProjectName names the project a new organisation gets. It is an
-// ordinary project and can be renamed.
+// defaultProjectName names a new organisation's first project.
 const defaultProjectName = "default"
 
 // User is a person, identified either by Keera Gateway or by the customer's IdP.
@@ -61,14 +60,13 @@ type User struct {
 func (u User) Disabled() bool { return u.DisabledAt != nil }
 
 // userColumnsOf is the select list userTargets fills, in its order, with each
-// column prefixed by table ("u." or ""). Joins need the prefix because the
-// tables share column names.
+// column prefixed by table ("u." or ""), since joined tables share column names.
 func userColumnsOf(table string) string {
 	return fmt.Sprintf(`%[1]sid, %[1]sorg_id, %[1]semail, %[1]sname, COALESCE(%[1]sexternal_id,''),
 	%[1]srole, %[1]screated_at, %[1]sdisabled_at`, table)
 }
 
-// userColumns is the select list scanUser reads, from users alone.
+// userColumns is the select list scanUser reads.
 var userColumns = userColumnsOf("")
 
 // userTargets points at the fields userColumnsOf fills, in its order.
@@ -85,10 +83,8 @@ func scanUser(r row) (User, error) {
 	return u, err
 }
 
-// KeyInfo is an issued key without its secret.
-//
-// The secret is shown once and never stored, so screens, reports and audit
-// entries use the key's name. A rotation carries the name over.
+// KeyInfo is an issued key without its secret. The secret is shown once and
+// never stored, so screens, reports and audit entries use the key's name.
 type KeyInfo struct {
 	ID        string `json:"id"`
 	OrgID     string `json:"org_id"`
@@ -122,9 +118,8 @@ func keyTargets(k *KeyInfo) []any {
 	}
 }
 
-// State is the one word a screen shows for a key at now: revoked, expired,
-// pending or active. Revocation wins over expiry, because somebody did it on
-// purpose.
+// State is the word a screen shows for a key at now: revoked, expired,
+// pending or active. Revoked wins over expired, because it was done on purpose.
 func (k KeyInfo) State(now time.Time) string {
 	switch {
 	case k.RevokedAt != nil:
@@ -145,9 +140,8 @@ type OrgTemplate struct {
 	SandboxClasses []policy.SandboxClass
 }
 
-// CreateOrg inserts an organisation with its email domain and template, in
-// one transaction, so it never exists without its template. The domain is
-// stored as given: the caller cleans it with policy.CleanEmailDomain.
+// CreateOrg inserts an organisation with its email domain and template in one
+// transaction. The caller cleans the domain with policy.CleanEmailDomain.
 func (s *Store) CreateOrg(ctx context.Context, o Org, tmpl OrgTemplate) (Org, error) {
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
@@ -161,8 +155,8 @@ func (s *Store) CreateOrg(ctx context.Context, o Org, tmpl OrgTemplate) (Org, er
 func createOrg(ctx context.Context, tx pgx.Tx, o Org, tmpl OrgTemplate) (Org, error) {
 	id := o.ID
 	domain := nullable(o.EmailDomain)
-	// The domain is set in the same insert, so a taken one creates nothing.
-	// Setting it afterwards left an organisation that a retry created again.
+	// Set the domain in the same insert, so a taken one creates nothing and a
+	// retry cannot create the organisation twice.
 	if err := tx.QueryRow(ctx,
 		"INSERT INTO orgs (id, name, email_domain, limited) VALUES ($1,$2,$3,$4) RETURNING created_at",
 		id, o.Name, domain, o.Limited,
@@ -214,9 +208,9 @@ type OrgChange struct {
 	Limited     *bool
 }
 
-// UpdateOrg changes an organisation's name, email domain and whether it is
-// limited, in one statement, so a refused domain does not leave the rest
-// behind. The name is only a label; the old one stays in the audit log.
+// UpdateOrg changes an organisation's name, email domain and limited flag in
+// one statement, so a refused domain changes nothing. The old name stays in
+// the audit log.
 func (s *Store) UpdateOrg(ctx context.Context, orgID string, c OrgChange) (Org, error) {
 	var domain *string
 	if c.EmailDomain != nil {
@@ -238,8 +232,7 @@ func (s *Store) LimitedOrgs(ctx context.Context) (map[string]string, error) {
 	return s.names(ctx, "SELECT id, name FROM orgs WHERE limited")
 }
 
-// DeletedOrg is what a deletion took with it. The counts are read in the same
-// transaction as the delete, so they describe what was actually removed.
+// DeletedOrg is what a deletion removed, counted in the same transaction.
 type DeletedOrg struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
@@ -254,18 +247,16 @@ type DeletedOrg struct {
 }
 
 // ErrOrgHasSandboxes refuses to delete an organisation whose sandboxes still
-// hold machines. Deleting their rows would leave the machines running with
-// nothing left to stop them.
+// hold machines, which would then keep running with nothing to stop them.
 var ErrOrgHasSandboxes = errors.New("store: the organisation still has live sandboxes")
 
-// DeleteOrg removes an organisation and everything scoped to it.
+// DeleteOrg removes an organisation and everything scoped to it. Guardrails
+// and spend are cleared first, while the ids that name them still exist; the
+// foreign keys remove the rest.
 //
-// Everything else goes through the foreign keys. Guardrails and spend are
-// cleared first, while the project and key ids that name them still exist.
-//
-// The request log, billing lines, payments, the credit account and the audit
-// log stay: finance invoices from them, and the audit log must keep the record
-// of this deletion. The saved card goes, so nobody can charge it again.
+// The request log, billing lines, payments, credit account and audit log stay,
+// for invoicing and as the record of this deletion. The saved card goes, so
+// nobody can charge it again.
 func (s *Store) DeleteOrg(ctx context.Context, orgID string) (DeletedOrg, error) {
 	var gone DeletedOrg
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -290,7 +281,6 @@ func (s *Store) DeleteOrg(ctx context.Context, orgID string) (DeletedOrg, error)
 			return ErrOrgHasSandboxes
 		}
 
-		// An organisation spans three scopes, and each is named explicitly.
 		scoped := func(owner string) string {
 			return `(scope_type = 'org'     AND ` + owner + ` = $1)
 			OR (scope_type = 'project' AND ` + owner + ` IN (SELECT id FROM projects WHERE org_id = $1))
@@ -313,10 +303,9 @@ func (s *Store) DeleteOrg(ctx context.Context, orgID string) (DeletedOrg, error)
 // policy.Resolved.Quotas.
 const scopeOwner = "split_part(scope_id, '|', 1)"
 
-// deleteScoped clears the guardrails and spend rows that match where, which
-// is given the expression naming a row's scope. Those tables name their scope
-// by plain id with no foreign key, so no cascade reaches them. Only spend ids
-// carry a meter, so guardrails rows are matched on their key as it is.
+// deleteScoped clears the guardrails and spend rows that match where. These
+// tables name their scope by plain id with no foreign key, so no cascade
+// reaches them. Only spend ids carry a meter.
 func deleteScoped(ctx context.Context, tx pgx.Tx, where func(owner string) string, id string) error {
 	for table, owner := range map[string]string{"guardrails": "scope_id", "spend": scopeOwner} {
 		if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE "+where(owner), id); err != nil {
@@ -363,11 +352,10 @@ type ProjectChange struct {
 	Description *string
 }
 
-// AnyOrg is the orgID for a write that may touch any organisation: the
-// operator's, or the gateway's own. Every other caller passes the one
-// organisation it is in, and a row outside it is ErrNotFound. That is a
-// second check behind the control plane's, so one it forgets cannot reach
-// another tenant.
+// AnyOrg is the orgID for a write that may touch any organisation, by the
+// operator or the gateway itself. Other callers pass their own organisation,
+// and a row outside it is ErrNotFound: a second check behind the control
+// plane's.
 const AnyOrg = "*"
 
 // inOrg is the condition that holds a write to the organisation in param, such
@@ -376,8 +364,8 @@ func inOrg(column, param string) string {
 	return "(" + param + " = '" + AnyOrg + "' OR " + column + " = " + param + ")"
 }
 
-// UpdateProject renames a project, changes its description, or both. The
-// name is only a label; the old one stays in the audit log.
+// UpdateProject renames a project, changes its description, or both. The old
+// name stays in the audit log.
 func (s *Store) UpdateProject(ctx context.Context, orgID, projectID string, c ProjectChange) (Project, error) {
 	var p Project
 	err := s.pool.QueryRow(ctx,
@@ -437,11 +425,9 @@ func (s *Store) FirstProject(ctx context.Context, orgID string) (string, error) 
 	return id, notFound(err)
 }
 
-// DeleteProject removes a project that no live key uses.
-//
-// Deleting it with a working key would move that key to another project's
-// guardrails, budget and rate limit. The check runs against the row locked
-// FOR UPDATE, so a key issued in between cannot slip through.
+// DeleteProject removes a project that no live key uses, since a live key
+// would move to another project's guardrails, budget and rate limit. The check
+// runs on the row locked FOR UPDATE, so a key issued meanwhile cannot slip by.
 //
 // Revoked keys are detached, not deleted, because usage rows still name them.
 // Guardrails and spend have no foreign key, so they are cleared here.
@@ -457,9 +443,8 @@ func (s *Store) DeleteProject(ctx context.Context, orgID, projectID string) (Del
 		}
 		gone.ID = projectID
 
-		// A sandbox's project decides its budget, quota and models. The row
-		// lock above holds off one being created meanwhile: its insert checks
-		// the foreign key, which waits for it.
+		// The row lock above holds off a new sandbox: its insert checks the
+		// foreign key, which waits for the lock.
 		if err := tx.QueryRow(ctx, "SELECT count(*) FROM sandboxes WHERE project_id = $1 AND "+liveSandbox,
 			projectID).Scan(&gone.LiveSandboxes); err != nil {
 			return err
@@ -497,13 +482,12 @@ func (s *Store) DeleteProject(ctx context.Context, orgID, projectID string) (Del
 	return gone, err
 }
 
-// ErrUserExists is returned when the organisation already has someone with
-// that address. Adding must not quietly change who they are: their role
-// changes through SetUserRole, and their subject only at sign-in.
+// ErrUserExists means the organisation already has someone with that address.
+// Adding never changes an existing person: the role changes through
+// SetUserRole, and the subject only at sign-in.
 var ErrUserExists = errors.New("store: that address is already in the organisation")
 
-// ErrExternalIDTaken is returned when someone in the organisation already has
-// the subject.
+// ErrExternalIDTaken means someone in the organisation already has the subject.
 var ErrExternalIDTaken = errors.New("store: that subject already belongs to another person")
 
 // AddUser creates a person, so they are placed in the right organisation
@@ -541,12 +525,9 @@ func (s *Store) ListUsers(ctx context.Context, orgID string) ([]User, error) {
 		WHERE ($1 = '' OR u.org_id = $1) ORDER BY u.email`, orgID)
 }
 
-// DisableUser turns a person off: it revokes every key attributed to them,
-// ends every session and removes their passkeys, in one transaction. It
-// returns how many keys it revoked.
-//
-// Disabling somebody twice keeps the first date, and still revokes any key
-// issued in between.
+// DisableUser revokes a person's keys, ends their sessions and removes their
+// passkeys in one transaction, and returns how many keys it revoked.
+// Disabling twice keeps the first date but still revokes newer keys.
 func (s *Store) DisableUser(ctx context.Context, orgID, userID string) (int, error) {
 	var revoked int
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -568,8 +549,7 @@ func (s *Store) DisableUser(ctx context.Context, orgID, userID string) (int, err
 		if err := deleteUserSessions(ctx, tx, userID); err != nil {
 			return err
 		}
-		// Like keys, passkeys do not come back with 'enable': a new set-up link
-		// does.
+		// Like keys, passkeys do not come back on enable: a new set-up link does.
 		return deletePasskeys(ctx, tx, userID)
 	})
 	if err != nil {
@@ -665,8 +645,8 @@ func (s *Store) ActivateKey(ctx context.Context, orgID, id, name string, hash []
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return k, err
 	}
-	// Nothing matched: say why, so the caller is told what to do instead.
-	// A pending key whose expiry passed would be refused at once.
+	// Nothing matched: find out why, so the caller can say what to do. An
+	// expired pending key would be refused at once, so it counts as expired.
 	var pending, revoked, expired bool
 	err = s.pool.QueryRow(ctx, `SELECT key_hash IS NULL, revoked_at IS NOT NULL,
 		expires_at IS NOT NULL AND expires_at <= now()
@@ -687,13 +667,13 @@ func (s *Store) ActivateKey(ctx context.Context, orgID, id, name string, hash []
 // sandbox, so it is not rotated.
 var ErrSandboxKey = errors.New("store: the key belongs to a sandbox")
 
-// RotateKey replaces the key oldID with next, in one transaction: next gets
-// the old key's organisation, project, person, kind and own guardrails, and
-// the old key is revoked. An empty next.Name keeps the old name. A nil
-// next.ExpiresAt gives the new key the old key's lifetime, counted from now.
+// RotateKey replaces the key oldID with next in one transaction: next gets the
+// old key's organisation, project, person, kind and guardrails, and the old
+// key is revoked. An empty next.Name keeps the old name. A nil next.ExpiresAt
+// keeps the old key's lifetime, counted from now.
 //
-// Doing it in steps can leave both keys live, or a new key without the old
-// one's limits, which quietly loosens a guardrail.
+// Doing it in steps could leave both keys live, or the new one without the
+// old one's limits.
 func (s *Store) RotateKey(ctx context.Context, orgID, oldID string, next KeyInfo, hash []byte,
 ) (KeyInfo, error) {
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -747,9 +727,9 @@ func (s *Store) RotateKey(ctx context.Context, orgID, oldID string, next KeyInfo
 	return next, nil
 }
 
-// LookupKey finds a key by the hash of what the client presented, with the
-// guardrails of its whole chain. It is one round trip, because it runs on a
-// cache miss in the request path.
+// LookupKey finds a key by the hash the client presented, with the guardrails
+// of its whole chain. It is one round trip, as it runs on a cache miss in the
+// request path.
 func (s *Store) LookupKey(ctx context.Context, hash []byte) (*policy.Resolved, error) {
 	return s.lookupKey(ctx, "k.key_hash = $1", hash)
 }
@@ -763,9 +743,9 @@ func (s *Store) LookupKeyByID(ctx context.Context, id string) (*policy.Resolved,
 // lookupKey finds the key that where matches. where is a constant, never
 // input.
 func (s *Store) lookupKey(ctx context.Context, where string, arg any) (*policy.Resolved, error) {
-	// Second checks, beyond what the control plane enforces: the project must
-	// be in the key's own org, so a bad row gives no project rather than another
-	// tenant's guardrails; and a disabled holder counts as a revoked key.
+	// Second checks behind the control plane: the project must be in the key's
+	// own org, so a bad row never gives another tenant's guardrails, and a
+	// disabled holder counts as a revoked key.
 	rows, err := s.pool.Query(ctx, `
 		SELECT k.id, k.org_id, COALESCE(pr.id,''), COALESCE(k.user_id,''), k.kind,
 		       k.expires_at, COALESCE(k.revoked_at, u.disabled_at), k.key_hash IS NULL,

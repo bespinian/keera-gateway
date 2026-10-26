@@ -27,8 +27,7 @@ func logged(t *testing.T, cfg config.Config) (limiter, string) {
 	return lim, buf.String()
 }
 
-// unreachable is a Redis nothing listens on, so the connection is refused at
-// once.
+// unreachable is a Redis address nothing listens on.
 func unreachable() *redis.Options { return &redis.Options{Addr: "127.0.0.1:1"} }
 
 func TestWithNoRedisTheBucketsStayInThisProcess(t *testing.T) {
@@ -51,7 +50,7 @@ func TestARedisThatCannotBeReachedWarnsAndTheGatewayStillStarts(t *testing.T) {
 	if !strings.Contains(logs, "cannot be reached") {
 		t.Errorf("nothing was logged about the Redis being down: %s", logs)
 	}
-	// The address is the one thing an operator needs in order to fix it.
+	// The operator needs the address to fix it.
 	if !strings.Contains(logs, "127.0.0.1:1") {
 		t.Errorf("the warning does not say which address failed: %s", logs)
 	}
@@ -81,8 +80,7 @@ func TestTheLimiterIsAlwaysSweepable(t *testing.T) {
 }
 
 func TestClosingTheLimiterIsSafeInBothShapes(t *testing.T) {
-	// serve defers the closer unconditionally, so the no-Redis case has to
-	// return one that does nothing rather than nil.
+	// serve always defers the closer, so it must not be nil.
 	for _, cfg := range []config.Config{
 		{},
 		{Redis: unreachable()},

@@ -17,19 +17,17 @@ import (
 type standInKind int
 
 const (
-	// servesLogprobs answers the lettered question with the distribution
-	// behind its one token, as vLLM and llama.cpp do. It is the default.
+	// servesLogprobs answers with the distribution behind its one token, as
+	// vLLM and llama.cpp do. It is the default.
 	servesLogprobs standInKind = iota
 	// namesOnly ignores the logprobs fields and writes the name out, as a
 	// hosted provider does.
 	namesOnly
 )
 
-// routeHarness wires a gateway whose organisation has one router of one route
-// step, in front of a stand-in inference plane answering as three models,
-// told apart by the backend model name the gateway sends.
-//
-// decide is what the deciding model answers, given the segments it was shown.
+// routeHarness wires a gateway with one router of one route step, in front of
+// a stand-in plane answering as three models, told apart by backend model
+// name. decide is what the deciding model answers, given the segments shown.
 func routeHarness(t *testing.T, decide func(segments []string) string,
 	rt policy.Route, resolved *policy.Resolved, kind ...standInKind,
 ) *harness {
@@ -41,9 +39,8 @@ func routeHarness(t *testing.T, decide func(segments []string) string,
 	}
 
 	backend := guardBackend("picker-served", func(c guardCall) string {
-		// The same model can be both a router's and a filter's; on the wire
-		// only the format appended to the instruction tells the calls apart.
-		// A gate is asked for a verdict, so it is given one.
+		// The same model can serve a router and a filter; only the format
+		// added to the instruction tells the calls apart. A gate gets a verdict.
 		answer := decide(c.segments)
 		if strings.Contains(c.instruction, "ALLOW") {
 			answer = "ALLOW"
@@ -122,10 +119,8 @@ func picks(alias string) func([]string) string {
 	return func([]string) string { return alias }
 }
 
-// lettered answers the lettered question as vLLM would: the chosen
-// destination's letter, and the distribution it was picked out of. The
-// letters are read from the instruction the gateway sent, as a real model
-// would read them.
+// lettered answers as vLLM would: the chosen destination's letter and the
+// distribution it came from. The letters are read from the instruction sent.
 func lettered(instruction, alias string) (string, bool) {
 	var chosen string
 	var alternatives []string
@@ -166,8 +161,8 @@ func TestRouteStepSendsTheRequestToTheModelItChose(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 
-	// The decision reaches the backend first, so the second body is the one the
-	// chosen model was actually asked.
+	// The decision reaches the backend first, so the second body is the
+	// chosen model's.
 	<-h.upstreamBodies
 	forwarded := string(<-h.upstreamBodies)
 	if !strings.Contains(forwarded, "large-served") {
@@ -177,8 +172,7 @@ func TestRouteStepSendsTheRequestToTheModelItChose(t *testing.T) {
 		t.Errorf("X-Keera-Router = %q, want %q", got, "auto -> keera-large")
 	}
 
-	// The usage row is the destination's, so per-model reporting is still
-	// about models.
+	// The usage row is the destination's, so per-model reports stay right.
 	ev := h.sink.last(t)
 	if ev.Alias != "keera-large" {
 		t.Errorf("alias = %q, want the destination keera-large", ev.Alias)
@@ -188,8 +182,7 @@ func TestRouteStepSendsTheRequestToTheModelItChose(t *testing.T) {
 	}
 }
 
-// The answer names the model that answered, not the router, so a developer
-// reading it can tell what produced it.
+// The answer names the model that answered, not the router.
 func TestRouteStepAnswerNamesTheModelThatAnswered(t *testing.T) {
 	h := routeHarness(t, picks("keera-small"), autoRoute(), nil)
 
@@ -209,8 +202,8 @@ func TestRouteStepAnswerNamesTheModelThatAnswered(t *testing.T) {
 	}
 }
 
-// The decision has to be made on what the client sent, not on what the filters
-// left, or a redaction filter would launder a prompt into the hosted model.
+// The decision is made on what the client sent, not what the filters left, or
+// a redaction filter would sneak a sensitive prompt to the hosted model.
 func TestRouteStepReadsTheRequestBeforeTheKeysFiltersDo(t *testing.T) {
 	resolved := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, nil, nil, nil)
 	resolved.Filters = []string{"redact"}
@@ -220,8 +213,7 @@ func TestRouteStepReadsTheRequestBeforeTheKeysFiltersDo(t *testing.T) {
 		seen = segments
 		return "keera-small"
 	}, autoRoute(), resolved)
-	// A filter on the same deciding model, so that both hooks run. It is told
-	// apart from the router by what the gateway asks it to produce.
+	// A filter on the same deciding model, so both hooks run.
 	h.src.filters = map[string]policy.Filter{
 		"org_1/redact": {
 			OrgID: "org_1", Alias: "redact", Model: "keera-picker",
@@ -239,8 +231,8 @@ func TestRouteStepReadsTheRequestBeforeTheKeysFiltersDo(t *testing.T) {
 	}
 }
 
-// The destination list is the authority, not the answer. A deciding model that
-// names something else has not decided, however plausible the name is.
+// A deciding model that names something outside the destination list has not
+// decided.
 func TestRouteStepWillNotSendToAModelItWasNotOffered(t *testing.T) {
 	h := routeHarness(t, picks("keera-embed"), autoRoute(), nil)
 
@@ -255,9 +247,8 @@ func TestRouteStepWillNotSendToAModelItWasNotOffered(t *testing.T) {
 	}
 }
 
-// An instruction step with one destination, written or left once the others
-// are down, has nothing to choose. Its model is never asked, so it cannot
-// fail the request, and the request goes straight there.
+// An instruction step with one destination left has nothing to choose. Its
+// model is not asked, so it cannot fail the request.
 func TestRouteStepWithOneDestinationDoesNotDecide(t *testing.T) {
 	one := autoRoute()
 	one.Destinations, one.Fallback = []string{"keera-large"}, ""
@@ -296,8 +287,8 @@ func TestRouteStepWithOneDestinationDoesNotDecide(t *testing.T) {
 	}
 }
 
-// Asking no model does not take away the fallback: when the one destination
-// cannot answer, the request goes there, as it would after a failed decision.
+// When the one destination cannot answer, the request still goes to the
+// fallback, as after a failed decision.
 func TestRouteStepWithOneDestinationFallsBackWhenItCannotAnswer(t *testing.T) {
 	rt := autoRoute()
 	rt.Destinations = []string{"keera-large"}
@@ -352,14 +343,14 @@ func TestRouteStepWithNoFallbackRefusesWhatItCannotDecide(t *testing.T) {
 		t.Errorf("outcome = %q, want error", ev.RouterOutcome)
 	}
 	// The generation happened, so it is charged, or a client could make the
-	// router free by talking it into failing.
+	// router free by making it fail.
 	if ev.CostMicros == 0 {
 		t.Error("the decision that could not be made was not charged")
 	}
 }
 
-// The other half of the same choice: a router that has somewhere safe to send a
-// request it cannot place does so rather than taking a department offline.
+// A router with a fallback sends a request it cannot place there rather than
+// refusing it.
 func TestRouteStepFallsBackWhenItsModelIsGone(t *testing.T) {
 	h := routeHarness(t, picks("keera-large"), autoRoute(), nil)
 	delete(h.src.models, "keera-picker")
@@ -383,7 +374,7 @@ func TestRouteStepFallsBackWhenItsModelIsGone(t *testing.T) {
 }
 
 // A key that may not use a router is told it does not exist, as for a
-// model, so another project's routers are not enumerable through 403s.
+// model, so other projects' routers cannot be discovered.
 func TestRouterIsRefusedToAKeyWhoseAllowListOmitsIt(t *testing.T) {
 	resolved := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, nil, nil, nil)
 	resolved.AllowedModels = []string{"keera-small"}
@@ -396,9 +387,8 @@ func TestRouterIsRefusedToAKeyWhoseAllowListOmitsIt(t *testing.T) {
 	}
 }
 
-// Allowing a router allows where it sends. Narrowing a key to the router is
-// how a scope is made to route, so destinations outside its allow-list must
-// stay reachable.
+// Allowing a router allows its destinations, even ones outside the key's
+// allow-list: narrowing a key to a router is how a scope is made to route.
 func TestRouterMayPlaceARequestOutsideTheKeysAllowList(t *testing.T) {
 	resolved := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, nil, nil, nil)
 	resolved.AllowedModels = []string{"auto"}
@@ -414,8 +404,7 @@ func TestRouterMayPlaceARequestOutsideTheKeysAllowList(t *testing.T) {
 	}
 }
 
-// A router only answers chat requests, so the other surfaces do not know its
-// name, as for a chat model named on /v1/embeddings.
+// A router only answers chat requests, so other surfaces do not know it.
 func TestRouterIsNotAModelOnTheEmbeddingSurface(t *testing.T) {
 	h := routeHarness(t, picks("keera-small"), autoRoute(), nil)
 
@@ -464,8 +453,7 @@ func TestTheDecidingModelIsToldWhatEachDestinationIsFor(t *testing.T) {
 	}
 }
 
-// A destination the catalogue cannot serve is left out of the choice rather
-// than offered and then found unreachable.
+// A destination the catalogue cannot serve is not offered.
 func TestADisabledDestinationIsNotOffered(t *testing.T) {
 	rt := autoRoute()
 	rt.Destinations = append(rt.Destinations, "keera-picker")
@@ -485,8 +473,7 @@ func TestADisabledDestinationIsNotOffered(t *testing.T) {
 	}
 }
 
-// A request the router cannot read is refused, and recorded as an error
-// rather than as a choice.
+// A request the router cannot read is refused and recorded as an error.
 func TestARouterRefusalOfAnUnreadableRequestIsAnError(t *testing.T) {
 	h := routeHarness(t, picks("keera-small"), autoRoute(), nil)
 
@@ -499,8 +486,7 @@ func TestARouterRefusalOfAnUnreadableRequestIsAnError(t *testing.T) {
 	}
 }
 
-// A client finds a router where it finds models, listed once with where it
-// may send.
+// A router is listed with the models, once, with its destinations.
 func TestARouterIsListedWithItsDestinations(t *testing.T) {
 	h := routeHarness(t, picks("keera-small"), autoRoute(), nil)
 
@@ -548,8 +534,7 @@ func TestChosenDestination(t *testing.T) {
 		{"fenced, which small models do", "`keera-small`", "keera-small"},
 		{"quoted and capitalised", `"Keera-Large"`, "keera-large"},
 		{"a sentence around it", "I would send this to keera-large", "keera-large"},
-		// The longest match wins, so a name containing another name is not
-		// read as the one it contains.
+		// A name containing another name is not read as the shorter one.
 		{"a name that contains another", "keera-small-eu", "keera-small-eu"},
 		{"a name with a slash in a sentence", "Send it to anthropic/keera-large.", "anthropic/keera-large"},
 		{"two names is not a decision", "keera-small or keera-large", ""},
@@ -574,8 +559,7 @@ func TestChosenDestination(t *testing.T) {
 	}
 }
 
-// The window is filled from the end, because a router answers what is being
-// asked now.
+// The window is filled from the end, where the current question is.
 func TestRouteStepWindowKeepsTheNewestSegments(t *testing.T) {
 	long := strings.Repeat("x", routeWindowBytes)
 	got := routeWindow([]string{long, "the older question", "the newest question"})
@@ -583,8 +567,7 @@ func TestRouteStepWindowKeepsTheNewestSegments(t *testing.T) {
 		t.Fatalf("routeWindow kept %d segments ending %q", len(got), got[len(got)-1])
 	}
 
-	// One segment larger than the whole window is kept whole: half a sentence
-	// would mislead more than a long one.
+	// One segment larger than the window is kept whole.
 	if got := routeWindow([]string{long + long}); len(got) != 1 {
 		t.Errorf("routeWindow dropped an oversized lone segment: %d segments", len(got))
 	}
@@ -593,9 +576,8 @@ func TestRouteStepWindowKeepsTheNewestSegments(t *testing.T) {
 	}
 }
 
-// chainHarness wires a gateway whose organisation has one fallback step in
-// front of a stand-in inference plane. down names the backend models that
-// answer with a failure of their own.
+// chainHarness wires a gateway with one fallback step in front of a stand-in
+// plane. down names the backend models that answer with a failure.
 func chainHarness(t *testing.T, rt policy.Route, down map[string]int) *harness {
 	t.Helper()
 	return chainHarnessWith(t, rt, func(w http.ResponseWriter, r *http.Request) {
@@ -638,8 +620,7 @@ func chainHarnessWith(t *testing.T, rt policy.Route, backend http.HandlerFunc) *
 	return h
 }
 
-// chainRoute is the ordinary fallback step: an order, and nothing that reads
-// the request.
+// chainRoute is a plain fallback step that reads nothing.
 func chainRoute(destinations ...string) policy.Route {
 	if len(destinations) == 0 {
 		destinations = []string{"keera-small", "keera-large"}
@@ -681,8 +662,7 @@ func TestFallbackStepUsesItsFirstDestination(t *testing.T) {
 	}
 }
 
-// Each destination that fails hands the request to the next, in the written
-// order, until one answers.
+// Each failing destination hands the request to the next, in order.
 func TestFallbackStepMovesToTheNextWhenOneFails(t *testing.T) {
 	h := chainHarness(t, chainRoute("keera-small", "keera-spare", "keera-large"),
 		map[string]int{"small-served": 503, "spare-served": 502})
@@ -710,8 +690,7 @@ func TestFallbackStepMovesToTheNextWhenOneFails(t *testing.T) {
 	if ev.RouterOutcome != store.RouterFellBack {
 		t.Errorf("outcome = %q, want %q", ev.RouterOutcome, store.RouterFellBack)
 	}
-	// The request succeeded, so only this row's note says the first
-	// destination is down.
+	// The request succeeded, so only the note says the first is down.
 	if !strings.Contains(ev.Note, "keera-small answered 503") || ev.Error != "" {
 		t.Errorf("note/error = %q/%q, want the failed attempt as a note", ev.Note, ev.Error)
 	}
@@ -788,15 +767,13 @@ func TestFallbackStepSkipsADestinationTheCatalogueCannotServe(t *testing.T) {
 	if forwarded := string(<-h.upstreamBodies); !strings.Contains(forwarded, "large-served") {
 		t.Errorf("the request did not go to the destination that exists: %s", forwarded)
 	}
-	// A destination missing from the catalogue is not a failed attempt, so
-	// the first real destination counts as chosen.
+	// A destination missing from the catalogue is not a failed attempt.
 	if ev := h.sink.last(t); ev.RouterOutcome != store.RouterChose {
 		t.Errorf("outcome = %q, want %q", ev.RouterOutcome, store.RouterChose)
 	}
 }
 
-// A router that decided does not get a second go: when the chosen model
-// answers 500, asking another would answer from a model nothing chose.
+// When the chosen model answers 500, no other is tried: nothing chose it.
 func TestInstructionStepDoesNotFailOverFromWhatItChose(t *testing.T) {
 	rt := autoRoute()
 	h := routeHarness(t, picks("keera-large"), rt, nil)
@@ -817,8 +794,7 @@ func TestInstructionStepDoesNotFailOverFromWhatItChose(t *testing.T) {
 	}
 }
 
-// measuredRoute is a router that reads nothing and ranks its destinations by
-// what this process has measured.
+// measuredRoute ranks its destinations by what this process measured.
 func measuredRoute(mode policy.RouteMode, destinations ...string) policy.Route {
 	return policy.Route{
 		OrgID: "org_1", Router: "pool", Mode: mode, Destinations: destinations,
@@ -845,8 +821,7 @@ func TestLatencyStepPlacesTheRequestOnTheFasterDestination(t *testing.T) {
 	if n := len(h.upstreamBodies); n != 0 {
 		t.Errorf("%d further requests were sent; the first one answered", n)
 	}
-	// On these modes 'chose' means the top-ranked destination, not the first
-	// one written.
+	// Here 'chose' means the top-ranked destination, not the first written.
 	ev := h.sink.last(t)
 	if ev.RouterOutcome != store.RouterChose {
 		t.Errorf("outcome = %q, want %q", ev.RouterOutcome, store.RouterChose)
@@ -863,8 +838,7 @@ func TestLeastBusyStepPlacesTheRequestWhereThereIsRoom(t *testing.T) {
 	h := chainHarness(t,
 		measuredRoute(policy.RouteModeLeastBusy, "keera-small", "keera-large"), nil)
 
-	// Two requests already outstanding against the destination a fallback
-	// router would send everything to.
+	// Two requests already busy on the first destination.
 	defer h.srv.load.begin("org_1/keera-small")()
 	defer h.srv.load.begin("org_1/keera-small")()
 
@@ -882,8 +856,7 @@ func TestLeastBusyStepPlacesTheRequestWhereThereIsRoom(t *testing.T) {
 }
 
 func TestAMeasuredStepStillFailsOverToWhatItRankedSecond(t *testing.T) {
-	// The ranking is wrong here: the fast one is down. The request must not
-	// fail because the router was confident.
+	// The fast one is down. The request must still succeed.
 	h := chainHarness(t,
 		measuredRoute(policy.RouteModeLatency, "keera-small", "keera-large"),
 		map[string]int{"large-served": 503})
@@ -910,8 +883,7 @@ func TestAMeasuredStepStillFailsOverToWhatItRankedSecond(t *testing.T) {
 			"the router ranked first is what falling back is", ev.RouterOutcome,
 			store.RouterFellBack)
 	}
-	// The destination that failed is ranked last for a while, so the next
-	// request does not walk into it again.
+	// The failed destination is ranked last for a while.
 	if !h.srv.load.read("org_1/keera-large", time.Now()).failing {
 		t.Error("a destination that answered 503 is still being ranked on its latency; " +
 			"the next request would be sent to it too")
@@ -938,8 +910,8 @@ func TestTheLatencyReadingLeavesOutTimeLostOnFailedDestinations(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 
-	// The destination that rescued the request answered at once. Charging it
-	// the first one's wait would rank it as slow.
+	// The rescuing destination answered at once; charging it the first one's
+	// wait would rank it as slow.
 	r := h.srv.load.read("org_1/keera-large", time.Now())
 	if !r.known || r.latency >= lost {
 		t.Errorf("keera-large measured %v (known %v), want less than the %v lost on keera-small",
@@ -969,15 +941,13 @@ func TestARouterRowSaysHowItEndedWhenTheClientHangsUpFirst(t *testing.T) {
 	if ev := h.sink.last(t); ev.RouterOutcome != store.RouterError {
 		t.Errorf("outcome = %q, want %q", ev.RouterOutcome, store.RouterError)
 	}
-	// The client left, the destination did not fail: a measured step must
-	// not rank it last for it.
+	// The client left; the destination did not fail, so it is not ranked last.
 	if r := h.srv.load.read("org_1/keera-small", time.Now()); r.failing {
 		t.Error("keera-small is marked failing because the client hung up")
 	}
 }
 
-// A client that hangs up while the model decides got no answer, so the row
-// says error, not chose.
+// A client that hangs up while the model decides gets an error row, not chose.
 func TestARouterRowSaysErrorWhenTheClientHangsUpWhileItDecides(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := routeHarness(t, func([]string) string {
@@ -1013,8 +983,7 @@ func TestAMeasuredStepChargesNoRoutingTime(t *testing.T) {
 	}
 	<-h.upstreamBodies
 
-	// router_ms is what the router added over the answering model's own
-	// work, and a router that neither generates nor retries adds nothing.
+	// A router that neither generates nor retries adds no router_ms.
 	if ev := h.sink.last(t); ev.RouterMS != 0 {
 		t.Errorf("router_ms = %d, want 0 - nothing was generated and nothing failed",
 			ev.RouterMS)
@@ -1033,8 +1002,7 @@ func TestTheInFlightCountIsGivenBackWhenTheRequestIsOver(t *testing.T) {
 		<-h.upstreamBodies
 	}
 
-	// A count never given back would rank the destination as busy forever,
-	// and the router would stop moving traffic.
+	// A count never given back would rank the destination busy forever.
 	now := time.Now()
 	for _, alias := range []string{"keera-small", "keera-large"} {
 		if got := h.srv.load.read(policy.ModelKey("org_1", alias), now).inflight; got != 0 {
@@ -1044,8 +1012,7 @@ func TestTheInFlightCountIsGivenBackWhenTheRequestIsOver(t *testing.T) {
 	}
 }
 
-// The lettered question costs one token of generation per request, rather
-// than as many as the model felt like writing.
+// The lettered question costs one generated token per request.
 func TestADecisionAsksForOneTokenAndTheDistributionBehindIt(t *testing.T) {
 	h := routeHarness(t, picks("keera-large"), autoRoute(), nil)
 
@@ -1061,8 +1028,7 @@ func TestADecisionAsksForOneTokenAndTheDistributionBehindIt(t *testing.T) {
 			t.Errorf("the decision did not ask for %s: %s", want, asked)
 		}
 	}
-	// The destinations are lettered, and the model is asked for the letter
-	// rather than for a name it could spell wrong.
+	// The destinations are lettered, and the model is asked for the letter.
 	for _, want := range []string{"A) keera-small", "B) keera-large", "Answer with one letter."} {
 		if !strings.Contains(asked, want) {
 			t.Errorf("the decision did not offer %q: %s", want, asked)
@@ -1073,8 +1039,8 @@ func TestADecisionAsksForOneTokenAndTheDistributionBehindIt(t *testing.T) {
 	}
 }
 
-// A model that answers with a letter no destination has cannot place a
-// request, because only the letters that were offered are looked at.
+// Only offered letters count, so a model answering another cannot place a
+// request.
 func TestALetterNoDestinationHasFallsBack(t *testing.T) {
 	// The stand-in is asked for a destination it was never offered, so it
 	// writes the name out instead of a letter.
@@ -1091,7 +1057,7 @@ func TestALetterNoDestinationHasFallsBack(t *testing.T) {
 }
 
 // A plane that serves no distribution still routes. It is found out once and
-// asked for a name from then on, with nothing to configure.
+// asked for a name from then on.
 func TestAPlaneWithoutLogprobsIsFoundOutOnceAndThenAskedForAName(t *testing.T) {
 	h := routeHarness(t, picks("keera-large"), autoRoute(), nil, namesOnly)
 
@@ -1100,8 +1066,7 @@ func TestAPlaneWithoutLogprobsIsFoundOutOnceAndThenAskedForAName(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	// The lettered question, the same question asked for a name, and then the
-	// request itself.
+	// The lettered question, the name question, then the request.
 	if asked := string(<-h.upstreamBodies); !strings.Contains(asked, `"logprobs":true`) {
 		t.Errorf("the first decision did not try for a distribution: %s", asked)
 	}
@@ -1133,8 +1098,7 @@ func TestAPlaneWithoutLogprobsIsFoundOutOnceAndThenAskedForAName(t *testing.T) {
 	}
 }
 
-// A check reports how sure the model was, which says whether a sample landed
-// right for a reason.
+// A check reports how sure the model was.
 func TestACheckReportsHowSureEachDecisionWas(t *testing.T) {
 	h := routeHarness(t, picks("keera-large"), autoRoute(), nil)
 
@@ -1156,9 +1120,7 @@ func TestACheckReportsHowSureEachDecisionWas(t *testing.T) {
 	}
 }
 
-// The same check against a plane that serves no distribution says nothing
-// about confidence rather than claiming the router was unsure. Zero is
-// unknown.
+// Against a plane with no distribution, confidence is zero, meaning unknown.
 func TestACheckSaysNothingAboutConfidenceItCannotRead(t *testing.T) {
 	h := routeHarness(t, picks("keera-large"), autoRoute(), nil, namesOnly)
 
@@ -1177,8 +1139,8 @@ func TestACheckSaysNothingAboutConfidenceItCannotRead(t *testing.T) {
 	}
 }
 
-// Any refusal after the router decided carries what the decision cost, not
-// only the router's own refusals: the budget was charged either way.
+// Any refusal after the router decided carries the decision's cost: the
+// budget was charged either way.
 func TestARefusalAfterTheRouterCarriesWhatItSpent(t *testing.T) {
 	h := routeHarness(t, picks("keera-large"), autoRoute(), nil)
 	large := h.src.models["keera-large"]

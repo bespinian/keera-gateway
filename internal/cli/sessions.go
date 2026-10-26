@@ -12,11 +12,9 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// sessionCmd is the panel's Sessions screen, in a terminal: 'list' ranks the
-// tasks, 'show' opens one.
+// sessionCmd is the panel's Sessions screen in a terminal.
 func sessionCmd(ctx context.Context, args []string) error {
-	// 'keera session <id>' opened a task before 'show' existed, and a row's id
-	// pasted after 'session' should still open it.
+	// 'keera session <id>' worked before 'show' existed, and still does.
 	if len(args) > 0 {
 		if _, err := strconv.ParseInt(args[0], 10, 64); err == nil {
 			args = append([]string{"show"}, args...)
@@ -39,9 +37,8 @@ func sessionCmd(ctx context.Context, args []string) error {
 		return sessionShow(ctx, c, fs.Arg(0), r.org, r.asJSON)
 	}
 
-	// The list reports calls, minutes and cost per task rather than per
-	// request, because nobody decides how many calls a task takes. It sorts by
-	// cost by default: the row worth reading is the task that cost the most.
+	// Reported per task, not per request, since nobody decides how many calls
+	// a task takes. Sorted by cost, as the costliest task is worth reading.
 	q, err := reportQuery(ctx, c, r.org, w, *since, map[string]string{
 		"sort": *sort, "limit": strconv.Itoa(*limit), "alias": *alias,
 	})
@@ -75,15 +72,14 @@ func printSessions(w *table, res sessionsResponse, since time.Duration) {
 		if who == "" {
 			who = res.KeyNames[s.KeyID]
 		}
-		// The id, not the conversation hash: it is what `keera session show` takes.
+		// The id, not the conversation hash, since `session show` takes it.
 		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n",
 			s.ID, s.StartedAt.Local().Format("2006-01-02 15:04"),
 			shortDuration(s.Duration()), s.Requests,
 			dash(strings.Join(s.Models, ",")), dash(who),
 			policy.FormatAmount(s.CostMicros), endedAs(s))
 	}
-	// Per task, and the middle task rather than the mean: one runaway task
-	// makes an average that describes none of the others.
+	// The median, not the mean: one runaway task skews an average.
 	t := res.Totals
 	_, _ = fmt.Fprintf(w, "\n%d sessions over %d requests in the last %s; showing %d\n",
 		t.Sessions, t.Requests, shortDuration(since), len(res.Data))
@@ -151,14 +147,13 @@ func printSession(w *table, res sessionResponse) {
 			policy.FormatAmount(r.CostMicros), r.TTFTMS, oneLine(cmp.Or(r.Error, r.Note)))
 	}
 
-	// What the agent did between its requests, through the MCP servers.
 	if len(res.ToolCalls) > 0 {
 		_, _ = fmt.Fprintln(w)
 		printToolCalls(w, res.ToolCalls)
 	}
 }
 
-// endedAs says how a task finished, in the panel's words.
+// endedAs uses the panel's words.
 func endedAs(s store.AgentSession) string {
 	switch {
 	case s.LastStatus >= 500:
@@ -168,15 +163,14 @@ func endedAs(s store.AgentSession) string {
 	case s.LastError != "":
 		return "interrupted"
 	case s.Failed+s.Refused+s.Interrupted > 0:
-		// It finished, but not everything in it did: the agent recovered.
+		// The agent recovered from a failed request.
 		return "served, after trouble"
 	default:
 		return "served"
 	}
 }
 
-// groupedBy says whether the client named the task or it was inferred, which
-// is how far to trust the grouping.
+// groupedBy says whether the client named the task or it was inferred.
 func groupedBy(s store.AgentSession) string {
 	if s.Stated {
 		return "an id the client sent"

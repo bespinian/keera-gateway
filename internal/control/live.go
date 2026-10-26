@@ -16,16 +16,14 @@ import (
 
 // The request log, read as it is written.
 //
-// Polling would cost every open tab a query per interval. Instead, the write
-// path announces each batch of usage events on store.EventsChannel, and one
-// listener per process wakes the streams of the organisations it names. The
-// notice carries nothing else: each stream runs its own query, narrowed to
-// what its reader may see.
+// Instead of polling, the write path announces each batch of usage events on
+// store.EventsChannel, and one listener per process wakes the streams of the
+// organisations it names. The notice carries nothing else: each stream runs its
+// own query, narrowed to what its reader may see.
 
 const (
-	// streamTick bounds how often one stream queries the database. Notices
-	// can come several times a second; the reader would not notice, the
-	// database would.
+	// streamTick bounds how often one stream queries the database. Notices can
+	// come several times a second.
 	streamTick = time.Second
 	// streamKeepalive is how often an idle stream sends a comment, so a proxy
 	// does not close it and make the browser reconnect every minute.
@@ -33,10 +31,10 @@ const (
 	// streamRows is the most rows one tick sends. Nobody can read more, and
 	// the counts cover the whole window anyway.
 	streamRows = 200
-	// streamRecount is how often a stream counts its whole window again.
-	// Between recounts it counts only new rows: recounting a busy week every
-	// second, for every tab, would load the database more than the traffic it
-	// shows. The recount drops rows that left the window.
+	// streamRecount is how often a stream recounts its whole window, which also
+	// drops rows that left it. In between it counts only new rows: recounting a
+	// busy week every second, for every tab, would load the database more than
+	// the traffic it shows.
 	streamRecount = time.Minute
 	// feedRetry is how long a dropped listener waits before reconnecting.
 	feedRetry = 2 * time.Second
@@ -82,11 +80,9 @@ func (f *requestFeed) watch(orgID string) (<-chan struct{}, func()) {
 	}
 }
 
-// Drain ends every open request stream.
-//
-// These responses only end when the reader closes the tab, so without Drain a
-// graceful shutdown would wait out its whole grace period. The browser
-// reconnects to the next process by itself.
+// Drain ends every open request stream. They only end when the reader closes
+// the tab, so without Drain a graceful shutdown would wait out its whole grace
+// period. The browser reconnects to the next process.
 func (s *Server) Drain() { s.feed.once.Do(func() { close(s.feed.closing) }) }
 
 // wake tells the streams of the organisations a payload names to look again.

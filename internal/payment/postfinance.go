@@ -1,9 +1,9 @@
-// Package payment takes the payments for prepaid credit, through PostFinance
+// Package payment takes payments for prepaid credit through PostFinance
 // Checkout. See docs/billing.md.
 //
-// Card details never reach Keera Gateway: the customer types them on
-// PostFinance's payment page, and what comes back is a transaction and,
-// when asked for, a token to charge the same card again.
+// Card details never reach the gateway: the customer types them on
+// PostFinance's payment page. What comes back is a transaction and, if asked
+// for, a token to charge the same card again.
 package payment
 
 import (
@@ -28,8 +28,7 @@ const DefaultURL = "https://checkout.postfinance.ch"
 // Settings are the PostFinance Checkout account payments go to.
 type Settings struct {
 	// URL is DefaultURL, or a stand-in in tests.
-	URL string
-	// SpaceID is the space the transactions are created in.
+	URL     string
 	SpaceID int64
 	// UserID and AuthKey are an application user of that space. AuthKey is
 	// decoded already: PostFinance shows it in base64.
@@ -54,8 +53,7 @@ func New(s Settings) *Client {
 // SpaceID is the space the client creates transactions in.
 func (c *Client) SpaceID() int64 { return c.s.SpaceID }
 
-// SaveCard is the tokenization mode that keeps the card, and offers it on the
-// payment page next time.
+// SaveCard keeps the card and offers it on the payment page next time.
 const SaveCard = "FORCE_CREATION_WITH_ONE_CLICK_PAYMENT"
 
 // LineItem is what a transaction is for.
@@ -83,8 +81,8 @@ type NewTransaction struct {
 	// organisation, so the payment page offers that organisation its card.
 	CustomerID           string `json:"customerId"`
 	CustomerEmailAddress string `json:"customerEmailAddress,omitempty"`
-	// MerchantReference is Keera's payment id, so a transaction in
-	// PostFinance's back office can be found in Keera.
+	// MerchantReference is Keera's payment id, to find the transaction from
+	// PostFinance's back office.
 	MerchantReference string `json:"merchantReference"`
 	SuccessURL        string `json:"successUrl,omitempty"`
 	FailedURL         string `json:"failedUrl,omitempty"`
@@ -110,9 +108,8 @@ type Transaction struct {
 	} `json:"token"`
 }
 
-// Paid reports whether the money is in. FULFILL is the state PostFinance
-// says goods may be handed over in; COMPLETED can still be held back by a
-// fraud check.
+// Paid reports whether the money is in. Only FULFILL counts: COMPLETED can
+// still be held back by a fraud check.
 func (t Transaction) Paid() bool { return t.State == "FULFILL" }
 
 // Failed reports whether the transaction will never be paid.
@@ -130,8 +127,7 @@ func (t Transaction) TokenID() int64 {
 
 // Card is how a saved card is shown: never its number.
 type Card struct {
-	// Label is what PostFinance calls the card, such as a brand and the last
-	// digits.
+	// Label is PostFinance's name for the card, such as brand and last digits.
 	Label string
 	// Expires is when PostFinance stops charging it. Zero when unknown.
 	Expires time.Time
@@ -206,8 +202,8 @@ type Document struct {
 	Data  []byte
 }
 
-// InvoiceDocument renders the invoice of a transaction: its receipt. The
-// layout and the merchant's address come from the space's invoice template.
+// InvoiceDocument renders a transaction's invoice, its receipt, from the
+// space's invoice template.
 func (c *Client) InvoiceDocument(ctx context.Context, id int64) (Document, error) {
 	var v struct {
 		Title string `json:"title"`
@@ -229,8 +225,7 @@ func (c *Client) DeleteToken(ctx context.Context, token int64) error {
 	return c.do(ctx, http.MethodDelete, "/payment/tokens/"+strconv.FormatInt(token, 10), nil, nil)
 }
 
-// localized picks English from a name PostFinance gives in several
-// languages, or any of them.
+// localized picks English from a name in several languages, or any of them.
 func localized(names map[string]string) string {
 	for _, lang := range []string{"en-US", "en-GB", "de-CH"} {
 		if n := names[lang]; n != "" {
@@ -262,7 +257,7 @@ func (e *Error) Error() string {
 }
 
 // maxResponse bounds what is read of an answer. A transaction is a few
-// kilobytes. A document is a PDF in base64, with the merchant's logo in it.
+// kilobytes; a document is a base64 PDF with the merchant's logo.
 const (
 	maxResponse = 1 << 20
 	maxDocument = 16 << 20
@@ -330,9 +325,9 @@ func (c *Client) call(ctx context.Context, method, path string, in, out any, lim
 	}
 }
 
-// jwt signs one request, as PostFinance asks: HS256 over the method and the
-// path with its query, issued now, so a captured token is useless for any
-// other request and soon for this one too.
+// jwt signs one request as PostFinance asks: HS256 over the method and path
+// with query, issued now, so a captured token is soon useless and never fits
+// another request.
 func (c *Client) jwt(method, path string, now time.Time) (string, error) {
 	if len(c.s.AuthKey) == 0 {
 		return "", errors.New("postfinance: no authentication key")
@@ -351,9 +346,8 @@ func (c *Client) jwt(method, path string, now time.Time) (string, error) {
 	return signed + "." + enc.EncodeToString(mac.Sum(nil)), nil
 }
 
-// Amount writes micro-francs as PostFinance takes an amount, such as
-// "108.10". Anything below a centime is dropped: Keera only asks for whole
-// centimes.
+// Amount writes micro-francs as a PostFinance amount, such as "108.10".
+// Anything below a centime is dropped: Keera only asks for whole centimes.
 func Amount(micros int64) json.Number {
 	sign := ""
 	if micros < 0 {

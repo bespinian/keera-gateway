@@ -64,8 +64,7 @@ func TestAuditIsScopedFilterableAndPagedByACursor(t *testing.T) {
 		t.Errorf("%d key.create entries, want 1", len(got))
 	}
 
-	// Ids are monotonic, so paging on one is stable even while the log is being
-	// written to - which "offset" would not be.
+	// Ids only grow, so paging on one is stable while the log grows.
 	page, err := st.ListAudit(ctx, AuditQuery{Limit: 2})
 	if err != nil {
 		t.Fatal(err)
@@ -81,8 +80,7 @@ func TestAuditIsScopedFilterableAndPagedByACursor(t *testing.T) {
 		t.Errorf("the cursor did not page backwards: %+v then %+v", page, next)
 	}
 
-	// The filters offered are the ones that occur, so none of them matches
-	// nothing and none that matters is hidden.
+	// The filters offered are the ones that occur.
 	facets, err := st.AuditFilters(ctx, "org_1")
 	if err != nil {
 		t.Fatalf("AuditFilters: %v", err)

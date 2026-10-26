@@ -5,8 +5,8 @@ ARG REVISION=""
 
 WORKDIR /src
 COPY . .
-# vendor/ is not in Git, so a builder that builds straight from a clone has to
-# write it here. With a vendor tree in the context, the build stays offline.
+# vendor/ is not in Git, so a build from a clone writes it here. With a vendor
+# tree in the context, the build stays offline.
 RUN [ -f vendor/modules.txt ] || go mod vendor
 RUN CGO_ENABLED=0 go build -mod=vendor -trimpath \
         -ldflags="-s -w \
@@ -28,7 +28,7 @@ COPY --from=build /out/keera-gateway /keera-gateway
 COPY LICENSE /LICENSE
 COPY --from=build /out/THIRD_PARTY_NOTICES /THIRD_PARTY_NOTICES
 
-# nobody:nogroup. There is no /etc/passwd here, so the id has to be numeric.
+# nobody:nogroup, numeric as there is no /etc/passwd.
 USER 65534:65534
 
 EXPOSE 8080

@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// integer reads a field as a JSON integer. Only tests need it: the gateway
-// reads ceilings with body.ceiling, which accepts every spelling.
+// integer reads a field as a JSON integer. The gateway itself uses
+// body.ceiling.
 func (b *body) integer(key string) (int, bool) {
 	raw, ok := b.value(key)
 	if !ok {
@@ -22,8 +22,7 @@ func (b *body) integer(key string) (int, bool) {
 }
 
 func TestParseBodyPreservesEverythingItDoesNotTouch(t *testing.T) {
-	// Anything dropped or reordered here would be taken from the client,
-	// provider extensions included.
+	// Nothing the client sent may be dropped or reordered.
 	const in = `{"model":"keera-code","messages":[{"role":"user","content":"hi"}],` +
 		`"temperature":0,"tools":[{"type":"function"}],"chat_template_kwargs":{"enable_thinking":false}}`
 
@@ -67,9 +66,8 @@ func TestParseBodyRefusesAReadKeyInOtherCase(t *testing.T) {
 }
 
 func TestEveryRequestFieldTheGatewayDecodesIsChecked(t *testing.T) {
-	// A field missing from readNames could be smuggled past the filters in
-	// other case, so a new field in a request struct must be added there too.
-	// seen stops the walk where a type holds itself, as a namespace holds tools.
+	// A field missing from readNames could pass the filters in other case, so
+	// every request struct field must be there. seen stops recursive types.
 	seen := map[reflect.Type]bool{}
 	var walk func(reflect.Type)
 	walk = func(t2 reflect.Type) {
@@ -247,8 +245,7 @@ func TestPrependSystem(t *testing.T) {
 }
 
 func TestPrependSystemDoesNotDecodeTheConversation(t *testing.T) {
-	// The array is spliced, not parsed, so unknown fields and number formatting
-	// arrive upstream byte for byte.
+	// The array is spliced, not parsed, so it arrives upstream byte for byte.
 	const in = `{"messages":[{"role":"user","content":"hi","cache_control":{"type":"ephemeral"},` +
 		`"weight":1.50}],"model":"keera-code"}`
 	b, err := parseBody([]byte(in))
@@ -271,8 +268,7 @@ func TestPrependSystemDoesNotDecodeTheConversation(t *testing.T) {
 }
 
 func TestParseBodyFindsFieldBoundariesInAwkwardJSON(t *testing.T) {
-	// The top level is walked by skipping strings and counting brackets. Each
-	// case is one a naive walk gets wrong.
+	// Each case is one a naive walk gets wrong.
 	for _, in := range []string{
 		`{"model":"m","messages":[{"role":"user","content":"}]},\"still text\""}]}`,
 		`{"model":"m","stop":["}","]",","],"n":1}`,
@@ -287,8 +283,7 @@ func TestParseBodyFindsFieldBoundariesInAwkwardJSON(t *testing.T) {
 			t.Errorf("parseBody(%s): %v", in, err)
 			continue
 		}
-		// encode does not keep the client's whitespace or key escapes, so the
-		// two are compared as JSON.
+		// encode drops whitespace and key escapes, so compare as JSON.
 		var want, got any
 		if err := json.Unmarshal([]byte(in), &want); err != nil {
 			t.Fatalf("the test case is not valid JSON: %v", err)
@@ -305,8 +300,7 @@ func TestParseBodyFindsFieldBoundariesInAwkwardJSON(t *testing.T) {
 }
 
 func TestParseBodyKeepsTheLastOfARepeatedField(t *testing.T) {
-	// A repeated key takes its last value, as JSON readers downstream do, and
-	// is forwarded once.
+	// A repeated key takes its last value and is forwarded once.
 	b, err := parseBody([]byte(`{"model":"first","stream":true,"model":"second"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -320,7 +314,7 @@ func TestParseBodyKeepsTheLastOfARepeatedField(t *testing.T) {
 }
 
 func TestParseBodyRefusesABodyItCannotRead(t *testing.T) {
-	// Refused here, saying where, rather than forwarded.
+	// Refused with the error's position, not forwarded.
 	for _, in := range []string{
 		`{"model":"m",}`,
 		`{"model":"m"`,
@@ -338,8 +332,8 @@ func TestParseBodyRefusesABodyItCannotRead(t *testing.T) {
 	}
 }
 
-// FuzzParseBody checks that the walk, the JSON reader every request goes
-// through, agrees with unmarshalling into a map on every body it accepts.
+// FuzzParseBody checks that the walk agrees with unmarshalling into a map on
+// every body it accepts.
 func FuzzParseBody(f *testing.F) {
 	f.Add(`{"model":"m","messages":[{"role":"user","content":"hi"}],"stream":true}`)
 	f.Add(`{"a":"}\"","b":[1,{"c":null}],"d":{},"e":-1.5e+3}`)
@@ -365,7 +359,7 @@ func FuzzParseBody(f *testing.F) {
 
 		checkFields(t, in, b, reference)
 		checkOrder(t, in, b)
-		// And what comes out is a document that still parses.
+		// The output must still parse.
 		var check map[string]json.RawMessage
 		if err := json.Unmarshal(b.encode(), &check); err != nil {
 			t.Fatalf("%q: encode() is not valid JSON: %v\n%s", in, err, b.encode())
@@ -373,7 +367,7 @@ func FuzzParseBody(f *testing.F) {
 	})
 }
 
-// checkFields holds every field the walk read to what unmarshalling read.
+// checkFields compares every field the walk read with what unmarshalling read.
 func checkFields(t *testing.T, in string, b *body, reference map[string]json.RawMessage) {
 	t.Helper()
 	if len(b.fields) != len(reference) {
@@ -384,8 +378,7 @@ func checkFields(t *testing.T, in string, b *body, reference map[string]json.Raw
 		if !ok {
 			t.Fatalf("%q: field %q was not read", in, k)
 		}
-		// The walk keeps whitespace that unmarshalling drops, so the two are
-		// compared as values.
+		// The walk keeps whitespace that unmarshalling drops, so compare values.
 		var wantVal, gotVal any
 		if err := json.Unmarshal(want, &wantVal); err != nil {
 			t.Fatalf("%q: reference value for %q is not valid JSON: %v", in, k, err)
@@ -399,7 +392,7 @@ func checkFields(t *testing.T, in string, b *body, reference map[string]json.Raw
 	}
 }
 
-// checkOrder holds the order to every field, once each.
+// checkOrder checks that the order lists every field once.
 func checkOrder(t *testing.T, in string, b *body) {
 	t.Helper()
 	if len(b.order) != len(b.fields) {

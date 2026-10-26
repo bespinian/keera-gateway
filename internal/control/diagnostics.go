@@ -1,9 +1,8 @@
 package control
 
-// What a deployment is missing, in one answer, for someone who does not yet
-// know what to suspect. The checks run here, where the facts are; `keera
-// doctor` only renders them. Nothing here writes, so it is safe to run during
-// an incident.
+// What a deployment is missing, in one answer. The checks run here, where the
+// facts are; `keera doctor` only renders them. Nothing here writes, so it is
+// safe to run during an incident.
 
 import (
 	"context"

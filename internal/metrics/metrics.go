@@ -1,5 +1,5 @@
-// Package metrics is a small Prometheus exposition, hand-rolled so that the
-// gateway stays a single binary with no client-library dependency.
+// Package metrics is a small hand-rolled Prometheus exposition, to avoid the
+// client-library dependency.
 package metrics
 
 import (
@@ -14,14 +14,11 @@ import (
 	"sync/atomic"
 )
 
-// latencyBuckets are in seconds. They reach far up because a streamed
-// completion can run for minutes.
+// latencyBuckets are in seconds. A streamed completion can run for minutes.
 var latencyBuckets = []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300}
 
-// overheadBuckets measure the gateway's own work, which is tens of
-// microseconds when it goes well. With latencyBuckets every request would land
-// in the first bucket. The top is far above normal, because a slow request is
-// what this is here to show.
+// overheadBuckets measure the gateway's own work, normally tens of
+// microseconds. The top is far above that, to show slow requests.
 var overheadBuckets = []float64{
 	0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 1,
 }
@@ -40,8 +37,7 @@ var (
 type series struct {
 	count atomic.Int64
 	sum   atomic.Int64 // tokens or micro-units, for counters that carry a value
-	// micros is the histogram's sum, kept in microseconds so it stays an
-	// integer.
+	// micros is the histogram's sum, in microseconds so it stays an integer.
 	micros  atomic.Int64
 	buckets []float64
 	hist    []atomic.Int64
@@ -58,21 +54,18 @@ func (s *series) observe(seconds float64, sum int64) {
 // Registry collects the gateway's counters.
 type Registry struct {
 	mu sync.RWMutex
-	// The keyed maps hold label values joined by NUL, in the order of the
-	// family's label names above.
+	// Keyed maps hold label values joined by NUL, in label-name order.
 	requests map[string]*series
 	inflight atomic.Int64
-	// rlFallback counts rate-limit admissions and token charges made locally
-	// because Redis was unreachable. Anything but zero means the limits bind
-	// per replica.
+	// rlFallback counts rate-limit decisions made locally because Redis was
+	// unreachable. Above zero, the limits bind per replica.
 	rlFallback   atomic.Int64
 	upstreamErrs map[string]*series
 	overhead     map[string]*series
 	// A filter's cost and refusals hide inside the request's series, so it has
 	// its own families to alert on.
 	filters map[string]*series
-	// The destination is a label because the split between destinations is
-	// the point of a router.
+	// The destination is a label: the split between them is a router's point.
 	routers map[string]*series
 	tools   map[string]*series
 }
@@ -88,8 +81,8 @@ func New() *Registry {
 	}
 }
 
-// seriesIn finds the series for one label set, and takes the write lock only
-// the first time that set appears.
+// seriesIn finds the series for one label set. It takes the write lock only
+// for a new set.
 func (r *Registry) seriesIn(m map[string]*series, buckets []float64, values ...string) *series {
 	key := strings.Join(values, "\x00")
 	r.mu.RLock()
@@ -115,15 +108,14 @@ func (r *Registry) Observe(model, org string, status int, seconds float64, token
 }
 
 // Overhead records the time the gateway itself added, from reading the body to
-// the upstream call, because request duration is mostly model time and would
-// hide a slower gateway. Filter and router time is left out, as each has its
-// own metric. Refusals make no upstream call, so they are not recorded.
+// the upstream call, since request duration is mostly model time. Filters and
+// routers have their own metrics. Refusals are not recorded.
 func (r *Registry) Overhead(model, org string, seconds float64) {
 	r.seriesIn(r.overhead, overheadBuckets, model, org).observe(seconds, 0)
 }
 
-// FilterRun records one filter's pass over one request. shadow is a label so
-// the weeks before and after a filter was enforced read side by side.
+// FilterRun records one filter's pass over one request. shadow is a label, to
+// compare a filter before and after it was enforced.
 func (r *Registry) FilterRun(filter, org, outcome string, shadow bool,
 	seconds float64, micros int64,
 ) {
@@ -145,9 +137,9 @@ func (r *Registry) ToolCall(server, org, outcome string, seconds float64) {
 	r.seriesIn(r.tools, latencyBuckets, server, org, outcome).observe(seconds, 0)
 }
 
-// UpstreamError records one failed attempt at a model: a backend that could not
-// be reached or did not start answering in time, or a 5xx a router moved past.
-// The org is a label because an alias is only unique inside one organisation.
+// UpstreamError records one failed attempt at a model: unreachable, too slow
+// to answer, or a 5xx a router moved past. The org is a label because an alias
+// is only unique inside one organisation.
 func (r *Registry) UpstreamError(model, org string) {
 	r.seriesIn(r.upstreamErrs, nil, model, org).count.Add(1)
 }
@@ -156,13 +148,11 @@ func (r *Registry) UpstreamError(model, org string) {
 // answer.
 func (r *Registry) RateLimitFallback() { r.rlFallback.Add(1) }
 
-// InflightAdd tracks concurrent upstream requests, which shows whether the
-// inference plane is saturated.
+// InflightAdd tracks concurrent upstream requests, to show saturation.
 func (r *Registry) InflightAdd(n int64) { r.inflight.Add(n) }
 
 // Write renders the exposition format. It renders into memory first, so a
-// slow reader never holds the lock: a new series waiting for it would stall
-// every request behind it.
+// slow reader never holds the lock and stalls requests.
 func (r *Registry) Write(w io.Writer) {
 	var buf bytes.Buffer
 	r.render(&buf)

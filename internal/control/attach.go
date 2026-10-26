@@ -36,9 +36,9 @@ import (
 // developer's `keera` binary may be older than the gateway.
 const upgradeProtocol = "keera-sandbox/1"
 
-// attachIdleTimeout closes a connection idle this long. It is generous,
-// because the traffic is a person typing; it is for connections nobody
-// closes, like a laptop put in a bag.
+// attachIdleTimeout closes a connection idle this long. It is generous, for a
+// person typing; it catches connections nobody closes, like a laptop put in a
+// bag.
 const attachIdleTimeout = 2 * time.Hour
 
 func (s *Server) attachRoutes(mux *httpx.Mux) {
@@ -225,11 +225,9 @@ func (h *hijacked) Write(b []byte) (int, error) {
 	return n, h.buf.Flush()
 }
 
-// hijack takes the connection away from the HTTP server.
-//
-// It uses http.NewResponseController, not a type assertion, because the
-// access log and the compressor wrap the writer; the controller follows their
-// Unwrap.
+// hijack takes the connection away from the HTTP server. It uses
+// http.NewResponseController, not a type assertion, because the access log and
+// the compressor wrap the writer.
 func hijack(w http.ResponseWriter) (*hijacked, error) {
 	conn, buf, err := http.NewResponseController(w).Hijack()
 	if err != nil {

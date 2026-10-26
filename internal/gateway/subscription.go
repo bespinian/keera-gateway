@@ -10,18 +10,15 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// Claude subscriptions.
+// Claude subscriptions. Claude Code signed in to a Claude Team or Enterprise
+// plan sends the person's own sign-in in Authorization, and the plan pays. The
+// gateway forwards that sign-in unchanged to Anthropic for a subscription
+// model, never stores or logs it, and still applies the key's guardrails.
 //
-// Claude Code signed in to a Claude Team or Enterprise plan can be pointed here
-// with ANTHROPIC_BASE_URL alone. Its requests then carry the person's own Claude
-// sign-in in Authorization, and the plan pays. The gateway forwards that
-// sign-in unchanged to Anthropic for a subscription model, and never stores or
-// logs it. It still applies the key's guardrails, and records the tokens.
-//
-// Who is asking comes from the Keera key in KeyHeader, which Claude Code sends
-// from ANTHROPIC_CUSTOM_HEADERS. That key is a subscription key: it reaches
-// subscription models only, so a copied settings file cannot spend the
-// organisation's money. See docs/subscriptions.md.
+// The caller is identified by the Keera key in KeyHeader, sent from
+// ANTHROPIC_CUSTOM_HEADERS. That subscription key reaches only subscription
+// models, so a copied settings file cannot spend the organisation's money.
+// See docs/subscriptions.md.
 
 // KeyHeader carries the Keera key when Authorization carries the caller's
 // Claude sign-in.
@@ -41,9 +38,9 @@ const subscriptionsOff = "this gateway does not take Claude subscriptions"
 // connectHint is what to run to set Claude Code up for a subscription.
 const connectHint = "run `keera login`, then `keera connect claude-code --subscription`"
 
-// subscriptionRefusal says why a request cannot reach a subscription model, or
-// returns nil when it can. A subscription model answers only Claude Code's
-// own API, and only with the caller's sign-in to forward.
+// subscriptionRefusal says why a request cannot reach a subscription model,
+// or nil. Such a model answers only Claude Code's own API, with the caller's
+// sign-in to forward.
 func subscriptionRefusal(c *call) *refusal {
 	switch {
 	case c.surf.dialect == nil || c.surf.dialect.provider() != "anthropic":
@@ -65,10 +62,9 @@ func subscriptionRefusal(c *call) *refusal {
 	return nil
 }
 
-// findModel finds the model a key names. A subscription key may also name one
-// by its backend model: Claude Code asks for some background work by
-// Anthropic's names, whatever its settings say. A dated name and the same name
-// without the date are the same model.
+// findModel finds the model a key names. A subscription key may also use the
+// backend model name, since Claude Code asks for some background work by
+// Anthropic's names. A dated name matches the undated one.
 func (s *Server) findModel(key policy.Key, name string) (policy.Model, bool) {
 	if m, found := s.src.Model(key.OrgID, name); found || !key.Subscription() {
 		return m, found
@@ -97,11 +93,10 @@ func undated(name string) string {
 	return name[:i]
 }
 
-// subscriptionAuth forwards the caller's sign-in and the headers Claude Code
-// identifies itself with, instead of a credential of the gateway's. Anthropic
-// accepts a Claude sign-in only from Claude Code, so the request has to reach
-// it as Claude Code sent it. The anthropic-* headers are an open list: a new
-// capability arrives as a new one.
+// subscriptionAuth forwards the caller's sign-in and Claude Code's own
+// headers instead of a gateway credential. Anthropic accepts a sign-in only
+// from Claude Code, so the request must arrive as Claude Code sent it. All
+// anthropic-* headers pass, since new features add new ones.
 func subscriptionAuth(client http.Header) func(http.Header, string) {
 	return func(h http.Header, _ string) {
 		for name, values := range client {
@@ -128,10 +123,9 @@ func forwardedHeader(name string) bool {
 // planHeaderPrefix starts the headers in which Anthropic reports a plan's usage.
 const planHeaderPrefix = "Anthropic-Ratelimit-Unified-"
 
-// passPlanHeaders hands Anthropic's plan headers to the client. Claude Code
-// reads them to show the plan's limits and to tell a plan limit from a passing
-// throttle. The retry headers are passed for every model; see
-// copyResponseHeaders.
+// passPlanHeaders passes Anthropic's plan headers to the client. Claude Code
+// reads them to show the plan's limits and to tell a plan limit from a brief
+// throttle. Retry headers pass for every model; see copyResponseHeaders.
 func passPlanHeaders(w http.ResponseWriter, upstream http.Header) {
 	for name, values := range upstream {
 		if strings.HasPrefix(name, planHeaderPrefix) {
@@ -140,8 +134,7 @@ func passPlanHeaders(w http.ResponseWriter, upstream http.Header) {
 	}
 }
 
-// planUsage reads how much of the plan is used off an answer's headers, or
-// returns nil when the answer reports none.
+// planUsage reads the plan usage from an answer's headers, or nil if none.
 func planUsage(h http.Header, now time.Time) *policy.PlanUsage {
 	p := &policy.PlanUsage{
 		FiveHour:         fraction(h.Get(planHeaderPrefix + "5h-Utilization")),
@@ -154,15 +147,15 @@ func planUsage(h http.Header, now time.Time) *policy.PlanUsage {
 	if p.FiveHour == nil && p.SevenDay == nil && p.Status == "" {
 		return nil
 	}
-	// The status is a short word. Anything longer is not one, and is not kept.
+	// The status is a short word; anything longer is dropped.
 	if len(p.Status) > 32 {
 		p.Status = ""
 	}
 	return p
 }
 
-// fraction reads a utilisation, the fraction of the plan's limit that Anthropic
-// sends. A value far outside 0 to 1 is dropped as unreadable.
+// fraction reads a utilisation, the used fraction of the plan's limit. A
+// value far outside 0 to 1 is dropped.
 func fraction(v string) *float64 {
 	f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
 	if err != nil || f < 0 || f > 10 {
@@ -181,7 +174,7 @@ func unixTime(v string) *time.Time {
 	return &t
 }
 
-// appendSystem puts the system prompt after the client's own system
-// blocks, not before. Claude Code's first block identifies it, and Anthropic
-// removes that block only when it comes first.
+// appendSystem puts the system prompt after the client's own system blocks.
+// Claude Code's first block identifies it, and Anthropic removes that block
+// only when it comes first.
 func appendSystem(b *body, prompt string) error { return setSystem(b, prompt, false) }

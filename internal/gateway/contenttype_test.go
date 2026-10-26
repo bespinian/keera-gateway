@@ -18,8 +18,7 @@ func TestForwardableContentType(t *testing.T) {
 	})
 
 	t.Run("anything a browser would render is answered as JSON", func(t *testing.T) {
-		// One origin serves the panel and this API, so a backend that answered
-		// text/html would be handing a document to the origin holding the
+		// The panel shares the origin, so text/html would render next to the
 		// session cookie.
 		for _, ct := range []string{
 			"text/html",

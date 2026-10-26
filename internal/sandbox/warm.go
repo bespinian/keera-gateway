@@ -8,11 +8,10 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// Warm pools: sandboxes started before anybody asks for one, because an image
-// pull on a fresh node can take a minute. The controller's extension keeps the
-// pool; this file writes its SandboxTemplate, SandboxWarmPool and SandboxClaim
-// objects. It is opt-in per deployment and per class, because every warm
-// sandbox holds its class's full CPU and memory all the time.
+// Warm pools are sandboxes started before anybody asks, because an image pull
+// can take a minute. The controller's extension keeps the pool; this file
+// writes its objects. It is opt-in, because every warm sandbox holds its full
+// CPU and memory all the time.
 
 const (
 	warmAPIGroup   = "extensions.agents.x-k8s.io"
@@ -20,10 +19,8 @@ const (
 	warmAPIPath    = "/apis/" + warmAPIGroup + "/" + warmAPIVersion
 )
 
-// Pooler is a driver that can keep warm pools. Its Capabilities say whether
-// they are on.
+// Pooler is a driver that can keep warm pools.
 type Pooler interface {
-	// EnsurePool makes one class's warm pool match the catalogue.
 	EnsurePool(ctx context.Context, class policy.SandboxClass) error
 	// PrunePools removes every pool whose poolKey is not in keep.
 	PrunePools(ctx context.Context, keep map[string]bool) error
@@ -31,17 +28,15 @@ type Pooler interface {
 
 var _ Pooler = (*Kubernetes)(nil)
 
-// Backing says which object a sandbox is made of. A claim and a Sandbox are
-// addressed differently, and every call needs to know which without an extra
-// round trip. It is stored on the row, so turning warm pools off does not
-// orphan existing claims.
+// Backing says which object a sandbox is made of, since a claim and a Sandbox
+// are addressed differently. It is stored on the row, so turning warm pools
+// off does not orphan claims.
 type Backing string
 
 const (
-	// BackingSandbox is a Sandbox object the driver created directly. It is
-	// the cold path, and the only one podman has.
+	// BackingSandbox is the cold path, and the only one podman has.
 	BackingSandbox Backing = "sandbox"
-	// BackingClaim is a SandboxClaim bound to a sandbox from a warm pool.
+	// BackingClaim is a SandboxClaim bound to a warm pool member.
 	BackingClaim Backing = "claim"
 )
 
@@ -53,19 +48,17 @@ type warmTemplate struct {
 }
 
 type warmTemplateSpec struct {
-	// The blueprint, inlined as the CRD inlines it.
 	PodTemplate  kubePodTmpl   `json:"podTemplate"`
 	VolumeClaims []kubePVCTmpl `json:"volumeClaimTemplates,omitempty"`
 	Service      *bool         `json:"service,omitempty"`
-	// EnvVarsInjectionPolicy must be Overrides. A warm sandbox starts before
-	// anyone asks for it, so its API key and session arrive on the claim, and
-	// this lets the controller apply them.
+	// EnvVarsInjectionPolicy must be Overrides: the API key and session
+	// arrive on the claim.
 	EnvVarsInjectionPolicy string `json:"envVarsInjectionPolicy,omitempty"`
-	// VolumeClaimTemplatesPolicy is Overrides too: each sandbox's home volume
-	// is its own, stated on the claim.
+	// VolumeClaimTemplatesPolicy is Overrides too: each home volume is stated
+	// on the claim.
 	VolumeClaimTemplatesPolicy string `json:"volumeClaimTemplatesPolicy,omitempty"`
-	// NetworkPolicyManagement is Unmanaged: the deployment's own policy over
-	// the namespace is the one place egress rules live.
+	// NetworkPolicyManagement is Unmanaged: egress rules live only in the
+	// deployment's own policy.
 	NetworkPolicyManagement string `json:"networkPolicyManagement,omitempty"`
 }
 
@@ -79,9 +72,8 @@ type warmPool struct {
 type warmPoolSpec struct {
 	Replicas    *int32      `json:"replicas,omitempty"`
 	TemplateRef kubeNameRef `json:"sandboxTemplateRef"`
-	// UpdateStrategy is OnReplenish. Recreate would empty the pool whenever a
-	// class changes. The cost is that some sandboxes run the old image for a
-	// while, though each row records the class's image at creation.
+	// UpdateStrategy is OnReplenish, since Recreate would empty the pool on
+	// every class change. Some sandboxes run the old image for a while.
 	UpdateStrategy *warmUpdateStrategy `json:"updateStrategy,omitempty"`
 }
 
@@ -101,7 +93,7 @@ type sandboxClaimSpec struct {
 	WarmPoolRef kubeNameRef     `json:"warmPoolRef"`
 	Lifecycle   *claimLifecycle `json:"lifecycle,omitempty"`
 	// AdditionalPodMetadata gives a pooled sandbox the labels saying whose it
-	// is. Without it, all pool members look the same on a node.
+	// is.
 	AdditionalPodMetadata kubeMeta      `json:"additionalPodMetadata"`
 	Env                   []claimEnv    `json:"env,omitempty"`
 	VolumeClaimTemplates  []kubePVCTmpl `json:"volumeClaimTemplates,omitempty"`
@@ -135,12 +127,12 @@ func (k *Kubernetes) claimPath(ref Ref) string {
 	return k.warmCollection("sandboxclaims") + "/" + url.PathEscape(objectName(ref))
 }
 
-// poolKey names one organisation's class among every organisation's warm
-// pools. Two organisations can each have a class of the same name.
+// poolKey includes the organisation, since two can have a class of the same
+// name.
 func poolKey(org, class string) string { return org + "/" + class }
 
-// warmName names a class's template and pool. The tail of the organisation's
-// id keeps two organisations' classes apart while the name stays readable.
+// warmName names a class's template and pool, with the tail of the
+// organisation's id to keep organisations apart.
 func warmName(org, class string) string {
 	return "keera-" + shortID(org) + "-" + class
 }
@@ -157,22 +149,19 @@ func (k *Kubernetes) poolMeta(org, class string) kubeMeta {
 	}
 }
 
-// EnsurePool makes one class's template and warm pool match the catalogue.
-// It is only called for a class with a warm pool.
+// EnsurePool is only called for a class with a warm pool.
 func (k *Kubernetes) EnsurePool(ctx context.Context, class policy.SandboxClass) error {
 	runtime, err := runtimeFor(class, k.opts.Runtimes, k.Name())
 	if err != nil {
 		return err
 	}
 
-	// The same builder as a cold sandbox, with no per-sandbox parts (no env,
-	// owner or expiry), so warm and cold sandboxes stay the same machine.
+	// The same builder as a cold sandbox, without per-sandbox parts.
 	blueprint := k.build(Spec{
 		ID: "pool_" + class.Name, Name: class.Name,
 		Org:   class.OrgID,
 		Class: class,
-		// Only an engineer's sandbox is claimed from a pool (backingFor), so
-		// pool members are engineer sandboxes: ready once sshd answers.
+		// Only engineer sandboxes are claimed from a pool (backingFor).
 		Purpose: policy.PurposeEngineer,
 	}, runtime)
 
@@ -210,14 +199,12 @@ func (k *Kubernetes) EnsurePool(ctx context.Context, class policy.SandboxClass) 
 	return nil
 }
 
-// PrunePools deletes the template and pool of every class not in keep, keyed
-// by poolKey. EnsurePool never visits a class that left the catalogue, whose
-// warm sandboxes would hold their CPU and memory for ever. A class with
-// warm: 0 is left out of keep too: an empty pool looks like a feature in use.
-// Objects are found by label, so a pool named some other way is still found.
+// PrunePools deletes the template and pool of every class not in keep.
+// Otherwise a class that left the catalogue would hold its resources for ever.
+// Objects are found by label.
 func (k *Kubernetes) PrunePools(ctx context.Context, keep map[string]bool) error {
 	selector := "?labelSelector=" + url.QueryEscape(labelManagedBy+"=keera")
-	// Pools first, so no pool is left pointing at a deleted template.
+	// Pools first, so none points at a deleted template.
 	for _, resource := range []string{"sandboxwarmpools", "sandboxtemplates"} {
 		var list struct {
 			Items []struct {
@@ -247,8 +234,7 @@ func (k *Kubernetes) PrunePools(ctx context.Context, keep map[string]bool) error
 	return nil
 }
 
-// apply creates an object, or merge-patches it if it already exists. A merge
-// patch is enough because Keera is the only writer of these objects.
+// apply creates or merge-patches an object. Keera is its only writer.
 func (k *Kubernetes) apply(ctx context.Context, collection, name string, obj any) error {
 	err := k.c.post(ctx, collection, obj, nil)
 	if isConflict(err) {
@@ -258,8 +244,7 @@ func (k *Kubernetes) apply(ctx context.Context, collection, name string, obj any
 }
 
 // createClaimed asks for a sandbox from a warm pool. The controller binds the
-// claim to a pool member and names it in the claim's status. Later calls
-// address the claim where they can and the bound Sandbox where they must.
+// claim to a pool member and names it in the claim's status.
 func (k *Kubernetes) createClaimed(ctx context.Context, spec Spec) (Status, error) {
 	labels := labelsFor(spec)
 	claim := &sandboxClaim{
@@ -296,9 +281,8 @@ func (k *Kubernetes) createClaimed(ctx context.Context, spec Spec) (Status, erro
 	return statusOfClaim(spec.Ref, &created), nil
 }
 
-// claimStatus reads one claim back, and the Sandbox it is bound to. Once
-// bound, the Sandbox decides the state: the claim's conditions do not say
-// whether the pod died, exited or was suspended.
+// claimStatus reads a claim and its bound Sandbox, which decides the state:
+// the claim does not say whether the pod died, exited or was suspended.
 func (k *Kubernetes) claimStatus(ctx context.Context, ref Ref) (Status, error) {
 	c, err := k.claim(ctx, ref)
 	if err != nil {
@@ -332,9 +316,8 @@ func (k *Kubernetes) claim(ctx context.Context, ref Ref) (sandboxClaim, error) {
 	return c, nil
 }
 
-// statusOfClaim collapses a claim's conditions like statusOf does a
-// Sandbox's. An unbound claim says so, because that means the pool is too
-// small, while waiting for a node means the cluster is.
+// statusOfClaim works like statusOf. An unbound claim says so: the pool is too
+// small, not the cluster.
 func statusOfClaim(ref Ref, c *sandboxClaim) Status {
 	st := Status{
 		Ref:     ref,
@@ -364,8 +347,7 @@ func claimEnvList(env map[string]string) []claimEnv {
 	kv := envList(env)
 	out := make([]claimEnv, 0, len(kv))
 	for _, e := range kv {
-		// The container is named, so a sidecar added to the template later
-		// does not also get this sandbox's API key.
+		// Named, so a sidecar added later does not get the API key.
 		out = append(out, claimEnv{Name: e.Name, Value: e.Value, ContainerName: podContainerName})
 	}
 	return out

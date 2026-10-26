@@ -7,17 +7,10 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// The filter log: what each filter did to the traffic it guarded.
-//
-// A filter can go wrong quietly in two ways: it rewrites too much, or it
-// refuses too much. Neither shows in the request log, so every run is recorded
-// here: how often it fires, what it does, how long it adds, what it costs, and
-// which project it affects.
+// The filter log records every filter run. A filter that rewrites or refuses
+// too much does not show in the request log, so its runs are kept here.
 
 // FilterOutcome is what one filter run did.
-//
-// There are four, not two, because a rewrite filter that changes nothing has
-// worked but done nothing, and that is worth telling apart.
 type FilterOutcome string
 
 const (
@@ -26,62 +19,53 @@ const (
 	FilterPass FilterOutcome = "pass"
 	// FilterRewrite is a rewrite filter that changed at least one segment.
 	FilterRewrite FilterOutcome = "rewrite"
-	// FilterRefuse is the filter saying no. When enforcing, the request was
-	// dropped; in shadow, it is a refusal that did not happen.
+	// FilterRefuse is the filter saying no. In shadow mode the request went on.
 	FilterRefuse FilterOutcome = "refuse"
-	// FilterError is a filter that could not run: its model is gone, disabled
-	// or unreachable, its answer could not be read, or the conversation was too
-	// large. When enforcing, the request was refused; in shadow, it went on.
+	// FilterError is a filter that could not run, such as when its model is
+	// unreachable. When enforcing, the request was refused; in shadow, it went on.
 	FilterError FilterOutcome = "error"
 )
 
-// FilterRun is one filter's pass over one request.
-//
-// It records what the filter did and nothing about what it read. Segments and
-// Changed are counts, so rewrite rates can be measured without keeping any
-// prompt text.
+// FilterRun is one filter's pass over one request. It records what the filter
+// did, never what it read: Segments and Changed are counts.
 type FilterRun struct {
 	Filter  string            `json:"filter"`
 	Mode    policy.FilterMode `json:"mode"`
 	Shadow  bool              `json:"shadow,omitempty"`
 	Outcome FilterOutcome     `json:"outcome"`
-	// LatencyMS is the filter's own generation, which the request waited for
-	// before it was forwarded.
+	// LatencyMS is how long the request waited for the filter.
 	LatencyMS  int64 `json:"latency_ms"`
 	CostMicros int64 `json:"cost_micros"`
 	Segments   int   `json:"segments"`
 	Changed    int   `json:"changed"`
 }
 
-// FilterStat is one filter's traffic over a window: its row on the Filters list
-// and the totals on its own screen.
+// FilterStat is one filter's traffic over a window.
 type FilterStat struct {
 	Filter string `json:"filter"`
 	Runs   int64  `json:"runs"`
-	// The outcomes sum to Runs. They are counts, not rates, so the reader can
-	// see how small the sample is.
+	// The outcomes sum to Runs. Counts, not rates, show how small the sample is.
 	Passed  int64 `json:"passed"`
 	Rewrote int64 `json:"rewrote"`
 	Refused int64 `json:"refused"`
 	Errored int64 `json:"errored"`
-	// Shadowed is how many of these runs enforced nothing. A count, not a flag,
-	// because a filter can leave shadow mode inside the window.
+	// Shadowed counts the runs in shadow mode. A count, not a flag, because a
+	// filter can leave shadow mode inside the window.
 	Shadowed int64 `json:"shadowed"`
 	// LatencyMedianMS and LatencyP95MS are what this filter adds to a request.
 	LatencyMedianMS int64 `json:"latency_median_ms"`
 	LatencyP95MS    int64 `json:"latency_p95_ms"`
 	CostMicros      int64 `json:"cost_micros"`
-	// Segments and Changed are summed over the runs, so the rewrite rate can
-	// be read per segment as well as per request.
+	// Segments and Changed are summed over the runs, for a per-segment rewrite
+	// rate.
 	Segments   int64      `json:"segments"`
 	Changed    int64      `json:"changed"`
 	LastRunAt  *time.Time `json:"last_run_at,omitempty"`
 	FirstRunAt *time.Time `json:"first_run_at,omitempty"`
 }
 
-// filterStatColumns is the select list both readings of this table share: the
-// totals for one filter, and the same per filter for the list. Sharing it
-// means the two can never be computed differently.
+// filterStatColumns is the select list for one filter's totals and the list,
+// so the two are always computed the same way.
 var filterStatColumns = `count(*),
 	` + countOf("outcome", FilterPass) + `,
 	` + countOf("outcome", FilterRewrite) + `,
@@ -103,10 +87,8 @@ func filterStatTargets(s *FilterStat) []any {
 }
 
 // FilterStats summarises how each of aliases ran inside a window, keyed by
-// alias. Naming the filters lets it read the index that leads with them.
-//
-// A filter with no traffic is absent rather than zeroed. The caller knows which
-// filters exist, and a zero row would not prove the filter never ran.
+// alias. Naming the filters lets it use the index that leads with them. A
+// filter with no traffic is absent rather than zeroed.
 func (s *Store) FilterStats(ctx context.Context, orgID string, aliases []string,
 	from, to time.Time,
 ) (map[string]FilterStat, error) {
@@ -130,10 +112,8 @@ func scanFilterStat(r row) (FilterStat, error) {
 	return st, err
 }
 
-// FilterPoint is one bucket of a filter's chart.
-//
-// Refusals and errors are separate series: one is the guardrail working and
-// the other is the guardrail broken.
+// FilterPoint is one bucket of a filter's chart. Refusals and errors are
+// apart: one is the filter working, the other is it broken.
 type FilterPoint struct {
 	At         time.Time `json:"at"`
 	Runs       int64     `json:"runs"`
@@ -143,7 +123,7 @@ type FilterPoint struct {
 	CostMicros int64     `json:"cost_micros"`
 }
 
-// FilterProjectRow is one project's experience of a filter. A small refusal rate
+// FilterProjectRow is one project's runs of a filter. A small refusal rate
 // across the organisation can still be most of one project's traffic.
 type FilterProjectRow struct {
 	ProjectID  string `json:"project_id"`
@@ -163,7 +143,7 @@ type FilterReport struct {
 	Series   []FilterPoint      `json:"series"`
 	Projects []FilterProjectRow `json:"projects"`
 	// Requests and OrgCostMicros are the organisation's whole traffic and cost
-	// in the same window, so the filter's numbers can be read as shares.
+	// in the window, so the filter's numbers can be read as shares.
 	Requests      int64 `json:"requests"`
 	OrgCostMicros int64 `json:"org_cost_micros"`
 }
@@ -199,7 +179,7 @@ func (s *Store) FilterReportFor(ctx context.Context, orgID, alias string,
 }
 
 // filterSeries is one filter's chart. Every bucket in the window is generated,
-// quiet ones included, so a filter that stopped running shows as a gap.
+// so a filter that stopped running shows as a gap.
 func (s *Store) filterSeries(ctx context.Context, orgID, alias string,
 	from, to time.Time, bucket string,
 ) ([]FilterPoint, error) {

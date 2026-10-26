@@ -1,8 +1,8 @@
-// Passkeys: setting one up from a link, your own list, and an administrator's
-// view of someone else's.
+// Passkeys: setting one up from a link, your own list, and an admin's view of
+// someone else's.
 //
-// Directory accounts have none: they sign in through their identity
-// provider, so leaving the directory still locks them out.
+// Directory accounts have none, so leaving the directory still locks them
+// out.
 
 import { api } from "../api.js";
 import { createPasskey, deviceName } from "../webauthn.js";
@@ -210,8 +210,8 @@ export function userPasskeys(user) {
         "button",
         {
           class: "btn btn-primary",
-          // A second link replaces the first, so a double click would hand
-          // over a link that no longer works.
+          // A second link replaces the first, so a double click would show a
+          // dead link.
           onClick: async (e) => {
             const button = e.currentTarget;
             button.disabled = true;
@@ -259,7 +259,6 @@ export function showPasskeyLink(email, link) {
   });
 }
 
-// nameInput is prefilled with this device's name.
 function nameInput() {
   return h("input", {
     class: "input",

@@ -9,18 +9,16 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// onKey reports whether a request may call a model on the deployment's own
-// provider key, which an organisation may have to pay for in advance: the
-// model it names, any its route steps decide with or may choose, or a
-// filter's. It is asked before anything is spent, so a step that might pick
-// such a model counts even if it would pick another.
+// onKey reports whether a request may call any model on the deployment's own
+// provider key, which may need prepaid credit. It runs before anything is
+// spent, so a model a route step might pick counts even if it picks another.
 func (s *Server) onKey(c *call) bool {
 	return len(s.keyDeciders(c)) > 0 || len(s.keyAnswerers(c)) > 0 ||
 		s.filtersOnKey(c.res.Key.OrgID, s.callFilters(c))
 }
 
-// keyAnswerers is the models on the deployment's key a request may be
-// answered by: the one it names, or every one its router may reach.
+// keyAnswerers is the models on the deployment's key that may answer a
+// request: the one it names, or every one its router may reach.
 func (s *Server) keyAnswerers(c *call) []policy.Model {
 	if !c.viaRouter() {
 		if c.model.PlatformKey {
@@ -37,8 +35,8 @@ func (s *Server) keyAnswerers(c *call) []policy.Model {
 	return out
 }
 
-// keyDeciders is the models a request's route steps decide with that are on
-// the deployment's key. A step that asks no model has none.
+// keyDeciders is the deciding models of a request's route steps that are on
+// the deployment's key.
 func (s *Server) keyDeciders(c *call) []policy.Model {
 	var out []policy.Model
 	for _, rt := range c.router.Routes() {
@@ -52,8 +50,7 @@ func (s *Server) keyDeciders(c *call) []policy.Model {
 	return out
 }
 
-// callFilters is every filter a request may pass: its router's, then the
-// key's own.
+// callFilters is every filter a request may pass: its router's, then the key's.
 func (s *Server) callFilters(c *call) []string {
 	var out []string
 	for step := range c.router.Steps() {
@@ -68,7 +65,6 @@ func (s *Server) filtersOnKey(org string, filters []string) bool {
 	return len(s.keyFilterModels(org, filters)) > 0
 }
 
-// keyFilterModels is the models on the deployment's key the filters run on.
 func (s *Server) keyFilterModels(org string, filters []string) []policy.Model {
 	var out []policy.Model
 	for _, alias := range filters {
@@ -91,16 +87,15 @@ func (s *Server) keyModel(org, alias string) (policy.Model, bool) {
 	return m, ok && m.PlatformKey
 }
 
-// mostTokens is all a call may use: its whole body as prompt and its whole
-// output ceiling as answer. A request holds this much credit, and a call on the
-// deployment's key whose usage record never came is billed it, so losing the
-// record is never a way to pay less.
+// mostTokens is all a call may use: its whole body as prompt and its output
+// ceiling as answer. A call on the deployment's key with no usage record is
+// billed this, so losing the record never means paying less.
 func mostTokens(bodyBytes, outputCeiling int) policy.Tokens {
 	return policy.Tokens{Input: bodyBytes / bytesPerToken, Output: outputCeiling}
 }
 
-// billUnreported bills a request on the deployment's key that reached the
-// provider and came back without a usage record. See mostTokens.
+// billUnreported bills a request on the deployment's key that came back
+// without a usage record. See mostTokens.
 func (s *Server) billUnreported(c *call, b *body) {
 	if !c.model.PlatformKey || c.ev.InputTokens+c.ev.OutputTokens > 0 {
 		return
@@ -112,10 +107,9 @@ func (s *Server) billUnreported(c *call, b *body) {
 		httpx.LogIDs(c.r.Context()))
 }
 
-// stripPremium removes, and returns, the fields that make a provider charge
-// more per token than its list price: Anthropic's fast mode and data
-// residency, and a dearer service tier. The usage record counts the same
-// tokens either way, so the request would be billed less than it cost.
+// stripPremium removes and returns the fields that make a provider charge
+// more than list price: Anthropic's fast mode and data residency, and dearer
+// service tiers. The usage record would not show the extra cost.
 func stripPremium(b *body) []string {
 	var removed []string
 	for _, field := range []string{"speed", "inference_geo"} {
@@ -133,23 +127,19 @@ func stripPremium(b *body) []string {
 	return removed
 }
 
-// listPriceTiers are the service tiers that cost no more than the list price.
 var listPriceTiers = []string{"auto", "default", "flex", "standard_only"}
 
-// unstatedOutputTokens is what a request that sets no output ceiling is held
-// for. It is not a bound: such a request may write up to what the model
-// allows, so its hold can fall short.
+// unstatedOutputTokens is held for a request with no output ceiling. It is not
+// a bound, so the hold can fall short.
 const unstatedOutputTokens = 64_000
 
-// mostOutputTokens bounds what a ceiling counts for, so a nonsense one cannot
-// overflow the hold.
+// mostOutputTokens caps a ceiling so a nonsense one cannot overflow the hold.
 const mostOutputTokens = 10_000_000
 
-// creditHold is the most a request may take from the credit: its whole body
-// as prompt, its output ceiling as answer, at the dearest model on the key it
-// may reach, plus each route step's decision, asked twice, and a rewrite of the
-// body by each filter on the key. It errs high, and is given back when the
-// request has been charged.
+// creditHold is the most a request may take from the credit: mostTokens at the
+// dearest model it may reach, plus each route step's decision twice, plus a
+// full rewrite by each filter on the key. It errs high and is released once
+// the request is charged.
 func (s *Server) creditHold(c *call, b *body) int64 {
 	t := mostTokens(c.received, c.outputTokens(b))
 	in := t.Input
@@ -159,8 +149,7 @@ func (s *Server) creditHold(c *call, b *body) int64 {
 			most = max(most, line.CreditMicros)
 		}
 	}
-	// A decision is billed apart from the answer. One asked by letter that
-	// comes back unreadable is asked again by name.
+	// An unreadable decision by letter is asked again by name.
 	for _, m := range s.keyDeciders(c) {
 		if line, ok := m.Bill(policy.Tokens{Input: in, Output: routeOutputTokens}); ok {
 			most += 2 * line.CreditMicros
@@ -169,8 +158,8 @@ func (s *Server) creditHold(c *call, b *body) int64 {
 	return most + s.filtersHold(c.res.Key.OrgID, s.callFilters(c), in)
 }
 
-// filtersHold is the most the filters on the deployment's key may take from
-// the credit reading in tokens: each may rewrite all of it.
+// filtersHold is the most the filters on the deployment's key may cost to read
+// in tokens. Each may rewrite all of them.
 func (s *Server) filtersHold(org string, filters []string, in int) int64 {
 	var most int64
 	for _, m := range s.keyFilterModels(org, filters) {
@@ -181,8 +170,7 @@ func (s *Server) filtersHold(org string, filters []string, in int) int64 {
 	return most
 }
 
-// outputTokens is the most a request may write: its output ceiling, or
-// nothing for an embedding.
+// outputTokens is the most a request may write; an embedding writes none.
 func (c *call) outputTokens(b *body) int {
 	if c.surf.kind == policy.KindEmbedding {
 		return 0
@@ -190,7 +178,6 @@ func (c *call) outputTokens(b *body) int {
 	return outputCeiling(b)
 }
 
-// outputCeiling is the most output tokens a request asks for.
 func outputCeiling(b *body) int {
 	asked := 0
 	if b != nil {
@@ -206,21 +193,21 @@ func outputCeiling(b *body) int {
 	return asked
 }
 
-// checkCredit says why a check may not call these models, or is empty when
-// it may: a model on the deployment's key needs credit, as a request does.
+// checkCredit says why a check may not call these models, or "" if it may. A
+// model on the deployment's key needs credit, as for a request.
 func (s *Server) checkCredit(org string, models ...policy.Model) string {
 	if !slices.ContainsFunc(models, func(m policy.Model) bool { return m.PlatformKey }) {
 		return ""
 	}
-	// Holding nothing only asks whether the organisation has credit.
+	// Holding 0 only asks whether the organisation has credit.
 	if _, err := s.budgets.HoldCredit(org, 0); err != nil {
 		return err.Error()
 	}
 	return ""
 }
 
-// billCheck bills what a check spent on the deployment's key. A check is not
-// a request, so it writes no usage row, but its calls are paid for like any.
+// billCheck bills what a check spent on the deployment's key. It writes no
+// usage row, since a check is not a request.
 func (s *Server) billCheck(org string, bills []policy.BillLine) {
 	if len(bills) == 0 {
 		return
@@ -228,9 +215,8 @@ func (s *Server) billCheck(org string, bills []policy.BillLine) {
 	s.record(store.Event{TS: time.Now(), OrgID: org, Bills: bills, BillsOnly: true})
 }
 
-// record takes what a request used of the deployment's keys from the local
-// view of its organisation's credit, and hands the event to the usage
-// writer, which takes it from the credit for good.
+// record charges the local view of the organisation's credit and hands the
+// event to the usage writer, which charges it for good.
 func (s *Server) record(ev store.Event) {
 	var credit int64
 	for _, b := range ev.Bills {

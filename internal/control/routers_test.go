@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/policy"
@@ -195,5 +196,67 @@ func TestDeleteModelARouteStepUsesIsRefused(t *testing.T) {
 		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "model_in_use") {
 			t.Errorf("%s: status = %d, want 409 model_in_use: %s", alias, w.Code, w.Body)
 		}
+	}
+}
+
+// The report says how much of each budget and daily or monthly rate limit is
+// used, from the counts the gateway checks them against.
+func TestRouterReportShowsWhatEachLimitUsed(t *testing.T) {
+	st, ctx := routerStore(t)
+	srv := routerServer(ctx, t, st)
+	body := map[string]any{"start": map[string]any{
+		"id": "hosted-budget", "kind": "budget", "budget_micros": 50_000_000, "period": "month",
+		"next": map[string]any{
+			"id": "daily", "kind": "rate_limit", "requests": 100, "tokens": 5000, "period": "day",
+			"next": map[string]any{
+				"id": "burst", "kind": "rate_limit", "requests": 10,
+				"next": map[string]any{"id": "small", "kind": "model", "ref": "keera-small"},
+			},
+		},
+	}}
+	if code, out := putTo(t, srv, "/v1/routers/capped", body); code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", code, out)
+	}
+	rtr, err := st.Router(ctx, "org_1", "capped")
+	if err != nil {
+		t.Fatalf("Router: %v", err)
+	}
+	now := time.Now()
+	budgets := srv.reg.Budgets()
+	for step := range rtr.Steps() {
+		scopes := rtr.Scopes(step)
+		budgets.Charge(scopes, 12_500_000, now)
+		budgets.Tally(scopes, policy.MeterTokens, 800, now)
+		budgets.StartRequest(scopes, now)
+	}
+
+	req := httptest.NewRequest(http.MethodGet,
+		httpx.ControlPrefix+"/v1/routers/capped/report?org_id=org_1", nil)
+	req.Header.Set("Authorization", "Bearer "+testOperatorKey)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body)
+	}
+	var got struct {
+		Limits []RouterLimit `json:"limits"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Limits) != 2 {
+		t.Fatalf("limits = %+v, want the budget and the daily one", got.Limits)
+	}
+	b := got.Limits[0]
+	if b.Step != "hosted-budget" || b.Budget == nil || b.Budget.SpendMicros != 12_500_000 ||
+		b.Budget.BudgetMicros != 50_000_000 || b.Budget.Period != policy.PeriodMonth ||
+		!b.Budget.ResetsAt.Equal(policy.PeriodMonth.Next(now)) {
+		t.Errorf("budget = %+v %+v", b, b.Budget)
+	}
+	r := got.Limits[1]
+	if r.Step != "daily" || r.Rate == nil || r.Rate.Period != policy.PeriodDay ||
+		r.Rate.Requests != 100 || r.Rate.RequestsUsed != 1 ||
+		r.Rate.Tokens != 5000 || r.Rate.TokensUsed != 800 {
+		t.Errorf("rate = %+v %+v", r, r.Rate)
 	}
 }

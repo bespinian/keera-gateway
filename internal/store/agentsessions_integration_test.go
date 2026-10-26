@@ -15,8 +15,7 @@ func TestSessionsGroupRequestsIntoTheTasksTheyWereMadeFor(t *testing.T) {
 	conversation := DerivedSessionKey("aaaaaaaaaaaaaaaa")
 
 	// One task: four served calls a minute apart, and a fifth the budget
-	// refused. A session carries how it ended because a task that stopped on a
-	// guardrail did not finish.
+	// refused.
 	events := make([]Event, 0, 6)
 	for i := range 4 {
 		events = append(events, Event{
@@ -32,16 +31,14 @@ func TestSessionsGroupRequestsIntoTheTasksTheyWereMadeFor(t *testing.T) {
 		OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID, Alias: "keera-code",
 		SessionKey: conversation, Status: 402, Error: "your project has spent its month budget",
 	})
-	// The same conversation two hours later, with the same opening prompt and
-	// so the same key. The idle gap exists for this: it is a new task.
+	// The same conversation two hours later, with the same key: a new task.
 	events = append(events, Event{
 		TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 		Alias: "keera-speed", SessionKey: conversation, CostMicros: 250,
 		InputTokens: 40, OutputTokens: 8, Status: 200, Latency: time.Second,
 		TTFT: 200 * time.Millisecond,
 	})
-	// A request that belongs to no conversation - an embedding - is still a
-	// request and must not become a session of its own.
+	// A request in no conversation, such as an embedding, is no session.
 	events = append(events, Event{
 		TS: now.Add(-90 * time.Minute), OrgID: f.orgID, ProjectID: f.projectID,
 		KeyID: f.keyID, Alias: "keera-embed", Status: 200, CostMicros: 10,
@@ -60,7 +57,7 @@ func TestSessionsGroupRequestsIntoTheTasksTheyWereMadeFor(t *testing.T) {
 			"nothing for the request that had no conversation", len(sessions))
 	}
 
-	// Newest first, like every other log here.
+	// Newest first.
 	recent, task := sessions[0], sessions[1]
 	if !recent.StartedAt.After(task.StartedAt) {
 		t.Fatalf("sessions are not newest-first: %v then %v", recent.StartedAt, task.StartedAt)
@@ -89,8 +86,7 @@ func TestSessionsGroupRequestsIntoTheTasksTheyWereMadeFor(t *testing.T) {
 	if task.Stated {
 		t.Error("a key derived from the opening prompt must not read as one the client stated")
 	}
-	// Four minutes of calls, and the duration runs to the end of the last one
-	// rather than to the moment it started.
+	// The duration runs to the end of the last call, not its start.
 	if got := task.Duration(); got != 4*time.Minute {
 		t.Errorf("duration = %s, want 4m", got)
 	}
@@ -99,8 +95,7 @@ func TestSessionsGroupRequestsIntoTheTasksTheyWereMadeFor(t *testing.T) {
 			"for no token and must not be in the median", task.TTFTMedianMS)
 	}
 
-	// A session is named by the request that opened it, which is how it is
-	// addressable at all.
+	// A session is named by the request that opened it.
 	rows, err := st.Requests(ctx, RequestQuery{OrgID: f.orgID})
 	if err != nil {
 		t.Fatalf("Requests: %v", err)
@@ -139,16 +134,14 @@ func TestAStatedSessionKeyIsMarkedAsOne(t *testing.T) {
 	}
 }
 
-// Applied to the rows, a model filter would cut a task in half wherever the
-// agent switched models.
+// A model filter must not cut a task where the agent switched models.
 func TestNarrowingToAModelKeepsTheSessionWhole(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 	now := time.Now().UTC().Truncate(time.Second)
 	conversation := DerivedSessionKey("cccccccccccccccc")
 
-	// One task that ran on the local model, reached for the hosted one in the
-	// middle of itself, and went back.
+	// One task that switched to the hosted model in the middle and back.
 	for i, alias := range []string{"keera-code", "keera-frontier", "keera-code"} {
 		if err := st.WriteEvents(ctx, []Event{{
 			TS:    now.Add(-time.Hour + time.Duration(i)*time.Minute),
@@ -203,12 +196,12 @@ func TestASessionIsFoundFromAnyRequestInIt(t *testing.T) {
 			t.Fatalf("WriteEvents: %v", err)
 		}
 	}
-	// A later task on the same conversation, which must not be dragged in.
+	// A later task on the same conversation, which must not be included.
 	if err := st.WriteEvents(ctx, []Event{{
 		TS: now, OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID, Alias: "keera-code",
 		SessionKey: conversation, Status: 200, CostMicros: 100,
 	}, {
-		// And a request with no conversation at all.
+		// And a request with no conversation.
 		TS: now, OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-embed", Status: 200,
 	}}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
@@ -239,16 +232,14 @@ func TestASessionIsFoundFromAnyRequestInIt(t *testing.T) {
 		t.Fatalf("session = %d calls with %d rows, want 3 and 3 - the later task on "+
 			"the same conversation is a different session", session.Requests, len(requests))
 	}
-	// Oldest first, unlike every other log here: a task is read from its
-	// beginning.
+	// Oldest first, unlike every other log.
 	if !requests[0].CreatedAt.Before(requests[2].CreatedAt) {
 		t.Errorf("the requests are not oldest-first: %v then %v", requests[0].CreatedAt, requests[2].CreatedAt)
 	}
 	if session.ID != requests[0].ID {
 		t.Errorf("session id = %d, want the opening request's %d", session.ID, requests[0].ID)
 	}
-	// The summary and the rows are two queries and must not be able to
-	// disagree about the same task.
+	// The summary and the rows are two queries that must agree.
 	var summed int64
 	for _, r := range requests {
 		summed += r.CostMicros
@@ -267,18 +258,17 @@ func TestASessionIsFoundFromAnyRequestInIt(t *testing.T) {
 			opening.ID, session.ID)
 	}
 
-	// A request that was part of no conversation is part of no session, and
-	// that is a 404 rather than an empty session.
+	// A request in no conversation is in no session: ErrNotFound.
 	if _, _, err := st.AgentSessionAt(ctx, f.orgID, loose, DefaultSessionGap); !errors.Is(err, ErrNotFound) {
 		t.Errorf("a request with no conversation gave %v, want ErrNotFound", err)
 	}
-	// And neither is another tenant's request, however guessable its id.
+	// Nor is another tenant's request.
 	if _, _, err := st.AgentSessionAt(ctx, "org_other", middle, DefaultSessionGap); !errors.Is(err, ErrNotFound) {
 		t.Errorf("another tenant's session gave %v, want ErrNotFound", err)
 	}
 }
 
-// Cut at the window's edge, a task's cost would be wrong, not just partial.
+// A task straddling the window's start is reported whole.
 func TestASessionStraddlingTheWindowIsReportedWhole(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -286,8 +276,7 @@ func TestASessionStraddlingTheWindowIsReportedWhole(t *testing.T) {
 	conversation := DerivedSessionKey("eeeeeeeeeeeeeeee")
 	from := now.Add(-time.Hour)
 
-	// Four calls, two on each side of where the window begins, five minutes
-	// apart - so they are one task by any gap worth using.
+	// Four calls five minutes apart, two on each side of the window's start.
 	for i := range 4 {
 		if err := st.WriteEvents(ctx, []Event{{
 			TS:    from.Add(time.Duration(i-2) * 5 * time.Minute),
@@ -297,7 +286,7 @@ func TestASessionStraddlingTheWindowIsReportedWhole(t *testing.T) {
 			t.Fatalf("WriteEvents: %v", err)
 		}
 	}
-	// A task that finished well before the window, which must not appear.
+	// A task that finished well before the window.
 	if err := st.WriteEvents(ctx, []Event{{
 		TS: from.Add(-3 * time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
 		SessionKey: conversation, Status: 200, CostMicros: 999,
@@ -324,15 +313,13 @@ func TestASessionStraddlingTheWindowIsReportedWhole(t *testing.T) {
 	}
 }
 
-// A log ordered by time buries one runaway task among the hundreds that were
-// fine.
+// Sessions rank by cost, tokens, requests and duration.
 func TestSessionsRankByWhatMakesOneWorthOpening(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 	now := time.Now().UTC().Truncate(time.Second)
 
-	// Three tasks: an expensive short one, a long cheap one that would not
-	// stop, and an ordinary one.
+	// Three tasks: an expensive short one, a long cheap one, and an ordinary one.
 	write := func(key string, at time.Time, calls int, micros int64, spacing time.Duration) {
 		for i := range calls {
 			if err := st.WriteEvents(ctx, []Event{{
@@ -373,8 +360,7 @@ func TestSessionsRankByWhatMakesOneWorthOpening(t *testing.T) {
 		}
 	}
 
-	// The totals describe the window, not the page being read, and the middle
-	// task rather than the mean of one with a runaway in it.
+	// The totals cover the window, not the page, and use medians.
 	page := window
 	page.Limit = 1
 	totals, err := st.AgentSessionSummary(ctx, page)
@@ -400,9 +386,8 @@ func TestSessionsRankByWhatMakesOneWorthOpening(t *testing.T) {
 	}
 }
 
-// A session is read through the same lenses as a request: one that holds a
-// failure is among the failed, and only one where everything was served is
-// served. The counts beside each lens and the filter choices cover the window.
+// A session holding a failure counts as failed, and only one where everything
+// was served counts as served. The counts and filter choices cover the window.
 func TestSessionsNarrowByOutcomeAndOfferWhatOccurred(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -449,8 +434,7 @@ func TestSessionsNarrowByOutcomeAndOfferWhatOccurred(t *testing.T) {
 		}
 	}
 
-	// The totals follow the lens, and the counts beside the lenses do not: a
-	// lens that only counted itself could not say where else to look.
+	// The totals follow the chosen outcome; the outcome counts do not.
 	failed := window
 	failed.Outcome = OutcomeFailed
 	totals, err := st.AgentSessionSummary(ctx, failed)
@@ -466,8 +450,7 @@ func TestSessionsNarrowByOutcomeAndOfferWhatOccurred(t *testing.T) {
 		t.Errorf("outcome counts = %+v, want %+v", totals.Outcomes, want)
 	}
 
-	// The choices ignore what is already narrowed to, so picking one model
-	// still offers the other.
+	// Picking one model still offers the other.
 	picked := window
 	picked.Alias = "keera-code"
 	facets, err := st.AgentSessionFilters(ctx, picked)
@@ -481,8 +464,7 @@ func TestSessionsNarrowByOutcomeAndOfferWhatOccurred(t *testing.T) {
 	if len(facets.Users) != 2 || len(facets.Keys) != 1 || facets.Keys[0].Count != 3 {
 		t.Errorf("facets = %+v, want both people and the one key with 3 sessions", facets)
 	}
-	// A session's status is how it ended, so the one that failed midway and
-	// then recovered counts under 200.
+	// A session's status is its last, so one that recovered counts under 200.
 	wantStatuses := []FacetCount{{"200", 2}, {"402", 1}}
 	if !slices.Equal(facets.Statuses, wantStatuses) {
 		t.Errorf("statuses = %+v, want %+v", facets.Statuses, wantStatuses)
@@ -506,7 +488,7 @@ func TestSessionsNarrowByOutcomeAndOfferWhatOccurred(t *testing.T) {
 		}
 	}
 
-	// A member's choices are their own, whatever else is asked.
+	// A member's choices are their own.
 	mine := window
 	mine.Holder = "user_2"
 	facets, err = st.AgentSessionFilters(ctx, mine)
@@ -572,7 +554,7 @@ func TestSessionsStayInsideOneTenantAndNarrowToOneEntity(t *testing.T) {
 		}
 	}
 
-	// An operator reads across tenants, and gets both.
+	// An operator reads across tenants.
 	all, err := st.AgentSessions(ctx, AgentSessionQuery{Gap: DefaultSessionGap})
 	if err != nil {
 		t.Fatalf("AgentSessions(every tenant): %v", err)
@@ -597,7 +579,7 @@ func TestTheIdleGapIsAppliedAtReadTime(t *testing.T) {
 	conversation := DerivedSessionKey("ffffffffffffffff")
 
 	// Two calls ten minutes apart: one task under a wide gap, two under a
-	// narrow one, from exactly the same rows.
+	// narrow one.
 	for i := range 2 {
 		if err := st.WriteEvents(ctx, []Event{{
 			TS:    now.Add(-time.Hour + time.Duration(i)*10*time.Minute),

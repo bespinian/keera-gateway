@@ -9,8 +9,7 @@ import (
 	"unicode/utf8"
 )
 
-// The unhappy requests carry what the dashboard's count cannot say: which
-// model, whose key, and what the client was told.
+// Unhappy requests carry the model, the key and what the client was told.
 func TestUnhappyRequestsCarryWhatTheClientWasTold(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -30,7 +29,7 @@ func TestUnhappyRequestsCarryWhatTheClientWasTold(t *testing.T) {
 			TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-fast", Status: 429, Error: "your project is over its rate limit",
 		},
-		// Answered, and then cut short: the 200 the client was sent stands.
+		// Answered, then cut short: the 200 the client got stands.
 		{
 			TS: now.Add(-30 * time.Minute), OrgID: f.orgID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 200, Error: "the stream ended before the model was done",
@@ -80,14 +79,13 @@ func TestUnhappyRequestsCarryWhatTheClientWasTold(t *testing.T) {
 	if len(all) != 3 {
 		t.Errorf("%d rows, want the three that did not deliver and not the one that did", len(all))
 	}
-	// Newest first: an investigation starts at what just happened.
+	// Newest first.
 	if !all[0].CreatedAt.After(all[len(all)-1].CreatedAt) {
 		t.Errorf("rows are not newest first: %v then %v", all[0].CreatedAt, all[len(all)-1].CreatedAt)
 	}
 }
 
-// Narrowing is how a reader gets from "something is failing" to one model or
-// one key, and a window with none of it must not report another tenant's.
+// Requests narrow to one model or key, and never show another tenant's.
 func TestUnhappyRequestsNarrowAndStayInsideOneTenant(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -151,8 +149,7 @@ func TestUnhappyRequestsNarrowAndStayInsideOneTenant(t *testing.T) {
 		t.Errorf("rows = %+v, want only the 502", rows)
 	}
 
-	// Paging backwards on the id cursor, which is stable while the log is still
-	// being written to.
+	// Paging backwards on the id cursor.
 	page, err := st.Requests(ctx, RequestQuery{OrgID: f.orgID, Outcome: OutcomeUnhappy, Limit: 1})
 	if err != nil {
 		t.Fatalf("Requests: %v", err)
@@ -172,8 +169,7 @@ func TestUnhappyRequestsNarrowAndStayInsideOneTenant(t *testing.T) {
 	}
 }
 
-// The column holds somebody else's free text, so the bound is enforced where it
-// is written rather than trusted to whoever wrote the message.
+// The column holds an upstream's free text, so it is bounded when written.
 func TestAnEnormousBackendMessageIsBounded(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -203,8 +199,7 @@ func TestAnEnormousBackendMessageIsBounded(t *testing.T) {
 	}
 }
 
-// A narrowed report is the same report over fewer rows: this project's
-// requests, tokens, spend and latency, and none of anybody else's.
+// A narrowed report covers only this project's rows.
 func TestOverviewNarrowsToOneEntity(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -233,8 +228,7 @@ func TestOverviewNarrowsToOneEntity(t *testing.T) {
 			TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 502, Error: "no backend answered",
 		},
-		// Another project, another key, the same window: none of it belongs in the
-		// first project's report.
+		// Another project and key in the same window.
 		{
 			TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: "project_2", KeyID: "key_2",
 			Alias: "keera-code", InputTokens: 900, OutputTokens: 90,
@@ -253,7 +247,7 @@ func TestOverviewNarrowsToOneEntity(t *testing.T) {
 		t.Errorf("unscoped = %d requests / %d micros, want 4 / 9600",
 			whole.Requests, whole.CostMicros)
 	}
-	// The dashboard does not pay for a breakdown it does not draw.
+	// The dashboard does not draw a per-key breakdown, so it is not read.
 	if whole.TopKeys != nil {
 		t.Errorf("TopKeys = %+v on an unscoped overview, want none", whole.TopKeys)
 	}
@@ -276,8 +270,7 @@ func TestOverviewNarrowsToOneEntity(t *testing.T) {
 		t.Errorf("TTFTP95MS = %d, want the project's own samples, not the slow one next door",
 			project.TTFTP95MS)
 	}
-	// A scoped screen breaks its traffic down by key, because "which of them is
-	// doing this" is the next question.
+	// A scoped screen breaks its traffic down by key.
 	if len(project.TopKeys) != 1 || project.TopKeys[0].Group != f.keyID {
 		t.Errorf("TopKeys = %+v, want only this project's key", project.TopKeys)
 	}
@@ -361,8 +354,7 @@ func TestRequestsCarryWhereTheirTimeWent(t *testing.T) {
 	}
 }
 
-// "My agent's calls never arrived" is answered by the served rows, so the
-// request log keeps them alongside the failures.
+// The request log holds served rows as well as failures.
 func TestRequestsCarryWhatWasServedAndWhatWasNot(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -399,7 +391,7 @@ func TestRequestsCarryWhatWasServedAndWhatWasNot(t *testing.T) {
 	if len(all) != 4 {
 		t.Fatalf("%d rows, want every request including the served one", len(all))
 	}
-	// Newest first, the same way every log here reads.
+	// Newest first.
 	if !all[0].CreatedAt.After(all[len(all)-1].CreatedAt) {
 		t.Errorf("rows are not newest-first: %v then %v", all[0].CreatedAt, all[len(all)-1].CreatedAt)
 	}
@@ -424,8 +416,8 @@ func TestRequestsCarryWhatWasServedAndWhatWasNot(t *testing.T) {
 		t.Error("the row lost that it was streamed")
 	}
 
-	// An interruption is a 200 that did not finish, which is neither a failure
-	// nor a refusal and has to stay tellable apart from both.
+	// An interruption is a 200 that did not finish: neither a failure nor a
+	// refusal.
 	cut, err := st.Requests(ctx, RequestQuery{OrgID: f.orgID, Outcome: OutcomeInterrupted})
 	if err != nil {
 		t.Fatalf("Requests(interrupted): %v", err)
@@ -458,8 +450,7 @@ func TestRequestsCarryWhatWasServedAndWhatWasNot(t *testing.T) {
 	}
 }
 
-// The log read forwards rather than backwards: what a panel watching it asks
-// for is everything past the newest row it has already been shown.
+// A live reader asks for everything past the newest row it has.
 func TestRequestsAfterACursorIsWhatALiveReaderSees(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -494,8 +485,7 @@ func TestRequestsAfterACursorIsWhatALiveReaderSees(t *testing.T) {
 	if seen == 0 {
 		t.Fatal("LatestEventID = 0 with two rows written")
 	}
-	// Caught up: a reader holding the newest row is sent nothing, rather than
-	// being sent that row again every time the log is written to.
+	// Caught up: a reader holding the newest row is sent nothing.
 	none, err := st.Requests(ctx, RequestQuery{OrgID: f.orgID, After: seen})
 	if err != nil {
 		t.Fatalf("Requests(after): %v", err)
@@ -520,8 +510,7 @@ func TestRequestsAfterACursorIsWhatALiveReaderSees(t *testing.T) {
 		t.Fatalf("past the cursor = %+v, want only the newest request", fresh)
 	}
 
-	// The cursor narrows with everything else rather than instead of it: a
-	// reader watching the failures is not sent the served rows in between.
+	// The cursor combines with the other filters.
 	served, err := st.Requests(ctx, RequestQuery{
 		OrgID: f.orgID, After: seen, Outcome: OutcomeOK,
 	})
@@ -531,8 +520,7 @@ func TestRequestsAfterACursorIsWhatALiveReaderSees(t *testing.T) {
 	if len(served) != 0 {
 		t.Errorf("a reader watching served requests was sent %+v", served)
 	}
-	// Both ends of the cursor meet, so paging backwards and watching forwards
-	// cannot disagree about a row.
+	// Both ends of the cursor meet, so paging back and watching forward agree.
 	older, err := st.Requests(ctx, RequestQuery{
 		OrgID: f.orgID, After: 0, Before: fresh[0].ID,
 	})
@@ -544,8 +532,7 @@ func TestRequestsAfterACursorIsWhatALiveReaderSees(t *testing.T) {
 	}
 }
 
-// Writing the log announces itself, which is what lets a panel show a request
-// as it is recorded rather than when its reader next reloads.
+// Writing the log sends a notification, so a panel shows requests at once.
 func TestWriteEventsAnnouncesThatTheLogGrew(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -554,8 +541,7 @@ func TestWriteEventsAnnouncesThatTheLogGrew(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
-	// Closed rather than released, so the LISTEN does not follow the
-	// connection into later tests.
+	// Closed rather than released, so the LISTEN does not leak into later tests.
 	conn := pooled.Hijack()
 	defer conn.Close(context.Background())
 	if _, err := conn.Exec(ctx, "LISTEN "+EventsChannel); err != nil {
@@ -584,8 +570,7 @@ func TestWriteEventsAnnouncesThatTheLogGrew(t *testing.T) {
 	}
 }
 
-// The counts cover the whole window: "400 requests, 2 refused" and "400
-// requests, 300 refused" can have the same first page.
+// The counts cover the whole window, not one page.
 func TestOutcomesCountTheWindowNotThePage(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -623,8 +608,7 @@ func TestOutcomesCountTheWindowNotThePage(t *testing.T) {
 	q := RequestQuery{
 		OrgID: f.orgID, ProjectID: f.projectID,
 		From: now.Add(-6 * time.Hour), To: now.Add(time.Hour),
-		// The outcome the reader is looking at must not narrow the counts: a
-		// filter that only offers the filter already applied is no filter.
+		// The chosen outcome does not narrow the counts.
 		Outcome: OutcomeFailed, Limit: 1,
 	}
 	c, err := st.Outcomes(ctx, q)
@@ -638,8 +622,7 @@ func TestOutcomesCountTheWindowNotThePage(t *testing.T) {
 		t.Errorf("counts = %+v, want 3 served, 1 failed, 1 refused, 1 interrupted", c)
 	}
 
-	// A status is not an outcome, so it does narrow them: the total beside
-	// "All" must match the rows on the screen.
+	// A status does narrow them, so the total matches the rows shown.
 	byStatus := q
 	byStatus.Status = 402
 	only, err := st.Outcomes(ctx, byStatus)
@@ -686,8 +669,7 @@ func TestOutcomesCountTheWindowNotThePage(t *testing.T) {
 	}
 }
 
-// "Did anything fail?" is asked about all of 5XX at once, by someone who does
-// not know which status their backends answer with.
+// A status class, such as 5xx, matches every status in it.
 func TestRequestsNarrowToAClassOfStatuses(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -735,8 +717,7 @@ func TestRequestsNarrowToAClassOfStatuses(t *testing.T) {
 		t.Errorf("5XX = %+v, want only the 503", server)
 	}
 
-	// The counts obey the class, as they obey an exact status, so the total
-	// beside "All" matches the rows below it.
+	// The counts obey the class, as they obey an exact status.
 	c, err := st.Outcomes(ctx, RequestQuery{OrgID: f.orgID, StatusClass: 4})
 	if err != nil {
 		t.Fatalf("Outcomes(4xx): %v", err)
@@ -746,8 +727,8 @@ func TestRequestsNarrowToAClassOfStatuses(t *testing.T) {
 	}
 }
 
-// The filter choices are read from the log, not the catalogue: of two hundred
-// keys, only the four that made a request this week are worth offering.
+// The filter choices are read from the log, so only values that occurred are
+// offered.
 func TestRequestFiltersOfferOnlyWhatOccurred(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -769,8 +750,7 @@ func TestRequestFiltersOfferOnlyWhatOccurred(t *testing.T) {
 			TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-fast", Status: 500, Error: "backend fell over",
 		},
-		// Outside the window, so outside every facet: a model nobody has called
-		// this week must not be offered as a way to narrow this week.
+		// Outside the window, so outside every facet.
 		{
 			TS: now.AddDate(0, 0, -10), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-retired", Status: 200,
@@ -782,8 +762,7 @@ func TestRequestFiltersOfferOnlyWhatOccurred(t *testing.T) {
 	q := RequestQuery{
 		OrgID: f.orgID,
 		From:  now.Add(-6 * time.Hour), To: now.Add(time.Hour),
-		// What has already been narrowed to must not narrow the facets, or the
-		// screen ends up offering only the filter it is already showing.
+		// A chosen filter does not narrow the facets.
 		Alias: "keera-code",
 	}
 	all, err := st.RequestFilters(ctx, q)
@@ -804,7 +783,7 @@ func TestRequestFiltersOfferOnlyWhatOccurred(t *testing.T) {
 	if len(all.Projects) != 1 || all.Projects[0].Value != f.projectID {
 		t.Errorf("projects = %+v, want the one project", all.Projects)
 	}
-	// A row with no person on it is nobody's, not a blank entry in the list.
+	// A row with no person is not a blank entry.
 	if len(all.Users) != 1 || all.Users[0].Value != "user_1" || all.Users[0].Count != 2 {
 		t.Errorf("users = %+v, want user_1 with its 2 rows and no empty value", all.Users)
 	}
@@ -812,8 +791,7 @@ func TestRequestFiltersOfferOnlyWhatOccurred(t *testing.T) {
 		t.Errorf("statuses = %+v, want the 200 and the 500", all.Statuses)
 	}
 
-	// The outcome being read does narrow them: which models are failing is the
-	// question, and a model that never failed is not an answer to it.
+	// The outcome does narrow them.
 	failed, err := st.RequestFilters(ctx, RequestQuery{
 		OrgID: f.orgID, From: q.From, To: q.To, Outcome: OutcomeFailed,
 	})
@@ -832,8 +810,7 @@ func TestRequestFiltersOfferOnlyWhatOccurred(t *testing.T) {
 	}
 }
 
-// The log ranks the window, not the page: the most expensive request of the
-// week is first even when it is not among the newest.
+// The log ranks the whole window, not one page.
 func TestRequestsRankTheWholeWindow(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -879,8 +856,7 @@ func TestRequestsRankTheWholeWindow(t *testing.T) {
 	}
 }
 
-// The cached share of a prompt is charged at its own rate. Without it, a row's
-// cost cannot be worked out from its counts, or checked against an invoice.
+// The cached share of a prompt is kept, as it is charged at its own rate.
 func TestRequestsCarryTheCachedShareOfThePrompt(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -892,8 +868,7 @@ func TestRequestsCarryTheCachedShareOfThePrompt(t *testing.T) {
 			Alias: "keera-code", Status: 200, InputTokens: 1000, CachedInputTokens: 900,
 			OutputTokens: 500, CostMicros: 2190,
 		},
-		// A model served inside your own infrastructure caches nothing, which
-		// has to come back as none cached rather than as absent.
+		// A self-hosted model caches nothing, which reads as zero cached.
 		{
 			TS: now, OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 200, InputTokens: 1000, OutputTokens: 500,
@@ -921,8 +896,8 @@ func TestRequestsCarryTheCachedShareOfThePrompt(t *testing.T) {
 	}
 }
 
-// Someone reporting a request quotes one id: the one the gateway answered
-// with, or the client's own. Either finds the row, and the row carries both.
+// Either the gateway's request id or the client's own finds the row, which
+// carries both.
 func TestARequestIsFoundByEitherID(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -971,8 +946,7 @@ func TestARequestIsFoundByEitherID(t *testing.T) {
 	}
 }
 
-// Rows written before v0.10.0 hold their steps as jsonb objects. They are
-// read until retention removes them.
+// Rows written before v0.10.0 hold their steps as jsonb objects.
 func TestRequestsWrittenBeforeCompactSpansKeepTheirSteps(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)

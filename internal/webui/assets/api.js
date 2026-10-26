@@ -22,9 +22,8 @@ export function setCsrf(token) {
   csrf = token || "";
 }
 
-// request sends one call and decodes the answer. raw returns the response
-// itself, for a body that streams or is a file. A refusal is an ApiError
-// either way.
+// request sends one call and decodes the answer. raw returns the response,
+// for a body that streams or is a file. A refusal is an ApiError either way.
 async function request(method, path, body, { raw, signal } = {}) {
   const headers = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -82,18 +81,16 @@ function query(params) {
 const path = (strings, ...values) =>
   strings.reduce((s, part, i) => s + encodeURIComponent(values[i - 1]) + part);
 
-// inOrg is one of an organisation's things, such as a model, by name.
+// inOrg names one of an organisation's things, such as a model.
 const inOrg = (orgID, collection, name, rest = "") =>
   path`/v1/${collection}/${name}` + rest + query({ org_id: orgID });
 
 export const api = {
   authConfig: () => get("/auth/config"),
   me: () => get("/v1/me"),
-  // Moves this session to another organisation the person is in.
   switchOrg: (orgID) => request("POST", "/v1/me/org", { org_id: orgID }),
   localSignIn: (key) => request("POST", "/auth/local", { key }),
-  // A username and password for an LDAP directory. flow is the sign-in
-  // `keera login` started, or empty.
+  // LDAP sign-in. flow is the sign-in `keera login` started, or empty.
   passwordSignIn: (provider, flow, username, password, next) =>
     request("POST", "/auth/password", {
       provider,
@@ -106,12 +103,12 @@ export const api = {
   // Signing in with a provider is a page the browser goes to, not a call.
   loginURL: (params) => url("/auth/login" + query(params)),
 
-  // The sign-up screen, after a sign-in that matched no organisation.
+  // After a sign-in that matched no organisation.
   signupInfo: () => get("/auth/signup"),
   completeSignup: (body) => request("POST", "/auth/signup", body),
 
-  // Passkeys. The /auth routes work before anybody has signed in, and take
-  // a JSON body even when it is empty.
+  // Passkeys. The /auth routes work before sign-in, and take a JSON body
+  // even when empty.
   passkeySignInOptions: (flow, next) =>
     request("POST", "/auth/passkey/options", {
       flow: flow || "",
@@ -152,7 +149,6 @@ export const api = {
   projects: (orgID) => get("/v1/projects" + query({ org_id: orgID })),
   createProject: (orgID, name, description) =>
     request("POST", "/v1/projects", { org_id: orgID, name, description }),
-  // change holds name, description or both.
   updateProject: (id, change) =>
     request("PATCH", path`/v1/projects/${id}`, change),
   deleteProject: (id) => request("DELETE", path`/v1/projects/${id}`),
@@ -185,8 +181,7 @@ export const api = {
   putGuardrails: (scope, id, limits) =>
     request("PUT", path`/v1/guardrails/${scope}/${id}`, limits),
 
-  // The organisation's filters. `stats` adds what each did to the traffic in
-  // the window, which only the Filters screen shows.
+  // `stats` adds what each filter did to the traffic in the window.
   filters: (orgID, { stats, since } = {}) =>
     get(
       "/v1/filters" + query({ org_id: orgID, stats: stats ? "1" : "", since }),
@@ -197,12 +192,11 @@ export const api = {
     request("DELETE", inOrg(orgID, "filters", alias)),
   checkFilter: (orgID, alias) =>
     request("POST", inOrg(orgID, "filters", alias, "/check")),
-  // What one filter has been doing to the organisation's own traffic.
   filterReport: (orgID, alias, since) =>
     get(path`/v1/filters/${alias}/report` + query({ org_id: orgID, since })),
 
-  // The organisation's routers. `stats` adds the traffic each took in the
-  // window, and how its route steps decided.
+  // `stats` adds each router's traffic in the window, and how its route
+  // steps decided.
   routers: (orgID, { stats, since } = {}) =>
     get(
       "/v1/routers" + query({ org_id: orgID, stats: stats ? "1" : "", since }),
@@ -211,16 +205,13 @@ export const api = {
     request("PUT", inOrg(orgID, "routers", alias), router),
   deleteRouter: (orgID, alias) =>
     request("DELETE", inOrg(orgID, "routers", alias)),
-  // Puts sample prompts through each route step of the router.
+  // Puts sample prompts through each route step.
   checkRouter: (orgID, alias) =>
     request("POST", inOrg(orgID, "routers", alias, "/check")),
-  // How much went through one router, which models answered, and how its
-  // route steps decided.
   routerReport: (orgID, alias, since) =>
     get(path`/v1/routers/${alias}/report` + query({ org_id: orgID, since })),
 
-  // Sandbox classes, with what the driver can deliver and what the reader's
-  // guardrail allows, so a screen offers only what is possible.
+  // With what the driver can deliver and what the reader's guardrail allows.
   sandboxClasses: (orgID) =>
     get("/v1/sandbox-classes" + query({ org_id: orgID })),
   deleteSandboxClass: (orgID, name) =>
@@ -236,15 +227,13 @@ export const api = {
   suspendSandbox: (id) => request("POST", path`/v1/sandboxes/${id}/suspend`),
   resumeSandbox: (id) => request("POST", path`/v1/sandboxes/${id}/resume`),
 
-  // The client catalogue. It comes from the control plane so the panel and
-  // `keera connect` hand out the same configurations.
+  // From the control plane, so the panel and `keera connect` agree.
   connect: () => get("/v1/connect"),
   renderConnect: (models) => request("POST", "/v1/connect/render", { models }),
   // Which clients called with the reader's own keys in the window.
   clients: (since) => get("/v1/clients" + query({ since })),
 
-  // The organisation's models. `stats` adds how fast each has been answering
-  // in the window, which only the Models screen shows.
+  // `stats` adds how fast each model answered in the window.
   models: (orgID, { stats, since } = {}) =>
     get(
       "/v1/models" + query({ org_id: orgID, stats: stats ? "1" : "", since }),
@@ -257,7 +246,6 @@ export const api = {
   checkModel: (orgID, alias) =>
     request("POST", inOrg(orgID, "models", alias, "/check")),
 
-  // The MCP servers the gateway stands in front of, and their tool calls.
   // toolCalls takes { org_id, since, server, tool, summary, limit }.
   mcpServers: (orgID) => get("/v1/mcp-servers" + query({ org_id: orgID })),
   putMCPServer: (orgID, alias, server) =>
@@ -273,21 +261,19 @@ export const api = {
     }),
 
   // The dashboard, or with a scope of { project_id }, { key_id } or { alias }
-  // one entity's screen: the same report over fewer rows, so the two agree.
+  // one entity's screen: the same report over fewer rows, so they agree.
   overview: (orgID, since, scope) =>
     get("/v1/overview" + query({ org_id: orgID, since, ...scope })),
 
-  // The same window as a map: clients, the models they reach, and the
-  // traffic between each pair.
+  // Clients, the models they reach, and the traffic between each pair.
   trafficMap: (orgID, since) =>
     get("/v1/map" + query({ org_id: orgID, since })),
   usage: (orgID, groupBy, since) =>
     get("/v1/usage" + query({ org_id: orgID, group_by: groupBy, since })),
   audit: (params) => get("/v1/audit" + query(params)),
-  // One month's bill for the deployment's own provider keys.
   billing: (orgID, month) =>
     get("/v1/billing" + query({ org_id: orgID, month })),
-  // The credit an organisation pays in advance, its card and its payments.
+  // Prepaid credit, the card and the payments.
   creditAccount: (orgID) =>
     get("/v1/billing/account" + query({ org_id: orgID })),
   updateCredit: (orgID, change) =>
@@ -300,7 +286,7 @@ export const api = {
       amount_micros: amountMicros,
       save_card: saveCard,
     }),
-  // Saves the receipt of a paid payment: PostFinance's invoice, as a PDF.
+  // PostFinance's invoice, as a PDF.
   receipt: async (id) => {
     const res = await request(
       "GET",
@@ -322,32 +308,29 @@ export const api = {
       amount_micros: amountMicros,
       note,
     }),
-  // The event log, narrowed to a project, key, model, person or status.
   requests: (params) => get("/v1/requests" + query(params)),
 
-  // The same log grouped into sessions, one row per task. It takes the
-  // narrowing of requests(), and `sort`.
+  // Takes the narrowing of requests(), and `sort`.
   sessions: (params) => get("/v1/sessions" + query(params)),
 
-  // One session, named by the id of any request in it.
+  // Named by the id of any request in it.
   session: (orgID, id) =>
     get(path`/v1/sessions/${id}` + query({ org_id: orgID })),
 
   // The log as it is written, from `after` on. The caller must close the
   // EventSource: browsers allow few connections per origin. It carries no
-  // CSRF token, since an EventSource sets no headers, and as a GET it changes
-  // nothing.
+  // CSRF token, as an EventSource sets no headers; a GET changes nothing.
   requestStream: (params) =>
     new EventSource(url("/v1/requests/stream" + query(params))),
 
-  // download is a GET the browser saves instead of the panel parsing it. It
-  // uses the session cookie, so no key ends up in a URL.
+  // A GET the browser saves. It uses the session cookie, so no key ends up
+  // in a URL.
   download: (route, params) =>
     save(url(route) + query({ ...params, format: "csv" })),
 };
 
 // save makes the browser save href. name is for an href the server does not
-// name, such as an object URL, which is released once saving has started.
+// name, such as an object URL, which is released once saving starts.
 function save(href, name) {
   const a = document.createElement("a");
   a.href = href;
@@ -359,10 +342,9 @@ function save(href, name) {
   if (name) setTimeout(() => URL.revokeObjectURL(href), 10_000);
 }
 
-/** chatTargets is what a client may name as its model: the organisation's
- *  enabled chat models, then its routers, as `keera connect` offers them.
- *  Subscription models are left out, because an ordinary key cannot reach
- *  them. Failing to read the routers still leaves the models. */
+/** chatTargets is what a client may name as its model: enabled chat models,
+ *  then routers, as `keera connect` offers them. Subscription models are left
+ *  out, as an ordinary key cannot reach them. */
 export async function chatTargets(orgID) {
   const [models, routers] = await Promise.all([
     api.models(orgID).then((r) => r.data || []),
@@ -374,7 +356,7 @@ export async function chatTargets(orgID) {
   return models
     .filter((m) => m.enabled !== false && m.kind === "chat" && !m.subscription)
     .concat(
-      // A router picks its model, so it has no context window of its own.
+      // A router has no context window of its own.
       routers.map((p) => ({
         alias: p.alias,
         kind: "chat",

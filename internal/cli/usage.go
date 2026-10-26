@@ -14,8 +14,7 @@ import (
 func usageCmd(ctx context.Context, args []string) error {
 	r := newCmdRun("usage", args)
 	fs := r.fs
-	// The same defaults as the panel's Usage screen, so both give the same
-	// totals when asked nothing.
+	// The same defaults as the panel's Usage screen.
 	groupBy := fs.String("by", "project", "group by: model, client, project, key, user, day or org")
 	alias := fs.String("model", "", modelUsage)
 	w := registerWho(fs)
@@ -61,9 +60,8 @@ type usageResponse struct {
 	ClientNames  map[string]string   `json:"client_names"`
 }
 
-// label is what a group is called: a project's name, a key's name, a person's
-// email, rather than the id the rows are grouped by. A row with no group is
-// real traffic, so it is named in the panel's words.
+// label names a group as people do (a project's name, a person's email)
+// rather than by id. A row with no group uses the panel's words.
 func (res usageResponse) label(groupBy, group string) string {
 	if group == "" {
 		switch groupBy {
@@ -83,11 +81,9 @@ func (res usageResponse) label(groupBy, group string) string {
 	return labelled(names, group)
 }
 
-// failuresCmd lists the calls that did not deliver: the failed, refused and
-// interrupted requests of the panel's request log, in a terminal.
-//
-// The backend's message is printed beside the model and the key, because only
-// its wording says whose problem a failure is.
+// failuresCmd lists the failed, refused and interrupted requests. The
+// backend's message is printed because only its wording says whose problem a
+// failure is.
 func failuresCmd(ctx context.Context, args []string) error {
 	r := newCmdRun("failures", args)
 	fs := r.fs
@@ -102,8 +98,7 @@ func failuresCmd(ctx context.Context, args []string) error {
 		return err
 	}
 	c := r.c
-	// 'all' is every request that did not deliver, which the request log
-	// calls unhappy.
+	// The request log calls 'all' unhappy.
 	switch *kind {
 	case "all":
 		*kind = string(store.OutcomeUnhappy)
@@ -118,8 +113,7 @@ func failuresCmd(ctx context.Context, args []string) error {
 		return err
 	}
 	if *status != "" {
-		// The server ignores a filter it cannot read, which would show
-		// everything as though it matched.
+		// The server ignores a filter it cannot read and would show everything.
 		if !validStatus(*status) {
 			return fmt.Errorf("--status takes a status such as 502, or a class such as 5xx, not %q", *status)
 		}
@@ -137,7 +131,6 @@ type failuresResponse struct {
 	KeyNames map[string]string     `json:"key_names"`
 }
 
-// matched is how many requests of the outcome asked for are in the window.
 func (r failuresResponse) matched(o store.Outcome) int64 {
 	switch o {
 	case store.OutcomeFailed:
@@ -159,7 +152,7 @@ func printFailures(w *table, res failuresResponse, o store.Outcome, since time.D
 		printNone(w, what+" in the last "+shortDuration(since), "")
 		return
 	}
-	// The request id opens the whole task: keera session show <id>.
+	// The request id is what `keera session show` takes.
 	w.header("REQUEST\tWHEN\tMODEL\tSTATUS\tKEY\tMESSAGE")
 	for _, f := range res.Data {
 		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n",
@@ -179,8 +172,7 @@ func printFailures(w *table, res failuresResponse, o store.Outcome, since time.D
 	}
 }
 
-// validStatus reports whether the request log can filter by v: one status, or
-// a class such as 5xx.
+// validStatus accepts one status or a class such as 5xx.
 func validStatus(v string) bool {
 	if n, err := strconv.Atoi(v); err == nil {
 		return n >= 100 && n <= 599
@@ -189,8 +181,8 @@ func validStatus(v string) bool {
 	return ok && len(c) == 1 && c[0] >= '1' && c[0] <= '5'
 }
 
-// httpStatus is a response status, painted by whose problem it is: a 5xx is
-// the deployment's, a 4xx the caller's.
+// httpStatus paints by whose problem it is: a 5xx is the deployment's, a 4xx
+// the caller's.
 func httpStatus(code int) string {
 	s := strconv.Itoa(code)
 	switch {

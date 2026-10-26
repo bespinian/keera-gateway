@@ -7,8 +7,7 @@ import (
 )
 
 func TestIsolationValid(t *testing.T) {
-	// The empty string is not a tier: nobody should get the cluster's default
-	// isolation by accident.
+	// Nobody should get the cluster's default isolation by accident.
 	if Isolation("").Valid() {
 		t.Error("the empty string should not be a valid isolation tier")
 	}
@@ -82,8 +81,7 @@ func TestResolvedSandboxAdmits(t *testing.T) {
 		if err == nil {
 			t.Fatal("a class outside the allow-list should be refused")
 		}
-		// The refused developer may not know a limit exists, so the message
-		// names what they may use.
+		// The message names what they may use.
 		if !strings.Contains(err.Error(), "small, medium") {
 			t.Errorf("the refusal should say what is allowed instead: %v", err)
 		}
@@ -113,8 +111,7 @@ func TestResolvedSandboxAdmits(t *testing.T) {
 }
 
 func TestResolveSandboxIsRestrictOnly(t *testing.T) {
-	// A project administrator must not grant the project more than its
-	// organisation allowed.
+	// A project must not get more than its organisation allowed.
 	org := &Limits{
 		MaxSandboxes:         new(4),
 		MaxSandboxTTLSeconds: new(8 * 3600),
@@ -122,7 +119,6 @@ func TestResolveSandboxIsRestrictOnly(t *testing.T) {
 		MaxSandboxCPU:        new(8000),
 	}
 	project := &Limits{
-		// Every one of these asks for more than the organisation allowed.
 		MaxSandboxes:         new(99),
 		MaxSandboxTTLSeconds: new(720 * 3600),
 		SandboxClasses:       []string{"medium", "big", "enormous"},
@@ -162,7 +158,7 @@ func TestResolveSandboxNarrowsFromNothing(t *testing.T) {
 }
 
 func TestResolvedSandboxAllowsClass(t *testing.T) {
-	// nil is every class, as a nil AllowedModels is every model.
+	// nil is every class.
 	if !(ResolvedSandbox{}).allowsClass("anything") {
 		t.Error("a nil allow-list should permit every class")
 	}
@@ -173,9 +169,7 @@ func TestResolvedSandboxAllowsClass(t *testing.T) {
 }
 
 func TestValidSandboxNames(t *testing.T) {
-	// A sandbox name becomes a DNS label in the cluster and half of an ssh
-	// config Host pattern on somebody's laptop, so it is held to a model
-	// alias's shape.
+	// A sandbox name becomes a DNS label and part of an ssh Host pattern.
 	for _, ok := range []string{"a", "fix-login", "sandbox-2", "x1"} {
 		if !ValidSandboxName(ok) {
 			t.Errorf("%q should be a usable sandbox name", ok)
@@ -199,16 +193,14 @@ func TestValidSandboxNames(t *testing.T) {
 }
 
 func TestSandboxStateGroupings(t *testing.T) {
-	// Live is what a quota counts; Running is what a bill is computed from.
-	// Suspended is live and not running, which is why there are two.
+	// Live is what a quota counts; Running is what a bill counts.
 	if !SandboxSuspended.Live() {
 		t.Error("a suspended sandbox still holds its volume, so it is live")
 	}
 	if SandboxSuspended.Running() {
 		t.Error("a suspended sandbox holds no compute")
 	}
-	// Expired is the same: it keeps its volume until it is resumed or
-	// terminated.
+	// Expired keeps its volume too.
 	if !SandboxExpired.Live() || SandboxExpired.Running() {
 		t.Error("an expired sandbox holds its volume and no compute")
 	}
@@ -225,8 +217,8 @@ func TestSandboxStateGroupings(t *testing.T) {
 	}
 }
 
-// One forge credential reaches every tenant's repositories, so a scope with no
-// list may check out nothing, and a level can only narrow what it inherits.
+// One forge credential reaches every tenant's repositories, so no list means
+// nothing, and a level can only narrow.
 func TestAllowedReposNarrowAndDefaultToNothing(t *testing.T) {
 	if err := (ResolvedSandbox{}).AdmitsRepo("acme/app"); err == nil {
 		t.Error("a scope with no list checked out a repository")

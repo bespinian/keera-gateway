@@ -68,8 +68,8 @@ func TestAModelOnTheOrganisationsOwnKeyIsNotBilled(t *testing.T) {
 	}
 }
 
-// What a call on the deployment's key takes from the credit is taken from the
-// local view at once, not only when the usage writer gets to it.
+// A call on the deployment's key is charged to the local view of the credit at
+// once, not only when the usage writer runs.
 func TestACallOnTheDeploymentsKeyTakesTheCredit(t *testing.T) {
 	h := filterHarness(t, redactor, nil)
 	onPlatformKey(h, "keera-code")
@@ -77,7 +77,6 @@ func TestACallOnTheDeploymentsKeyTakesTheCredit(t *testing.T) {
 	h.post(t, "/v1/chat/completions",
 		`{"model":"keera-code","messages":[{"role":"user","content":"hunter2"}]}`)
 
-	// The list price, 30 micros.
 	if b := h.sink.last(t).Bills[0]; b.CreditMicros != 30 {
 		t.Errorf("credit = %d, want 30", b.CreditMicros)
 	}
@@ -149,8 +148,8 @@ func waitFor(t *testing.T, what string, done func() bool) {
 	}
 }
 
-// Holding the most it may cost stops requests started together from all
-// spending the same credit.
+// Holding the most it may cost stops parallel requests spending the same
+// credit.
 func TestARequestOnTheDeploymentsKeyHoldsCreditWhileItRuns(t *testing.T) {
 	h := filterHarness(t, redactor, nil)
 	onPlatformKey(h, "keera-code")
@@ -159,8 +158,7 @@ func TestARequestOnTheDeploymentsKeyHoldsCreditWhileItRuns(t *testing.T) {
 		`"messages":[{"role":"user","content":"hunter2"}]}`
 	h.post(t, "/v1/chat/completions", body)
 
-	// The whole body as prompt and the ceiling as answer. The filter's model
-	// is the organisation's own, so it adds nothing.
+	// The filter's model is on the organisation's own key, so it adds nothing.
 	want, _ := h.src.models["keera-code"].Bill(policy.Tokens{
 		Input: len(body) / bytesPerToken, Output: 1000,
 	})
@@ -176,8 +174,7 @@ func TestARequestOnTheDeploymentsKeyHoldsCreditWhileItRuns(t *testing.T) {
 	}
 }
 
-// A router's decision is billed on top of the answer, so it is held on top of
-// it too.
+// A router's decision is billed on top of the answer, so it is held too.
 func TestARoutedRequestHoldsItsDecisionOnTopOfItsAnswer(t *testing.T) {
 	h := routeHarness(t, picks("keera-large"), autoRoute(), nil)
 	onPlatformKey(h, "keera-picker")
@@ -223,9 +220,9 @@ func TestOutputCeiling(t *testing.T) {
 	}
 }
 
-// A client that hangs up does not end a request on the deployment's key: the
-// answer is read to its usage record, which says what the provider charged.
-// An estimate would miss what was never streamed, such as reasoning.
+// After a hang-up, an answer on the deployment's key is still read to its
+// usage record. An estimate would miss what was never streamed, such as
+// reasoning.
 func TestAnAnswerOnTheDeploymentsKeyIsReadToTheEndAfterAHangUp(t *testing.T) {
 	for _, stream := range []bool{true, false} {
 		name := map[bool]string{true: "stream", false: "buffered"}[stream]
@@ -279,8 +276,8 @@ func TestAnAnswerOnTheDeploymentsKeyIsReadToTheEndAfterAHangUp(t *testing.T) {
 	}
 }
 
-// The provider charges for its own tools apart from tokens, which is not
-// billed, so they never go out on the deployment's key.
+// The provider charges for hosted tools apart from tokens, so they never go
+// out on the deployment's key.
 func TestHostedToolsAreTakenOutOnTheDeploymentsKey(t *testing.T) {
 	h, seen := providerHarness(t, "anthropic", "claude-opus-5", jsonBackend(anthropicAnswer), nil)
 	onPlatformKey(h, "keera-frontier")
@@ -346,7 +343,7 @@ func TestHostedToolsAreKeptOnTheOrganisationsKey(t *testing.T) {
 }
 
 // Every organisation shares the deployment's OpenAI account, so nothing is
-// stored there, and nothing is generated where the gateway cannot bill it.
+// stored there, and nothing is generated that the gateway cannot bill.
 func TestAResponsesRequestOnTheDeploymentsKeyStoresNothing(t *testing.T) {
 	h, seen := providerHarness(t, "openai", "gpt-5.5",
 		jsonBackend(`{"model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}`), nil)
@@ -388,8 +385,8 @@ func TestAChatCompletionOnTheDeploymentsKeyIsNotStored(t *testing.T) {
 	}
 }
 
-// A check calls the model like a request does, so on the deployment's key it
-// needs credit and is billed, without a usage row.
+// A check on the deployment's key needs credit and is billed, without a usage
+// row.
 func TestAModelCheckOnTheDeploymentsKeyIsBilled(t *testing.T) {
 	h := filterHarness(t, redactor, nil)
 	onPlatformKey(h, "keera-code")
@@ -430,8 +427,8 @@ func TestAFilterCheckOnTheDeploymentsKeyIsBilled(t *testing.T) {
 	}
 }
 
-// Postgres refuses a NUL byte in text, and a usage row it refuses takes the
-// whole batch with it, other organisations' bills included.
+// Postgres refuses a NUL byte in text, and one refused row fails the whole
+// batch, other organisations' bills included.
 func TestAModelNameWithAControlCharacterIsRefusedAndNotStored(t *testing.T) {
 	h := newHarness(t, jsonBackend(`{}`), nil, nil)
 	for _, name := range []string{`\u0000`, `keera-code\u0000`, `a\nb`} {
@@ -461,8 +458,8 @@ func TestAStreamFieldThatIsNotABooleanIsRefused(t *testing.T) {
 	}
 }
 
-// The event that carries the usage record can quote what the client sent. A
-// client must not be able to make it look like another event.
+// The usage event can quote what the client sent, which must not make it look
+// like another event.
 func TestAStreamQuotingAnEventTypeIsBilledFromItsUsageRecord(t *testing.T) {
 	stream := func(events ...string) http.HandlerFunc {
 		return func(w http.ResponseWriter, _ *http.Request) {
@@ -502,8 +499,8 @@ func TestAStreamQuotingAnEventTypeIsBilledFromItsUsageRecord(t *testing.T) {
 	})
 }
 
-// Fast mode, data residency and a dearer service tier cost more than the list
-// price per token, so they never go out on the deployment's key.
+// Fast mode, data residency and dearer service tiers cost more than list
+// price, so they never go out on the deployment's key.
 func TestPremiumFieldsAreTakenOutOnTheDeploymentsKey(t *testing.T) {
 	h, seen := providerHarness(t, "anthropic", "claude-opus-5", jsonBackend(anthropicAnswer), nil)
 	onPlatformKey(h, "keera-frontier")
@@ -554,8 +551,7 @@ func TestOneHourCacheWritesAreBilledAtTheirOwnRate(t *testing.T) {
 	}
 }
 
-// An answer without a usage record would otherwise cost nothing, though the
-// provider charged for it. It is billed the most it may have used.
+// An answer without a usage record is billed the most it may have used.
 func TestAnAnswerOnTheDeploymentsKeyWithoutUsageIsBilledItsCeiling(t *testing.T) {
 	body := `{"model":"keera-code","max_tokens":1000,"messages":[{"role":"user","content":"hi"}]}`
 	for name, opts := range map[string]Options{

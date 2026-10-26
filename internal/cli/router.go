@@ -19,12 +19,9 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// routerRun is one 'keera router' invocation.
-//
-// A router is a tree, which flags cannot spell, so its steps come from a JSON
-// file. The flags of a route step are the exception: the simplest router is
-// one route step, and changing one step should not need the whole file. See
-// docs/routers.md.
+// routerRun reads a router's steps from a JSON file, since flags cannot spell
+// a tree. A route step also has flags, so the simplest router needs no file.
+// See docs/routers.md.
 type routerRun struct {
 	*aliasRun
 
@@ -33,8 +30,7 @@ type routerRun struct {
 	displayName string
 	description string
 
-	// The route step's own flags. step names the step they change, or which
-	// one to check.
+	// The route step's flags. step names the step they change or check.
 	step         string
 	mode         string
 	model        string
@@ -67,9 +63,8 @@ func routerCmd(ctx context.Context, args []string) error {
 		"comma-separated models the route step may choose between; on a fallback step, in the "+
 			"order to try them, on a latency or least-busy step, the order to break a tie in, "+
 			"and on a size step, each with its ceiling - 'keera-speed:4k,big'")
-	// Two flags rather than one string: an absent string cannot be told from an
-	// empty one, and on 'set' that is the difference between keeping the
-	// fallback and refusing what the step cannot place.
+	// Two flags: on 'set', one string could not tell "keep the fallback" from
+	// "no fallback".
 	fs.StringVar(&r.fallback, "fallback", "",
 		"where a request goes when the decision cannot be made, or the header names no "+
 			"destination; must be one of the destinations")
@@ -150,7 +145,6 @@ func (r *routerRun) delete(ctx context.Context) error {
 	})
 }
 
-// routeFlags reports whether a flag of a route step was given.
 func (r *routerRun) routeFlags() bool {
 	return slices.ContainsFunc(routeStepFlags, func(name string) bool { return given(r.fs, name) })
 }
@@ -211,9 +205,8 @@ func (r *routerRun) put(ctx context.Context) error {
 	return nil
 }
 
-// routeStep finds the route step the flags change: the one --step names, or
-// the router's only one. A router with no steps yet gets one, which makes the
-// simplest router.
+// routeStep finds the step --step names, or the only one. A router with no
+// steps yet gets one.
 func (r *routerRun) routeStep(p *policy.Router) (*policy.Step, error) {
 	if p.Start == nil {
 		id := r.step
@@ -276,9 +269,8 @@ func (r *routerRun) applyRoute(s *policy.Step) error {
 		}
 		s.Destinations, s.Ceilings = aliases, ceilings
 	}
-	// A step that changes mode keeps nothing the new mode does not use: the
-	// control plane refuses, say, a fallback step that carries a deciding
-	// model.
+	// A step that changes mode keeps nothing the new mode does not use, or
+	// the control plane refuses it.
 	if !s.Mode.Decides() {
 		s.Model, s.Prompt = "", ""
 	}
@@ -314,7 +306,7 @@ func (r *routerRun) applyRoute(s *policy.Step) error {
 }
 
 // applyHeader sets what a header step reads. Without --destinations, its
-// destinations are where its values send, and the fallback.
+// destinations are its values' targets and the fallback.
 func (r *routerRun) applyHeader(s *policy.Step) error {
 	if s.Mode != policy.RouteModeHeader {
 		for _, flag := range []string{"header", "values"} {
@@ -353,16 +345,13 @@ func (r *routerRun) applyHeader(s *policy.Step) error {
 	return nil
 }
 
-// needsDecider refuses a flag that only an instruction step reads.
 func needsDecider(flag string, mode policy.RouteMode) error {
 	return fmt.Errorf("--%s is for a route step that decides with a model; a %s step "+
 		"decides nothing, and what orders its destinations is %s", flag, mode, cliOrdersBy(mode))
 }
 
-// readRouterFile reads the steps from a file, or stdin for "-". The file
-// holds either the first step, or a whole router with 'start', as 'show
-// --json' prints it. Names in a whole router are kept unless a flag says
-// otherwise.
+// readRouterFile reads stdin for "-". The file holds either the first step or
+// a whole router with 'start', as 'show --json' prints it.
 func readRouterFile(path string, p *policy.Router) error {
 	text, err := textOrFile("@" + path)
 	if err != nil {
@@ -388,19 +377,17 @@ func readRouterFile(path string, p *policy.Router) error {
 	return nil
 }
 
-// decodeStrict refuses a field it does not know, as the control plane does.
-// Dropped quietly, a misspelt "exceded" would save a limit that refuses
-// instead of branching.
+// decodeStrict refuses unknown fields, as the control plane does. Otherwise a
+// misspelt "exceded" would save a limit that refuses instead of branching.
 func decodeStrict(raw []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	return dec.Decode(v)
 }
 
-// nameSteps gives every step without an id one made from its kind, such as
-// "filter-2", so a file need not number its steps. A limit counts under its
-// id, so a limit that should keep its counts across edits is given one in the
-// file.
+// nameSteps names steps without an id after their kind, such as "filter-2". A
+// limit counts under its id, so one that should keep its counts across edits
+// needs an id in the file.
 func nameSteps(p policy.Router) {
 	taken := map[string]bool{}
 	for s := range p.Steps() {
@@ -443,8 +430,7 @@ func printRouter(w *table, p policy.Router) {
 	for _, line := range stepTree(p.Start) {
 		_, _ = fmt.Fprintf(w, "  %s\n", line)
 	}
-	// A route step's instruction is what it decides by, so it is printed
-	// whole, which a line of the tree cannot do.
+	// A route step's instruction is printed whole, which a tree line cannot do.
 	for s := range p.Steps() {
 		if s.Kind == policy.StepRoute && s.Mode.Decides() && s.Prompt != "" {
 			printBlock(w, "instruction ("+s.ID+")", strings.Split(s.Prompt, "\n"))
@@ -452,9 +438,8 @@ func printRouter(w *table, p policy.Router) {
 	}
 }
 
-// stepTree draws the steps from s on, one line each. A step that hands the
-// request on to one next step is followed by it at the same depth; where the
-// request can go two ways, each way is a branch drawn under it.
+// stepTree draws one line per step. A single next step stays at the same
+// depth; where a request can go two ways, each way is a branch under it.
 func stepTree(s *policy.Step) []string {
 	var lines []string
 	for s != nil {
@@ -473,15 +458,13 @@ func stepTree(s *policy.Step) []string {
 	return lines
 }
 
-// branch is one way a request can go from a step, and the steps along it.
 type branch struct {
 	label string
 	lines []string
 }
 
-// routeBranches is one branch per destination: its steps, or a note that it
-// is sent straight there. The step's own order comes first; a branch for a
-// destination it no longer has is still shown, so it can be taken out.
+// routeBranches is one branch per destination, in the step's order. A branch
+// for a destination it no longer has is still shown, so it can be removed.
 func routeBranches(s *policy.Step) []branch {
 	dests := slices.Clone(s.Destinations)
 	for _, d := range slices.Sorted(maps.Keys(s.Branches)) {
@@ -507,8 +490,6 @@ func routeBranches(s *policy.Step) []branch {
 	return out
 }
 
-// branchLines draws branches with box-drawing lines, so each step can be
-// followed back to the branch it is on.
 func branchLines(branches []branch) []string {
 	var lines []string
 	for i, b := range branches {
@@ -524,9 +505,8 @@ func branchLines(branches []branch) []string {
 	return lines
 }
 
-// stepLine says what one step does. A limit and a route step name their id
-// too: a limit's counts are kept under it, and --step names a route step by
-// it.
+// stepLine shows the id of a limit, whose counts are kept under it, and of a
+// route step, which --step names by it.
 func stepLine(s *policy.Step) string {
 	switch s.Kind {
 	case policy.StepFilter:
@@ -545,7 +525,6 @@ func stepLine(s *policy.Step) string {
 	return string(s.Kind) + " " + s.Ref
 }
 
-// routeLine says how a route step chooses, and what it does when it cannot.
 func routeLine(s *policy.Step) string {
 	switch {
 	case s.Mode.Decides():
@@ -563,8 +542,7 @@ func routeLine(s *policy.Step) string {
 	}
 }
 
-// promptPreview is the start of a system prompt, on one line: enough to tell
-// two apart in a tree. `show --json` prints the whole text.
+// promptPreview is enough to tell two prompts apart in a tree.
 func promptPreview(p string) string {
 	p = strings.Join(strings.Fields(p), " ")
 	if r := []rune(p); len(r) > 60 {
@@ -573,8 +551,6 @@ func promptPreview(p string) string {
 	return p
 }
 
-// limitTail is a limit's id, and what happens over it when it has no exceeded
-// branch to draw.
 func limitTail(s *policy.Step) string {
 	tail := " " + style.muted("("+s.ID+")")
 	if s.Exceeded == nil {
@@ -583,8 +559,6 @@ func limitTail(s *policy.Step) string {
 	return tail
 }
 
-// cliOrdersBy says, as a clause, where a route step that reads nothing gets
-// its order from.
 func cliOrdersBy(mode policy.RouteMode) string {
 	switch mode {
 	case policy.RouteModeLatency:
@@ -600,8 +574,6 @@ func cliOrdersBy(mode policy.RouteMode) string {
 	}
 }
 
-// fallbackLabel says what happens to a request an instruction step cannot
-// place.
 func fallbackLabel(fallback string) string {
 	if fallback == "" {
 		return "refuses the request"
@@ -609,7 +581,6 @@ func fallbackLabel(fallback string) string {
 	return "falls back to " + fallback
 }
 
-// printRouterCheck prints what checking each route step found.
 func printRouterCheck(w *table, c control.RouterCheck) {
 	show(w, "router", c.Router)
 	for _, p := range c.Routes {
@@ -640,8 +611,7 @@ func printRouteProbe(w *table, p gateway.RouteProbe) {
 	for _, warning := range p.Warnings {
 		show(w, "warning", warning)
 	}
-	// Each sample beside where it went: whether a destination is right depends
-	// on what the sample asked for.
+	// Each sample beside where it went, since what is right depends on it.
 	for i, d := range p.Decisions {
 		printDecision(w, i, d)
 	}
@@ -655,22 +625,21 @@ func printDecision(w *table, i int, d gateway.SampleDecision) {
 	case d.Error != "":
 		_, _ = fmt.Fprintf(w, "  could not decide\t%s\n", d.Error)
 	case d.Confidence > 0:
-		// Beside the choice it qualifies: a step right but barely sure is
-		// what this check is for.
+		// A step right but barely sure is what this check is for.
 		_, _ = fmt.Fprintf(w, "  chose\t%s (%.0f%% sure)\n", d.Chosen, d.Confidence*100)
 	default:
 		_, _ = fmt.Fprintf(w, "  chose\t%s\n", d.Chosen)
 	}
 }
 
-// printRouteChain lists the destinations in the order they would be tried.
-// The first that answers is serving every request right now.
+// printRouteChain lists destinations in the order they would be tried. The
+// first that answers serves every request right now.
 func printRouteChain(w *table, p gateway.RouteProbe) {
 	if len(p.Chain) == 0 {
 		return
 	}
-	// A size step's bands are configuration, not a reading, so they get a
-	// column of their own.
+	// A size step's bands are configuration, not a reading, so they get
+	// their own column.
 	if p.Mode.Sizes() {
 		_, _ = fmt.Fprintln(w)
 		w.header("PLACED ON\tTAKES\tANSWERS\tTOOK\tNOTE")
@@ -692,15 +661,13 @@ func printRouteChain(w *table, p gateway.RouteProbe) {
 	_, _ = fmt.Fprintln(w)
 	w.header("TRIES\tANSWERS\tTOOK\tNOTE")
 	for i, hop := range p.Chain {
-		// The reading goes with the note: only some modes have one, and an
-		// empty column would look like a measurement of nothing.
+		// The reading goes with the note: only some modes have one.
 		_, _ = fmt.Fprintf(w, "%d. %s\t%s\t%s\t%s\n",
 			i+1, hop.Alias, yesNo(hop.Answers), hopTook(hop),
 			appendReading(hop.Note, hop.Reading))
 	}
 }
 
-// hopTook is how long one destination took to answer, or a dash.
 func hopTook(hop gateway.RouteHop) string {
 	if hop.MS > 0 {
 		return fmt.Sprintf("%dms", hop.MS)
@@ -708,7 +675,6 @@ func hopTook(hop gateway.RouteHop) string {
 	return "-"
 }
 
-// appendReading joins a hop's note to what the step measured of it.
 func appendReading(note, reading string) string {
 	switch {
 	case reading == "":
@@ -720,17 +686,21 @@ func appendReading(note, reading string) string {
 	}
 }
 
-// routerReportResponse is what /v1/routers/{alias}/report answers with.
 type routerReportResponse struct {
-	Router *policy.Router     `json:"router"`
-	Report store.RouterReport `json:"report"`
+	Router *policy.Router        `json:"router"`
+	Report store.RouterReport    `json:"report"`
+	Limits []control.RouterLimit `json:"limits"`
 }
 
-// printRouterReport is how much went through a router, which models answered
-// it, and how its route steps decided. The split between destinations is what
-// says whether routing works: a step that sends everything to one place
-// looks healthy in every other number.
 func printRouterReport(w *table, name string, since time.Duration, res routerReportResponse) {
+	printRouterTraffic(w, name, since, res)
+	printRouterLimits(w, res)
+}
+
+// printRouterTraffic shows the split between destinations, which says whether
+// routing works: a step that sends everything to one place looks healthy in
+// every other number.
+func printRouterTraffic(w *table, name string, since time.Duration, res routerReportResponse) {
 	rep := res.Report
 	show(w, "router", name)
 	if res.Router == nil {
@@ -758,8 +728,7 @@ func printRouterReport(w *table, name string, since time.Duration, res routerRep
 	if placed := rep.Chose + rep.FellBack + rep.Errored; placed > 0 {
 		show(w, "decided", fmt.Sprintf("%d (%s)", rep.Chose, share(rep.Chose, placed)))
 		if rep.FellBack > 0 {
-			// Every request that fell back was answered, so this line is the
-			// only place it shows.
+			// A request that fell back was answered, so it shows only here.
 			show(w, "fell back", fmt.Sprintf("%d (%s) - answered by a destination other "+
 				"than the route step's first choice", rep.FellBack, share(rep.FellBack, placed)))
 		}
@@ -782,4 +751,81 @@ func printRouterReport(w *table, name string, since time.Duration, res routerRep
 			d.Alias, d.Requests, share(d.Requests, rep.Total.Requests),
 			d.InputTokens+d.OutputTokens, policy.FormatAmount(d.CostMicros), d.TTFTMedianMS)
 	}
+}
+
+// printRouterLimits shows how much of each budget and daily or monthly rate
+// limit is used. Each counts in its own window, not the report's.
+func printRouterLimits(w *table, res routerReportResponse) {
+	if len(res.Limits) == 0 {
+		return
+	}
+	var full []string
+	_, _ = fmt.Fprintln(w)
+	w.header("LIMIT\tUSED\tOF\tRESETS")
+	for _, l := range res.Limits {
+		var (
+			used, of string
+			frac     float64
+			resets   time.Time
+		)
+		switch {
+		case l.Budget != nil:
+			b := l.Budget
+			used, frac = policy.FormatMoney(b.SpendMicros), fraction(b.SpendMicros, b.BudgetMicros)
+			of, resets = policy.FormatMoney(b.BudgetMicros)+" per "+string(b.Period), b.ResetsAt
+		case l.Rate != nil:
+			r := l.Rate
+			var usedBits, ofBits []string
+			for _, c := range []struct {
+				used, limit int64
+				unit        string
+			}{{r.RequestsUsed, r.Requests, "req"}, {r.TokensUsed, r.Tokens, "tok"}} {
+				if c.limit > 0 {
+					usedBits = append(usedBits, fmt.Sprintf("%d %s", c.used, c.unit))
+					ofBits = append(ofBits, fmt.Sprintf("%d %s", c.limit, c.unit))
+					frac = max(frac, fraction(c.used, c.limit))
+				}
+			}
+			used = strings.Join(usedBits, ", ")
+			of, resets = strings.Join(ofBits, ", ")+" per "+string(r.Period), r.Period.Next(time.Now())
+		default:
+			continue
+		}
+		used += fmt.Sprintf(" (%.0f%%)", frac*100)
+		switch {
+		case frac >= 1:
+			used = style.bad(used)
+			full = append(full, l.Step)
+		case frac >= 0.8:
+			used = style.warn(used)
+		}
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", l.Step, used, of,
+			resets.Local().Format("2006-01-02 15:04"))
+	}
+	for _, id := range full {
+		then := "refuses requests"
+		if s := routerStep(res.Router, id); s != nil && s.Exceeded != nil {
+			then = "sends requests down its exceeded branch"
+		}
+		_, _ = fmt.Fprintf(w, "\n%s is used up: it %s until it resets.\n", id, then)
+	}
+}
+
+func fraction(used, limit int64) float64 {
+	if limit <= 0 {
+		return 0
+	}
+	return float64(used) / float64(limit)
+}
+
+func routerStep(p *policy.Router, id string) *policy.Step {
+	if p == nil {
+		return nil
+	}
+	for s := range p.Steps() {
+		if s.ID == id {
+			return s
+		}
+	}
+	return nil
 }

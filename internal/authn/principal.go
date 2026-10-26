@@ -1,9 +1,7 @@
 // Package authn is who the caller is, and what that lets them do.
 //
 // The control plane has three ways in: the operator key, for automation and
-// for a new deployment with no identity provider yet; a browser session, for a
-// person signed in through the identity provider or with a passkey; and a
-// command-line token, for that same person at a terminal.
+// new deployments; a browser session; and a command-line token.
 package authn
 
 import (
@@ -13,41 +11,33 @@ import (
 	"time"
 )
 
-// Role is what a person may do.
 type Role string
 
 const (
-	// RoleOperator runs the deployment: it creates organisations and works in any
-	// of them.
+	// RoleOperator runs the deployment and works in any organisation.
 	RoleOperator Role = "operator"
-	// RoleAdmin runs one organisation: its projects, guardrails, keys and people,
-	// and its models, MCP servers, filters, routers and sandbox classes.
+	// RoleAdmin runs one organisation.
 	RoleAdmin Role = "admin"
-	// RoleMember sees their organisation's usage and their own requests,
-	// sessions and map, manages their own keys and changes no policy.
+	// RoleMember sees usage and their own requests, manages their own keys
+	// and changes no policy.
 	RoleMember Role = "member"
 )
 
-// Valid reports whether r is a role Keera Gateway knows.
 func (r Role) Valid() bool {
 	return r == RoleOperator || r == RoleAdmin || r == RoleMember
 }
 
-// Assignable reports whether r is a role a request may grant.
-//
-// The operator role is not: it comes only from KEERA_OPERATORS or an operator
-// group, so a tenant's administrator cannot use the panel to break out of
-// their tenant.
+// Assignable reports whether a request may grant r. The operator role comes
+// only from KEERA_OPERATORS or an operator group, so an administrator cannot
+// break out of their tenant.
 func (r Role) Assignable() bool { return r == RoleAdmin || r == RoleMember }
 
-// Method is how a caller proved who they are.
 type Method string
 
 const (
 	MethodOperatorKey Method = "operator_key"
 	MethodSession     Method = "session"
-	// MethodCLI is the same identity as a session, but sent in a header
-	// rather than a cookie. It is its own method so that, unlike a session, it
+	// MethodCLI is a session sent in a header rather than a cookie, so it
 	// skips the cross-site checks a cookie needs.
 	MethodCLI Method = "cli"
 )
@@ -65,22 +55,20 @@ type Principal struct {
 	Email  string `json:"email,omitempty"`
 	Name   string `json:"name,omitempty"`
 	Role   Role   `json:"role"`
-	// OrgID empty means no organisation: true only of the operator key.
-	// Unrestricted, not an empty OrgID, is what lets a caller see them all.
+	// OrgID is empty only for the operator key. Unrestricted, not an empty
+	// OrgID, lets a caller see every organisation.
 	OrgID string `json:"org_id,omitempty"`
 	// CSRF is the double-submit token for a session. It is empty for the
 	// operator key and the command line, which no browser sends by itself.
 	CSRF string `json:"-"`
-	// CredentialHash names the session or command-line token row, for
-	// sign-out.
+	// CredentialHash names the session or token row, for sign-out.
 	CredentialHash []byte `json:"-"`
-	// SignedInAt is when a session's sign-in happened. Adding a passkey
-	// needs a recent one.
+	// SignedInAt matters because adding a passkey needs a recent sign-in.
 	SignedInAt time.Time `json:"-"`
 }
 
-// Actor is what goes in the audit log. The operator key cannot say who used
-// it, so it is recorded as "operator key".
+// Actor is what goes in the audit log. The operator key is recorded as
+// "operator key".
 func (p *Principal) Actor() string {
 	if p.Via == MethodOperatorKey {
 		return "operator key"
@@ -91,27 +79,21 @@ func (p *Principal) Actor() string {
 	return p.UserID
 }
 
-// Unrestricted reports whether this principal sees every organisation.
 func (p *Principal) Unrestricted() bool {
 	return p.Via == MethodOperatorKey || p.Role == RoleOperator
 }
 
-// CanReadOrg reports whether the principal may see an organisation's data.
 func (p *Principal) CanReadOrg(orgID string) bool {
 	return p.Unrestricted() || p.inOrg(orgID)
 }
 
-// CanAdminOrg reports whether the principal may administer an organisation,
-// as RoleAdmin describes.
 func (p *Principal) CanAdminOrg(orgID string) bool {
 	return p.Unrestricted() || (p.Role == RoleAdmin && p.inOrg(orgID))
 }
 
-// CanManageKeyFor reports whether the principal may activate, rename, rotate
-// or revoke a key in orgID attributed to userID ("" for nobody). A member may
-// manage their own keys, so they can stop a leaked one without waiting for an
-// administrator. A key attributed to nobody, such as a pipeline's, stays an
-// administrator's.
+// CanManageKeyFor reports whether the principal may manage a key in orgID
+// attributed to userID ("" for nobody). A member may manage their own, so
+// they can stop a leaked one. A key of nobody's stays an administrator's.
 func (p *Principal) CanManageKeyFor(orgID, userID string) bool {
 	return p.CanAdminOrg(orgID) ||
 		(p.Role == RoleMember && p.inOrg(orgID) && p.UserID != "" && userID == p.UserID)
@@ -121,11 +103,8 @@ func (p *Principal) inOrg(orgID string) bool {
 	return orgID != "" && orgID == p.OrgID
 }
 
-// ScopeOrg resolves which organisation a request applies to.
-//
-// A principal bound to one organisation gets their own when the parameter is
-// empty. Naming another one is refused rather than quietly rewritten, so a
-// request never does something other than what it says.
+// ScopeOrg resolves which organisation a request applies to. Empty means the
+// principal's own. Naming another is refused rather than quietly rewritten.
 func (p *Principal) ScopeOrg(requested string) (string, error) {
 	if p.Unrestricted() {
 		return requested, nil
@@ -139,32 +118,26 @@ func (p *Principal) ScopeOrg(requested string) (string, error) {
 	return p.OrgID, nil
 }
 
-// RoleMapping maps an identity provider's claims onto a Keera Gateway role.
-//
-// The operator groups and KEERA_OPERATORS are checked first, then the admin
-// groups, then the default. So a directory that manages access through groups
-// gets exactly what it says, and an address named as an operator stays one.
+// RoleMapping maps an identity provider's claims to a role. The operator
+// groups and KEERA_OPERATORS are checked first, then the admin groups, then
+// the default.
 type RoleMapping struct {
 	OperatorGroups []string
 	AdminGroups    []string
-	// OperatorEmails names operators by address. It is how the first operator
-	// signs in before the directory has Keera groups, and the only way to be
-	// an operator on a provider that issues no groups.
+	// OperatorEmails lets the first operator sign in before the directory has
+	// Keera groups, and is the only way on a provider with no groups.
 	OperatorEmails []string
 	// Default is the role for someone who matches nothing.
 	Default Role
 }
 
-// UsesGroups reports whether any role here is decided by group membership.
 func (m RoleMapping) UsesGroups() bool {
 	return anyNonBlank(m.OperatorGroups) || anyNonBlank(m.AdminGroups)
 }
 
-// DecidesAdmin reports whether a group here decides the administrator role.
-//
-// If one does, the directory owns the role and it is reapplied on every
-// sign-in. If none does (for example Google Workspace, which issues no groups
-// claim), the role is assigned in Keera and kept until someone changes it.
+// DecidesAdmin reports whether a group decides the administrator role. Then
+// the directory owns it and it is reapplied on every sign-in. Otherwise it is
+// assigned in Keera.
 func (m RoleMapping) DecidesAdmin() bool { return anyNonBlank(m.AdminGroups) }
 
 func anyNonBlank(ss []string) bool {
@@ -176,13 +149,12 @@ func anyNonBlank(ss []string) bool {
 	return false
 }
 
-// RoleFor returns the role for an identity.
 func (m RoleMapping) RoleFor(email string, groups []string) Role {
 	if containsFold(groups, m.OperatorGroups) {
 		return RoleOperator
 	}
-	// Before the admin groups: an address named in KEERA_OPERATORS is an
-	// operator, whatever else the directory says about it.
+	// An address in KEERA_OPERATORS is an operator, whatever the directory
+	// says.
 	for _, e := range m.OperatorEmails {
 		if strings.EqualFold(strings.TrimSpace(e), email) {
 			return RoleOperator

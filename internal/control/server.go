@@ -1,10 +1,9 @@
 // Package control is Keera Gateway's control plane: the tenancy, guardrails and
-// reporting API that the web panel and the CLI both use, the sign-in flow
-// behind it, and the panel itself.
+// reporting API that the web panel and the CLI use, its sign-in flow, and the
+// panel itself.
 //
-// The inference API and the control API never share a route: every
-// developer's editor reaches the one, and the other decides what those
-// editors may do.
+// The inference API and the control API never share a route: editors reach the
+// one, and the other decides what they may do.
 package control
 
 import (
@@ -39,9 +38,8 @@ import (
 )
 
 type Options struct {
-	// OperatorKey is the credential for automation, and the way in before
-	// there are users. Empty means there is none, and nothing can sign in
-	// with it.
+	// OperatorKey is the credential for automation, and the way in before there
+	// are users. Empty means there is none.
 	OperatorKey string
 	// MetricsToken reads /metrics and nothing else, so a scrape configuration
 	// does not need the operator key. Empty leaves /metrics to operators.
@@ -49,8 +47,7 @@ type Options struct {
 	// Secrets seals the credentials of hosted models and MCP servers.
 	Secrets *secret.Box
 	// Providers are the identity providers, in the order the sign-in screen
-	// shows them. With none and no passkeys, the operator key is the only way
-	// in.
+	// shows them. With none and no passkeys, only the operator key can sign in.
 	Providers authn.Providers
 	// Passkeys is this gateway as WebAuthn sees it. Nil means passkeys are
 	// off.
@@ -61,9 +58,9 @@ type Options struct {
 	// ServeUI serves the control panel from this listener's root.
 	ServeUI       bool
 	SecureCookies bool
-	// PublicURL is this gateway as a browser sees it. It is also the origin
-	// put into the client configurations the panel hands out. Empty falls back
-	// to the request's Host header.
+	// PublicURL is this gateway as a browser sees it, and the origin in the
+	// client configurations the panel hands out. Empty falls back to the
+	// request's Host header.
 	PublicURL string
 	// ChatURL is Keera Chat's origin. A sign-in may hand over to its
 	// callback as well as to a loopback port. Empty allows only loopback.
@@ -73,9 +70,9 @@ type Options struct {
 	// SessionGap is how long an agent conversation may go quiet before the
 	// next request starts a new task. Zero is store.DefaultSessionGap.
 	SessionGap time.Duration
-	// Sandboxes lends out machines. Nil means there is no sandbox driver: the
-	// sandbox catalogue can still be read and edited, and everything else
-	// answers that a driver has to be switched on.
+	// Sandboxes lends out machines. Nil means no sandbox driver: the catalogue
+	// can still be edited, and everything else says a driver must be switched
+	// on.
 	Sandboxes *sandbox.Manager
 	// Template is what every new organisation starts with, from
 	// KEERA_MODELS_FILE and KEERA_SANDBOXES_FILE.
@@ -105,18 +102,17 @@ type Server struct {
 	opts     Options
 	log      *slog.Logger
 
-	// hasOperatorKey guards operatorHash: without it, a server built with no
-	// operator key would accept sha256(""), which anyone can send. Config
-	// requires one, so this only matters to a caller that skips it.
+	// hasOperatorKey guards operatorHash: without it, a server with no operator
+	// key would accept sha256(""), which anyone can send.
 	operatorHash   [32]byte
 	hasOperatorKey bool
 	// metricsHash is the same for the scrape token.
 	metricsHash     [32]byte
 	hasMetricsToken bool
 
-	// signIn throttles the routes that work for a caller who has not signed
-	// in yet, keyed by client address, and password sign-ins per account. It
-	// is in memory, so each replica counts on its own.
+	// signIn throttles some unauthenticated routes per client address, and
+	// password sign-ins per account. It is in memory, so each replica counts on
+	// its own.
 	signIn *ratelimit.Limiter
 
 	// feed tells every open request stream that the usage log has grown.
@@ -152,8 +148,8 @@ func (s *Server) Sweep(now time.Time) { s.signIn.Sweep(BucketIdle, now) }
 // enabled, the panel. The inference plane is mounted in front of it, under
 // httpx.InferencePrefix.
 //
-// /healthz, /readyz and /metrics stay at the root rather than under
-// httpx.ControlPrefix, because that is where orchestrators and scrapers look.
+// /healthz, /readyz and /metrics stay at the root, where orchestrators and
+// scrapers look.
 func (s *Server) Handler() http.Handler {
 	// Only the control plane is compressed. The inference plane streams
 	// tokens, which must not wait in a buffer.
@@ -166,8 +162,8 @@ func (s *Server) Routes() []string { return s.mux().Patterns() }
 
 func (s *Server) mux() *httpx.Mux {
 	mux := httpx.NewMux()
-	// route registers an authenticated route; pattern is "METHOD /path",
-	// with the path under httpx.ControlPrefix.
+	// route registers an authenticated route. pattern is "METHOD /path", under
+	// httpx.ControlPrefix.
 	s.routes = nil
 	route := func(pattern string, h handler) {
 		s.routes = append(s.routes, pattern)
@@ -185,9 +181,8 @@ func (s *Server) mux() *httpx.Mux {
 	mux.Handle("GET "+openapi.YAMLPath, openapi.YAML())
 	mux.Handle("GET "+openapi.JSONPath, openapi.JSON())
 
-	// The sign-in flow. Nobody has signed in yet, so the routes that do work
-	// are throttled per address. /auth/config reads and decides nothing, so it
-	// is not.
+	// The sign-in flow. Nobody is signed in yet, so these routes are throttled
+	// per address. /auth/config only reads, so it is not.
 	mux.HandleFunc("GET "+httpx.ControlPrefix+"/auth/config", s.authConfig)
 	// public registers a sign-in route like route does, throttled instead of
 	// authenticated.
@@ -329,9 +324,8 @@ func (s *Server) mux() *httpx.Mux {
 	route("POST /v1/sandboxes/{ref}/resume", s.withSandboxes(s.resumeSandbox))
 	route("GET /v1/sandbox-usage", s.sandboxUsage)
 
-	// A byte stream into a sandbox. It is a path on this listener, not a port
-	// of its own, so a deployment still has one address and one certificate.
-	// See attach.go.
+	// A byte stream into a sandbox. It runs on this listener, not its own port,
+	// so a deployment keeps one address and one certificate. See attach.go.
 	s.attachRoutes(mux)
 
 	// Everything under the control prefix is the API. Without this, a typo in
@@ -403,10 +397,10 @@ const BucketIdle = 10 * time.Minute
 const signInThrottled = "too many sign-in attempts from this address; wait a moment and try again"
 
 // throttle limits one unauthenticated route per client address, answering msg
-// once over. Without it, POST /auth/local would let anyone guess the operator
-// key, and GET /auth/login would let anyone fill the login flow table. It is a
-// brake, not a security boundary: many people can share one address and one
-// person can use many, which is why the rates are generous.
+// once over. Without it, anyone could guess the operator key on
+// POST /auth/local, or fill the login flow table on GET /auth/login. It is a
+// brake, not a security boundary: many people can share an address and one
+// person can use many, so the rates are generous.
 func (s *Server) throttle(name string, perMinute int, msg string,
 	next http.HandlerFunc,
 ) http.Handler {
@@ -527,9 +521,9 @@ func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	return true
 }
 
-// refuseBody answers a body httpx.ReadJSON could not decode. The decoder's own
-// words name the problem, such as a misspelt field. A body over the limit is
-// 413, as on the gateway, so a client can tell it from a mistake in the JSON.
+// refuseBody answers a body httpx.ReadJSON could not decode, in the decoder's
+// own words, such as a misspelt field. A body over the limit is 413, as on the
+// gateway.
 func refuseBody(w http.ResponseWriter, err error) {
 	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 		httpx.WriteError(w, http.StatusRequestEntityTooLarge, "invalid_request_error",
@@ -658,9 +652,8 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// metricsRoute serves the Prometheus exposition. It is operator-only, because
-// metrics are labelled by organisation. The scrape token reads this route and
-// nothing else, so a scrape config need not hold the operator key.
+// metricsRoute serves the Prometheus exposition. It is operator-only because
+// metrics are labelled by organisation. The scrape token can read it too.
 func (s *Server) metricsRoute(w http.ResponseWriter, r *http.Request) {
 	if presented, err := auth.FromHeader(r.Header.Get("Authorization")); err == nil &&
 		s.matchesMetricsToken(presented) {

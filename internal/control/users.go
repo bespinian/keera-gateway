@@ -123,9 +123,8 @@ func newUserRole(externalID, role string, unrestricted bool) (authn.Role, error)
 }
 
 // newUserSignIn decides how a person added by hand signs in: "sso" or
-// authn.PasskeyProvider. requested is what the caller asked for; empty means
-// the way this gateway signs people in, which is its identity provider, or
-// passkeys when it has none.
+// authn.PasskeyProvider. An empty requested means the gateway's identity
+// provider, or passkeys when it has none.
 func newUserSignIn(requested, externalID string, sso, passkeys bool) (string, error) {
 	signIn := requested
 	if signIn == "" {

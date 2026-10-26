@@ -19,7 +19,6 @@ func newFlagSet() (*flag.FlagSet, *int, *bool, *string) {
 }
 
 func TestParseAcceptsFlagsAfterPositionalArguments(t *testing.T) {
-	// This is how the command reads naturally, and how it will be typed.
 	fs, requests, asJSON, _ := newFlagSet()
 	if err := parse(fs, []string{"project", "project_1", "--requests", "60", "--json"}); err != nil {
 		t.Fatalf("parse: %v", err)
@@ -87,8 +86,7 @@ func TestParseRejectsAnUnknownFlag(t *testing.T) {
 	}
 }
 
-// The panel's amount() rounds the same way, so one cost reads the same in
-// both.
+// The panel's amount() rounds the same way.
 func TestFormatAmountRoundsAsThePanelDoes(t *testing.T) {
 	tests := []struct {
 		micros int64
@@ -126,9 +124,9 @@ func TestFormatMicrosKeepsSmallAmountsVisible(t *testing.T) {
 	}
 }
 
-// Every sandbox verb shares one FlagSet, so without this 'resume --ttl 8h'
-// would parse and the lifetime would be dropped without a word. The same
-// check holds the arguments to what help.go says the verb takes.
+// Every sandbox verb shares one FlagSet, so without this check 'resume --ttl
+// 8h' would parse and silently drop the lifetime. It also holds the arguments
+// to what help.go says the verb takes.
 func TestParseVerbHoldsAVerbToItsFlagsAndArguments(t *testing.T) {
 	for _, tc := range []struct {
 		sub  string
@@ -176,8 +174,7 @@ func TestArgCount(t *testing.T) {
 	}
 }
 
-// Report windows and lifetimes are thought of in days, so --since 7d works,
-// and a default prints as 7d rather than 168h0m0s.
+// --since 7d works, and a default prints as 7d rather than 168h0m0s.
 func TestDurationFlagTakesDays(t *testing.T) {
 	const day = 24 * time.Hour
 	for in, want := range map[string]time.Duration{

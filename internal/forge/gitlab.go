@@ -16,11 +16,11 @@ import (
 // GitLab mints a project access token per sandbox: one project, the Developer
 // role, and repository read and write.
 //
-// GitLab sets expiry by the day, so a token would run until midnight UTC
-// after its sandbox ends. The manager revokes it when the sandbox ends.
+// GitLab expires tokens by the day, so the manager revokes each one when its
+// sandbox ends.
 //
-// Developer can push to unprotected branches only, so an agent cannot push to
-// a protected default branch.
+// Developer pushes to unprotected branches only, so an agent cannot push to a
+// protected default branch.
 type GitLab struct {
 	web   *url.URL
 	token string
@@ -30,9 +30,9 @@ type GitLabOptions struct {
 	// URL is the instance, such as https://gitlab.example.ch. Empty is
 	// GitLab.com.
 	URL string
-	// Token may create project access tokens on the projects sandboxes use:
-	// a personal, group or service account token with the api scope, held by
-	// a Maintainer of those projects.
+	// Token creates project access tokens on the projects sandboxes use: a
+	// personal, group or service account token with the api scope, held by a
+	// Maintainer of those projects.
 	Token string
 }
 

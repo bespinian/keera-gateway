@@ -21,8 +21,8 @@ type decisionCall struct {
 	HeadMaxLen int                         `json:"head_max_len"`
 }
 
-// decisionBackend is a stand-in for laya-serve on /systemone, in front of
-// answer for every other path. reply is the answer to the one question asked.
+// decisionBackend stands in for laya-serve on /systemone, and answer for every
+// other path. reply answers the one question asked.
 func decisionBackend(reply func(decisionCall) string, answer http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/systemone") {
@@ -38,8 +38,7 @@ func decisionBackend(reply func(decisionCall) string, answer http.HandlerFunc) h
 	}
 }
 
-// choiceAnswer is laya-serve's answer to a choice, with the chosen label well
-// ahead of the other.
+// choiceAnswer is laya-serve's answer to a choice, with a clear winner.
 func choiceAnswer(chosen, other string) string {
 	return fmt.Sprintf(`{"type":"choice","choice":%q,"probabilities":{%q:0.8,%q:0.2}}`,
 		chosen, chosen, other)
@@ -93,9 +92,8 @@ func TestARouterDecidesWithADecisionModel(t *testing.T) {
 
 	c := <-calls
 	q := c.Questions[decisionID]
-	// The question is the instruction alone, and each destination is offered
-	// by what it is for: the protocol a chat model is given means nothing to
-	// a classifier.
+	// A classifier gets the instruction alone, and each destination by its
+	// description, not the chat protocol.
 	if q.Type != "choice" || q.Instructions != "Which model should answer this request?" {
 		t.Errorf("question = %+v, want the router's instruction as a choice", q)
 	}
@@ -149,7 +147,7 @@ func TestARewriteFilterCannotRunOnADecisionModel(t *testing.T) {
 
 	resp := h.post(t, "/v1/chat/completions",
 		`{"model":"keera-code","messages":[{"role":"user","content":"hunter2"}]}`)
-	// It fails closed, like any filter whose model cannot do its job.
+	// It fails closed.
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", resp.StatusCode)
 	}
@@ -223,8 +221,7 @@ func TestCheckingADecisionModelAsksItAnObviousQuestion(t *testing.T) {
 	}
 }
 
-// A decision model is sent only the request and its question, so only those
-// count against its context, not the instructions a chat model would need.
+// Only the request and question count against a decision model's context.
 func TestADecisionModelIsMeasuredByWhatItIsSent(t *testing.T) {
 	small := func() map[string]policy.Model {
 		models := decisionModels()

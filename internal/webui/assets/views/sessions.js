@@ -1,12 +1,12 @@
 // Sessions: the request log grouped into tasks. One instruction to an agent
-// is thirty or forty calls, and the cost of a task is what people budget with.
+// is dozens of calls, and people budget by task.
 //
-// It ranks by any number, not only time, because the row worth opening is the
-// costly or looping task, not the latest.
+// It ranks by any number, not only time: the row worth opening is the costly
+// or looping task, not the latest.
 //
 // A session is grouped, not stored: requests share a hash of the conversation
-// and are split wherever the agent was idle longer than the deployment's gap.
-// No prompt is kept.
+// and are split wherever the agent was idle longer than the gap. No prompt is
+// kept.
 
 import { api, ApiError } from "../api.js";
 import {
@@ -60,12 +60,11 @@ const PAGE = 100;
 // The most the control plane sends in one page.
 const MAX_ROWS = 5000;
 
-// How often a live screen refreshes, at most.
 const REFRESH_MS = 3000;
 
 const LIVE_KEY = "keera.sessions.live";
 
-// Remembered apart from the request log's ranking, which offers others.
+// Separate from the request log's ranking, which offers others.
 const SORT_KEY = "keera.sessions.sort";
 
 const NO_COUNTS = { total: 0, ok: 0, failed: 0, refused: 0, interrupted: 0 };
@@ -135,8 +134,8 @@ export async function sessionsView(ctx) {
       ),
     );
     wrap.append(hint(res.gap_seconds));
-    // There is no table to update, so the first session redraws the screen.
-    // A request outside any session, such as an embedding, does not.
+    // No table yet, so the first session redraws the screen. A request
+    // outside any session, such as an embedding, does not.
     follow(ctx, watch, since, narrowed, async () => {
       const next = await api.sessions({ ...params, facets: "" });
       if ((next.data || []).length) ctx.reload();
@@ -150,8 +149,7 @@ export async function sessionsView(ctx) {
   wrap.append(hint(res.gap_seconds));
 
   follow(ctx, watch, since, narrowed, async () => {
-    // Ask again for as many sessions as are on the screen, so a reader who
-    // loaded more pages keeps them.
+    // As many sessions as are shown, so loaded pages stay.
     const limit =
       rank.by === "" ? Math.min(Math.max(rows.length, PAGE), MAX_ROWS) : PAGE;
     const next = await api.sessions({ ...params, limit, facets: "" });
@@ -163,16 +161,16 @@ export async function sessionsView(ctx) {
   return wrap;
 }
 
-// follow runs update whenever a request is recorded that could change this
-// screen. Sessions are not stored, so there is nothing to stream: the request
-// stream says when to fetch them again. Throttled to one query per REFRESH_MS.
+// follow runs update whenever a request could change this screen. Sessions
+// are not stored, so the request stream says when to refetch. Throttled to
+// one query per REFRESH_MS.
 function follow(ctx, watch, since, narrowed, update) {
   // No status filter: a new request can move a session into or out of one.
   const listen = { org_id: ctx.orgID, since, ...narrowed, status: "" };
   const refresh = throttled(update, REFRESH_MS);
   ctx.onTeardown(refresh.stop);
-  // The stream starts at the end of the log. Requests made while it was
-  // closed are picked up by the refresh once it is open again.
+  // The stream starts at the log's end. Requests missed while closed are
+  // picked up by the refresh on reopening.
   followRequests(ctx, watch, () => api.requestStream(listen), {
     onRequests: (payload) => {
       if ((payload.data || []).length) refresh();
@@ -181,9 +179,8 @@ function follow(ctx, watch, since, narrowed, update) {
   });
 }
 
-/** sessionLog is the session list below a project's, key's or model's charts.
- *  It takes the outcome and ranking but no filters, as the screen is already
- *  narrowed. */
+/** sessionLog is the session list on an entity's screen. It takes the
+ *  outcome and ranking but no filters, as the screen is already narrowed. */
 export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
   const outcome = currentOutcome();
   const rank = ranking(ctx, SORT_KEY);
@@ -254,8 +251,8 @@ export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
   return wrap;
 }
 
-// more is what follows a full page: the pager in time order, a note under a
-// ranking. The cursor is over time, so it cannot page a ranking.
+// more follows a full page: the pager in time order, a note under a ranking,
+// since the cursor cannot page a ranking.
 function more(params, rows, rank, list) {
   if (rows.length < PAGE) return null;
   if (rank.by !== "") return rankedNote(PAGE, "sessions");
@@ -268,8 +265,8 @@ function sessionsCSV(params) {
   );
 }
 
-// pager appends the next page. The cursor is the oldest session shown, which
-// is what the control plane sends as next_before.
+// pager appends the next page. The cursor is the oldest session shown, as
+// next_before.
 function pager(params, rows, list) {
   return loadMore(
     PAGE,
@@ -301,8 +298,8 @@ function sessionTable(ctx, rows, names, hide, rank) {
         ),
     },
     {
-      // In the list, so nobody has to open thirty sessions to find the one
-      // that died. A session's status is that of its last request.
+      // In the list, so nobody opens thirty sessions to find the one that
+      // died. A session's status is that of its last request.
       label: "Status",
       sortKey: (a) => a.last_status,
       cell: (a) => statusCell(a),
@@ -416,8 +413,8 @@ function sessionTable(ctx, rows, names, hide, rank) {
   });
 }
 
-// statusCell says how the last call went, in the request log's words. A task
-// whose final call was refused did not finish.
+// statusCell says how the last call went. A task whose final call was
+// refused did not finish.
 function statusCell(a) {
   const last = { status: a.last_status, error: a.last_error };
   const [label, tone, why] = outcomeMeaning(last);
@@ -603,7 +600,6 @@ export async function sessionDetailView(ctx) {
     );
   }
 
-  // The request log's table, newest first like the log itself.
   wrap.append(
     h(
       "div",
@@ -654,12 +650,10 @@ export async function sessionDetailView(ctx) {
   return wrap;
 }
 
-// turnStrip draws one bar per call, in order, sized by cost and coloured by
-// outcome. Even bars mean the agent is working, a tail of identical small ones
-// that it is looping, and a red bar is where it went wrong.
-//
-// Cost rather than latency, because a refused call has no latency worth
-// drawing. A free call still gets a bar tall enough to click.
+// turnStrip draws one bar per call, sized by cost and coloured by outcome.
+// Even bars mean the agent is working, a tail of identical small ones that it
+// is looping, and a red bar is where it went wrong. Cost rather than latency,
+// as a refused call has no latency worth drawing.
 function turnStrip(ctx, requests, names) {
   const max = Math.max(...requests.map((q) => q.cost_micros || 0), 1);
   return h(
@@ -683,8 +677,7 @@ function turnStrip(ctx, requests, names) {
   );
 }
 
-// hint explains on screen how sessions are inferred, and so what they cannot
-// promise.
+// hint explains how sessions are inferred, and so what they cannot promise.
 function hint(gapSeconds, detail) {
   const gap = duration((gapSeconds || 0) * 1000);
   const how =

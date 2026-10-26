@@ -11,12 +11,11 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// Deleting a class must not end its sandboxes. An extend or resume then gets
-// the lifetimes of a class that states none, however long it has lived.
+// After its class is deleted, an extend or resume gets default lifetimes,
+// however long the sandbox has lived.
 func TestStandInForADeletedClassKeepsALifetime(t *testing.T) {
 	created := time.Date(2026, 9, 28, 8, 0, 0, 0, time.UTC)
-	// Already much older than the default ceiling: that must not make the next
-	// lifetime longer.
+	// Older than the default ceiling, which must not lengthen the next one.
 	expires := created.Add(20 * 24 * time.Hour)
 	sb := store.Sandbox{
 		OrgID: "org_1", Class: "gone", Image: "i", Isolation: policy.IsolationStandard,
@@ -40,7 +39,7 @@ func TestStandInForADeletedClassKeepsALifetime(t *testing.T) {
 }
 
 // An agent runs no sshd, so it would never pass a pool member's readiness
-// probe. Only an engineer's sandbox is claimed from a pool.
+// probe.
 func TestOnlyEngineersClaimFromAWarmPool(t *testing.T) {
 	warm := policy.SandboxClass{Name: "standard", Warm: 2}
 	cases := []struct {
@@ -62,8 +61,7 @@ func TestOnlyEngineersClaimFromAWarmPool(t *testing.T) {
 	}
 }
 
-// An agent's task runs again on resume, so an agent sandbox is never
-// suspended.
+// An agent's task would run again on resume.
 func TestAnAgentSandboxIsNotSuspended(t *testing.T) {
 	m := NewManager(nil, nil, ManagerOptions{})
 	sb := store.Sandbox{Name: "fix-it", Purpose: policy.PurposeAgent, State: policy.SandboxReady}
@@ -74,8 +72,7 @@ func TestAnAgentSandboxIsNotSuspended(t *testing.T) {
 	}
 }
 
-// An agent with no task or no repository would fail later, after its key was
-// minted, so it is refused before anything is created.
+// An agent with no task or repository is refused before anything is created.
 func TestAnAgentSandboxNeedsATaskAndARepository(t *testing.T) {
 	m := NewManager(nil, nil, ManagerOptions{})
 	for name, req := range map[string]CreateRequest{
@@ -89,8 +86,8 @@ func TestAnAgentSandboxNeedsATaskAndARepository(t *testing.T) {
 	}
 }
 
-// KEERA_BASE_URL decides where a sandbox's key goes, and the gateway leaves it
-// unset where it has no public address. A caller's own must not fill the gap.
+// KEERA_BASE_URL decides where a sandbox's key goes. A caller's must not fill
+// the gap where the gateway leaves it unset.
 func TestACallerCannotSetAKeeraVariable(t *testing.T) {
 	m := NewManager(nil, nil, ManagerOptions{})
 	_, err := m.admit(context.Background(), CreateRequest{

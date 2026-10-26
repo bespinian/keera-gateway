@@ -1,11 +1,9 @@
-// Package connect holds the configuration a developer needs to point a coding
-// agent at a Keera Gateway.
+// Package connect holds the configuration that points a coding agent at the
+// gateway.
 //
-// The control panel's Connect client dialog and `keera connect` both use
-// this one catalogue, so they hand out the same configuration. Each block is a
-// template, filled in with the gateway address and the models a key may call,
-// with their limits: by `keera connect` on the developer's machine, and by the
-// control plane for the panel.
+// The panel's Connect client dialog and `keera connect` share this catalogue,
+// so they hand out the same configuration. Each block is a template, filled
+// in with the gateway address and the models a key may call.
 package connect
 
 import (
@@ -26,29 +24,27 @@ type Client struct {
 	Label string `json:"label"`
 	// About says in one line what the client is, for the panel's picker.
 	About string `json:"about"`
-	// Path is the file the configuration belongs in. It is empty for a block
-	// that is a command to run rather than a file. A path under ~ is a config
-	// that may exist already; any other is a new file in the current directory.
+	// Path is the file the configuration belongs in, or empty for a command.
+	// A path under ~ may exist already; any other is a new file in the
+	// current directory.
 	Path string `json:"path,omitempty"`
 	// Lang is how a renderer should highlight the block: json, toml, sh or
 	// python.
 	Lang string `json:"lang"`
 	// Template is the block. It carries {{base}}, {{models}}, {{aliases}}
-	// (every alias, comma-separated) and {{alias}} (the first, the default),
-	// for Render to fill in. A block that holds the key itself, because its
-	// file cannot read the environment, carries {{key}}. Claude Code's
-	// carries {{claude_env}} and {{claude_overrides}}; see claude.go.
+	// (every alias, comma-separated) and {{alias}} (the default), for Render
+	// to fill in. A block whose file cannot read the environment carries
+	// {{key}}. Claude Code's carries {{claude_env}} and {{claude_overrides}}.
 	Template string `json:"template"`
 	// Names is the other ids each Anthropic model goes by, for
 	// {{claude_overrides}}. See ClaudeNames.
 	Names map[string][]string `json:"names,omitempty"`
-	// Entry is what {{models}} repeats, once per model, joined with commas. It
-	// carries {{alias}}, {{name}} and the two limits, {{context}} and
-	// {{output}}. It is empty for a client that does not list its models.
+	// Entry is what {{models}} repeats per model, joined with commas. It
+	// carries {{alias}}, {{name}}, {{context}} and {{output}}. Empty for a
+	// client that does not list its models.
 	Entry string `json:"entry,omitempty"`
-	// Run is what to type once it is configured, and Note a caveat, both in
-	// prose. A span in backticks is something to type or a name to find;
-	// the panel shows it as code, and RunText and NoteText as quoted.
+	// Run is what to type once it is configured, and Note a caveat. A span in
+	// backticks shows as code in the panel and quoted in a terminal.
 	Run  string `json:"run"`
 	Note string `json:"note,omitempty"`
 }
@@ -68,30 +64,24 @@ type Model struct {
 
 // The limits a client is given.
 //
-// Every client that takes a context window gets the one the catalogue
-// advertises, so an alias behaves the same in every editor. Codex takes one
-// window for every model, so it gets the default model's. Only OpenCode gets
-// an output length, because its schema needs one with the window; the others
-// keep their own defaults. No entry sets a temperature, because reasoning
-// models reject one.
+// Every client that takes a context window gets the catalogue's, so an alias
+// behaves the same in every editor. Codex takes one window for all models, so
+// it gets the default model's. Only OpenCode gets an output length, as its
+// schema needs one. No entry sets a temperature: reasoning models reject one.
 const (
 	// DefaultContext is the window for a model whose entry states none. Pi
 	// assumes the same for a model it does not know.
 	DefaultContext = 128_000
-	// MaxOutput caps the answer length OpenCode is given. It is generous for
-	// whole files, but an agent told it has unlimited room writes until the
-	// backend cuts it off mid-patch.
+	// MaxOutput caps the answer length OpenCode is given: enough for whole
+	// files, but an agent with unlimited room writes until cut off mid-patch.
 	MaxOutput = 16_384
 	// MinOutput is the shortest answer that is still a useful edit.
 	MinOutput = 1_024
 )
 
 // Limits turns a model's context window into the window and output length a
-// client config states.
-//
-// The output is at most a quarter of the window, because an agent spends the
-// rest on the conversation so far: a 16k model allowed 16k of answer fails on
-// its second turn.
+// client config states. The output is at most a quarter of the window: the
+// rest holds the conversation so far.
 func Limits(maxContext int) (window, output int) {
 	window = maxContext
 	if window <= 0 {
@@ -157,8 +147,8 @@ func fill(text string, m Model) string {
 	).Replace(text)
 }
 
-// jsonText escapes a name for the JSON string every template puts {{name}} in.
-// An administrator types a display name, so it may hold a quote.
+// jsonText escapes a name for the JSON string every template puts {{name}} in,
+// as a display name may hold a quote.
 func jsonText(s string) string {
 	var b strings.Builder
 	enc := json.NewEncoder(&b)
@@ -222,8 +212,8 @@ func Clients() []Client {
 	return out
 }
 
-// The last entry is a plain request with cURL. Its address and key are all any
-// other OpenAI-compatible client needs.
+// The last entry is a plain cURL request, for any other OpenAI-compatible
+// client.
 var clients = []Client{
 	{
 		ID:    "pi",
@@ -287,9 +277,8 @@ var clients = []Client{
 		ID:    "claude-code",
 		Label: "Claude Code",
 		About: "Anthropic's coding agent, over the Messages API.",
-		// The same settings `keera connect claude-code` writes. They hold the
-		// key itself, because settings.json does not read the environment,
-		// and modelOverrides has no environment variable. The base is the
+		// The settings `keera connect claude-code` writes. They hold the key,
+		// as settings.json does not read the environment. The base is the
 		// gateway's root: Claude Code adds /v1/messages itself.
 		Path: "~/.claude/settings.json",
 		Lang: "json",

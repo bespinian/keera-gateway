@@ -8,38 +8,33 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// The request log: every recorded inference request, one row at a time. It
-// reads the same table as the dashboard, so the two always agree on what a
-// request was.
+// The request log lists recorded inference requests from the same table as
+// the dashboard, so the two always agree.
 
-// Outcome is which requests a log asks for. The unhappy ones are kept apart
-// because each needs a different response.
+// Outcome is which requests a log asks for.
 type Outcome string
 
 const (
-	// OutcomeAny is every request. An entity's own screen opens on it.
+	// OutcomeAny is every request.
 	OutcomeAny Outcome = ""
-	// OutcomeOK is a request that was served and finished without error.
+	// OutcomeOK is a request that was served without error.
 	OutcomeOK Outcome = "ok"
 	// OutcomeUnhappy is everything that did not deliver: a status of 400 or
 	// more, or a message.
 	OutcomeUnhappy Outcome = "unhappy"
-	// OutcomeFailed is a request the inference plane could not answer. It is
-	// the same set the dashboard counts as failed.
+	// OutcomeFailed is a request the inference plane could not answer, as the
+	// dashboard counts it.
 	OutcomeFailed Outcome = "failed"
-	// OutcomeRefused is a request that got a 4xx. Mostly a guardrail stopped
-	// it: a spent budget, a rate limit, a model this key may not use, a
-	// filter. It can also be a request the gateway or backend could not take,
-	// such as one too large. It cost nothing.
+	// OutcomeRefused is a request that got a 4xx, mostly from a guardrail, or
+	// because it was too large. It cost nothing.
 	OutcomeRefused Outcome = "refused"
-	// OutcomeInterrupted is a request that was answered and then did not
-	// finish, such as a stream that ended early. Its status is the 200 the
-	// client got; the message says what went wrong afterwards.
+	// OutcomeInterrupted is a request that was answered but did not finish,
+	// such as a stream that ended early. Its status is the 200 the client got.
 	OutcomeInterrupted Outcome = "interrupted"
 )
 
-// outcomeClauses maps an outcome to its condition, which keeps the caller's
-// string out of the SQL text.
+// outcomeClauses maps an outcome to its condition, keeping the caller's string
+// out of the SQL.
 var outcomeClauses = map[Outcome]string{
 	OutcomeAny:         "TRUE",
 	OutcomeOK:          "status < 400 AND error IS NULL",
@@ -49,7 +44,6 @@ var outcomeClauses = map[Outcome]string{
 	OutcomeInterrupted: "status < 400 AND error IS NOT NULL",
 }
 
-// ValidOutcome reports whether o is an outcome a log can ask for.
 func ValidOutcome(o Outcome) bool {
 	_, ok := outcomeClauses[o]
 	return ok
@@ -67,8 +61,7 @@ func Outcomes() []string {
 	return out
 }
 
-// outcomeClause is the condition for o, or OutcomeAny's for an outcome it does
-// not know.
+// outcomeClause is the condition for o, or OutcomeAny's for an unknown one.
 func outcomeClause(o Outcome) string {
 	if clause, ok := outcomeClauses[o]; ok {
 		return clause
@@ -82,17 +75,15 @@ func countOutcome(o Outcome) string {
 	return "count(*) FILTER (WHERE " + outcomeClauses[o] + ")"
 }
 
-// Request is one recorded inference request with what an entity's screen shows
-// in a row: when, which model, whose key, what it cost and what happened. It
-// covers both served and failed requests, because the log is one table.
+// Request is one recorded inference request, served or failed.
 type Request struct {
 	ID        int64     `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
 	Alias     string    `json:"alias,omitempty"`
 	Status    int       `json:"status"`
 	Error     string    `json:"error,omitempty"`
-	// Note is what went wrong on the way to an answer that was served all the
-	// same, such as a router falling back.
+	// Note is a problem on a request that was still served, such as a router
+	// falling back.
 	Note      string `json:"note,omitempty"`
 	KeyID     string `json:"key_id,omitempty"`
 	ProjectID string `json:"project_id,omitempty"`
@@ -102,28 +93,25 @@ type Request struct {
 	Client      string `json:"client,omitempty"`
 	InputTokens int64  `json:"input_tokens"`
 	// CachedInputTokens is the part of InputTokens the provider served from its
-	// prompt cache at a lower price. Without it the cost cannot be recomputed
-	// from the counts.
+	// prompt cache at a lower price.
 	CachedInputTokens int64 `json:"cached_input_tokens"`
 	// CacheWriteTokens is the part of InputTokens the provider wrote to its
-	// prompt cache, for the same reason.
+	// prompt cache.
 	CacheWriteTokens int64 `json:"cache_write_tokens"`
 	OutputTokens     int64 `json:"output_tokens"`
 	CostMicros       int64 `json:"cost_micros"`
 	LatencyMS        int64 `json:"latency_ms"`
-	// TTFTMS is how long the client waited for the first token: the latency a
-	// developer notices.
+	// TTFTMS is how long the client waited for the first token.
 	TTFTMS int64 `json:"ttft_ms"`
 	Stream bool  `json:"stream"`
 	// Estimated marks token counts the gateway guessed because the client hung
 	// up before the upstream reported them. The cost is then an estimate too.
 	Estimated bool `json:"estimated"`
 	Canceled  bool `json:"canceled"`
-	// SessionKey names the agent conversation this request was part of, so a
-	// reader can open the whole task. Empty for one that was part of none.
+	// SessionKey names the agent conversation of this request, if any.
 	SessionKey string `json:"session_key,omitempty"`
-	// Spans is where the latency went, step by step. It is loaded with the row
-	// so opening a slow request needs no second round trip.
+	// Spans is where the latency went, step by step, loaded with the row to
+	// save a round trip.
 	Spans []Span `json:"spans,omitempty"`
 	// RequestID is the id the gateway answered with, and ClientRequestID the
 	// client's own. Rows written before v0.7.0 have neither.
@@ -131,8 +119,8 @@ type Request struct {
 	ClientRequestID string `json:"client_request_id,omitempty"`
 }
 
-// requestColumns is the select list every reading of a request row shares, so
-// a new column reaches every screen at once. scanRequest reads it in order.
+// requestColumns is the select list every read of a request row shares.
+// scanRequest reads it in order.
 const requestColumns = `id, ts, alias, status, COALESCE(error, ''),
 	COALESCE(key_id, ''), COALESCE(project_id, ''), COALESCE(user_id, ''), org_id,
 	COALESCE(client, ''), input_tokens, cached_input_tokens, cache_write_tokens,
@@ -152,43 +140,38 @@ func scanRequest(r row) (Request, error) {
 	return q, err
 }
 
-// RequestQuery narrows the request log. Every field is optional; the zero value
-// is "the most recent requests of this tenant".
+// RequestQuery narrows the request log. Every field is optional.
 type RequestQuery struct {
 	OrgID string
 	ReportScope
-	// Holder keeps the log to the requests of one person's keys, whatever
-	// else is narrowed. It is how a member reads the log. Unlike UserID, it
-	// also narrows the filter choices, which would otherwise count everyone's.
+	// Holder keeps only one person's requests, for a member reading the log.
+	// Unlike UserID, it also narrows the filter choices.
 	Holder string
-	// RequestID finds the requests with this id, or with this id of the
-	// client's own.
+	// RequestID matches the gateway's request id or the client's own.
 	RequestID string
 	Outcome   Outcome
 	Status    int
-	// StatusClass matches a whole class of statuses by its first digit: 5 for
-	// every server error, 4 for every client error, 2 for every success.
+	// StatusClass matches statuses by their first digit, such as 5 for 5xx.
 	StatusClass int
 	From        time.Time
 	To          time.Time
-	// Before pages backwards by id. An offset would shift while the log is
-	// being written to.
+	// Before pages backwards by id, which, unlike an offset, does not shift
+	// while the log grows.
 	Before int64
-	// After is the other end of the same cursor, for a live reader: everything
-	// recorded since the last row shown. The id is used, not a timestamp,
-	// because two requests can share a timestamp.
+	// After is the other end of the cursor, for a live reader: everything
+	// since the last row shown. It uses the id, as timestamps can tie.
 	After int64
-	// Skip leaves out rows a live reader already has. A reader that reads
-	// past After again, for rows that were committed late, needs it.
+	// Skip leaves out rows a live reader already has, when it reads past After
+	// again for rows committed late.
 	Skip []int64
 	// Sort is SortRecent, SortCost, SortTokens or SortFirstToken. Before only
-	// pages under SortRecent, where id order and time order match.
+	// works under SortRecent.
 	Sort  Sort
 	Limit int
 }
 
-// requestOrder maps a sort to its ORDER BY, which keeps the caller's string out
-// of the SQL text.
+// requestOrder maps a sort to its ORDER BY, keeping the caller's string out of
+// the SQL.
 var requestOrder = map[Sort]string{
 	SortRecent:     "id DESC",
 	SortCost:       "cost_micros DESC, id DESC",
@@ -214,7 +197,6 @@ func (q RequestQuery) where() string {
 		  AND ($9 = '' OR user_id = $9)` + q.narrow("", 9)
 }
 
-// whereArgs are the values where refers to.
 func (q RequestQuery) whereArgs() []any {
 	return append(append([]any{
 		q.OrgID, nullableTime(q.From), nullableTime(q.To), q.Status,
@@ -222,10 +204,8 @@ func (q RequestQuery) whereArgs() []any {
 	}, q.args()...), q.RequestID)
 }
 
-// Requests returns the matching rows in the order q asks for, newest first by
-// default.
-//
-// An empty OrgID means every tenant, which only an operator ever asks for.
+// Requests returns the matching rows in the order q asks for. An empty OrgID
+// means every tenant, which only an operator asks for.
 func (s *Store) Requests(ctx context.Context, q RequestQuery) ([]Request, error) {
 	order, ok := requestOrder[q.Sort]
 	if !ok {
@@ -238,8 +218,7 @@ func (s *Store) Requests(ctx context.Context, q RequestQuery) ([]Request, error)
 		append(q.whereArgs(), pageLimit(q.Limit, 100, 5000))...)
 }
 
-// RequestOutcomes counts one window by outcome, so the log can show how many
-// of each there are before anybody narrows to one.
+// RequestOutcomes counts one window by outcome.
 type RequestOutcomes struct {
 	Total       int64 `json:"total"`
 	OK          int64 `json:"ok"`
@@ -248,12 +227,9 @@ type RequestOutcomes struct {
 	Interrupted int64 `json:"interrupted"`
 }
 
-// Outcomes counts the window q describes by what happened to each request.
-//
-// The chosen outcome is ignored, or the screen would only offer the one it
-// already shows. Everything else in q applies, status and id cursors included,
-// so the total matches the table beside it. The live stream uses the cursors
-// to count only the rows it has not counted yet.
+// Outcomes counts the window q describes by outcome. It ignores q's outcome,
+// so the screen can offer the others, but applies everything else, cursors
+// included, so the total matches the table beside it.
 func (s *Store) Outcomes(ctx context.Context, q RequestQuery) (RequestOutcomes, error) {
 	var c RequestOutcomes
 	err := s.pool.QueryRow(ctx, `SELECT count(*),
@@ -276,7 +252,7 @@ func (c *RequestOutcomes) Add(d RequestOutcomes) {
 }
 
 // FacetCount is one value a log can be narrowed by, with how many rows in the
-// window have it. The count shows which of many values is the problem.
+// window have it.
 type FacetCount struct {
 	Value string `json:"value"`
 	Count int64  `json:"count"`
@@ -294,7 +270,7 @@ func holderFacets(table string) string {
 		SELECT 'user', user_id, count(*) FROM ` + table + ` WHERE user_id <> '' GROUP BY user_id`
 }
 
-// facets runs a facet query, every facet starting empty rather than null.
+// facets runs a facet query. Every facet starts empty rather than null.
 func (s *Store) facets(ctx context.Context, sql string, args ...any) (RequestFacets, error) {
 	f := RequestFacets{
 		Models:   []FacetCount{},
@@ -318,13 +294,10 @@ func (s *Store) facets(ctx context.Context, sql string, args ...any) (RequestFac
 	return f, err
 }
 
-// RequestFacets is what the request log can be narrowed by, over the whole
-// window: the models, keys, projects, people and statuses that occur, each with
-// its count. They are read from the log rather than listed from the roster,
-// so only values that made requests are offered.
-//
-// There is no total: the outcome counts already carry one. The session list
-// reads the same facets, with each session's last status as its status.
+// RequestFacets is what the request log can be narrowed by: the models, keys,
+// projects, people and statuses in the window, each with its count. They come
+// from the log, so only values that made requests are offered. The session
+// list uses them too, with each session's last status.
 type RequestFacets struct {
 	Models   []FacetCount `json:"models"`
 	Keys     []FacetCount `json:"keys"`
@@ -333,7 +306,6 @@ type RequestFacets struct {
 	Statuses []FacetCount `json:"statuses,omitempty"`
 }
 
-// add files one counted value under its facet.
 func (f *RequestFacets) add(facet string, c FacetCount) {
 	switch facet {
 	case "model":
@@ -350,10 +322,8 @@ func (f *RequestFacets) add(facet string, c FacetCount) {
 }
 
 // RequestFilters counts the window by model, key, project, person and status.
-//
-// Only the tenant, the holder, the outcome and the time bounds of q are read,
-// so the screen still offers the other values after one is picked. A model
-// picked after a project can then match nothing, and the screen says so.
+// It reads only q's tenant, holder, outcome and time bounds, so the screen
+// still offers other values after one is picked.
 func (s *Store) RequestFilters(ctx context.Context, q RequestQuery) (RequestFacets, error) {
 	return s.facets(ctx, `
 		WITH matching AS (
@@ -376,12 +346,9 @@ func (s *Store) RequestFilters(ctx context.Context, q RequestQuery) (RequestFace
 }
 
 // LatestEventID is the highest id in the log, or zero when it is empty. A live
-// reader with no row yet starts from it, so the stream does not replay the
-// window already on screen.
-//
-// It is the highest id overall, not the highest matching one. Otherwise a
-// reader watching for failures on a deployment with none would start at zero
-// and get the whole window when the first one arrived.
+// reader with no row yet starts from it, so it does not replay the window on
+// screen. It is the highest overall, not the highest matching, or a reader
+// filtering for something rare would start at zero.
 func (s *Store) LatestEventID(ctx context.Context) (int64, error) {
 	var id int64
 	err := s.pool.QueryRow(ctx, "SELECT COALESCE(max(id), 0) FROM usage_events").Scan(&id)

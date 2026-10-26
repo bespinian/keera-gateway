@@ -11,67 +11,49 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// loads is what this process has seen of each destination, for the route
-// steps that order by measurement instead of by a written list. A written
-// order is wrong when destinations are equals: always using the first of two
-// identical vLLM deployments would leave half the GPUs idle. Two measured
-// orders exist:
+// loads is what this process has seen of each destination, for route steps
+// that order by measurement. A written order wastes equal destinations: always
+// using the first of two identical vLLM deployments leaves half the GPUs idle.
+// Two measured orders exist:
 //
-//   - In flight: requests outstanding against a destination, from dispatch to
-//     the last token. Best when destinations are alike and requests are not,
-//     and the only signal right after a restart.
-//   - Latency: a decayed average of time to first token. Best when
-//     destinations differ (regions, providers, hardware), since queue depth
-//     cannot be compared across machines of different speed.
+//   - In flight: requests outstanding, until the last token. Best when
+//     destinations are alike, and the only signal right after a restart.
+//   - Latency: a decayed average time to first token. Best when destinations
+//     differ, since queue depth cannot be compared across machines.
 //
-// Everything is per process and in memory. Sharing it between replicas would
-// add a round trip to every request for a number that is already stale, so
-// these modes get less exact as the gateway scales out.
+// Everything is per process and in memory, since sharing it would add a round
+// trip per request. These modes get less exact as the gateway scales out.
 type loads struct {
-	// model key -> *destLoad. A sync.Map because it is read and written on
-	// every request, over keys that change only when models do. The key,
-	// not the alias, because two organisations can each have a model of the
-	// same alias.
+	// m maps a model key, not an alias, to *destLoad, since two organisations
+	// can use the same alias.
 	m sync.Map
 }
 
 const (
-	// loadHalfLife is how long an observation takes to lose half its weight.
-	// Short enough that a recovered destination is back within a few
-	// requests, long enough that one slow request does not decide.
+	// loadHalfLife is short enough that a recovered destination is back within
+	// a few requests, long enough that one slow request does not decide.
 	loadHalfLife = 30 * time.Second
-	// loadStale is when an observation is discarded and the destination is
-	// unknown again, which puts it back at the front of the order. That is how
-	// a measured step notices a destination has got faster.
+	// loadStale is when an observation is dropped, which puts the destination
+	// back at the front so the step notices if it got faster.
 	loadStale = 5 * time.Minute
-	// loadPenalty is how long a destination that failed is ranked last.
-	//
-	// Without it both modes favour a dead destination: nothing answers, so it
-	// stays unmeasured and first, and nothing is in flight against it. It is
-	// short because being wrong costs just one failed attempt.
+	// loadPenalty is how long a failed destination is ranked last. Without it,
+	// a dead destination stays unmeasured and idle, so both modes favour it.
 	loadPenalty = 30 * time.Second
 )
 
-// destLoad is one destination's measurements.
 type destLoad struct {
-	// inflight is atomic because it changes twice on every request.
 	inflight atomic.Int64
 
 	mu sync.Mutex
-	// ewma is the decayed average time to first token, and at is when it was
-	// last updated. at is what the decay is measured from, and what makes an
-	// old number count as absent.
-	ewma time.Duration
-	at   time.Time
-	// failedAt is when this destination last failed to answer. See
-	// loadPenalty.
+	// ewma is the decayed average time to first token, last updated at at.
+	ewma     time.Duration
+	at       time.Time
 	failedAt time.Time
 }
 
 func newLoads() *loads { return &loads{} }
 
-// get is the per-destination record, made on first use. key is the model's
-// Key.
+// get returns the record for a model key, made on first use.
 func (l *loads) get(key string) *destLoad {
 	if v, ok := l.m.Load(key); ok {
 		return v.(*destLoad)
@@ -80,13 +62,10 @@ func (l *loads) get(key string) *destLoad {
 	return v.(*destLoad)
 }
 
-// begin records that a request has been dispatched to the model under key,
-// and returns the function that records that it is over. The count covers the
-// whole answer, because a model streaming is still busy.
-//
-// The returned function must be called (see the defer in answer): a leaked
-// count leaves a destination looking busy forever. Calls after the first do
-// nothing.
+// begin counts a request as in flight and returns the function that ends it.
+// The count covers the whole answer, since a streaming model is still busy.
+// The function must be called, or the destination looks busy forever; later
+// calls do nothing.
 func (l *loads) begin(key string) func() {
 	d := l.get(key)
 	d.inflight.Add(1)
@@ -94,11 +73,9 @@ func (l *loads) begin(key string) func() {
 	return func() { once.Do(func() { d.inflight.Add(-1) }) }
 }
 
-// observe records how long a destination took to start answering: until its
-// first token, or its whole answer when the client did not stream.
-//
-// Only answers count: a fast refusal would post the best score. Failures are
-// recorded by fail, and a 4xx, being the request's fault, not at all.
+// observe records the time to first token, or to the whole answer without
+// streaming. Only answers count, since a fast refusal would post the best
+// score.
 func (l *loads) observe(key string, ttft time.Duration, now time.Time) {
 	if ttft <= 0 {
 		return
@@ -108,20 +85,17 @@ func (l *loads) observe(key string, ttft time.Duration, now time.Time) {
 	defer d.mu.Unlock()
 	switch age := now.Sub(d.at); {
 	case d.at.IsZero(), age >= loadStale, age < 0:
-		// Nothing to blend with: the first observation, one whose predecessor
-		// has expired, or a clock that has gone backwards.
+		// Nothing to blend with, or the clock went backwards.
 		d.ewma = ttft
 	default:
-		// Weighted by age, not count, so ten requests in a second and ten in
-		// an hour do not count the same.
+		// Weighted by age, not count.
 		w := math.Exp2(-age.Seconds() / loadHalfLife.Seconds())
 		d.ewma = time.Duration(w*float64(d.ewma) + (1-w)*float64(ttft))
 	}
 	d.at = now
 }
 
-// fail records that a destination did not answer, which ranks it last until
-// loadPenalty has passed.
+// fail ranks a destination last until loadPenalty has passed.
 func (l *loads) fail(key string, now time.Time) {
 	d := l.get(key)
 	d.mu.Lock()
@@ -129,16 +103,13 @@ func (l *loads) fail(key string, now time.Time) {
 	d.failedAt = now
 }
 
-// reading is what one destination looks like at one moment.
 type reading struct {
-	// inflight is what this gateway has outstanding against it.
 	inflight int64
-	// latency is the decayed time to first token, and known says whether
-	// there is one. Unknown is neither slow nor fast: nothing recent has been
-	// seen, as after a restart, when newly added, or after five idle minutes.
+	// latency is the decayed time to first token, if known. Unknown means
+	// nothing recent was seen, such as after a restart.
 	latency time.Duration
 	known   bool
-	// failing is a destination that failed within the last loadPenalty.
+	// failing means it failed within the last loadPenalty.
 	failing bool
 }
 
@@ -156,17 +127,15 @@ func (l *loads) read(key string, now time.Time) reading {
 	return r
 }
 
-// order sorts a measured step's destinations, best first, in place. The sort
-// is stable, so the written order breaks every tie: a step with no
-// measurements behaves like a fallback step. The rules, in order:
+// order sorts a measured step's destinations in place, best first. The sort is
+// stable, so the written order breaks ties. The rules, in order:
 //
-//  1. A destination that just failed goes last (see loadPenalty).
-//  2. For latency, a destination with no recent measurement goes first. This
-//     deliberate inefficiency keeps the order self-correcting: otherwise the
-//     first destination to post a good number would keep all the traffic.
+//  1. A destination that just failed goes last.
+//  2. For latency, one with no recent measurement goes first. Otherwise the
+//     first to post a good number would keep all the traffic.
 //  3. Then least in flight, or lowest latency.
 //
-// key maps an alias to the model key its numbers are kept under.
+// key maps an alias to its model key.
 func (l *loads) order(mode policy.RouteMode, aliases []string, key func(alias string) string) {
 	if len(aliases) < 2 || !mode.Measures() {
 		return
@@ -191,17 +160,15 @@ func (l *loads) order(mode policy.RouteMode, aliases []string, key func(alias st
 	})
 }
 
-// orderByLoad sorts a route step's destinations by what has been measured of the
-// models they name for its organisation. See loads.order.
+// orderByLoad sorts a route step's destinations. See loads.order.
 func (s *Server) orderByLoad(rt policy.Route, aliases []string) {
 	s.load.order(rt.Mode, aliases, func(alias string) string {
 		return policy.ModelKey(rt.OrgID, alias)
 	})
 }
 
-// describe says in a few words what a measured step currently makes of a
-// destination, for the step's check. It is prose because it is one
-// replica's view of the last few minutes.
+// describe says what a measured step currently makes of a destination, for
+// the step's check. It is prose, since it is one replica's recent view.
 func (l *loads) describe(mode policy.RouteMode, key string) string {
 	if !mode.Measures() {
 		return ""

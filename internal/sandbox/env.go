@@ -14,9 +14,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// environment is what the sandbox is told.
-//
-// The caller's Env goes in first and the manager's values over it, so a caller
+// environment puts the manager's values over the caller's Env, so a caller
 // cannot redirect a sandbox's gateway address or key.
 func (m *Manager) environment(ctx context.Context, req CreateRequest, row store.Sandbox,
 	secret string, expires time.Time,
@@ -34,14 +32,14 @@ func (m *Manager) environment(ctx context.Context, req CreateRequest, row store.
 	if len(req.AuthorizedKeys) > 0 {
 		env["KEERA_AUTHORIZED_KEYS"] = strings.Join(req.AuthorizedKeys, "\n")
 	}
-	// Commits are by the person the work was done for, not by "keera".
+	// Commits are by the person, not by "keera".
 	if req.Owner != "" {
 		env["KEERA_GIT_AUTHOR_EMAIL"] = req.Owner
 		env["KEERA_GIT_AUTHOR_NAME"] = req.Owner
 	}
 
-	// An agent sandbox names its own session (docs/sessions.md): as the
-	// header Claude Code reads itself, and in Pi's configuration below.
+	// An agent sandbox names its own session (docs/sessions.md), for Claude
+	// Code and for Pi below.
 	if row.Purpose == policy.PurposeAgent {
 		env["KEERA_SESSION"] = row.ID
 		env["ANTHROPIC_CUSTOM_HEADERS"] = httpx.SessionHeader + ": " + row.ID
@@ -64,18 +62,16 @@ func (m *Manager) inferenceEnv(env map[string]string) {
 	}
 	inference := base + httpx.InferencePrefix
 	env["KEERA_BASE_URL"] = inference
-	// Both spellings, because OpenAI and Anthropic clients disagree on where
-	// the version goes.
+	// OpenAI and Anthropic clients disagree on where the version goes.
 	env["OPENAI_BASE_URL"] = inference + "/v1"
 	env["ANTHROPIC_BASE_URL"] = inference
-	// The key is only in KEERA_API_KEY, never under a vendor's name: Pi arms a
-	// built-in provider from ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or
-	// OPENAI_API_KEY, which would offer models this key cannot use and could
-	// send the key and prompts to that vendor (docs/sandboxes.md).
+	// The key is only in KEERA_API_KEY, never under a vendor's name: Pi would
+	// arm a built-in provider from it and could send the key and prompts to
+	// that vendor (docs/sandboxes.md).
 }
 
-// agentEnv configures Pi with every model the key may reach, and starts it on
-// the first of them.
+// agentEnv configures Pi with every model the key may reach, starting on the
+// first.
 func (m *Manager) agentEnv(ctx context.Context, req CreateRequest, env map[string]string) {
 	models := m.reachableModels(ctx, req)
 	if len(models) == 0 && env["KEERA_BASE_URL"] != "" {
@@ -85,9 +81,9 @@ func (m *Manager) agentEnv(ctx context.Context, req CreateRequest, env map[strin
 	}
 	if cfg := piConfig(env["KEERA_BASE_URL"], models, env["KEERA_SESSION"]); cfg != "" {
 		env["KEERA_PI_CONFIG"] = cfg
-		// Pi prefers an armed built-in provider, so without this an image that
-		// exports a vendor variable would send the key to that vendor. Only in
-		// a sandbox: `keera connect` must not override a laptop's default.
+		// Pi prefers an armed built-in provider, so an image that exports a
+		// vendor variable would send the key there. Only in a sandbox: `keera
+		// connect` must not override a laptop's default.
 		env["KEERA_PI_SETTINGS"] = piSettings(models[0].Alias)
 	}
 	if len(models) > 0 {
@@ -97,14 +93,12 @@ func (m *Manager) agentEnv(ctx context.Context, req CreateRequest, env map[strin
 	}
 }
 
-// piSettings is the Pi settings file that makes this gateway the provider a
-// sandbox starts on.
+// piSettings makes this gateway Pi's default provider.
 func piSettings(alias string) string {
 	raw, err := json.Marshal(map[string]any{
 		"defaultProvider": piProvider,
 		"defaultModel":    alias,
-		// No install ping from inside a customer's cluster, as with Claude
-		// Code's telemetry in internal/connect.
+		// No install ping from inside a customer's cluster.
 		"enableInstallTelemetry": false,
 	})
 	if err != nil {
@@ -113,14 +107,12 @@ func piSettings(alias string) string {
 	return string(raw)
 }
 
-// piProvider is the provider the connect catalogue's Pi template names, and
-// so the one Pi's settings make the default. A test compares the two.
+// piProvider must match the connect catalogue's Pi template. A test checks.
 const piProvider = "keera"
 
-// piConfig renders Pi's models.json from the template `keera connect pi`
-// prints for a laptop, so /model offers exactly what the guardrail allows. A
-// session id, given for an agent's sandbox, is sent with every request, so the
-// task is one session. It is empty with no base URL or no models: no
+// piConfig renders Pi's models.json from the `keera connect pi` template, so
+// /model offers exactly what the guardrail allows. A session id makes an
+// agent's task one session. It is empty with no base URL or no models: no
 // configuration is better than a wrong one.
 func piConfig(base string, models []connect.Model, session string) string {
 	pi, ok := connect.Find(connect.Clients(), "pi")
@@ -151,10 +143,8 @@ func piConfig(base string, models []connect.Model, session string) string {
 	return string(out)
 }
 
-// reachableModels is every enabled chat model and router this sandbox's key
-// may use, models first and in catalogue order. It resolves the allow-list the
-// inference path enforces, so the sandbox offers only models that will answer.
-// Embedding models are left out: a coding agent cannot use them.
+// reachableModels is every enabled chat model and router the key may use,
+// models first, so the sandbox offers only models that will answer.
 func (m *Manager) reachableModels(ctx context.Context, req CreateRequest) []connect.Model {
 	var failed error
 	limits := func(scope policy.ScopeType, id string) *policy.Limits {
@@ -170,15 +160,14 @@ func (m *Manager) reachableModels(ctx context.Context, req CreateRequest) []conn
 		}
 		return &lim
 	}
-	// The key mintKey issues is a standard one, so it cannot reach a
-	// subscription model either.
+	// mintKey issues a standard key, which cannot reach subscription models.
 	resolved := policy.Resolve(
 		policy.Key{OrgID: req.OrgID, ProjectID: req.ProjectID, UserID: req.UserID, Kind: policy.KeyStandard},
 		limits(policy.ScopeOrg, req.OrgID),
 		limits(policy.ScopeProject, req.ProjectID),
 		nil,
 	)
-	// Without the guardrails the list would offer models they forbid.
+	// Without the guardrails the list could offer forbidden models.
 	if failed != nil {
 		m.log.Warn("sandbox: reading the guardrails for the agent configuration failed",
 			"error", failed)
@@ -213,7 +202,7 @@ func chatModelsFor(resolved *policy.Resolved, catalogue []policy.Model,
 			MaxContext: mod.MaxContext, BackendModel: mod.BackendModel, Provider: mod.Provider,
 		})
 	}
-	// A router is named like a model, and allowed like one.
+	// A router is named and allowed like a model.
 	for _, p := range routers {
 		if resolved.MayCallRouter(p.Alias) {
 			out = append(out, connect.Model{Alias: p.Alias, Name: p.DisplayName})

@@ -64,13 +64,11 @@ func TestModelCatalogueRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Model: %v", err)
 	}
-	// The provider marks the values around it as the provider's answers, not
-	// the operator's. Without it the panel asks somebody to check them.
+	// The provider marks the values as the provider's, not the operator's.
 	if got.Provider != "anthropic" {
 		t.Errorf("Provider = %q, want the provider the entry was declared against", got.Provider)
 	}
-	// Cache rates make a hosted model's cost here match the provider's
-	// console. A lost column would read as a rate nobody set.
+	// Cache rates make a hosted model's cost match the provider's.
 	if got.CachedInputMicrosPerMTok != 100_000 || got.CacheWriteMicrosPerMTok != 1_250_000 {
 		t.Errorf("cache rates = %d read, %d write, want the stored 100000 and 1250000",
 			got.CachedInputMicrosPerMTok, got.CacheWriteMicrosPerMTok)
@@ -85,8 +83,7 @@ func TestModelCatalogueRoundTrip(t *testing.T) {
 	if got.HasAPIKey {
 		t.Error("HasAPIKey is set for a model with no stored credential")
 	}
-	// The date is stored as a date and read back as text, so check it
-	// round-trips.
+	// The date is stored as a date and read back as text.
 	if got.ReleaseDate != "2026-07-24" || got.Location != "usa" {
 		t.Errorf("release date = %q, location = %q, want 2026-07-24 and usa",
 			got.ReleaseDate, got.Location)
@@ -201,8 +198,7 @@ func TestOrganisationModelsAreScopedToTheirOrganisation(t *testing.T) {
 	put("org_1", "private", "org_1")
 	put("org_2", "fast", "org_2")
 	put("org_2", "private", "org_2")
-	// Written again, so the upsert updates it in place rather than adding a
-	// second one.
+	// Written again, so the upsert updates it in place.
 	put("org_1", "private", "org_1 again")
 
 	aliases := func(ms []policy.Model) []string {

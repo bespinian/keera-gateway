@@ -22,9 +22,8 @@ var (
 	errorKey   = []byte(`"error"`)
 )
 
-// maxEventBytes bounds how much of one server-sent event is held before it is
-// forwarded without waiting for its blank line. Anything this large cannot be
-// the small usage-only chunk, so there is no reason to hold it.
+// maxEventBytes is how much of one event is held before it is forwarded
+// without its blank line. Anything this large is not the usage-only chunk.
 const maxEventBytes = 1 << 20
 
 // tokenUsage is the usage record of streamed and buffered responses. The tags
@@ -33,8 +32,8 @@ type tokenUsage struct {
 	InputTokens  int `json:"prompt_tokens"`
 	OutputTokens int `json:"completion_tokens"`
 	// InputDetails is how much of the prompt the provider read from its cache
-	// (cheaper) and wrote to it (may cost more); see policy.Model.Cost. Both are
-	// part of InputTokens. A self-hosted plane sends none, which means no cache.
+	// and wrote to it; see policy.Model.Cost. Both are part of InputTokens. A
+	// self-hosted plane sends none, meaning no cache.
 	InputDetails struct {
 		CachedTokens     int `json:"cached_tokens"`
 		CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
@@ -68,35 +67,30 @@ func (u *tokenUsage) tokens() policy.Tokens {
 
 // streamStats is what a piped stream tells the gateway about what it carried.
 type streamStats struct {
-	// usage is the upstream's record, or nil if the stream ended before one
-	// arrived, as it does when the client disconnects.
+	// usage is the upstream's record, or nil if the stream ended first, as
+	// when the client disconnects.
 	usage *tokenUsage
 	// deltas counts chunks with generated content. vLLM sends one per token,
 	// so this estimates the output when no usage record came.
 	deltas int
 	// firstAt is when the first token (text, reasoning or a tool call) reached
-	// the client. Events that only open the answer, such as the role, do not count.
+	// the client. Events like the role do not count.
 	firstAt time.Time
-	// partial says usage was pieced together from a stream that ended early,
-	// so the row is an estimate.
+	// partial says usage was pieced together from a stream that ended early.
 	partial bool
 	// cut is why a stream read to its end is still not a whole answer: an
-	// upstream error, or no finish reason. A passed-on stream is the client's
-	// to judge, so this is only recorded.
+	// upstream error, or no finish reason. It is only recorded.
 	cut error
 }
 
-// sseLines reads a server-sent event stream one line at a time.
-//
-// It uses ReadSlice, since ReadBytes would allocate for every token. A line
-// longer than the buffer, such as a large tool call, is held until its newline
-// arrives, so it is never read as two lines.
+// sseLines reads a server-sent event stream one line at a time. It uses
+// ReadSlice, since ReadBytes would allocate for every token. A line longer
+// than the buffer is held until its newline, so it is never read as two.
 type sseLines struct {
-	rd *bufio.Reader
-	// part is a line that spans reads, until it is complete.
+	rd   *bufio.Reader
 	part []byte
-	// limit bounds part, so an upstream that never sends a newline cannot
-	// fill the gateway's memory.
+	// limit caps part, so an upstream that never sends a newline cannot fill
+	// memory.
 	limit int64
 }
 
@@ -104,13 +98,12 @@ func newSSELines(src io.Reader, limit int64) *sseLines {
 	return &sseLines{rd: bufio.NewReaderSize(src, readBuffer), limit: limit}
 }
 
-// readBuffer is what one read holds. Any event smaller than this, which is
-// every token of a completion, is read without copying.
+// readBuffer is what one read holds. Any smaller event, such as a token, is
+// read without copying.
 const readBuffer = 32 << 10
 
-// next returns the next line, terminator included, together with the error
-// that ended the read. The slice it returns is only valid until the following
-// call, exactly as ReadSlice's is.
+// next returns the next line, terminator included, and the error that ended
+// the read. The slice is valid only until the next call, as with ReadSlice.
 func (l *sseLines) next() ([]byte, error) {
 	for {
 		frag, err := l.rd.ReadSlice('\n')
@@ -132,9 +125,9 @@ func (l *sseLines) next() ([]byte, error) {
 	}
 }
 
-// eachLine calls line with every line of a server-sent event stream, and end
-// once the stream stops, so a last event cut off before its blank line still
-// counts. The stream ending is not an error; a failed read is, after end.
+// eachLine calls line for every line of a stream, and end once it stops, so
+// a last event without its blank line still counts. EOF is not an error; a
+// failed read is returned after end.
 func eachLine(src io.Reader, limit int64, line func([]byte) error, end func() error) error {
 	lines := newSSELines(src, limit)
 	for {
@@ -156,13 +149,10 @@ func eachLine(src io.Reader, limit int64, line func([]byte) error, end func() er
 	}
 }
 
-// pipeSSE forwards a server-sent event stream, flushing every event as it goes,
-// while watching for the usage record.
-//
-// dropUsageEvent removes the trailing usage-only chunk from what reaches the
-// client. It is set when the gateway, not the client, asked for that chunk.
-// alias, when set, is written as the model name of every chunk. limit bounds
-// one line.
+// pipeSSE forwards a server-sent event stream, flushing every event, while
+// watching for the usage record. dropUsageEvent removes the usage-only chunk
+// the gateway asked for itself. alias, when set, becomes every chunk's model
+// name. limit caps one line.
 func pipeSSE(dst io.Writer, flush func(), src io.Reader, alias string,
 	dropUsageEvent bool, limit int64,
 ) (streamStats, error) {
@@ -179,22 +169,21 @@ func pipeSSE(dst io.Writer, flush func(), src io.Reader, alias string,
 // nil, as chatChunks.failure decides for a translated one.
 func (p *ssePipe) failure() error { return endedFailure(p.upstreamErr, p.finished) }
 
-// ssePipe is the state of one piped stream: the event being gathered, and
-// what has been learnt so far.
+// ssePipe is the state of one piped stream.
 type ssePipe struct {
 	dst   io.Writer
 	flush func()
-	// name is the alias, encoded once for every chunk it is written into.
+	// name is the alias, JSON-encoded once.
 	name      []byte
 	dropUsage bool
-	// renamed holds the chunk with the alias in it, reused for every chunk.
+	// renamed is a reused buffer for the chunk with the alias in it.
 	renamed []byte
 
 	stats     streamStats
 	event     []byte
 	usageOnly bool
-	// generated says the event being gathered, or one before it, carries a
-	// token. Once it is set, no chunk is decoded for it again.
+	// generated says this event or an earlier one carries a token. Once set,
+	// no chunk is decoded for it again.
 	generated bool
 	// finished says a chunk gave a finish reason, which every backend sends
 	// at the end of a whole answer. upstreamErr is an error sent in place of
@@ -203,8 +192,8 @@ type ssePipe struct {
 	upstreamErr string
 }
 
-// add takes one line into the current event, and forwards the event once it
-// is complete or too large to hold.
+// add adds one line to the current event, and forwards the event once it is
+// complete or too large to hold.
 func (p *ssePipe) add(line []byte) error {
 	p.event = append(p.event, line...)
 	trimmed := bytes.TrimRight(line, "\r\n")
@@ -257,7 +246,7 @@ func (p *ssePipe) emit() error {
 }
 
 // inspect pulls what the gateway needs out of one chunk. A cheap byte search
-// comes first, so ordinary content chunks never reach the JSON decoder.
+// comes first, so content chunks never reach the JSON decoder.
 func inspect(payload []byte, stats *streamStats, usageOnly *bool) {
 	if bytes.Contains(payload, deltaKey) {
 		stats.deltas++
@@ -277,9 +266,8 @@ func inspect(payload []byte, stats *streamStats, usageOnly *bool) {
 }
 
 // generated reports whether a chat or text completion chunk carries a token
-// the model wrote. Reasoning counts: the model has started, even if the
-// client shows only the answer. vLLM and llama.cpp name it reasoning_content,
-// others reasoning.
+// the model wrote. Reasoning counts, since the model has started. vLLM and
+// llama.cpp call it reasoning_content, others reasoning.
 func generated(payload []byte) bool {
 	var chunk struct {
 		Choices []struct {
@@ -292,8 +280,8 @@ func generated(payload []byte) bool {
 			} `json:"delta"`
 		} `json:"choices"`
 	}
-	// A field of an unexpected type fails the decode but leaves the rest
-	// read, so the error is not a verdict.
+	// A field of an unexpected type fails the decode but the rest is still
+	// read, so the error is ignored.
 	_ = json.Unmarshal(payload, &chunk)
 	for _, c := range chunk.Choices {
 		d := c.Delta
@@ -305,14 +293,13 @@ func generated(payload []byte) bool {
 	return false
 }
 
-// hasUsage reports whether payload has a usage key with a value other than
-// null. With include_usage, OpenAI sends "usage":null in every chunk, and
-// only the last one needs decoding.
+// hasUsage reports whether payload has a non-null usage. With include_usage,
+// OpenAI sends "usage":null in every chunk; only the last needs decoding.
 func hasUsage(payload []byte) bool { return hasValue(payload, usageKey) }
 
-// hasValue reports whether payload has key with a value other than null,
-// without decoding it. Inside a string a quote is escaped, so the quoted key
-// followed by a colon is only ever a key.
+// hasValue reports whether payload has key with a non-null value, without
+// decoding it. Quotes in a string are escaped, so the quoted key followed by
+// a colon is always a key.
 func hasValue(payload, key []byte) bool {
 	_, after, ok := bytes.Cut(payload, key)
 	if !ok {
@@ -326,16 +313,13 @@ func hasValue(payload, key []byte) bool {
 	return !bytes.HasPrefix(rest, []byte("null"))
 }
 
-// flushBeforeRead holds back a stream's flushes until the gateway goes back to
-// the upstream for more.
+// flushBeforeRead holds back a stream's flushes until the gateway reads from
+// the upstream again. A flush is a system call, and one per token was most of
+// a stream's CPU. The pipes read through a bufio.Reader, so the events of one
+// read go out in one write, and a busy gateway flushes less.
 //
-// A flush is a system call, and one per token was most of a stream's CPU. The
-// pipes read through a bufio.Reader, which reads from here only once its events
-// are used up, so the events of one read go out in one write. A busy gateway
-// reads more per call and so flushes less, which is when it matters.
-//
-// A timer writes pings while the read waits, so all writes and flushes go
-// through one lock, and a flush asked for during that wait happens at once.
+// A timer writes pings while the read waits, so writes and flushes share one
+// lock, and a flush asked for during the wait happens at once.
 type flushBeforeRead struct {
 	src     io.Reader
 	dst     io.Writer
@@ -403,11 +387,10 @@ func usageFromResponse(raw []byte) *tokenUsage {
 }
 
 // scanSSE walks the data payloads of a server-sent event stream, joining an
-// event's data lines the way the format says to and skipping the terminator.
-// limit bounds one event's payload.
+// event's data lines and skipping the terminator. limit caps one payload.
 func scanSSE(src io.Reader, limit int64, fn func(payload []byte) error) error {
-	// data holds one event's payload and is reused for the next, to avoid an
-	// allocation per token. fn must not keep what it is given.
+	// data is reused for every event, to avoid an allocation per token. fn
+	// must not keep what it is given.
 	var data []byte
 
 	complete := func() error {
@@ -468,19 +451,18 @@ type oaiToolCallDelta struct {
 	} `json:"function"`
 }
 
-// chatChunks is what a stream translated into another API learns from a chat
-// completion stream besides its content. Both the Messages and the Responses
-// streams embed it.
+// chatChunks is what a translated stream learns from a chat completion stream
+// besides its content. The Messages and Responses streams embed it.
 type chatChunks struct {
 	finishReason string
 	usage        *tokenUsage
-	// deltas counts the chunks the model wrote into, reasoning included,
-	// as the chat pipe does: a client that hangs up is charged on it.
+	// deltas counts chunks the model wrote into, reasoning included. A
+	// client that hangs up is charged on it.
 	deltas int
 	// firstAt is when the first token arrived. A translation drops reasoning,
-	// so this can be earlier than the first event the client is sent.
+	// so this can be before the client's first event.
 	firstAt time.Time
-	// upstreamErr is the message of an error the upstream sent mid-stream.
+	// upstreamErr is an error message the upstream sent mid-stream.
 	upstreamErr string
 }
 
@@ -491,8 +473,7 @@ func (c *chatChunks) fold(payload []byte, text func(string) error,
 ) error {
 	var chunk oaiStreamChunk
 	if json.Unmarshal(payload, &chunk) != nil {
-		// An unreadable chunk is skipped: the rest of the turn is still worth
-		// delivering.
+		// An unreadable chunk is skipped; the rest is still worth delivering.
 		return nil
 	}
 	if chunk.Usage != nil {

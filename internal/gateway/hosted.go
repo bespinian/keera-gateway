@@ -7,20 +7,17 @@ import (
 	"strings"
 )
 
-// Hosted tools run on the provider's own servers: web search, fetching a URL,
-// running code, a remote MCP server. They reach the outside world from the
-// provider's side, where no guardrail of this gateway sees what went where.
+// Hosted tools, such as web search or a remote MCP server, run on the
+// provider's servers, out of sight of this gateway's guardrails.
 //
-// On the deployment's own provider key they are taken out before forwarding,
-// as the provider charges for them apart from tokens. Only the tools the
-// client runs itself are kept. The list names what is kept, not what is taken
-// out, so a hosted tool released next month is taken out too.
+// On the deployment's own provider key they are removed, since the provider
+// charges for them apart from tokens. The list names the tools that are kept,
+// so a new hosted tool is removed too.
 
 // anthropicClientTools and openAIClientTools are the tool types the client
-// runs, by type, or by prefix for entries ending in '_'. An Anthropic tool
-// with no type is one the client declared, like a function. An OpenAI
-// namespace holds only functions and custom tools: Codex puts each MCP server
-// and its own subagent tools in one.
+// runs, matched by prefix for entries ending in '_'. An Anthropic tool with no
+// type is a client tool. An OpenAI namespace holds only functions and custom
+// tools; Codex puts each MCP server in one.
 var (
 	anthropicClientTools = []string{"custom", "bash_", "text_editor_", "computer_", "memory_"}
 	openAIClientTools    = []string{
@@ -29,7 +26,6 @@ var (
 	}
 )
 
-// keepsTool reports whether a tool of this type is one the client runs.
 func keepsTool(typ string, client []string) bool {
 	if typ == "" {
 		return true
@@ -39,9 +35,8 @@ func keepsTool(typ string, client []string) bool {
 	})
 }
 
-// stripTools removes the hosted tools from a request's tools array and returns
-// their names. A tool_choice that named one goes too, or the provider would
-// refuse the request for naming a tool it was not offered.
+// stripTools removes the hosted tools and returns their names. A tool_choice
+// naming one goes too, or the provider would refuse the request.
 func stripTools(b *body, client []string) []string {
 	raw, ok := b.value("tools")
 	if !ok {
@@ -88,7 +83,7 @@ func stripTools(b *body, client []string) []string {
 }
 
 // choiceKinds are the tool_choice types that say how to choose, rather than
-// name a hosted tool to use.
+// name a hosted tool.
 var choiceKinds = []string{
 	"auto", "any", "none", "required", "tool", "function", "custom",
 	"allowed_tools",
@@ -101,7 +96,7 @@ func hostedChoice(typ string, client []string) bool {
 }
 
 // stripHostedTools on the Messages API also drops mcp_servers, which asks
-// Anthropic to connect to the servers it lists.
+// Anthropic to connect to those servers.
 func (anthropicDialect) stripHostedTools(b *body) []string {
 	removed := stripTools(b, anthropicClientTools)
 	if b.remove("mcp_servers") {

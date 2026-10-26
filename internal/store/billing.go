@@ -9,9 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// queueBills adds an event's billable calls to the batch, so they are written
-// with the event. When the event cannot be written, they are written alone:
-// see the bills-only fallback in WriteEvents.
+// queueBills adds an event's billable calls to the batch, to be written with
+// the event, or alone if the event cannot be (see WriteEvents).
 func queueBills(batch *pgx.Batch, e Event) {
 	for _, b := range e.Bills {
 		batch.Queue(`INSERT INTO billing_lines (ts, org_id, alias, provider, backend_model,
@@ -24,10 +23,9 @@ func queueBills(batch *pgx.Batch, e Event) {
 	}
 }
 
-// queueCredit takes what a batch's billing lines cost from each
-// organisation's credit. Summed per organisation, like spend, so a busy
-// account row is locked once per batch; and in sorted order, so replicas
-// take the locks in the same order.
+// queueCredit takes a batch's billing cost from each organisation's credit,
+// summed per organisation so a busy row is locked once per batch, and sorted
+// so replicas lock in the same order.
 func queueCredit(batch *pgx.Batch, events []Event) {
 	used := map[string]int64{}
 	for _, e := range events {

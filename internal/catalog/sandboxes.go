@@ -18,9 +18,8 @@ type sandboxFile struct {
 
 // Sandbox is one declared class.
 //
-// The resource fields are strings, so a file can say "4" and "16Gi" as
-// Kubernetes files do. They are parsed and checked here, once. The control
-// API takes the parsed policy.SandboxClass, the same shape it returns.
+// The resource fields are strings, so a file can say "4" and "16Gi" as in
+// Kubernetes. The control API takes the parsed policy.SandboxClass.
 type Sandbox struct {
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
@@ -40,9 +39,8 @@ type Sandbox struct {
 	Purposes   []string `yaml:"purposes"`
 }
 
-// Defaults for what an entry does not say. Each one guards against a mistake:
-// a class with no lifetime or ceiling is a machine somebody must remember to
-// stop.
+// Defaults for what an entry does not say: a class with no lifetime or ceiling
+// is a machine somebody must remember to stop.
 const (
 	// DefaultSandboxTTL and DefaultSandboxMaxTTL also give a sandbox whose
 	// class was deleted its lifetimes.
@@ -50,14 +48,13 @@ const (
 	DefaultSandboxMaxTTL    = 24 * time.Hour
 	defaultSandboxCPUMillis = 2000
 	defaultSandboxMemoryMiB = 4096
-	// minSandboxTTL is the floor. A shorter sandbox could expire while its
-	// image is still being pulled.
+	// minSandboxTTL is the floor: a shorter sandbox could expire while its
+	// image is pulled.
 	minSandboxTTL = 5 * time.Minute
-	// maxSandboxTTL is the ceiling: long enough for any task, but sandboxes
-	// must not live for ever.
+	// maxSandboxTTL is the ceiling: long enough for any task.
 	maxSandboxTTL = 28 * 24 * time.Hour
-	// maxWarm bounds a warm pool. Every warm sandbox holds the class's full
-	// CPU and memory with nobody using it, so a typo here costs money.
+	// maxWarm bounds a warm pool. Each warm sandbox holds its full CPU and
+	// memory unused, so a typo costs money.
 	maxWarm = 32
 )
 
@@ -122,8 +119,8 @@ func ParseSandbox(s Sandbox) (policy.SandboxClass, error) {
 	return c, nil
 }
 
-// CheckSandboxClass holds a class sent to the control API to the rules a
-// file's entry is held to, and fills in the same defaults for what is zero.
+// CheckSandboxClass holds a class sent to the control API to the same rules
+// and defaults as a file's entry.
 func CheckSandboxClass(c policy.SandboxClass) (policy.SandboxClass, error) {
 	s := Sandbox{
 		Name: c.Name, Description: c.Description, Image: c.Image,
@@ -154,9 +151,8 @@ func CheckSandboxClass(c policy.SandboxClass) (policy.SandboxClass, error) {
 func parseIsolation(s Sandbox, c *policy.SandboxClass) error {
 	c.Isolation = policy.Isolation(strings.ToLower(strings.TrimSpace(s.Isolation)))
 	if c.Isolation == "" {
-		// Not "standard": a class written without thought for isolation should
-		// still get a real boundary, and this tier needs nothing from the
-		// hardware.
+		// Not "standard": a class should still get a real boundary, and this
+		// tier needs nothing from the hardware.
 		c.Isolation = policy.IsolationIsolated
 	}
 	if !c.Isolation.Valid() {
@@ -245,8 +241,8 @@ func parseCPU(raw string, def int) (int, error) {
 
 // parseMiB reads a byte quantity into mebibytes, with Kubernetes suffixes.
 //
-// A bare number is mebibytes, not bytes as in Kubernetes: "memory: 4096"
-// meaning four kilobytes would be a class nothing can schedule.
+// A bare number is mebibytes, not bytes as in Kubernetes, where
+// "memory: 4096" would be four kilobytes.
 func parseMiB(raw string, def int) (int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -294,9 +290,8 @@ func parseTTL(raw string, def time.Duration) (time.Duration, error) {
 	return d, nil
 }
 
-// LoadSandboxes reads and validates a sandbox template file. Like the model
-// file it is a template: each new organisation starts with a copy of every
-// class it declares.
+// LoadSandboxes reads and validates a sandbox template file, which each new
+// organisation starts with a copy of.
 func LoadSandboxes(path string) ([]policy.SandboxClass, error) {
 	return load(path, parseSandboxFile)
 }

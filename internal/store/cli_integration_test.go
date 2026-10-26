@@ -7,11 +7,9 @@ import (
 	"time"
 )
 
-// A command-line sign-in is two rows, both credentials. These tests cover what
-// no fake can: redeeming a code deletes it, an expired row is invisible, and
-// the cascades off a person take both.
+// A command-line sign-in is two rows, both credentials: redeeming a code
+// deletes it, an expired row is invisible, and deleting a person removes both.
 
-// signedInUser is one person to hang a sign-in on.
 func signedInUser(t *testing.T, st *Store, ctx context.Context) string {
 	t.Helper()
 	if _, err := st.CreateOrg(ctx, Org{ID: "org_1", Name: "Example Bank"}, OrgTemplate{}); err != nil {
@@ -24,8 +22,7 @@ func signedInUser(t *testing.T, st *Store, ctx context.Context) string {
 	return u.ID
 }
 
-// The code is a credential in the URL the browser carries, so it is worth
-// nothing the second time, wherever the second reader got it from.
+// The code travels in a URL, so it works only once.
 func TestACLICodeIsRedeemedExactlyOnce(t *testing.T) {
 	st, ctx := db(t)
 	userID := signedInUser(t, st, ctx)
@@ -48,8 +45,7 @@ func TestACLICodeIsRedeemedExactlyOnce(t *testing.T) {
 	}
 }
 
-// An expired code is a sign-in somebody walked away from. Every reader treats
-// it as gone before the sweep removes it, so nothing depends on the sweep.
+// An expired code reads as gone before the sweep removes it.
 func TestAnExpiredCLICodeIsAlreadyGone(t *testing.T) {
 	st, ctx := db(t)
 	userID := signedInUser(t, st, ctx)
@@ -64,8 +60,8 @@ func TestAnExpiredCLICodeIsAlreadyGone(t *testing.T) {
 	}
 }
 
-// Every command presents the token, so a lookup carries the person behind it:
-// their role and organisation authorise the request.
+// A token lookup carries the person behind it, whose role and organisation
+// authorise the request.
 func TestACLITokenResolvesToThePersonBehindIt(t *testing.T) {
 	st, ctx := db(t)
 	userID := signedInUser(t, st, ctx)
@@ -106,9 +102,8 @@ func TestAnExpiredCLITokenIsNotAToken(t *testing.T) {
 	}
 }
 
-// "Signs them out everywhere" is what a role change relies on, and a terminal
-// somebody is still signed in on is part of everywhere. A half-finished sign-in
-// goes too: it would mint a fresh token seconds later.
+// Signing somebody out also ends their command-line tokens and half-finished
+// sign-ins, which could mint a fresh token.
 func TestSigningSomebodyOutReachesTheirTerminals(t *testing.T) {
 	st, ctx := db(t)
 	userID := signedInUser(t, st, ctx)
@@ -135,8 +130,8 @@ func TestSigningSomebodyOutReachesTheirTerminals(t *testing.T) {
 	}
 }
 
-// The loopback handshake rides on the login flow, because the callback that
-// completes a sign-in must not read where to send the answer out of its own URL.
+// The loopback handshake is stored on the login flow, because the callback
+// must not read where to send the answer from its own URL.
 func TestALoginFlowCarriesTheLoopbackHandshake(t *testing.T) {
 	st, ctx := db(t)
 
@@ -160,8 +155,8 @@ func TestALoginFlowCarriesTheLoopbackHandshake(t *testing.T) {
 	}
 }
 
-// An ordinary sign-in carries none of it, and must not read as one that does -
-// that would redirect somebody's browser to a port nothing is listening on.
+// An ordinary sign-in carries none of it, and must not read as a command-line
+// one.
 func TestAPanelSignInIsNotACommandLineOne(t *testing.T) {
 	st, ctx := db(t)
 

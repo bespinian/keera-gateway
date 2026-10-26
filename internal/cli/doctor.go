@@ -1,10 +1,7 @@
 package cli
 
-// `keera doctor` - one command for "why does this not work".
-//
-// The checks and their verdicts come from the control plane (see
-// internal/control/diagnostics.go). This renders them and turns a failure
-// into an exit code, so a pipeline can run it too.
+// `keera doctor` shows the control plane's checks (internal/control/diagnostics.go)
+// and turns a failure into an exit code.
 
 import (
 	"context"
@@ -30,8 +27,7 @@ func doctorCmd(ctx context.Context, args []string) error {
 	if *probe {
 		q.Set("probe", "1")
 	}
-	// An organisation is optional: without one, the checks that need it are
-	// skipped, so only a given one that cannot be found is an error.
+	// Without an organisation the checks that need one are skipped.
 	org, err := resolveOrg(ctx, c, r.org)
 	if err != nil && r.org != "" {
 		return err
@@ -61,8 +57,7 @@ func doctorCmd(ctx context.Context, args []string) error {
 		printDiagnosis(c.base, d)
 	}
 
-	// A failed check fails the command, so an install script can end with it.
-	// Warnings do not: a deployment with warnings still works.
+	// Warnings do not fail the command: a deployment with warnings still works.
 	if d.Failures > 0 {
 		return fmt.Errorf("%s failed", plural(d.Failures, "check"))
 	}
@@ -72,9 +67,7 @@ func doctorCmd(ctx context.Context, args []string) error {
 func printDiagnosis(base string, d control.Diagnosis) {
 	fmt.Printf("%s\n\n", style.head(base))
 
-	// Details and fixes are wrapped to fit after the verdict and the longest
-	// name. Their later lines start with two empty cells, so they stay in the
-	// detail column.
+	// Wrapped lines start with two empty cells to stay in the detail column.
 	nameWidth := 0
 	for _, check := range d.Checks {
 		nameWidth = max(nameWidth, len([]rune(check.Name)))
@@ -116,15 +109,14 @@ func printDiagnosis(base string, d control.Diagnosis) {
 		fmt.Println(style.ok("Everything checks out."))
 	}
 	if !d.Probed {
-		// Said every time, so a clean report is not read as proof that the
-		// models answer.
+		// Said every time, so a clean report is not read as proof the models
+		// answer.
 		fmt.Println("The inference plane was not called: 'keera doctor --probe' asks each " +
 			"model to answer.")
 	}
 }
 
-// mark is a verdict as a word, painted when there is colour. The padding is
-// outside the paint, so the columns are the same either way.
+// mark pads outside the paint, so the columns line up with or without colour.
 func mark(v control.Verdict) string {
 	switch v {
 	case control.VerdictFail:

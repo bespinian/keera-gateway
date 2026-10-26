@@ -9,8 +9,7 @@ import (
 )
 
 // Directory is how recently a person's identity provider vouched for them.
-// Session and token lookups carry it, so deciding whether to ask again costs
-// no extra query.
+// Session and token lookups carry it, to save a query.
 type Directory struct {
 	// Linked means a refresh token is stored, so the directory can be asked.
 	Linked    bool
@@ -27,13 +26,13 @@ func (d Directory) Due(now time.Time, every time.Duration) bool {
 const directoryColumns = `i.refresh_token IS NOT NULL,
 	COALESCE(i.directory_checked_at, 'epoch'::timestamptz)`
 
-// identityJoin brings in what the directory said about the identity of the
-// users row u. Every row of one person shares it.
+// identityJoin brings in what the directory said about the identity of users
+// row u. Every row of one person shares it.
 const identityJoin = ` LEFT JOIN identities i ON i.external_id = u.external_id`
 
 // RecordDirectoryCheck notes that the directory just vouched for an identity
-// and keeps the refresh token it returned, sealed. Nil keeps the stored one:
-// Google hands one out only the first time a person consents.
+// and keeps its sealed refresh token. Nil keeps the stored one, since Google
+// issues one only at first consent.
 func (s *Store) RecordDirectoryCheck(ctx context.Context, externalID string, sealed []byte) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO identities (external_id, refresh_token, directory_checked_at)
 		VALUES ($1, $2, now())
@@ -43,10 +42,10 @@ func (s *Store) RecordDirectoryCheck(ctx context.Context, externalID string, sea
 	return err
 }
 
-// ClaimDirectoryCheck takes the next check of an identity's directory, if one
-// is due, and returns the sealed refresh token to make it with. Only one
-// caller wins: a provider that rotates refresh tokens refuses the second use
-// of one, and that refusal would sign the person out.
+// ClaimDirectoryCheck takes the next due check of an identity's directory and
+// returns the sealed refresh token for it. Only one caller wins, since a
+// provider that rotates tokens would refuse a second use and sign the person
+// out.
 func (s *Store) ClaimDirectoryCheck(ctx context.Context, externalID string,
 	checkedBefore time.Time,
 ) ([]byte, bool, error) {
@@ -61,9 +60,8 @@ func (s *Store) ClaimDirectoryCheck(ctx context.Context, externalID string,
 	return sealed, err == nil, err
 }
 
-// EndDirectoryLink drops an identity's refresh token and every sign-in it
-// holds, in every organisation, for when its directory no longer vouches for
-// it.
+// EndDirectoryLink drops an identity's refresh token and all its sign-ins, in
+// every organisation, when its directory no longer vouches for it.
 func (s *Store) EndDirectoryLink(ctx context.Context, externalID string) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, "UPDATE identities SET refresh_token = NULL WHERE external_id = $1",

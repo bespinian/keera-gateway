@@ -36,9 +36,7 @@ func pick(id string, branches map[string]*Step) *Step {
 	}
 }
 
-// exampleRouter is the one in docs/routers.md: a pattern filter, a budget
-// that sends what is over it to the local model, and a route step whose
-// hosted branch is redacted first.
+// exampleRouter is the one in docs/routers.md.
 func exampleRouter() Router {
 	return Router{OrgID: "org_1", Alias: "safe", Start: &Step{
 		ID: "secrets", Kind: StepFilter, Ref: "secrets",
@@ -60,8 +58,8 @@ func TestRouterExampleIsValid(t *testing.T) {
 	if msg := p.Problem(routerRefs()); msg != "" {
 		t.Fatalf("Problem() = %q", msg)
 	}
-	// Every model a request may end at: the budget's fallback, the route
-	// step's destination without a branch, and the end of its hosted branch.
+	// The budget's fallback, the route step's unbranched destination, and the
+	// end of its hosted branch.
 	got := p.Reaches()
 	slices.Sort(got)
 	if want := []string{"hosted", "local"}; !slices.Equal(got, want) {
@@ -274,8 +272,7 @@ func TestRouteStepProblems(t *testing.T) {
 			"no destinations", route(func(s *Step) { s.Destinations, s.Fallback = nil, "" }),
 			"needs 'destinations'",
 		},
-		// It would be left out of the choice, so the step would quietly choose
-		// between fewer models than it says.
+		// The step would quietly choose between fewer models than it says.
 		{
 			"a destination that does not exist",
 			route(func(s *Step) { s.Destinations = []string{"local", "huge"} }),
@@ -303,8 +300,7 @@ func TestRouteStepProblems(t *testing.T) {
 				s.Fallback = ""
 			}), "the limit is 16",
 		},
-		// It is where a request goes when the decision could not be made, so
-		// it has to be somewhere the step could send it anyway.
+		// The fallback has to be somewhere the step could send anyway.
 		{
 			"a fallback that is not a destination",
 			route(func(s *Step) { s.Fallback = "embed" }), "not one of its destinations",
@@ -365,8 +361,7 @@ func TestRouteStepProblems(t *testing.T) {
 			"a header step without values",
 			byHeader(func(s *Step) { s.Values = nil }), "needs 'values'",
 		},
-		// The header's value is compared in lowercase, so this one would
-		// never match.
+		// Values are compared in lowercase, so this would never match.
 		{
 			"a value in capitals",
 			byHeader(func(s *Step) { s.Values = map[string]string{"Hard": "hosted"} }),
@@ -396,8 +391,7 @@ func TestRouteStepProblems(t *testing.T) {
 	}
 
 	t.Run("one destination is enough", func(t *testing.T) {
-		// It gives clients a name that stays the same while the model
-		// behind it changes.
+		// It gives clients a stable name.
 		for _, mode := range routeModes {
 			s := &Step{ID: "r", Kind: StepRoute, Mode: mode, Destinations: []string{"local"}}
 			if mode.Decides() {
@@ -413,8 +407,7 @@ func TestRouteStepProblems(t *testing.T) {
 		}
 	})
 	t.Run("a header step with a fallback", func(t *testing.T) {
-		// The fallback takes a request without the header, so it needs no
-		// value of its own.
+		// The fallback takes a request without the header.
 		p := Router{OrgID: "org_1", Alias: "p", Start: byHeader(func(*Step) {})}
 		if got := p.Problem(routerRefs()); got != "" {
 			t.Errorf("Problem() = %q", got)
@@ -488,8 +481,8 @@ func TestRouterScopeIsItsOwn(t *testing.T) {
 	}
 }
 
-// A rate limit per minute is token buckets, as a key's is. Per day or month it
-// is counted like a budget, one window for requests and one for tokens.
+// A rate limit per minute is token buckets. Per day or month it is counted
+// like a budget, one window each for requests and tokens.
 func TestRouterRateLimitScopes(t *testing.T) {
 	p := Router{OrgID: "org_1", Alias: "safe"}
 

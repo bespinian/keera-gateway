@@ -9,9 +9,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// modelEntry is one model or router as /v1/models lists it. It carries the
-// fields of both OpenAI's and Anthropic's model list, so an SDK of either
-// reads it.
+// modelEntry is one model or router as /v1/models lists it, with the fields of
+// both OpenAI's and Anthropic's model list.
 type modelEntry struct {
 	ID      string `json:"id"`
 	Object  string `json:"object"`
@@ -20,20 +19,14 @@ type modelEntry struct {
 	// Type and CreatedAt are Anthropic's names for Object and Created.
 	Type      string `json:"type"`
 	CreatedAt string `json:"created_at,omitempty"`
-	// MaxContext is not part of the OpenAI shape, but clients that know to
-	// look for it can size a request without being told out of band.
+	// MaxContext is not an OpenAI field, but lets clients size a request.
 	MaxContext int `json:"max_context_tokens,omitempty"`
-	// DisplayName is the model's or router's name for people, as Anthropic's
-	// API calls it. Anthropic's has one for every model, so the alias stands
-	// in.
+	// DisplayName falls back to the alias, since Anthropic always sends one.
 	DisplayName string `json:"display_name"`
-	// Description says what the model is for, so a person choosing has
-	// more to go on than the name.
 	Description string `json:"description,omitempty"`
 	// Location says where prompts sent to the model go.
 	Location string `json:"location,omitempty"`
-	// Destinations is set only on routers, which is also how a client
-	// tells them from a model.
+	// Destinations is set only on routers, which tells them from models.
 	Destinations []string `json:"destinations,omitempty"`
 }
 
@@ -49,9 +42,8 @@ func modelEntryOf(m policy.Model) modelEntry {
 	return e
 }
 
-// routerEntryOf lists a router as a model, because a client names it in
-// the same field. Its destinations are every model it may send to. It has no
-// context window of its own, so none is given.
+// routerEntryOf lists a router as a model, since a client names it in the same
+// field. It has no context window of its own.
 func (s *Server) routerEntryOf(p policy.Router) modelEntry {
 	return modelEntry{
 		ID: p.Alias, Object: "model", Type: "model", OwnedBy: "keera",
@@ -60,9 +52,8 @@ func (s *Server) routerEntryOf(p policy.Router) modelEntry {
 	}
 }
 
-// listModels answers /v1/models with the models and routers this key may
-// use. Clients discover through it, so it must never leak one the key cannot
-// reach.
+// listModels answers /v1/models with the models and routers this key may use,
+// and never one it cannot reach.
 func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 	res, ok := s.authenticate(w, r, openAIShape{})
 	if !ok {
@@ -70,8 +61,8 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []modelEntry{}
 	for _, m := range s.src.Models(res.Key.OrgID) {
-		// A locked model would only refuse, so a client is not offered it.
-		// Nor a decision model, which answers only routers and gates.
+		// Locked models would only refuse, and decision models serve only
+		// routers and gates.
 		if m.Enabled && !m.Locked && m.Kind != policy.KindDecision && res.MayUse(m) {
 			out = append(out, modelEntryOf(m))
 		}
@@ -81,8 +72,7 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 			out = append(out, s.routerEntryOf(p))
 		}
 	}
-	// The list is never paged. has_more and the two ids are Anthropic's
-	// paging fields, which its SDKs read.
+	// The list is never paged, but Anthropic's SDKs read its paging fields.
 	list := map[string]any{
 		"object": "list", "data": out, "has_more": false,
 		"first_id": nil, "last_id": nil,
@@ -101,7 +91,7 @@ func (s *Server) getModel(w http.ResponseWriter, r *http.Request) {
 	alias := r.PathValue("alias")
 	n, ok := s.callable(res, alias, "")
 	switch {
-	// A locked model is left out of the list, so it is not described either.
+	// A locked model is not listed, so it is not described either.
 	case !ok, !n.viaRouter() && n.model.Locked:
 		httpx.WriteNotFound(w, "model_not_found", s.advise(modelNotFound(alias)))
 	case n.viaRouter():
@@ -111,7 +101,7 @@ func (s *Server) getModel(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// named is what a request's 'model' field names: a model or a router.
+// named is a model or router named by a request's 'model' field.
 type named struct {
 	model  policy.Model
 	router policy.Router
@@ -119,20 +109,17 @@ type named struct {
 
 func (n named) viaRouter() bool { return n.router.Alias != "" }
 
-// callable decides what a key may name as its model: a model it may use, or
-// else one of its organisation's routers. kind narrows it to one API
-// surface, and empty accepts any. Routers answer only chat, and a decision
-// model no client at all.
+// callable decides what a key may name as its model: a model it may use, or a
+// router. kind narrows it to one API surface; empty accepts any. Routers
+// answer only chat, and decision models no client.
 //
-// Every route that takes a model name asks here, so they all agree. What is
-// missing and what is forbidden are both "not found", so other projects'
-// models cannot be discovered through 403s.
+// Every route that takes a model name asks here. Missing and forbidden are
+// both "not found", so other projects' models cannot be found through 403s.
 func (s *Server) callable(res *policy.Resolved, alias string, kind policy.Kind) (named, bool) {
 	if alias == "" {
 		return named{}, false
 	}
-	// A model is looked up first. The control plane refuses a router named
-	// like a model, and a model named like a router, so the two rarely meet.
+	// Models first. The control plane keeps router and model aliases apart.
 	if m, found := s.findModel(res.Key, alias); found {
 		ok := m.Enabled && m.Kind != policy.KindDecision && (kind == "" || m.Kind == kind) &&
 			res.MayUse(m)
@@ -147,9 +134,8 @@ func (s *Server) callable(res *policy.Resolved, alias string, kind policy.Kind) 
 	return named{}, false
 }
 
-// servedAt names the endpoints a model the key may use is served at, for a
-// request that named it at an endpoint for another kind of model. It is ""
-// for any other model, so a refusal says nothing a key could not list.
+// servedAt names the endpoints that serve a model, for a request that used
+// the wrong endpoint. It is "" for a model the key may not use.
 func (s *Server) servedAt(res *policy.Resolved, alias string) string {
 	m, found := s.findModel(res.Key, alias)
 	if !found || !m.Enabled || !res.MayUse(m) {
@@ -163,12 +149,10 @@ func (s *Server) servedAt(res *policy.Resolved, alias string) string {
 	case policy.KindEmbedding:
 		return "/v1/embeddings"
 	}
-	// No client can name a decision model.
 	return ""
 }
 
-// created is the model's release date as a Unix time, which is what OpenAI's
-// "created" field holds. Zero when no date is stated.
+// created is the model's release date as Unix time, or 0.
 func created(m policy.Model) int64 {
 	t, err := time.Parse(time.DateOnly, m.ReleaseDate)
 	if err != nil {

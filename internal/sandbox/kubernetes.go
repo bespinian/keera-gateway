@@ -15,9 +15,8 @@ import (
 )
 
 // The Kubernetes driver writes one Sandbox object per sandbox, and the
-// agent-sandbox controller (sigs.k8s.io/agent-sandbox) runs it. It gives a
-// stable identity, a volume that survives a suspend, and a scheduled end,
-// without Keera owning a controller:
+// agent-sandbox controller (sigs.k8s.io/agent-sandbox) runs it, so Keera needs
+// no controller of its own:
 //
 //	spec.shutdownTime    when it tears the sandbox down, even if the gateway is gone
 //	spec.shutdownPolicy  whether the object survives that
@@ -25,8 +24,8 @@ import (
 //	volumeClaimTemplates the home directory, kept across a suspend
 //	status.conditions    Ready, PodScheduled, Suspended, Finished
 //
-// Because the controller owns the expiry, a gateway that crashes for good
-// leaves no sandboxes running.
+// The controller owns the expiry, so a gateway that dies for good leaves no
+// sandboxes running.
 
 const (
 	sandboxAPIGroup   = "agents.x-k8s.io"
@@ -36,24 +35,20 @@ const (
 
 type KubernetesOptions struct {
 	Kube KubeConfig
-	// Namespace is where sandboxes are created. Keep it separate from the
-	// gateway's own: a sandbox's API key is in its pod spec, so anybody who can
-	// read pods there can read every sandbox's key.
+	// Namespace must be separate from the gateway's: anybody who can read pods
+	// there can read every sandbox's API key.
 	Namespace string
-	// Runtimes maps an isolation tier to this cluster's RuntimeClass names. A
-	// tier with no entry is refused at creation, never downgraded.
+	// Runtimes maps isolation tiers to RuntimeClass names. A tier with no
+	// entry is refused, never downgraded.
 	Runtimes map[policy.Isolation]string
-	// StorageClass provisions the home volume. Empty uses the cluster default,
-	// which may be too slow for build output.
+	// StorageClass empty uses the cluster default, which may be slow for
+	// builds.
 	StorageClass string
-	// ServiceAccount is what a sandbox pod runs as. Empty is the namespace's
-	// default, with its token not mounted.
-	ServiceAccount string
-	// ImagePullSecrets are passed to the pod for a registry that needs one.
+	// ServiceAccount empty is the namespace's default, with no token mounted.
+	ServiceAccount   string
 	ImagePullSecrets []string
-	// Warm switches warm pools on. It needs the agent-sandbox warm-pool
-	// extension (extensions.agents.x-k8s.io/v1beta1), so it is its own
-	// setting: without the extension, every pool reconcile would fail.
+	// Warm needs the warm-pool extension (extensions.agents.x-k8s.io/v1beta1),
+	// so it is a setting of its own.
 	Warm bool
 	Log  *slog.Logger
 }
@@ -63,16 +58,14 @@ type Kubernetes struct {
 	opts KubernetesOptions
 }
 
-// NewKubernetes builds the driver and checks it can reach the API server. It
-// lists sandboxes rather than asking for the version, because that proves at
-// start that the Sandbox CRD is installed and this service account may use it.
+// NewKubernetes lists sandboxes as a check, which proves the Sandbox CRD is
+// installed and the service account may use it.
 func NewKubernetes(ctx context.Context, opts KubernetesOptions) (*Kubernetes, error) {
 	if opts.Log == nil {
 		opts.Log = slog.Default()
 	}
 	if opts.Namespace == "" {
-		// Allowed, so an install that never set it still starts, but warned
-		// about.
+		// Allowed so an install without it still starts, but warned about.
 		opts.Namespace = inClusterNamespace()
 		opts.Log.Warn("KEERA_SANDBOX_NAMESPACE is not set, so sandboxes run in the "+
 			"gateway's namespace, where anyone who can read pods can read their API keys; "+
@@ -101,8 +94,6 @@ func NewKubernetes(ctx context.Context, opts KubernetesOptions) (*Kubernetes, er
 
 func (k *Kubernetes) Name() string { return "kubernetes" }
 
-// Capabilities derives the isolation tiers from the runtime mapping, so the
-// driver cannot claim one it cannot deliver.
 func (k *Kubernetes) Capabilities() Capabilities {
 	return capabilitiesFor(k.opts.Runtimes, k.opts.Warm)
 }
@@ -117,8 +108,7 @@ func (k *Kubernetes) sandboxPath(name string) string {
 	return k.collection() + "/" + url.PathEscape(name)
 }
 
-// kubeSandbox is the part of the Sandbox resource this driver reads or
-// writes. The rest belongs to the controller.
+// kubeSandbox is the part of the Sandbox resource this driver uses.
 type kubeSandbox struct {
 	APIVersion string            `json:"apiVersion,omitempty"`
 	Kind       string            `json:"kind,omitempty"`
@@ -156,8 +146,8 @@ type kubePod struct {
 	Containers                   []kubeContainer  `json:"containers"`
 	Volumes                      []kubeVolume     `json:"volumes,omitempty"`
 	ImagePullSecrets             []kubeNameRef    `json:"imagePullSecrets,omitempty"`
-	// RestartPolicy is Never, so a sandbox whose process died shows as
-	// finished instead of quietly restarting into an empty shell.
+	// RestartPolicy is Never, so a dead process shows as finished instead of
+	// quietly restarting.
 	RestartPolicy string `json:"restartPolicy,omitempty"`
 }
 
@@ -250,7 +240,6 @@ type kubePVCSpec struct {
 	Resources        kubeResources `json:"resources"`
 }
 
-// kubeSandboxStatus is the observed half of a Sandbox.
 type kubeSandboxStatus struct {
 	ServiceFQDN string          `json:"serviceFQDN,omitempty"`
 	Conditions  []kubeCondition `json:"conditions,omitempty"`
@@ -274,15 +263,13 @@ func conditionOf(conds []kubeCondition, typ string) (kubeCondition, bool) {
 	return kubeCondition{}, false
 }
 
-// Create writes one Sandbox object and returns without waiting for it to be
-// ready. The panel and the CLI poll the row.
+// Create does not wait for the sandbox to be ready. The panel and CLI poll.
 func (k *Kubernetes) Create(ctx context.Context, spec Spec) (Status, error) {
 	runtime, err := runtimeFor(spec.Class, k.opts.Runtimes, k.Name())
 	if err != nil {
 		return Status{}, err
 	}
-	// The manager set spec.Backing, so the row and the object agree on which
-	// kind of object this is.
+	// The manager set spec.Backing, so the row and the object agree.
 	if spec.Claimed() {
 		return k.createClaimed(ctx, spec)
 	}
@@ -291,8 +278,7 @@ func (k *Kubernetes) Create(ctx context.Context, spec Spec) (Status, error) {
 	var created kubeSandbox
 	err = k.c.post(ctx, k.collection(), obj, &created)
 	if isConflict(err) {
-		// Already there, which is what was asked for. This makes a retry after
-		// a dropped connection harmless.
+		// Already there, so a retry after a dropped connection is harmless.
 		return k.Status(ctx, spec.Ref)
 	}
 	if err != nil {
@@ -301,8 +287,7 @@ func (k *Kubernetes) Create(ctx context.Context, spec Spec) (Status, error) {
 	return k.statusOf(spec.Ref, &created), nil
 }
 
-// volumeClaimsFor is the home volume claim, or nil for a class with no disk.
-// Shared with the claim path.
+// volumeClaimsFor is nil for a class with no disk.
 func volumeClaimsFor(class policy.SandboxClass, storageClass string,
 	labels map[string]string,
 ) []kubePVCTmpl {
@@ -321,15 +306,14 @@ func volumeClaimsFor(class policy.SandboxClass, storageClass string,
 	}}
 }
 
-// build is the Sandbox object for a spec. Warm pool templates use it too, so
-// warm and cold sandboxes are the same machine.
+// build is used by warm pool templates too, so warm and cold sandboxes match.
 func (k *Kubernetes) build(spec Spec, runtimeClass string) *kubeSandbox {
 	labels := labelsFor(spec)
 
 	pod := kubePod{
 		ServiceAccountName: k.opts.ServiceAccount,
 		// The workload runs whatever a model wrote and has no business with
-		// the API server. Set here so it holds however the sandbox was made.
+		// the API server.
 		AutomountServiceAccountToken: new(false),
 		SecurityContext: &kubePodSecurity{
 			RunAsNonRoot:   new(true),
@@ -359,8 +343,7 @@ func (k *Kubernetes) build(spec Spec, runtimeClass string) *kubeSandbox {
 		},
 		Spec: kubeSpec{
 			OperatingMode: "Running",
-			// A headless Service gives the sandbox a DNS name that resolves
-			// inside the cluster. The driver itself dials the pod IP.
+			// A DNS name inside the cluster. The driver dials the pod IP.
 			Service:     new(true),
 			PodTemplate: kubePodTmpl{Metadata: kubeMeta{Labels: labels}, Spec: pod},
 		},
@@ -371,8 +354,7 @@ func (k *Kubernetes) build(spec Spec, runtimeClass string) *kubeSandbox {
 		obj.Spec.ShutdownPolicy = shutdownPolicy(spec.Purpose)
 	}
 
-	// A class with no disk gets an emptyDir: there is somewhere to write, and
-	// nothing survives a suspend.
+	// A class with no disk gets an emptyDir, which a suspend loses.
 	if claims := volumeClaimsFor(spec.Class, k.opts.StorageClass, labels); claims != nil {
 		obj.Spec.VolumeClaims = claims
 	} else {
@@ -383,8 +365,7 @@ func (k *Kubernetes) build(spec Spec, runtimeClass string) *kubeSandbox {
 	return obj
 }
 
-// podContainerName names the one container in a sandbox pod. A claim names it
-// too when it hands over the environment.
+// podContainerName names the one container in a sandbox pod.
 const podContainerName = "sandbox"
 
 func sandboxContainer(spec Spec) kubeContainer {
@@ -392,11 +373,10 @@ func sandboxContainer(spec Spec) kubeContainer {
 		Name:  podContainerName,
 		Image: spec.Class.Image,
 		Env:   envList(spec.Env),
-		// Only sshd is declared: every attach goes through it.
+		// Every attach goes through sshd.
 		Ports: []kubePort{{Name: "ssh", ContainerPort: PortSSH, Protocol: "TCP"}},
 		Resources: kubeResources{
-			// Requests equal limits, so every sandbox is Guaranteed: a noisy
-			// neighbour cannot make it slow in the afternoon.
+			// Requests equal limits, so a noisy neighbour cannot slow it.
 			Requests: resourceMap(spec.Class),
 			Limits:   resourceMap(spec.Class),
 		},
@@ -404,12 +384,10 @@ func sandboxContainer(spec Spec) kubeContainer {
 		SecurityContext: &kubeCtrSecurity{
 			AllowPrivilegeEscalation: new(false),
 			Capabilities:             &kubeCaps{Drop: []string{"ALL"}},
-			// The root filesystem stays writable wherever the sandbox user
-			// has rights, such as home and /tmp. The isolation tier holds
+			// The root filesystem stays writable; the isolation tier holds
 			// the boundary.
 		},
-		// Ready when sshd answers, which the entrypoint makes mean setup is
-		// done.
+		// The entrypoint starts sshd only once setup is done.
 		ReadinessProbe: &kubeProbe{
 			TCPSocket:           &kubeTCPProbe{Port: PortSSH},
 			InitialDelaySeconds: 2,
@@ -428,9 +406,8 @@ func formatExpiry(t time.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
-// shutdownPolicy decides what happens to the object when its time runs out.
-// An agent's is deleted: the task is over, and its result is a branch. An
-// engineer's is retained: its volume holds work in progress.
+// shutdownPolicy deletes an agent's sandbox when its time runs out, and keeps
+// an engineer's, whose volume holds work in progress.
 func shutdownPolicy(p policy.Purpose) string {
 	if p == policy.PurposeAgent {
 		return "Delete"
@@ -449,9 +426,8 @@ func (k *Kubernetes) Status(ctx context.Context, ref Ref) (Status, error) {
 	return k.statusOf(ref, &obj), nil
 }
 
-// statusOf collapses the controller's mode and conditions into one state.
-// The cases are in order of precedence: a sandbox whose time is up is not
-// "not ready yet", and a pod that failed while suspending is a failure.
+// statusOf collapses the controller's mode and conditions into one state. The
+// cases are in order of precedence.
 func (k *Kubernetes) statusOf(ref Ref, obj *kubeSandbox) Status {
 	st := Status{
 		Ref:     ref,
@@ -470,8 +446,7 @@ func (k *Kubernetes) statusOf(ref Ref, obj *kubeSandbox) Status {
 	case hasFinished && finished.Status == "True" && finished.Reason == "PodFailed":
 		st.State, st.Detail = policy.SandboxFailed, detailOf(finished, "the sandbox process failed")
 	case hasFinished && finished.Status == "True":
-		// Nothing is left to attach to, but the detail says it exited rather
-		// than crashed.
+		// The detail says it exited rather than crashed.
 		st.State, st.Detail = policy.SandboxFailed, "the sandbox process exited"
 		st.Exited = true
 	case obj.Spec.OperatingMode == "Suspended":
@@ -479,8 +454,7 @@ func (k *Kubernetes) statusOf(ref Ref, obj *kubeSandbox) Status {
 	case hasReady && ready.Status == "True":
 		st.State = policy.SandboxReady
 	case hasScheduled && scheduled.Status == "False":
-		// The scheduler's message, verbatim: it says why the sandbox is still
-		// starting better than anything we could write.
+		// The scheduler's message says best why it is still starting.
 		st.State, st.Detail = policy.SandboxPending, detailOf(scheduled, "waiting to be scheduled")
 	case hasReady:
 		st.State, st.Detail = policy.SandboxPending, detailOf(ready, "starting")
@@ -508,8 +482,7 @@ func detailOf(c kubeCondition, fallback string) string {
 	}
 }
 
-// Suspend stops the sandbox's pod and keeps its volume. Like Resume it is a
-// merge patch of one field, so two gateways doing it at once agree.
+// Suspend, like Resume, patches one field, so two gateways doing it agree.
 func (k *Kubernetes) Suspend(ctx context.Context, ref Ref) error {
 	return k.setMode(ctx, ref, "Suspended")
 }
@@ -518,13 +491,11 @@ func (k *Kubernetes) Resume(ctx context.Context, ref Ref) error {
 	return k.setMode(ctx, ref, "Running")
 }
 
-// Revive gives an expired sandbox its new environment and end, and starts it
-// on the volume it kept. The container is sent whole, because a merge patch
-// replaces a list.
+// Revive sends the container whole, because a merge patch replaces a list.
 func (k *Kubernetes) Revive(ctx context.Context, spec Spec) error {
 	until := formatExpiry(spec.Expires)
 	if spec.Claimed() {
-		// A claim carries its environment itself, and the bound Sandbox runs.
+		// A claim carries its own environment.
 		patch := map[string]any{"spec": map[string]any{
 			"env":       claimEnvList(spec.Env),
 			"lifecycle": map[string]any{"shutdownTime": until},
@@ -545,8 +516,7 @@ func (k *Kubernetes) Revive(ctx context.Context, spec Spec) error {
 }
 
 func (k *Kubernetes) setMode(ctx context.Context, ref Ref, mode string) error {
-	// A claim has no operatingMode, so a claimed sandbox is patched through
-	// the Sandbox it is bound to.
+	// A claim has no operatingMode, so patch its bound Sandbox.
 	path := k.object(ref)
 	if ref.Claimed() {
 		bound, err := k.boundSandbox(ctx, ref)
@@ -559,9 +529,8 @@ func (k *Kubernetes) setMode(ctx context.Context, ref Ref, mode string) error {
 	return kubeNotFound(k.c.patch(ctx, path, patch))
 }
 
-// Extend moves the shutdown time. For a claim it moves the claim's own
-// lifetime: deleting the claim is what returns the sandbox, so the claim must
-// not end before its Sandbox.
+// Extend moves the shutdown time. For a claim it moves the claim's lifetime,
+// which must not end before its Sandbox.
 func (k *Kubernetes) Extend(ctx context.Context, ref Ref, until time.Time) error {
 	end := formatExpiry(until)
 	if ref.Claimed() {
@@ -575,11 +544,10 @@ func (k *Kubernetes) Extend(ctx context.Context, ref Ref, until time.Time) error
 }
 
 // Terminate removes the sandbox and, through owner references, its pod,
-// Service and volume. A sandbox already gone is success: a user's terminate
-// and the sweep's expiry race, and the loser must not fail.
+// Service and volume. One already gone is success: a user and the sweep may
+// race.
 func (k *Kubernetes) Terminate(ctx context.Context, ref Ref) error {
-	// For a pooled sandbox, delete the claim. Deleting the bound Sandbox would
-	// drain the pool and leave the claim pointing at nothing.
+	// For a pooled sandbox, delete the claim, not the bound Sandbox.
 	path := k.object(ref)
 	if ref.Claimed() {
 		path = k.claimPath(ref)
@@ -590,11 +558,9 @@ func (k *Kubernetes) Terminate(ctx context.Context, ref Ref) error {
 	return nil
 }
 
-// Dial connects to the pod IP directly. The port-forward subresource would
-// work from anywhere, but costs an upgrade through the API server per
-// connection and needs pods/portforward, which reaches any pod in the
-// namespace. Dialing directly needs the gateway in the same cluster and the
-// sandbox namespace's NetworkPolicy to admit it, as the Helm chart sets up.
+// Dial connects to the pod IP directly. Port-forward would need
+// pods/portforward, which reaches any pod in the namespace. This needs the
+// gateway in the same cluster, admitted by the NetworkPolicy.
 func (k *Kubernetes) Dial(ctx context.Context, ref Ref, port int) (net.Conn, error) {
 	st, err := k.Status(ctx, ref)
 	if err != nil {
@@ -611,8 +577,7 @@ func envList(env map[string]string) []kubeEnv {
 		return nil
 	}
 	out := make([]kubeEnv, 0, len(env))
-	// Sorted, so the same spec always gives the same pod template and the
-	// controller sees no change.
+	// Sorted, so the same spec gives the same pod template.
 	for _, n := range slices.Sorted(maps.Keys(env)) {
 		out = append(out, kubeEnv{Name: n, Value: env[n]})
 	}
@@ -630,8 +595,7 @@ func resourceMap(c policy.SandboxClass) map[string]string {
 	return m
 }
 
-// mibQuantity renders MiB as a Kubernetes quantity, in Gi where it divides
-// evenly, so it reads like the catalogue ("16Gi", not "16384Mi").
+// mibQuantity uses Gi where it divides evenly ("16Gi", not "16384Mi").
 func mibQuantity(mib int) string {
 	if mib%1024 == 0 {
 		return fmt.Sprintf("%dGi", mib/1024)
@@ -647,8 +611,7 @@ func nullableString(s string) *string {
 }
 
 // boundSandbox is the path of the Sandbox a claim is bound to. An unbound
-// claim is ErrNotReady, not ErrNotFound: the pool has not answered yet, so the
-// answer is "wait", not "gone".
+// claim is ErrNotReady, not ErrNotFound: wait, not gone.
 func (k *Kubernetes) boundSandbox(ctx context.Context, ref Ref) (string, error) {
 	c, err := k.claim(ctx, ref)
 	if err != nil {

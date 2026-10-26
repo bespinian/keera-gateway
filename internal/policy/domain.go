@@ -5,12 +5,9 @@ import (
 	"strings"
 )
 
-// CleanEmailDomain turns what was typed into what a sign-in is compared
-// against: the lowercased part of an address after the @, as
-// authn.Identity.Domain returns it.
-//
-// Anything else is refused now. A domain that matches nothing fails silently,
-// and only once a second organisation exists.
+// CleanEmailDomain turns what was typed into the lowercased domain a sign-in
+// is compared with, as authn.Identity.Domain returns it. Anything else is
+// refused now, since a domain that matches nothing would fail silently.
 func CleanEmailDomain(given string) (string, error) {
 	d := strings.ToLower(strings.TrimSpace(given))
 	// "@example.ch" and the fully-qualified "example.ch." both mean the domain.
@@ -40,7 +37,6 @@ func CleanEmailDomain(given string) (string, error) {
 	return d, nil
 }
 
-// hostOf is the host part of something typed as a URL.
 func hostOf(s string) string {
 	if _, after, ok := strings.Cut(s, "//"); ok {
 		s = after

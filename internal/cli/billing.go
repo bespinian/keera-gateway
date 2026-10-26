@@ -16,7 +16,6 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// billingRun is one 'keera billing' invocation.
 type billingRun struct {
 	*cmdRun
 	month    string
@@ -31,9 +30,8 @@ type billingRun struct {
 
 func billingCmd(ctx context.Context, args []string) error {
 	r := &billingRun{cmdRun: newCmdRun("billing", args)}
-	// An operator moves another organisation's money with grant and
-	// invoiced, so those name it every time rather than trusting whichever
-	// organisation is chosen. Every other verb acts on the chosen one.
+	// grant and invoiced move another organisation's money, so they name it
+	// every time rather than trust the chosen one.
 	r.reword("grant", "org", "organisation, by name or id (required)")
 	r.reword("invoiced", "org", "organisation, by name or id (required)")
 	r.fs.StringVar(&r.month, "month", "", "the month to bill, as YYYY-MM (default: this month)")
@@ -75,8 +73,7 @@ func billingCmd(ctx context.Context, args []string) error {
 	}
 }
 
-// account is path for the organisation the verb acts on: the one given, or
-// the only one there is.
+// account is path for the organisation given, or the only one there is.
 func (r *billingRun) account(ctx context.Context, path string) (string, error) {
 	org, err := resolveOrg(ctx, r.c, r.org)
 	if err != nil {
@@ -136,15 +133,13 @@ func printBilling(w *table, res billingResponse) {
 	_, _ = fmt.Fprintln(w)
 }
 
-// creditResponse is GET /v1/billing/account.
 type creditResponse struct {
 	Payments bool                `json:"payments"`
 	Account  store.CreditAccount `json:"account"`
 	Recent   []store.Payment     `json:"recent"`
 }
 
-// confirmForget names the card and what stops with it, as the panel does,
-// and makes the administrator confirm. PostFinance forgets it too, so it
+// confirmForget asks first because PostFinance forgets the card too, so it
 // cannot be put back.
 func (r *billingRun) confirmForget(ctx context.Context, orgID string) error {
 	res, err := r.creditAccount(ctx, orgID)
@@ -163,7 +158,6 @@ func (r *billingRun) confirmForget(ctx context.Context, orgID string) error {
 		`word "forget"`, "forget", "the card was kept")
 }
 
-// errNoPayments is what the payment verbs say on a deployment without them.
 var errNoPayments = errors.New("this deployment takes no payments: nobody pays in advance " +
 	"(see https://docs.keera.ch/manage/billing/)")
 
@@ -219,8 +213,7 @@ func printCredit(w *table, res creditResponse) {
 	}
 }
 
-// printPayments lists payments. orgNames is set when they span organisations,
-// as an operator's do when no organisation is chosen, and adds a column.
+// printPayments adds an organisation column when orgNames is set.
 func printPayments(w *table, list []store.Payment, orgNames map[string]string) {
 	if len(list) == 0 {
 		printNone(w, "payments", "keera billing topup --amount 100")
@@ -240,7 +233,6 @@ func printPayments(w *table, list []store.Payment, orgNames map[string]string) {
 	}
 }
 
-// amountMicros reads --amount, which every verb that moves money needs.
 func (r *billingRun) amountMicros() (int64, error) {
 	if !given(r.fs, "amount") {
 		return 0, fmt.Errorf("--amount is required, in CHF (see: keera help billing %s)", r.verb)
@@ -388,8 +380,7 @@ func (r *billingRun) payments(ctx context.Context) error {
 	return out(r.asJSON, payments, func(w *table) { printPayments(w, payments, names) })
 }
 
-// receipt saves the receipt of a paid payment: the invoice PostFinance
-// renders for it.
+// receipt saves the invoice PostFinance renders for a paid payment.
 func (r *billingRun) receipt(ctx context.Context) error {
 	paymentID := r.fs.Arg(0)
 	pdf, header, err := r.c.fetch(ctx, "GET", "/v1/billing/payments/"+url.PathEscape(paymentID)+"/receipt", nil)
@@ -408,9 +399,8 @@ func (r *billingRun) receipt(ctx context.Context) error {
 	return nil
 }
 
-// receiptName is the name the server gave the receipt, so the command saves
-// it under the same name as the panel's download. Only the base is kept: the
-// name must not place the file outside the current directory.
+// receiptName uses the server's name for the receipt, as the panel's download
+// does. Only the base is kept, so the file stays in the current directory.
 func receiptName(h http.Header) string {
 	_, params, err := mime.ParseMediaType(h.Get("Content-Disposition"))
 	if err != nil {

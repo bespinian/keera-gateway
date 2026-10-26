@@ -7,12 +7,10 @@ import (
 )
 
 // textDoc is the text of one request body that filters and routers read: the
-// strings a filter may rewrite, and the way to put the rewrites back.
-//
-// Only prose counts: message contents, the text parts of a multimodal
-// message, a completion prompt, an embedding input. Tool-call arguments,
-// images and audio are not shown, because rewriting them could produce a
-// request the inference plane rejects. That is a real limit of this guardrail.
+// strings a filter may rewrite, and how to put them back. Only prose counts.
+// Tool-call arguments, images and audio are left out, since rewriting them
+// could produce a request the plane rejects. That is a real limit of this
+// guardrail.
 type textDoc interface {
 	texts() []string
 	apply(b *body, replaced []string) error
@@ -57,9 +55,8 @@ func extractChat(b *body) (*treeDoc, error) {
 	return d, nil
 }
 
-// extractScalar is the text of a field that is either one string or an array:
-// a completion's prompt, an embedding's input. Token ids are not text, so an
-// array of them gives a filter nothing to read.
+// extractScalar is the text of a field that is one string or an array, such
+// as a completion's prompt. An array of token ids has no text.
 func extractScalar(b *body, field string) *treeDoc {
 	d := newTreeDoc()
 	v, _ := d.root(b, field)

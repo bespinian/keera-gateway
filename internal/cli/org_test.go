@@ -5,7 +5,6 @@ import (
 	"testing"
 )
 
-// chosenOrg is the organisation this machine remembers for the fake gateway.
 func chosenOrg(t *testing.T) string {
 	t.Helper()
 	c, err := loadCredentials()

@@ -50,8 +50,7 @@ func (s *Server) markPlatform(m *policy.Model) {
 		return
 	}
 	// Its own key is never sent. A model the price table does not know is not
-	// on the deployment's key either: the registry sends it without a key, and
-	// logs why.
+	// on the deployment's key either: the registry sends it without a key.
 	m.HasAPIKey = false
 	_ = s.opts.Platform.Lock(m)
 }
@@ -244,10 +243,9 @@ func (s *Server) checkModelAlias(w http.ResponseWriter, r *http.Request, orgID, 
 }
 
 // checkSubscriptionUsers refuses to make a model a subscription model while a
-// filter or router uses it. Only Claude Code signed in to a Claude plan reaches
-// such a model, so they would fail on every request. It is the other half of
-// the checks in checkReaderModel and Router.Problem, since the writes can come
-// in either order.
+// filter or router uses it: only Claude Code on a Claude plan reaches such a
+// model, so they would fail on every request. It pairs with checkReaderModel
+// and Router.Problem, since the writes can come in either order.
 func (s *Server) checkSubscriptionUsers(w http.ResponseWriter, r *http.Request,
 	orgID, alias string,
 ) bool {

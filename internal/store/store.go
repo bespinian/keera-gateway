@@ -1,5 +1,5 @@
-// Package store is Keera Gateway's Postgres layer: schema migration, the
-// control-plane queries, and the batched writes the gateway produces.
+// Package store is Keera Gateway's Postgres layer: migrations, control-plane
+// queries and the gateway's batched writes.
 package store
 
 import (
@@ -23,21 +23,20 @@ var migrations embed.FS
 // revoked key stops working within one round trip rather than one cache TTL.
 const NotifyChannel = "keera_policy"
 
-// EventsChannel says that a batch of usage events was written, so a panel
-// watching the request log sees new requests quickly. The payload names the
-// organisations the batch wrote requests for; EventOrgs reads it.
+// EventsChannel says a batch of usage events was written, so a panel watching
+// the request log sees new requests quickly. The payload names the batch's
+// organisations; EventOrgs reads it.
 //
 // It is separate from NotifyChannel because it fires several times a second,
-// and a policy notification makes every replica drop its whole cache.
+// and a policy notification makes every replica drop its cache.
 const EventsChannel = "keera_events"
 
-// eventsPayloadMax keeps the payload well under the 8000 bytes Postgres
-// allows. A batch for more organisations than fit sends none, which wakes
-// every stream.
+// eventsPayloadMax keeps the payload well under Postgres's 8000-byte limit. If
+// the organisations do not fit, none are sent, which wakes every stream.
 const eventsPayloadMax = 4000
 
 // eventsPayload names the organisations events wrote requests for. ok is
-// false when they wrote none, so there is nothing to announce.
+// false when there are none.
 func eventsPayload(events []Event) (payload string, ok bool) {
 	var b strings.Builder
 	seen := make(map[string]bool)
@@ -57,8 +56,8 @@ func eventsPayload(events []Event) (payload string, ok bool) {
 	return b.String(), len(seen) > 0
 }
 
-// EventOrgs reads an EventsChannel payload. all says every organisation may
-// have new requests, for a payload that names none.
+// EventOrgs reads an EventsChannel payload. all is true for a payload that
+// names none, meaning every organisation may have new requests.
 func EventOrgs(payload string) (orgs []string, all bool) {
 	if payload == "" {
 		return nil, true
@@ -71,7 +70,7 @@ var ErrNotFound = errors.New("store: not found")
 
 type Store struct {
 	pool *pgxpool.Pool
-	// referenceSlots bounds the LockReferences held at once. See there.
+	// referenceSlots bounds the LockReferences held at once.
 	referenceSlots chan struct{}
 }
 
@@ -85,10 +84,10 @@ func Open(ctx context.Context, dsn string, maxConns int32) (*Store, error) {
 		cfg.MaxConns = maxConns
 	}
 	// Report queries filter with "$1 = '' OR org_id = $1". A cached generic
-	// plan cannot use the org index for that, and scans every tenant's rows.
+	// plan cannot use the org index for that and scans every tenant's rows.
 	cfg.ConnConfig.RuntimeParams["plan_cache_mode"] = "force_custom_plan"
 	// Days are UTC days, as for budgets and usage_daily, whatever the
-	// database's own time zone is.
+	// database's time zone.
 	cfg.ConnConfig.RuntimeParams["timezone"] = "UTC"
 	cfg.MaxConnLifetime = time.Hour
 	cfg.MaxConnIdleTime = 10 * time.Minute
@@ -113,8 +112,8 @@ func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
-// Migrate applies any embedded migration the database has not seen. It takes an
-// advisory lock first, so starting several replicas at once is safe.
+// Migrate applies any embedded migration the database has not seen, under an
+// advisory lock so several replicas can start at once.
 func (s *Store) Migrate(ctx context.Context) (applied []string, err error) {
 	conn, err := s.pool.Acquire(ctx)
 	if err != nil {
@@ -199,32 +198,29 @@ func (s *Store) Notify(ctx context.Context, payload string) error {
 }
 
 // Listen holds a dedicated connection on a notify channel and calls fn with
-// the payload of every notification. It returns the error that ended the
-// subscription.
-//
-// It tries once and does not reconnect, because each caller handles a lost
-// connection its own way. The connection is its own, outside the pool, so
-// callers should be few and long-lived.
+// each payload. It returns the error that ended it, and does not reconnect:
+// each caller handles that its own way. The connection is outside the pool,
+// so callers should be few and long-lived.
 func (s *Store) Listen(ctx context.Context, channel string, fn func(payload string)) error {
 	pooled, err := s.pool.Acquire(ctx)
 	if err != nil {
 		return err
 	}
-	// Taken out of the pool and closed at the end, so the setting and the
-	// LISTEN below never reach a pooled query.
+	// Taken out of the pool, so the setting and LISTEN never reach a pooled
+	// query.
 	conn := pooled.Hijack()
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = conn.Close(ctx)
 	}()
-	// A listener sends nothing while it waits, so a server-side
-	// idle_session_timeout would end it every time it ran out.
+	// A listener sends nothing while it waits, so idle_session_timeout would
+	// end it.
 	if _, err := conn.Exec(ctx, "SET idle_session_timeout = 0"); err != nil {
 		return err
 	}
-	// A channel name cannot be a placeholder, so it must only ever come from
-	// this binary's own constants.
+	// A channel name cannot be a placeholder, so it must only come from this
+	// binary's constants.
 	if _, err := conn.Exec(ctx, "LISTEN "+channel); err != nil {
 		return err
 	}
@@ -237,11 +233,11 @@ func (s *Store) Listen(ctx context.Context, channel string, fn func(payload stri
 	}
 }
 
-// row is what pgx's Row and Rows have in common: one Scan.
+// row is what pgx's Row and Rows have in common.
 type row interface{ Scan(dest ...any) error }
 
 // queryAll runs a query and reads every row with scan. No rows gives an empty
-// slice rather than nil, so a list encodes as [] in JSON.
+// slice, so a list encodes as [] in JSON.
 func queryAll[T any](ctx context.Context, pool *pgxpool.Pool, scan func(row) (T, error),
 	sql string, args ...any,
 ) ([]T, error) {
@@ -276,8 +272,7 @@ func queryMap[V any](ctx context.Context, pool *pgxpool.Pool, targets func(*V) [
 	return out, nil
 }
 
-// execOne runs a statement that should touch a row, and returns ErrNotFound if
-// it touched none.
+// execOne runs a statement and returns ErrNotFound if it touched no row.
 func (s *Store) execOne(ctx context.Context, sql string, args ...any) error {
 	tag, err := s.pool.Exec(ctx, sql, args...)
 	if err != nil {
@@ -289,8 +284,7 @@ func (s *Store) execOne(ctx context.Context, sql string, args ...any) error {
 	return nil
 }
 
-// notFound turns pgx's no-rows into ErrNotFound, which the control plane maps
-// to a 404.
+// notFound turns pgx's no-rows into ErrNotFound.
 func notFound(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
@@ -300,7 +294,7 @@ func notFound(err error) error {
 
 // IsMissingOrg reports whether a write named an organisation that does not
 // exist. Every foreign key into orgs cascades on delete, so this is the only
-// way one of them fails. The logs that outlive an organisation have none.
+// way one fails.
 func IsMissingOrg(err error) bool {
 	e, ok := errors.AsType[*pgconn.PgError](err)
 	return ok && e.Code == "23503" && strings.HasSuffix(e.ConstraintName, "_org_id_fkey")
@@ -322,7 +316,6 @@ func violates(err error, constraint string) bool {
 	return ok && e.ConstraintName == constraint
 }
 
-// nullable stores an empty string as NULL.
 func nullable(s string) *string {
 	if s == "" {
 		return nil
@@ -330,8 +323,7 @@ func nullable(s string) *string {
 	return &s
 }
 
-// nullableTime stores a zero time as NULL, which the queries read as "no
-// bound". Otherwise it would be year 1.
+// nullableTime stores a zero time as NULL, which queries read as no bound.
 func nullableTime(t time.Time) *time.Time {
 	if t.IsZero() {
 		return nil
@@ -340,7 +332,7 @@ func nullableTime(t time.Time) *time.Time {
 }
 
 // pageLimit is how many rows a list reads: n, def when n is unset, and at
-// most ceiling. A cap keeps one request from reading a whole table.
+// most ceiling.
 func pageLimit(n, def, ceiling int) int {
 	if n <= 0 {
 		return def
@@ -349,8 +341,7 @@ func pageLimit(n, def, ceiling int) int {
 }
 
 // countOf counts the rows whose col is one of vals. The values are this
-// package's own constants, never a caller's string, so they can go into the
-// SQL text, quoted.
+// package's constants, never a caller's string, so they go into the SQL quoted.
 func countOf[T ~string](col string, vals ...T) string {
 	quoted := make([]string, len(vals))
 	for i, v := range vals {

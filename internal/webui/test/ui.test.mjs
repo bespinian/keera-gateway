@@ -1,5 +1,5 @@
-// Unit tests for the panel's pure helpers, run with `make check-js`. They use
-// node:test, so the panel keeps having no build step and no dependencies.
+// Unit tests for the panel's pure helpers, run with `make check-js`. node:test
+// keeps the panel free of a build step and dependencies.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

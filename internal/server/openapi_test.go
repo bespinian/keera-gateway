@@ -13,8 +13,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/sandbox"
 )
 
-// The spec is written by hand, so this keeps it honest: every route the server
-// answers is in it, and everything in it is a route.
+// The spec is written by hand: every route must be in it, and everything in it
+// must be a route.
 func TestOpenAPIDescribesEveryRoute(t *testing.T) {
 	log := slog.New(slog.DiscardHandler)
 	gw := gateway.New(nil, nil, ratelimit.New(), nil, nil, gateway.Options{}, log)

@@ -45,21 +45,20 @@ func TestLookupKeyCollapsesTheWholeChain(t *testing.T) {
 	if res.Key.OrgID != f.orgID || res.Key.ProjectID != f.projectID || res.Key.ID != f.keyID {
 		t.Errorf("resolved key = %+v, want the fixture's ids", res.Key)
 	}
-	// The intersection of all three allow-lists, and nothing else: keera-code is
-	// dropped by the key, keera-frontier by the project.
+	// The intersection of all three allow-lists: keera-code is dropped by the
+	// key, keera-frontier by the project.
 	if len(res.AllowedModels) != 1 || res.AllowedModels[0] != "keera-speed" {
 		t.Errorf("AllowedModels = %v, want [keera-speed]", res.AllowedModels)
 	}
-	// Text does not narrow: the organisation's instruction reaches the request
-	// whatever the project added after it.
+	// Prompts add up rather than narrow.
 	const wantPrompt = "Never include customer data in an example.\n\n" +
 		"Prefer the payments project's own libraries."
 	if res.SystemPrompt != wantPrompt {
 		t.Errorf("SystemPrompt = %q, want %q", res.SystemPrompt, wantPrompt)
 	}
 
-	// Budgets are kept per level rather than merged: two limits that both hold.
-	// The project's budget per day is a scope of its own, beside its month.
+	// Budgets are kept per level, not merged. The project's daily budget is a
+	// scope of its own, beside its monthly one.
 	want := []policy.Scope{
 		{
 			Type: policy.ScopeOrg, ID: f.orgID, RPM: 600, TPM: 400000,
@@ -90,8 +89,8 @@ func TestLookupKeyWithNoPoliciesAnywhere(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LookupKey: %v", err)
 	}
-	// Unrestricted, but still three scopes: the gateway counts requests against
-	// every level whether or not a limit is set on it.
+	// Unrestricted, but still three scopes: the gateway counts requests at
+	// every level.
 	if res.AllowedModels != nil {
 		t.Errorf("AllowedModels = %v, want nil - no allow-list is every model", res.AllowedModels)
 	}
@@ -137,8 +136,7 @@ func TestLookupKeyRejectsUnknownRevokedAndExpiredKeys(t *testing.T) {
 	if err := st.RevokeKey(ctx, AnyOrg, "key_no_such_thing"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("revoking a key that does not exist gave %v, want ErrNotFound", err)
 	}
-	// A key that has been revoked is kept, so its usage history keeps
-	// resolving.
+	// A revoked key is kept, so its usage history still resolves.
 	keys, err := st.KeySummaries(ctx, KeyQuery{OrgID: f.orgID})
 	if err != nil {
 		t.Fatalf("KeySummaries: %v", err)
@@ -149,9 +147,8 @@ func TestLookupKeyRejectsUnknownRevokedAndExpiredKeys(t *testing.T) {
 }
 
 func TestLookupKeyIgnoresAProjectInAnotherOrganisation(t *testing.T) {
-	// The control plane refuses to bind a key to a project outside its own
-	// organisation. This is the second check: a row written another way must
-	// resolve as a key with no project, not with the other tenant's guardrails.
+	// A key bound to another organisation's project, written past the control
+	// plane, resolves with no project, not the other tenant's guardrails.
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 
@@ -167,7 +164,7 @@ func TestLookupKeyIgnoresAProjectInAnotherOrganisation(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("PutGuardrail: %v", err)
 	}
-	// Written past the control plane, which is the case this defends against.
+	// Written past the control plane.
 	if _, err := st.pool.Exec(ctx,
 		"UPDATE api_keys SET project_id = 'project_elsewhere' WHERE id = $1", f.keyID); err != nil {
 		t.Fatalf("planting the cross-tenant row: %v", err)
@@ -194,8 +191,8 @@ func TestLookupKeyIgnoresAProjectInAnotherOrganisation(t *testing.T) {
 }
 
 func TestLookupKeyByIDMatchesTheHashLookup(t *testing.T) {
-	// The playground finds a key by its id, and must meet exactly the guardrails
-	// the key's own requests do.
+	// The playground finds a key by its id, with the same guardrails as its
+	// requests.
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 	if err := st.PutGuardrail(ctx, policy.ScopeProject, f.projectID, policy.Limits{
@@ -229,8 +226,7 @@ func TestLookupKeyByIDMatchesTheHashLookup(t *testing.T) {
 	}
 }
 
-// A pending key has no secret, so nothing can use it until it is activated,
-// and it is activated once.
+// A pending key has no secret until it is activated, and it is activated once.
 func TestActivateKeyGivesAPendingKeyItsSecretOnce(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)

@@ -29,8 +29,7 @@ type Signup struct {
 	RedirectTo     string
 }
 
-// signupColumns names signups.name in full: SignupByToken joins orgs, which
-// has a name too.
+// signupColumns names signups.name in full, since SignupByToken joins orgs.
 const signupColumns = `token_hash, provider, external_id, email, signups.name, role,
 	refresh_token, COALESCE(invited_org, ''), redirect_to`
 
@@ -71,9 +70,8 @@ func (s *Store) SignupByToken(ctx context.Context, hash []byte) (Signup, error) 
 	return su, notFound(err)
 }
 
-// InvitationFor finds the organisation that added a person by address before
-// they ever signed in: the oldest row at that address that no identity has
-// taken yet. A disabled row is no invitation.
+// InvitationFor finds the organisation that invited an address: the oldest
+// enabled row at it that no identity has taken yet.
 func (s *Store) InvitationFor(ctx context.Context, email string) (Org, error) {
 	return s.orgWhere(ctx, `WHERE id = (SELECT org_id FROM users
 		WHERE email = $1 AND (external_id IS NULL OR external_id = '') AND disabled_at IS NULL
@@ -88,9 +86,9 @@ func takeSignup(ctx context.Context, tx pgx.Tx, hash []byte) (Signup, error) {
 }
 
 // SignUp uses a sign-up to create an organisation, with the person as its
-// administrator, or as an operator if they are one. It is one transaction: a
-// name already taken leaves the sign-up for another try, and two tabs cannot
-// each create one.
+// administrator, or operator if they are one. It is one transaction, so a
+// taken name leaves the sign-up for another try, and two tabs cannot each
+// create one.
 func (s *Store) SignUp(ctx context.Context, hash []byte, o Org, tmpl OrgTemplate) (
 	Signup, Org, User, error,
 ) {
@@ -125,7 +123,7 @@ func (s *Store) SignUp(ctx context.Context, hash []byte, o Org, tmpl OrgTemplate
 }
 
 // JoinInvitation uses a sign-up to take the row the inviting organisation
-// made for the person. The role is the one that row was given.
+// made for the person, with that row's role.
 func (s *Store) JoinInvitation(ctx context.Context, hash []byte) (Signup, User, error) {
 	var (
 		su Signup
@@ -139,8 +137,7 @@ func (s *Store) JoinInvitation(ctx context.Context, hash []byte) (Signup, User, 
 		if su.InvitedOrg == "" {
 			return ErrNotFound
 		}
-		// ErrNotFound: the invitation was withdrawn, or somebody else took it
-		// meanwhile.
+		// ErrNotFound: the invitation was withdrawn or taken meanwhile.
 		u, err = takeInvitation(ctx, tx, su.InvitedOrg, su.Email, su.Name, su.ExternalID)
 		return err
 	})

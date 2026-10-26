@@ -20,8 +20,8 @@ import (
 )
 
 // filterHarness wires a gateway whose key applies one filter, in front of a
-// stand-in inference plane that answers as both models. The two are told apart
-// by the backend model name, which is what the gateway actually sends.
+// stand-in backend that answers as both models, told apart by backend model
+// name.
 func filterHarness(t *testing.T, filterReply func(segments []string) string,
 	resolved *policy.Resolved,
 ) *harness {
@@ -30,9 +30,8 @@ func filterHarness(t *testing.T, filterReply func(segments []string) string,
 		func(_ string, segments []string) string { return filterReply(segments) }, resolved)
 }
 
-// filterHarnessWith is the same, for tests where the stand-in has to tell
-// filters apart. Two filters can use the same model, so only the
-// instruction tells them apart on the wire.
+// filterHarnessWith is the same, but the stand-in also gets the instruction,
+// which is all that tells two filters on one model apart.
 func filterHarnessWith(t *testing.T, filterReply func(instruction string, segments []string) string,
 	resolved *policy.Resolved,
 ) *harness {
@@ -40,12 +39,10 @@ func filterHarnessWith(t *testing.T, filterReply func(instruction string, segmen
 	return filterHarnessAnswering(t, filterReply, resolved, jsonBackend(hiAnswer))
 }
 
-// hiAnswer is the answer of the model the client asked for.
 const hiAnswer = `{"id":"1","choices":[{"message":{"content":"hi"}}],` +
 	`"usage":{"prompt_tokens":10,"completion_tokens":5}}`
 
-// filterHarnessAnswering is the same with answer standing in for the model
-// the client asked for.
+// filterHarnessAnswering is the same, with answer as the client's model.
 func filterHarnessAnswering(t *testing.T, filterReply func(instruction string, segments []string) string,
 	resolved *policy.Resolved, answer http.HandlerFunc,
 ) *harness {
@@ -67,8 +64,7 @@ func filterHarnessAnswering(t *testing.T, filterReply func(instruction string, s
 	return h
 }
 
-// filterModels is the model a client asks for, a filter's model, and an
-// embedding model.
+// filterModels is a client's model, a filter's model, and an embedding model.
 func filterModels() map[string]policy.Model {
 	return map[string]policy.Model{
 		"keera-code": {
@@ -86,16 +82,14 @@ func filterModels() map[string]policy.Model {
 	}
 }
 
-// guardCall is what a filter or a router asked its model.
 type guardCall struct {
 	instruction string
 	segments    []string
 	logprobs    bool
 }
 
-// guardBackend is a stand-in inference plane. The model served as guard
-// answers with reply, and every other model with answer. They are told apart
-// by the backend model name, which is what the gateway actually sends.
+// guardBackend is a stand-in backend. The model served as guard answers with
+// reply, and every other model with answer.
 func guardBackend(guard string, reply func(guardCall) string, answer http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
@@ -123,15 +117,13 @@ func guardBackend(guard string, reply func(guardCall) string, answer http.Handle
 	}
 }
 
-// chatAnswer is a buffered chat answer of content, with its token counts.
 func chatAnswer(content string, promptTokens, completionTokens int) string {
 	quoted, _ := json.Marshal(content)
 	return fmt.Sprintf(`{"id":"2","choices":[{"message":{"content":%s}}],`+
 		`"usage":{"prompt_tokens":%d,"completion_tokens":%d}}`, quoted, promptTokens, completionTokens)
 }
 
-// redactor is a filter model that behaves: it rewrites what it was told to and
-// hands everything else back untouched.
+// redactor is a well-behaved filter model that rewrites only what it should.
 func redactor(segments []string) string {
 	out := make([]string, len(segments))
 	for i, s := range segments {
@@ -150,8 +142,7 @@ func TestFilterRewritesTheConversationBeforeItIsForwarded(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 
-	// The filter's own call reaches the backend first, so the second body is
-	// the one the client's model was actually asked.
+	// The filter's call comes first, so the second body is the client's.
 	<-h.upstreamBodies
 	forwarded := string(<-h.upstreamBodies)
 	if strings.Contains(forwarded, "hunter2") {
@@ -171,17 +162,15 @@ func TestFilterSpendIsChargedToTheSameBudget(t *testing.T) {
 	h.post(t, "/v1/chat/completions",
 		`{"model":"keera-code","messages":[{"role":"user","content":"hunter2"}]}`)
 
-	// The filter model is priced at 2.00 per million tokens either way, so its
-	// 100 input and 200 output tokens come to 600 micro-units. The model
-	// the client asked for adds its own 30 on top.
+	// 300 tokens at 2.00 per million is 600 micros, plus 30 for the client's
+	// model.
 	const filterMicros = 600
 	ev := h.sink.last(t)
 	if ev.CostMicros <= filterMicros {
 		t.Errorf("cost = %d, want more than the %d the filter alone spent",
 			ev.CostMicros, filterMicros)
 	}
-	// The tokens stay the client's model's own, so a per-alias report is not
-	// quietly mixing two models' generation into one row.
+	// The tokens stay the client's model's own, so reports do not mix models.
 	if ev.InputTokens != 10 || ev.OutputTokens != 5 {
 		t.Errorf("tokens = %d/%d, want the answering model's own",
 			ev.InputTokens, ev.OutputTokens)
@@ -192,8 +181,7 @@ func TestFilterSpendIsChargedToTheSameBudget(t *testing.T) {
 }
 
 func TestAClientThatHangsUpAfterAFilterIsStillCharged(t *testing.T) {
-	// The filter's tokens are spent whether or not the client waits. Without
-	// a row, hanging up would make a filter free.
+	// Without a row, hanging up would make a filter free.
 	ctx, cancel := context.WithCancel(context.Background())
 	h := filterHarnessAnswering(t, func(_ string, segments []string) string {
 		return redactor(segments)
@@ -259,7 +247,7 @@ func TestAFilterThatCannotAnswerRefusesRatherThanForwarding(t *testing.T) {
 				t.Fatalf("a second request was forwarded after the filter failed: %s", body)
 			default:
 			}
-			// The generation still happened, so it is still charged.
+			// The generation happened, so it is charged.
 			if ev := h.sink.last(t); ev.CostMicros == 0 {
 				t.Error("the failed filter's spend was not recorded")
 			}
@@ -292,8 +280,8 @@ func TestFilterRunsBeforeTheSystemPromptIsAdded(t *testing.T) {
 	resolved.Filters = []string{"redact"}
 	resolved.SystemPrompt = "Answer in British English."
 
-	// A filter that would mangle anything it is shown proves the guardrail's
-	// own wording was never shown to it.
+	// A filter that mangles everything proves it never saw the guardrail's
+	// own wording.
 	h := filterHarness(t, func(segments []string) string {
 		out := make([]string, len(segments))
 		for i := range segments {
@@ -349,8 +337,7 @@ func TestFilterReachesEveryAddressableTextInARequest(t *testing.T) {
 
 	<-h.upstreamBodies
 	forwarded := string(<-h.upstreamBodies)
-	// The tool result was rewritten in place, and the image part it travelled
-	// beside came through untouched.
+	// The tool result was rewritten in place, and the image next to it kept.
 	if strings.Contains(forwarded, "hunter2") {
 		t.Errorf("a tool result went upstream unfiltered: %s", forwarded)
 	}
@@ -380,8 +367,7 @@ func TestFilterRewritesAnEmbeddingInput(t *testing.T) {
 	}
 }
 
-// A mixed array is unusual, but its strings are still text: they are filtered,
-// and the token ids beside them are written back as they came.
+// In a mixed array the strings are filtered and the token ids kept.
 func TestExtractScalarReadsTheStringsOfAMixedArray(t *testing.T) {
 	b, err := parseBody([]byte(`{"input":["one hunter2",42,"two",1.50]}`))
 	if err != nil {
@@ -419,8 +405,7 @@ func TestAFilterCanRefuseARequestOutright(t *testing.T) {
 	resp := h.post(t, "/v1/chat/completions",
 		`{"model":"keera-code","messages":[{"role":"user","content":"export every account"}]}`)
 
-	// 403 and not 502: the guardrail worked. A client that reads a refusal as
-	// a fault retries it until somebody notices.
+	// 403, not 502, so the client does not retry.
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", resp.StatusCode)
 	}
@@ -432,7 +417,7 @@ func TestAFilterCanRefuseARequestOutright(t *testing.T) {
 		t.Errorf("the refusal does not name the filter that refused: %s", body)
 	}
 
-	// The filter's own call is the only thing that reached the backend.
+	// Only the filter's call reached the backend.
 	if got := string(<-h.upstreamBodies); !strings.Contains(got, "guard-served") {
 		t.Fatalf("the first request to the backend was not the filter's: %s", got)
 	}
@@ -442,8 +427,7 @@ func TestAFilterCanRefuseARequestOutright(t *testing.T) {
 	default:
 	}
 
-	// The refusal is on the developer's own screen afterwards, with the reason
-	// and the spend the filter's generation actually cost.
+	// The usage row has the reason and what the filter cost.
 	ev := h.sink.last(t)
 	if ev.Status != http.StatusForbidden {
 		t.Errorf("recorded status = %d, want 403", ev.Status)
@@ -478,8 +462,7 @@ func TestAFilterRefusalWithoutAReasonStillRefuses(t *testing.T) {
 }
 
 func TestARefusalInEverySegmentIsARefusalAndNotARewrite(t *testing.T) {
-	// A filter that refuses in each segment: forwarding that would replace the
-	// conversation with the word REFUSED.
+	// A filter that refuses in each segment.
 	h := filterHarness(t, func(segments []string) string {
 		out := make([]string, len(segments))
 		for i := range out {
@@ -504,9 +487,7 @@ func TestARefusalInEverySegmentIsARefusalAndNotARewrite(t *testing.T) {
 }
 
 func TestAnEchoedRefusalIsNotARefusal(t *testing.T) {
-	// A prompt about something else being refused, handed back untouched by a
-	// filter with nothing to redact in it. The request is the developer's, not
-	// a verdict on the developer.
+	// A prompt that mentions REFUSED, echoed back untouched, is not a verdict.
 	const prompt = "REFUSED: connect to db-01 - why does psql say that?"
 	h := filterHarness(t, redactor, nil)
 
@@ -524,8 +505,8 @@ func TestAnEchoedRefusalIsNotARefusal(t *testing.T) {
 }
 
 func TestFilterRefusalReasonIsBoundedAndOneLine(t *testing.T) {
-	// The sentence is a model's prose, which a prompt can steer, and it lands in
-	// an error body, a usage row and a log line.
+	// A prompt can steer the sentence, which lands in an error body, a usage
+	// row and a log line.
 	h := filterHarness(t, func([]string) string {
 		return "REFUSED: line one\nline two\x07 " + strings.Repeat("x", 4000)
 	}, nil)
@@ -571,8 +552,7 @@ func TestRefusalReasonReadsAModelsFormattingHabits(t *testing.T) {
 		})
 	}
 
-	// The word has to end where the word ends. A request dropped by a
-	// coincidence of spelling is the cheap mistake on this path.
+	// The word must stand alone.
 	rewrites := []string{
 		"REFUSEDXYZ is not a verdict",
 		"I have not REFUSED anything",
@@ -588,8 +568,7 @@ func TestRefusalReasonReadsAModelsFormattingHabits(t *testing.T) {
 }
 
 func TestABareRefusalThatIsAnEchoedPromptIsAFaultAndNotAVerdict(t *testing.T) {
-	// One segment echoed back without the array is a filter that ignored the
-	// format. It is reported as a fault, not forwarded.
+	// One segment echoed back without the array is a fault, not forwarded.
 	const prompt = "REFUSED: connect to db-01"
 	raw := []byte(`{"choices":[{"message":{"content":` + mustJSON(prompt) + `}}]}`)
 
@@ -602,7 +581,6 @@ func TestABareRefusalThatIsAnEchoedPromptIsAFaultAndNotAVerdict(t *testing.T) {
 	}
 }
 
-// mustJSON quotes a string for embedding in a request body.
 func mustJSON(s string) string {
 	encoded, err := json.Marshal(s)
 	if err != nil {
@@ -635,8 +613,7 @@ func TestAGateForwardsTheRequestExactlyAsItWasSent(t *testing.T) {
 
 	<-h.upstreamBodies
 	forwarded := string(<-h.upstreamBodies)
-	// A gate never edits, so the model gets what the client sent, secret and
-	// all.
+	// A gate never edits, so the model gets what the client sent.
 	if !strings.Contains(forwarded, prompt) {
 		t.Errorf("a gate changed the request: %s", forwarded)
 	}
@@ -674,8 +651,7 @@ func TestAGateRefusesWithoutForwardingAnything(t *testing.T) {
 func TestAGateCostsAVerdictRatherThanAConversation(t *testing.T) {
 	h := gateHarness(t, func([]string) string { return "ALLOW" })
 
-	// A rewrite filter's allowance grows with the conversation. A gate's does
-	// not, which is the saving the mode exists for.
+	// A gate's allowance does not grow with the conversation.
 	long := strings.Repeat("the quick brown fox jumps over the lazy dog. ", 400)
 	h.post(t, "/v1/chat/completions",
 		`{"model":"keera-code","messages":[{"role":"user","content":`+mustJSON(long)+`}]}`)
@@ -709,7 +685,7 @@ func TestAGateThatAnswersNeitherVerdictRefuses(t *testing.T) {
 			h := gateHarness(t, tc.reply)
 			resp := h.post(t, "/v1/chat/completions",
 				`{"model":"keera-code","messages":[{"role":"user","content":"a"}]}`)
-			// Fails closed: the only way past a gate is a word it recognises.
+			// Fails closed.
 			if resp.StatusCode != http.StatusBadGateway {
 				t.Fatalf("status = %d, want 502", resp.StatusCode)
 			}
@@ -737,9 +713,7 @@ func TestAGateReadsTheWordsASmallModelActuallyWrites(t *testing.T) {
 		})
 	}
 
-	// "REFUSE" is read as a refusal here and not on the rewrite path. A gate's
-	// answer is nothing but a verdict, so there is no prose for the word to
-	// collide with.
+	// "REFUSE" counts for a gate, which writes no prose, but not for a rewrite.
 	for _, reply := range []string{"REFUSE: a credential", "REFUSED", "refused: a credential"} {
 		t.Run("refusing with "+reply, func(t *testing.T) {
 			h := gateHarness(t, func([]string) string { return reply })
@@ -754,8 +728,7 @@ func TestAGateReadsTheWordsASmallModelActuallyWrites(t *testing.T) {
 }
 
 func TestAGateAfterARewriteJudgesTheRedactedText(t *testing.T) {
-	// The order the chain already runs in, and the right way round: what a gate
-	// decides on is what would actually have been sent, not what was typed.
+	// A gate judges what would actually be sent, not what was typed.
 	resolved := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, nil, nil, nil)
 	resolved.Filters = []string{"redact", "escalate"}
 
@@ -786,8 +759,7 @@ func TestAGateAfterARewriteJudgesTheRedactedText(t *testing.T) {
 }
 
 func TestCheckingAGateSendsBothHalvesOfTheSampleSeparately(t *testing.T) {
-	// One request with both halves would be refused for the credential and say
-	// nothing about ordinary code.
+	// Sent together, the credential would hide how ordinary code fares.
 	var asked [][]string
 	h := gateHarness(t, func(segments []string) string {
 		asked = append(asked, segments)
@@ -823,16 +795,14 @@ func TestCheckingAGateSendsBothHalvesOfTheSampleSeparately(t *testing.T) {
 		t.Errorf("warnings = %q, want none from a gate that answered both correctly",
 			p.Warnings)
 	}
-	// A rewrite filter's reading of the same sample has nothing to say here:
-	// nothing was rewritten, so there are no segments to show.
+	// Nothing was rewritten, so there are no segments.
 	if len(p.Segments) != 0 {
 		t.Errorf("segments = %+v, want none from a gate", p.Segments)
 	}
 }
 
 func TestCheckingAGateThatRefusesEverythingWarnsAboutIt(t *testing.T) {
-	// The expensive mistake nothing downstream reports: every request the
-	// guardrail covers is stopped.
+	// The costly mistake: every request the guardrail covers is stopped.
 	h := gateHarness(t, func([]string) string { return "REFUSED: it mentions a system" })
 
 	p := h.server().CheckFilter(context.Background(), h.src.filters["org_1/redact"])
@@ -870,8 +840,8 @@ func shadowHarness(t *testing.T, reply func([]string) string) *harness {
 	return h
 }
 
-// filterRuns is the filter log the request wrote. A shadow filter changes
-// nothing about the answer, so the log is the only place it shows.
+// filterRuns is the filter log the request wrote, the only place a shadow
+// filter shows.
 func filterRuns(t *testing.T, h *harness) []store.FilterRun {
 	t.Helper()
 	return h.sink.last(t).FilterRuns
@@ -889,13 +859,12 @@ func TestAShadowFilterForwardsTheRequestExactlyAsItWasSent(t *testing.T) {
 
 	<-h.upstreamBodies
 	forwarded := string(<-h.upstreamBodies)
-	// The whole promise of shadow: the filter read the request, would have
-	// taken the credential out of it, and the request went as it was sent.
+	// The filter would have removed the credential, but the request went as
+	// sent.
 	if !strings.Contains(forwarded, prompt) {
 		t.Errorf("a shadow filter changed the request: %s", forwarded)
 	}
-	// And it is not claimed to have acted. A header naming it would tell a
-	// client its request had been through a guardrail that was not enforcing.
+	// And no header claims it acted.
 	if got := resp.Header.Get("X-Keera-Filters"); got != "" {
 		t.Errorf("X-Keera-Filters = %q, want nothing: no filter acted", got)
 	}
@@ -914,7 +883,6 @@ func TestAShadowFilterForwardsTheRequestExactlyAsItWasSent(t *testing.T) {
 	}
 }
 
-// Whatever a shadow filter answers, its outcome is only recorded.
 func TestAShadowFilterDoesNotStopTheRequest(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -922,14 +890,11 @@ func TestAShadowFilterDoesNotStopTheRequest(t *testing.T) {
 		model string
 		want  store.FilterOutcome
 	}{
-		// The refusal that did not happen. It is the number a guardrail is
-		// rolled out on, and the request it was about was served.
+		// The refusal is recorded, and the request served.
 		{"when it refuses", func([]string) string {
 			return "REFUSED: this asks for an export of the customer table"
 		}, "", store.FilterRefuse},
-		// Everywhere else this refuses the request, but a shadow filter is a
-		// measurement and must not take a department offline. The failure is
-		// still recorded: a shadow filter that cannot run measures nothing.
+		// A failure is recorded, but does not refuse the request.
 		{
 			"when it cannot run", func([]string) string { return "I have redacted it." }, "",
 			store.FilterError,
@@ -972,8 +937,7 @@ func TestAShadowFilterIsStillCharged(t *testing.T) {
 	h.post(t, "/v1/chat/completions",
 		`{"model":"keera-code","messages":[{"role":"user","content":"hunter2"}]}`)
 
-	// The same 600 micro-units the enforcing filter costs: the generation
-	// happened, so shadow is no discount.
+	// The same 600 micros as an enforcing filter.
 	const filterMicros = 600
 	if h.budgets.charged < filterMicros {
 		t.Errorf("charged = %d, want the shadow filter's spend included",
@@ -986,8 +950,7 @@ func TestAShadowFilterIsStillCharged(t *testing.T) {
 }
 
 func TestAShadowRewriteIsNotHandedToTheNextFilter(t *testing.T) {
-	// A shadow rewrite did not happen, so the gate after it has to judge the
-	// text that will actually be sent.
+	// A shadow rewrite did not happen, so the next gate judges the original.
 	resolved := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, nil, nil, nil)
 	resolved.Filters = []string{"redact", "escalate"}
 
@@ -1048,8 +1011,7 @@ func TestAFilterRunIsRecordedWithWhatItDid(t *testing.T) {
 	case run.Outcome != store.FilterRewrite:
 		t.Errorf("outcome = %q, want a rewrite", run.Outcome)
 	case run.Segments != 2 || run.Changed != 1:
-		// Counts only, never the text, are enough to tell how much an
-		// instruction rewrites.
+		// Counts only, never the text.
 		t.Errorf("segments = %d, changed = %d; want 2 shown and the 1 it edited",
 			run.Segments, run.Changed)
 	case run.CostMicros == 0:
@@ -1058,8 +1020,7 @@ func TestAFilterRunIsRecordedWithWhatItDid(t *testing.T) {
 }
 
 func TestAFilterThatChangedNothingIsRecordedAsAPass(t *testing.T) {
-	// Worked and changed nothing is its own outcome: over a week it says the
-	// filter is not needed, which "it ran" would not.
+	// "Passed" is its own outcome, which shows when a filter is not needed.
 	h := filterHarness(t, redactor, nil)
 
 	h.post(t, "/v1/chat/completions",
@@ -1072,8 +1033,6 @@ func TestAFilterThatChangedNothingIsRecordedAsAPass(t *testing.T) {
 }
 
 func TestARefusedRequestStillCarriesItsFilterRuns(t *testing.T) {
-	// The refusal is the case the log is read for most often, so it must not be
-	// the one outcome that goes unrecorded.
 	h := gateHarness(t, func([]string) string { return "REFUSED: not this one" })
 
 	resp := h.post(t, "/v1/chat/completions",
@@ -1096,8 +1055,7 @@ func TestAFilterThatBrokeIsRecordedOnTheRequestItRefused(t *testing.T) {
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502", resp.StatusCode)
 	}
-	// An enforcing filter that cannot run refuses everything, so its failures
-	// must be counted apart from the refused requests.
+	// Failures are counted apart from refusals.
 	runs := filterRuns(t, h)
 	if len(runs) != 1 || runs[0].Outcome != store.FilterError {
 		t.Errorf("runs = %+v, want the failure recorded against the filter", runs)
@@ -1105,8 +1063,7 @@ func TestAFilterThatBrokeIsRecordedOnTheRequestItRefused(t *testing.T) {
 }
 
 func TestARequestWithNoFilterableTextIsForwardedWithoutAFilterRun(t *testing.T) {
-	// The filters did not run, and no row claims they did: a filter that
-	// passed a request it never read would skew every rate on its screen.
+	// The filters did not run, and no row claims they did.
 	for _, body := range []string{
 		`{"model":"keera-code","messages":[]}`,
 		`{"model":"keera-code","messages":[{"role":"user","content":[{"type":"image_url",` +
@@ -1132,10 +1089,9 @@ func TestARequestWithNoFilterableTextIsForwardedWithoutAFilterRun(t *testing.T) 
 
 /* ---------------------------------- gates read from the first token */
 
-// gateHarnessServingLogprobs is a gate in front of a plane that serves a
-// distribution. reply is what the model writes; allow is the first token's
-// share for ALLOW, and REFUSED holds the rest. They are separate because prose
-// and first token disagreeing is the tricky case.
+// gateHarnessServingLogprobs is a gate in front of a backend that serves
+// logprobs. reply is the written text; allow is the first token's share for
+// ALLOW, and REFUSED holds the rest.
 func gateHarnessServingLogprobs(t *testing.T, reply string, allow float64) *harness {
 	t.Helper()
 
@@ -1143,8 +1099,7 @@ func gateHarnessServingLogprobs(t *testing.T, reply string, allow float64) *harn
 		content, _ := json.Marshal(reply)
 		body := `{"id":"2","choices":[{"message":{"content":` + string(content) + `}`
 		if c.logprobs {
-			// The first token is whichever verdict holds most of the mass,
-			// which is what a plane decoding greedily would have written.
+			// The first token is the likelier verdict, as with greedy decoding.
 			token := "ALLOW"
 			if allow < 0.5 {
 				token = "REFUSED"
@@ -1181,7 +1136,7 @@ func TestOnlyAGateAsksForTheDistribution(t *testing.T) {
 	if !strings.Contains(asked, `"logprobs":true`) {
 		t.Errorf("the gate did not ask for a distribution: %s", asked)
 	}
-	// The allowance is untouched: a refusal still carries a written sentence.
+	// The allowance stays, since a refusal still writes a sentence.
 	if !strings.Contains(asked, `"max_tokens":192`) {
 		t.Errorf("the gate's output allowance changed: %s", asked)
 	}
@@ -1197,9 +1152,8 @@ func TestOnlyAGateAsksForTheDistribution(t *testing.T) {
 	}
 }
 
-// A small model that writes a sentence instead of the word used to stop the
-// request. The first token says which verdict it meant, whatever it wrapped
-// around it.
+// A model that writes a sentence instead of the word is read from its first
+// token.
 func TestAVerdictIsReadFromTheFirstTokenWhenTheWordsCannotBe(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -1223,8 +1177,7 @@ func TestAVerdictIsReadFromTheFirstTokenWhenTheWordsCannotBe(t *testing.T) {
 			allow: 0.95, want: http.StatusOK,
 		},
 		{
-			// It answered with its first token and stopped, which is a plane
-			// that returned the distribution and no text worth reading.
+			// Only the first token, and no useful text.
 			name: "nothing written at all", reply: "", allow: 0.96, want: http.StatusOK,
 		},
 	}
@@ -1240,8 +1193,7 @@ func TestAVerdictIsReadFromTheFirstTokenWhenTheWordsCannotBe(t *testing.T) {
 	}
 }
 
-// A gate that refuses owes the sender a sentence. Where it refused without
-// writing the word, the prose it wrote instead is that sentence.
+// A gate that refused without the word gives its prose as the reason.
 func TestARefusalReadFromTheFirstTokenStillCarriesASentence(t *testing.T) {
 	h := gateHarnessServingLogprobs(t,
 		"This one carries a live credential and must not be sent.", 0.02)
@@ -1257,7 +1209,7 @@ func TestARefusalReadFromTheFirstTokenStillCarriesASentence(t *testing.T) {
 		t.Errorf("the refusal carried no reason: %s", body)
 	}
 
-	// And where there was no prose either, it says so rather than nothing.
+	// Without prose, it says so.
 	h = gateHarnessServingLogprobs(t, "", 0.01)
 	resp = h.post(t, "/v1/chat/completions",
 		`{"model":"keera-code","messages":[{"role":"user","content":"a"}]}`)
@@ -1271,8 +1223,7 @@ func TestARefusalReadFromTheFirstTokenStillCarriesASentence(t *testing.T) {
 	}
 }
 
-// The written word still decides when there is one: it is what the
-// administrator checked before going live.
+// The written word decides when there is one.
 func TestTheWrittenVerdictOutranksTheDistribution(t *testing.T) {
 	// It wrote REFUSED, and its first token leans the other way.
 	h := gateHarnessServingLogprobs(t, "REFUSED: a credential", 0.9)
@@ -1306,8 +1257,8 @@ func TestAGateWithNeitherReadingStillFailsClosed(t *testing.T) {
 	}
 }
 
-// The gate asks again for the words, and remembers not to ask that backend for
-// a distribution again, as a router does.
+// The gate asks again without logprobs, and remembers not to ask that backend
+// for them again.
 func TestAGateWhoseBackendRejectsLogprobsReadsTheWords(t *testing.T) {
 	var withLogprobs, without atomic.Int32
 	backend := func(w http.ResponseWriter, r *http.Request) {
@@ -1363,8 +1314,8 @@ func TestAGateWhoseBackendRejectsLogprobsReadsTheWords(t *testing.T) {
 	}
 }
 
-// What a check reports, which is the whole reason the number is kept: a gate
-// that answered both halves correctly and could barely tell them apart.
+// A check shows a gate that answered both halves right but could barely tell
+// them apart.
 func TestAGateCheckReportsHowSureEachVerdictWas(t *testing.T) {
 	h := gateHarnessServingLogprobs(t, "ALLOW", 0.93)
 
@@ -1381,8 +1332,7 @@ func TestAGateCheckReportsHowSureEachVerdictWas(t *testing.T) {
 		}
 	}
 
-	// A plane serving no distribution says nothing rather than claiming the
-	// gate had no opinion.
+	// Without logprobs, no confidence is reported.
 	plain := gateHarness(t, func([]string) string { return "ALLOW" })
 	p = plain.srv.CheckFilter(t.Context(), plain.src.filters["org_1/redact"])
 	if !p.OK {

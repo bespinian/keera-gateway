@@ -40,8 +40,7 @@ func TestServesTheShell(t *testing.T) {
 }
 
 func TestRoutesFallBackToTheShell(t *testing.T) {
-	// The panel routes on the URL, so a deep link has to load the same
-	// document - otherwise reloading on /projects is a 404.
+	// Otherwise reloading on /projects is a 404.
 	for _, path := range []string{"/projects", "/keys", "/organisations", "/anything"} {
 		w := get(t, path, nil)
 		if w.Code != http.StatusOK {
@@ -54,8 +53,8 @@ func TestRoutesFallBackToTheShell(t *testing.T) {
 }
 
 func TestMissingAssetsAre404(t *testing.T) {
-	// An asset that is not there must not silently return HTML, which the
-	// browser would then try to parse as JavaScript.
+	// A missing asset must not return HTML, which the browser would parse as
+	// JavaScript.
 	w := get(t, "/assets/nope.js", nil)
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", w.Code)
@@ -87,8 +86,8 @@ var relativeImport = regexp.MustCompile(`from\s+"(\.[^"]+)"`)
 
 func TestEveryImportIsEmbedded(t *testing.T) {
 	// A module missing from the binary is a blank page at run time and no
-	// error at build time. The list comes from the imports themselves, so a
-	// new view is covered without anyone adding it.
+	// error at build time. The list comes from the imports, so new views are
+	// covered too.
 	roots := []string{"assets/app.js"}
 	if err := fs.WalkDir(assets, "assets/views", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -124,15 +123,15 @@ func TestEveryImportIsEmbedded(t *testing.T) {
 // providerMarkKey matches one entry of the providerMarks table in ui.js.
 var providerMarkKey = regexp.MustCompile(`(?m)^  ([a-z0-9]+): \{$`)
 
-// A mark whose key matches no provider name silently never appears. A
-// provider without a mark is fine: it shows its name.
+// A mark whose key matches no provider never appears. A provider without a
+// mark is fine: it shows its name.
 func TestEveryProviderMarkNamesAProvider(t *testing.T) {
 	body, err := fs.ReadFile(assets, "assets/ui.js")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Only the first table in the file: the identity-provider marks below it
-	// are keyed by names an operator chooses, which nothing here can check.
+	// Only the first table: the identity-provider marks below it are keyed by
+	// names an operator chooses.
 	table := string(body)
 	start := strings.Index(table, "const providerMarks = {")
 	end := strings.Index(table, "const idpMarks = {")
@@ -240,8 +239,8 @@ func TestAssetsAreServedPrecompressed(t *testing.T) {
 }
 
 func TestTheTwoBodiesCarryDifferentEntityTags(t *testing.T) {
-	// One tag over two representations is how a cache ends up handing a
-	// gzipped file to a client that cannot read one.
+	// One tag for both bodies lets a cache serve gzip to a client that cannot
+	// read it.
 	plain := get(t, "/assets/app.js", nil).Header().Get("ETag")
 	zipped := get(t, "/assets/app.js", map[string]string{"Accept-Encoding": "gzip"}).Header().Get("ETag")
 	if plain == "" || zipped == "" {

@@ -71,16 +71,14 @@ func TestParseRejectsWhatWouldFailSilentlyAtRuntime(t *testing.T) {
 			wantErr: "backend is required",
 		},
 		{
-			// Forgetting this is the mistake that makes vLLM answer 404 for
-			// every request, so it is worth naming --served-model-name in the
-			// error rather than saying "required".
+			// Forgetting this makes vLLM answer 404 to every request, so the
+			// error names --served-model-name.
 			name:    "no backend model",
 			in:      "models:\n  - alias: a\n    backends: [\"http://x/v1\"]",
 			wantErr: "served-model-name",
 		},
 		{
-			// The control API refuses it too, so a file cannot seed an
-			// organisation with a model nobody could save again.
+			// The control API refuses it too.
 			name:    "a backend that is not http",
 			in:      "models:\n  - alias: a\n    backends: [\"file:///etc/passwd\"]\n    backend_model: m",
 			wantErr: "not an http or https address",
@@ -91,9 +89,8 @@ func TestParseRejectsWhatWouldFailSilentlyAtRuntime(t *testing.T) {
 			wantErr: "declared twice",
 		},
 		{
-			// The alias reaches a developer's client config unquoted, so a
-			// name that could close a JSON string or a shell word is refused
-			// where it is declared rather than where it is rendered.
+			// The alias reaches client configs unquoted, so a name that could
+			// break JSON or a shell word is refused here.
 			name:    "an alias that would break a client config",
 			in:      "models:\n  - alias: \"a\\\", \\\"x\\\": \\\"\"\n    backends: [\"http://x/v1\"]\n    backend_model: m",
 			wantErr: "lowercase letters",
@@ -132,8 +129,7 @@ func TestParseRejectsWhatWouldFailSilentlyAtRuntime(t *testing.T) {
 	}
 }
 
-// A field the file shape does not have is refused, so a setting nothing reads
-// is not mistaken for one that works.
+// An unknown field is refused, so it is not mistaken for a working setting.
 func TestAnUnknownFieldIsRefused(t *testing.T) {
 	_, err := parseModelFile([]byte(`
 models:
@@ -160,8 +156,7 @@ sandboxes:
 }
 
 func TestASubscriptionModelIsAnthropicsOwnAPI(t *testing.T) {
-	// Each caller's Claude sign-in goes to the backend, so nothing else may
-	// stand there.
+	// Each caller's Claude sign-in goes to the backend.
 	ok := Model{
 		Alias: "claude-opus", Provider: "anthropic", BackendModel: "claude-opus-5-5",
 		Subscription: true,

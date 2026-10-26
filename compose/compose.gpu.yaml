@@ -4,53 +4,45 @@
 #   sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml   # once, on the host
 #   podman compose -f compose.yaml -f compose.gpu.yaml up -d --build
 #
-# vLLM rather than llama.cpp, because this tier serves a team. PagedAttention
-# shares one KV pool, so a developer holding a 30k context reserves nothing
-# from the others, and its prefill on a datacenter card is well ahead of
-# llama.cpp's CUDA path, which matters as coding agents resend large contexts
-# every turn.
+# vLLM, because this tier serves a team: PagedAttention shares one KV pool,
+# and its prefill is faster, which matters as agents resend large contexts.
 
 services:
   keera-engine:
     image: ${KEERA_VLLM_IMAGE:-docker.io/vllm/vllm-openai:latest}
     # CDI is how podman hands an NVIDIA device to a container. Generate the spec
-    # on the host first (see the header), or create fails with an unresolvable
-    # device.
+    # on the host first (see the header).
     devices:
       - nvidia.com/gpu=all
-    # The container writes to the device nodes, which SELinux denies without
-    # this. Harmless elsewhere.
+    # SELinux denies writes to the device nodes without this.
     security_opt:
       - label=disable
-    # vLLM needs far more than podman's 64 MB /dev/shm, or it dies with
-    # "Insufficient space in /dev/shm". 8 GB is the floor for one card; raise
-    # it for tensor parallelism across several.
+    # vLLM needs far more than podman's 64 MB /dev/shm. 8 GB is the floor for
+    # one card; raise it for several.
     shm_size: ${KEERA_SHM_SIZE:-8gb}
-    # vLLM's weights. The base file's llama-cache mount stays unused:
-    # podman-compose 1.6 cannot remove it in an override.
+    # vLLM's weights. The llama-cache mount stays: podman-compose 1.6 cannot
+    # remove it in an override.
     volumes:
       - hf-cache:/root/.cache/huggingface
     healthcheck:
       # A 6 GB first download needs more grace than llama.cpp's 1 GB one.
       start_period: 600s
     command:
-      # Sizes, other models and cards are in README.md. No --quantization: vLLM
-      # reads it from the checkpoint, so any KEERA_GPU_MODEL works.
+      # Sizes, other models and cards are in README.md. vLLM reads the
+      # quantization from the checkpoint.
       - ${KEERA_GPU_MODEL:-Qwen/Qwen2.5-Coder-7B-Instruct-AWQ}
       - --served-model-name
       - keera-speed
       # A fraction of VRAM.
       - --gpu-memory-utilization
       - "0.90"
-      # Qwen2.5-Coder's max_position_embeddings. The advertised 131k needs a
-      # static YaRN rope_scaling block, which vLLM also applies to short prompts
-      # and degrades them. models.yaml says 16384; README.md says how to use the
-      # whole window.
+      # Qwen2.5-Coder's max_position_embeddings. The advertised 131k needs YaRN
+      # scaling, which degrades short prompts. models.yaml says 16384; README.md
+      # says how to use the whole window.
       - --max-model-len
       - "32768"
-      # The parser must match the model's tool-call syntax. Otherwise calls come
-      # back as prose in `content` with `tool_calls` empty and no error logged,
-      # the failure internal/gateway/probe.go names. hermes is Qwen2.5's.
+      # The parser must match the model's tool-call syntax, or calls come back
+      # as prose with no error. hermes is Qwen2.5's.
       - --enable-auto-tool-choice
       - --tool-call-parser
       - hermes

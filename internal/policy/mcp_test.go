@@ -10,9 +10,7 @@ func TestToolAllowListsNarrowToTheNarrowerEntry(t *testing.T) {
 	project := &Limits{AllowedTools: []string{"github/search_code", "jira", "slack"}}
 	r := Resolve(Key{ID: "k", OrgID: "o", ProjectID: "t"}, org, project, nil)
 
-	// The organisation allows all of github and one jira tool; the project allows
-	// one github tool and all of jira. What both allow is one tool of each, and
-	// slack, which the organisation never allowed, is not in it.
+	// What both allow is one tool of each; slack was never the org's to grant.
 	want := []string{"github/search_code", "jira/search"}
 	if !slices.Equal(r.AllowedTools, want) {
 		t.Fatalf("allowed = %v, want %v", r.AllowedTools, want)

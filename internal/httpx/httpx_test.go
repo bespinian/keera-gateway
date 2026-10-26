@@ -8,9 +8,8 @@ import (
 	"testing"
 )
 
-// A request id is echoed on the response, logged and quoted in a 500. Honouring
-// the client's own lets their report and the log name the same request; holding
-// it to the shape of an id keeps it from being a place to put something else.
+// A client's own request id is kept, so its report and the log match, but only
+// if it looks like an id, as it is echoed and logged.
 func TestRequestIDAcceptsAnIDAndNothingElse(t *testing.T) {
 	tests := []struct {
 		name, presented string
@@ -76,8 +75,7 @@ func TestMiddlewareKeepsTheClientsOwnID(t *testing.T) {
 	}
 }
 
-// OpenAI takes any ASCII up to 512 characters as X-Client-Request-Id. The id
-// is also logged and sent on as a header, so control characters are dropped.
+// X-Client-Request-Id is logged and sent on, so control characters are dropped.
 func TestClientRequestIDTakesWhatOpenAITakes(t *testing.T) {
 	tests := []struct {
 		name, presented string
@@ -101,8 +99,7 @@ func TestClientRequestIDTakesWhatOpenAITakes(t *testing.T) {
 	}
 }
 
-// The client's own id sits next to the request id, so a log line can be found
-// by either. It never replaces the request id.
+// The client's own id is logged beside the request id, never instead of it.
 func TestTheClientsRequestIDIsLoggedBesideOurs(t *testing.T) {
 	var buf strings.Builder
 	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
@@ -127,8 +124,7 @@ func TestTheClientsRequestIDIsLoggedBesideOurs(t *testing.T) {
 	}
 }
 
-// Media types compare without regard to case or parameters, so a server that
-// answers Application/JSON is read as JSON.
+// Media types compare without case or parameters.
 func TestMediaType(t *testing.T) {
 	for in, want := range map[string]string{
 		"application/json":                 "application/json",

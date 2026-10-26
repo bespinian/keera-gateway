@@ -22,9 +22,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// maxAliasBytes bounds the 'model' field a client may send. Real aliases are
-// short; the limit exists because the value is free text that ends up in a
-// usage row and in a refusal message.
+// maxAliasBytes caps the 'model' field. It is free text that ends up in a
+// usage row and a refusal message.
 const maxAliasBytes = 128
 
 // call is one inference request on its way through serve.
@@ -34,8 +33,8 @@ type call struct {
 	res  *policy.Resolved
 	surf surface
 	tr   *trace
-	// ev is the request's usage row, filled in as the request goes. It exists
-	// from the start, because a refused request is still recorded.
+	// ev is the usage row. It exists from the start, since a refused request
+	// is still recorded.
 	ev store.Event
 
 	// work is when the gateway's own work began, for the overhead metric.
@@ -43,20 +42,19 @@ type call struct {
 	// now is when the limits were checked. Budgets are charged against it.
 	now time.Time
 
-	// alias and model are the model that will answer. On a routed request they
-	// change twice: to the route step's choice, and to the destination that
+	// alias and model are the model that answers. A routed request changes
+	// them twice: to the route step's choice, then to the destination that
 	// answered.
 	alias string
 	model policy.Model
 	// route is the route step that chose the model, when routed.
 	route policy.Route
-	// router is the router the client named, if it named one.
+	// router is the router the client named, if any.
 	router policy.Router
 	// scopes is every scope the request is charged to: the key's levels, then
 	// each limit of a router it passed.
 	scopes []policy.Scope
-	// prompts is the system prompt steps of a router the request passed, in
-	// the order it passed them.
+	// prompts are the system prompts of the router steps passed, in order.
 	prompts []string
 
 	decision routeDecision
@@ -68,20 +66,18 @@ type call struct {
 	// step chose, or a trying step's list.
 	chain []policy.Model
 
-	// native is the body in the client's own API, for destinations sent that
-	// API rather than a translation (see native.go); nil when none are.
-	// translated says some get the translation. Until then, or when none do,
-	// the OpenAI-shaped body is nil.
+	// native is the body in the client's own API, for destinations that get
+	// it untranslated (see native.go); nil when none do. translated says some
+	// get the translation. Until then the OpenAI-shaped body is nil.
 	native     *body
 	translated bool
 
 	stream        bool
 	injectedUsage bool
 
-	// received is the size of the body the client sent.
 	received int
-	// held is what the request holds of the organisation's credit until it
-	// ends. See creditHold.
+	// held is the organisation credit held until the request ends. See
+	// creditHold.
 	held int64
 }
 
@@ -112,9 +108,8 @@ func (c *call) viaRouter() bool { return c.router.Alias != "" }
 // forwarding it would skip the prompt.
 const promptAdded = "a guardrail or a router step adds a system prompt to this request"
 
-// systemPrompt is what goes before the client's messages: the key's levels'
-// prompts, outermost first, then those of the router steps the request
-// passed. The more particular comes last.
+// systemPrompt goes before the client's messages: the key's levels' prompts,
+// outermost first, then the router steps'. The more specific comes last.
 func (c *call) systemPrompt() string {
 	out := c.res.SystemPrompt
 	for _, p := range c.prompts {
@@ -130,19 +125,17 @@ type hookSpend struct {
 	took   time.Duration
 }
 
-// serve is everything after authentication: enforce, forward, account.
-//
-// Each step returns false when the request is over, either because it has
-// been refused or because the client has gone.
+// serve is everything after authentication: enforce, forward, account. Each
+// step returns false when the request is over: refused, or the client left.
 func (s *Server) serve(w http.ResponseWriter, r *http.Request, res *policy.Resolved,
 	surf surface, tr *trace,
 ) {
-	// Clipped, so a router's limits are appended to a copy and never to the
-	// cached key's own list.
+	// Clipped, so a router's limits are appended to a copy, not to the cached
+	// key's list.
 	c := &call{w: w, r: r, res: res, surf: surf, tr: tr, scopes: slices.Clip(res.Scopes), ev: store.Event{
 		TS: tr.start, OrgID: res.Key.OrgID, ProjectID: res.Key.ProjectID, UserID: res.Key.UserID,
 		KeyID: res.Key.ID,
-		// Read now, before the headers are replaced by the ones the backend gets.
+		// Read before the headers are replaced for the backend.
 		Client:          connect.Identify(r.Header.Get(connect.ClientHeader), r.UserAgent()),
 		RequestID:       httpx.RequestID(r.Context()),
 		ClientRequestID: httpx.ClientRequestID(r.Context()),
@@ -153,18 +146,16 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, res *policy.Resol
 		return
 	}
 	c.received = len(raw)
-	// Given back once the request has been charged, whichever way it ends.
+	// Released after the request is charged, however it ends.
 	defer func() { s.budgets.ReleaseCredit(c.res.Key.OrgID, c.held) }()
-	// Ends what admit and a router's limit steps counted, whichever way the
-	// request ends. c.scopes is read then, not now.
+	// Ends what admit and router limit steps counted. c.scopes is read when
+	// this runs, not now.
 	defer func() { s.budgets.EndRequest(c.scopes, c.now) }()
-	// The gateway's own work starts here. Everything before is the client
-	// sending its body, and a slow link should not count as gateway overhead.
+	// Overhead starts here, so a slow client upload does not count.
 	c.work = time.Now()
 	tr.seal("")
 
-	// All of the gateway's own checks are one step: together they take a
-	// fraction of a millisecond, and one bar says that more clearly than five.
+	// All checks are one trace step: together they take under a millisecond.
 	tr.open(store.SpanAdmit, "")
 	b, ok := s.decode(c, raw)
 	if !ok || !s.target(c, b) || !s.admit(c, b) {
@@ -172,9 +163,8 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, res *policy.Resol
 	}
 	tr.seal("")
 
-	// The router runs before the key's filters, so its route steps read what
-	// the client sent, unredacted. That is why their models should be served
-	// locally.
+	// The router runs before the key's filters, so its route steps read the
+	// unredacted request. That is why their models should be local.
 	if c.viaRouter() {
 		if b, ok = s.useRouter(c, b); !ok {
 			return
@@ -192,28 +182,25 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, res *policy.Resol
 
 func (s *Server) receive(c *call) ([]byte, bool) {
 	// Opened rather than timed, so a body refused halfway (over the size cap)
-	// is still drawn as the step it was refused in.
+	// still shows as this step.
 	c.tr.open(store.SpanReceive, "")
 	return readBody(c.w, c.r, s.opts.MaxBodyBytes, func(status int, code, msg string) {
 		s.refuse(c, refusal{status: status, typ: "invalid_request_error", code: code, msg: msg})
 	})
 }
 
-// bodyReadTimeout bounds how long a client may take to send its request.
-// Without it, a client that sends a large body slowly holds its memory for as
-// long as it likes.
+// bodyReadTimeout limits how long a client may take to send its body, so a
+// slow upload cannot hold memory forever.
 const bodyReadTimeout = 2 * time.Minute
 
-// readBody reads a request body of at most limit bytes, compressed or not. A
-// body over the limit, or in an encoding the gateway cannot read, is answered
-// by refuse, in the caller's own shape. Any other error is a client that went
-// away mid-upload, which needs no answer.
+// readBody reads a body of at most limit bytes, compressed or not. A body
+// too large or in an unknown encoding is answered by refuse, in the caller's
+// shape. Any other error means the client left mid-upload and needs no answer.
 func readBody(w http.ResponseWriter, r *http.Request, limit int64,
 	refuse func(status int, code, msg string),
 ) ([]byte, bool) {
-	// The deadline is lifted again after: the connection is still read while
-	// the answer streams, to notice the client hanging up. Not every writer
-	// supports a deadline, which is fine.
+	// The deadline is lifted after: the connection is still read while the
+	// answer streams, to notice a hang-up. Not every writer supports one.
 	rc := http.NewResponseController(w)
 	_ = rc.SetReadDeadline(time.Now().Add(bodyReadTimeout))
 	defer func() { _ = rc.SetReadDeadline(time.Time{}) }()
@@ -237,8 +224,8 @@ func readBody(w http.ResponseWriter, r *http.Request, limit int64,
 			return nil, false
 		}
 		defer func() { _ = zr.Close() }()
-		// The limit holds for what the body unpacks to as well, or a small
-		// upload could fill the memory.
+		// The limit also applies after unpacking, so a small upload cannot
+		// fill memory.
 		src = io.LimitReader(zr, limit+1)
 	default:
 		refuse(http.StatusUnsupportedMediaType, "unsupported_encoding",
@@ -263,10 +250,9 @@ func readBody(w http.ResponseWriter, r *http.Request, limit int64,
 	return nil, false
 }
 
-// decode parses the body. Everything after this is written against the OpenAI
-// shape, except what is sent to a provider in the client's own API. A body in
-// such an API is kept as it came, in c.native, and is translated only once
-// something needs the OpenAI shape (see translate). Until then b is nil.
+// decode parses the body. A body in a provider's own API is kept as is in
+// c.native and translated to the OpenAI shape only when needed (see
+// translate). Until then b is nil.
 func (s *Server) decode(c *call, raw []byte) (*body, bool) {
 	d := c.surf.dialect
 	b, err := parseBody(raw)
@@ -275,16 +261,14 @@ func (s *Server) decode(c *call, raw []byte) (*body, bool) {
 		return nil, false
 	}
 	// A backend that reads "true" or 1 as true would stream an answer the
-	// gateway reads as a whole one, without the usage record it adds to a
-	// stream, and the request would go unbilled.
+	// gateway treats as whole, without usage, so it would go unbilled.
 	if _, present := b.value("stream"); present {
 		if _, ok := b.boolean("stream"); !ok {
 			s.refuse(c, invalidBody("the 'stream' field must be true or false"))
 			return nil, false
 		}
 	}
-	// Set before anything can refuse, so a session cut short by a budget
-	// shows the refusal too.
+	// Set before any refusal, so a session cut short by a budget shows it.
 	if d == nil {
 		c.ev.SessionKey = sessionKey(c.r, c.res.Key.ID, c.surf.kind, b.firstUserMessage)
 		return b, true
@@ -296,8 +280,7 @@ func (s *Server) decode(c *call, raw []byte) (*body, bool) {
 }
 
 // translate makes the OpenAI-shaped body from the client's own, the first
-// time a router or a destination that is not the client's provider needs it.
-// A body that is in the OpenAI shape already is returned as it is.
+// time something needs it. An OpenAI-shaped body is returned as is.
 func (s *Server) translate(c *call, b *body) (*body, bool) {
 	if b != nil {
 		return b, true
@@ -310,9 +293,8 @@ func (s *Server) translate(c *call, b *body) (*body, bool) {
 	return b, true
 }
 
-// openAIBody turns the client's own body into the OpenAI shape, and answers
-// in the shape the request was decoded into, on this call's own copy of the
-// surface.
+// openAIBody turns the client's body into the OpenAI shape, and sets the
+// call's own copy of the surface to answer in the decoded shape.
 func openAIBody(c *call) (*body, error) {
 	b, sh, err := c.surf.shape.decodeBody(c.native.encode())
 	if err == nil {
@@ -360,8 +342,8 @@ func notRebuilt(err error) *refusal {
 // target works out what the 'model' field names: one of this organisation's
 // models or routers.
 func (s *Server) target(c *call, b *body) bool {
-	// Before the translation, the model is read from the client's own API,
-	// which names it in the same field.
+	// Before translation the model is read from the client's own body, which
+	// uses the same field.
 	alias, _ := c.sent(b).str("model")
 	if ref := aliasRefusal(alias); ref != nil {
 		s.refuse(c, *ref)
@@ -412,8 +394,8 @@ func aliasRefusal(alias string) *refusal {
 			msg: "the 'model' field is required; send one of the models from /v1/models",
 		}
 	}
-	// An oversized name is refused without being quoted back or stored:
-	// otherwise a client could put a request-sized string on every usage row.
+	// An oversized name is not quoted back or stored, so a client cannot put
+	// a huge string on every usage row.
 	if len(alias) > maxAliasBytes {
 		return &refusal{
 			status: http.StatusNotFound,
@@ -422,8 +404,8 @@ func aliasRefusal(alias string) *refusal {
 				"names none - send one of the models from /v1/models", len(alias)),
 		}
 	}
-	// No model's name has a control character, and a NUL byte is one Postgres
-	// refuses to store.
+	// No model name has a control character, and Postgres refuses to store a
+	// NUL byte.
 	if !printable(alias) {
 		return &refusal{
 			status: http.StatusNotFound,
@@ -462,8 +444,8 @@ func (s *Server) lookupModel(res *policy.Resolved, alias string, kind policy.Kin
 	return n, nil
 }
 
-// admit checks the rate limits, the credit and the budgets. A request let
-// through is counted against the rate limits per day or month.
+// admit checks the rate limits, credit and budgets. A request let through
+// counts against the daily and monthly limits.
 func (s *Server) admit(c *call, b *body) bool {
 	c.now = time.Now()
 	if !s.admitted(c, b) {
@@ -495,8 +477,8 @@ func (s *Server) admitted(c *call, b *body) bool {
 			return false
 		}
 	}
-	// A subscription pays for the model, so only filters can spend the
-	// organisation's money, and without them no budget applies.
+	// A subscription pays for the model, so only filters spend the
+	// organisation's money. Without them no budget applies.
 	if c.model.Subscription && len(c.res.Filters) == 0 {
 		return true
 	}
@@ -507,15 +489,14 @@ func (s *Server) admitted(c *call, b *body) bool {
 	return true
 }
 
-// checkBudgets checks the budgets of scopes. It only decides, as checkRates
-// does.
+// checkBudgets checks the budgets of scopes. Like checkRates, it only decides.
 func (s *Server) checkBudgets(c *call, scopes []policy.Scope) (refusal, bool) {
 	err := s.budgets.Allow(scopes, c.now)
 	if err == nil {
 		return refusal{}, true
 	}
 	if _, ok := errors.AsType[*policy.ErrBudgetExceeded](err); !ok {
-		// The budgeter should only ever say yes or no, so anything else is a bug.
+		// Any other error from the budgeter is a bug.
 		s.log.Error("unexpected budget error", "error", err,
 			httpx.LogIDs(c.r.Context()))
 	}
@@ -539,27 +520,25 @@ func (s *Server) useRoute(c *call, b *body) bool {
 	if d.micros > 0 {
 		s.budgets.Charge(c.scopes, d.micros, c.now)
 	}
-	// Recorded on every outcome, refusals included: a step that can no
-	// longer decide shows up in exactly those rows.
+	// Recorded on every outcome, including refusals, which is where a step
+	// that can no longer decide shows up.
 	c.ev.RouterOutcome = d.outcome
 	c.ev.RouterMS = d.took.Milliseconds()
-	// A fallback step reads nothing, so its cost is the failed attempts,
-	// which are drawn on their own. It is drawn only when it has a reason
-	// to show.
+	// A fallback step reads nothing and its failed attempts are drawn on
+	// their own, so it is drawn only when it has something to show.
 	if rt.Chooses() || ref != nil || d.why != "" {
 		c.tr.since(store.SpanRoute, rt.Router+"/"+rt.Step, routeAt, routeNote(d, ref))
 	}
-	// A step that chooses is counted here; one that tries is counted after
-	// forwarding. A refusal is counted either way, since nothing else would
-	// show a step that has stopped placing traffic.
+	// A choosing step is counted here, a trying step after forwarding. A
+	// refusal is always counted, or a step that stopped placing traffic
+	// would not show.
 	count := func(outcome store.RouterOutcome) {
 		s.metrics.RouterRun(rt.Router, rt.Step, c.res.Key.OrgID, string(outcome),
 			d.alias, d.took.Seconds(), d.micros)
 	}
 	if d.why != "" {
-		// A note, not an error: the fallback may still serve the request, and
-		// then this is the only record it was placed by default. Appended,
-		// since an exceeded branch on the way may have left its own note.
+		// A note, not an error: the fallback may still serve the request.
+		// Appended, since an exceeded branch may have left a note already.
 		c.ev.Note = appendNote(c.ev.Note, "the router '"+rt.Router+"' could not choose: "+d.why)
 	}
 	if ref != nil {
@@ -575,8 +554,8 @@ func (s *Server) useRoute(c *call, b *body) bool {
 		return false
 	}
 
-	// From here on the request is about the chosen model. That it was chosen
-	// is carried by ev.RouterOutcome alone.
+	// From here on the request is about the chosen model. Only
+	// ev.RouterOutcome records that it was chosen.
 	c.alias = d.alias
 	model, ok := s.serveable(c.res.Key.OrgID, c.alias)
 	if !ok || model.Kind != c.surf.kind {
@@ -605,8 +584,8 @@ func (s *Server) useNative(c *call, b *body) (*body, bool) {
 		return b, true
 	}
 	d := c.surf.dialect
-	// A body only the provider itself can read goes nowhere else, so the
-	// other destinations are dropped from the chain.
+	// A body only the provider can read goes nowhere else, so other
+	// destinations are dropped.
 	if why := d.needsNative(c.native); why != "" {
 		var kept []policy.Model
 		for _, m := range c.chain {
@@ -663,15 +642,13 @@ func (c *call) sendsNative(m policy.Model) bool {
 	return c.native != nil && d != nil && m.Provider == d.provider()
 }
 
-// useFilters runs the key's filters over the request.
-//
-// They run before anything the gateway adds, so they only rewrite what the
-// client sent, never the administrator's system prompt. What they spent is
-// charged even when they fail, so breaking a filter never makes it free.
+// useFilters runs the key's filters over the request. They run before the
+// gateway adds anything, so they never rewrite the administrator's system
+// prompt. Their spend is charged even when they fail, so a broken filter is
+// never free.
 func (s *Server) useFilters(c *call, b *body) bool {
-	// A filter a router step already ran is not run again, as a filter named
-	// at two guardrail levels runs once: it would judge the same text twice
-	// and be paid for twice.
+	// A filter a router step already ran is skipped, like one named at two
+	// levels: it would judge the same text twice and be paid twice.
 	aliases := slices.DeleteFunc(slices.Clone(c.res.Filters), func(alias string) bool {
 		return slices.ContainsFunc(c.filters.runs, func(r store.FilterRun) bool { return r.Filter == alias })
 	})
@@ -683,23 +660,21 @@ func (s *Server) useFilters(c *call, b *body) bool {
 	if rewrote && c.native != nil && c.translated && !s.retranslate(c, b) {
 		return false
 	}
-	// Names the enforcing filters in order, so a developer can see their
-	// prompt was changed or judged, and by what.
+	// Lists the enforcing filters, so a developer can see what changed or
+	// judged their prompt.
 	listHeader(c.w, "X-Keera-Filters", c.filters.applied)
 	return true
 }
 
-// runFilters runs filters over the body that would be sent now: the client's
-// own, if it is still in its own API. It charges what they spent and answers
-// the client when they refuse or the client hangs up. It says whether they
-// rewrote the body.
+// runFilters runs filters over the body as it would be sent now, the
+// client's own if still untranslated. It charges their spend, answers the
+// client on a refusal or hang-up, and says whether they rewrote the body.
 func (s *Server) runFilters(c *call, b *body, aliases []string, by string) (rewrote, ok bool) {
 	target, extract := b, func(b *body) (textDoc, error) { return extractText(b, c.surf.kind) }
 	if c.native != nil {
 		target, extract = c.native, c.surf.dialect.text
 	}
 	run, ref := s.applyFilters(c.r.Context(), c.res.Key.OrgID, aliases, by, target, extract, c.tr)
-	// Added to the runs of earlier steps, which came first.
 	c.filters.add(run)
 	if run.micros > 0 {
 		s.budgets.Charge(c.scopes, run.micros, c.now)
@@ -734,10 +709,9 @@ func (s *Server) retranslate(c *call, b *body) bool {
 func (s *Server) prepare(c *call, b *body) bool {
 	c.tr.open(store.SpanPrepare, "")
 
-	// The system prompt (see systemPrompt) goes first; the client's own system
-	// message is kept after it. Only chat has a place for one. A chat body
-	// without a messages array is refused, because forwarding it would skip
-	// the prompt.
+	// The system prompt goes before the client's own system message. Only
+	// chat has a place for one. A chat body without a messages array is
+	// refused, since forwarding it would skip the prompt.
 	if prompt := c.systemPrompt(); prompt != "" && c.surf.kind == policy.KindChat {
 		if b != nil && !b.prependSystem(prompt) {
 			s.refuse(c, invalidBody("the 'messages' field must be an array; "+promptAdded))
@@ -755,9 +729,9 @@ func (s *Server) prepare(c *call, b *body) bool {
 		}
 	}
 	if c.chainOnKey() {
-		// Hosted tools are taken out on the deployment's key: the provider
-		// charges for them apart from tokens, and that is not billed. The header
-		// tells a developer whose agent stopped searching the web why.
+		// Hosted tools are removed on the deployment's key: the provider
+		// charges for them apart from tokens, which is not billed. The header
+		// tells the developer why.
 		var tools []string
 		// On chat completions a hosted search is a field rather than a tool.
 		if b != nil && b.remove("web_search_options") {
@@ -774,9 +748,9 @@ func (s *Server) prepare(c *call, b *body) bool {
 				fields = append(fields, stripPremium(sent)...)
 			}
 		}
-		// Every organisation shares the deployment's OpenAI account, so a chat
-		// completion is not stored there either. The Responses dialect turns
-		// store off itself, where leaving it out would mean on.
+		// Every organisation shares the deployment's OpenAI account, so chat
+		// completions are not stored there. The Responses dialect turns store
+		// off itself, since leaving it out means on.
 		if b != nil {
 			if on, _ := b.boolean("store"); on {
 				b.remove("store")
@@ -785,15 +759,15 @@ func (s *Server) prepare(c *call, b *body) bool {
 		}
 		listHeader(c.w, "X-Keera-Removed-Fields", slices.Compact(slices.Sorted(slices.Values(fields))))
 	}
-	// Both APIs that can go untranslated name it as the OpenAI shape does.
+	// Both untranslated APIs use the same 'stream' field as OpenAI.
 	c.stream, _ = c.sent(b).boolean("stream")
 	if c.stream && b != nil {
 		c.injectedUsage = b.ensureUsageInStream()
 	}
 	c.ev.Stream = c.stream
 
-	// The router's and the filters' own generations are taken out, so turning
-	// on a guardrail does not look like the gateway getting slower.
+	// Router and filter generations are left out, so a guardrail does not
+	// look like the gateway getting slower.
 	s.metrics.Overhead(c.alias, c.res.Key.OrgID,
 		(time.Since(c.work) - c.filters.wall - c.decision.took - c.earlier.took).Seconds())
 	c.tr.seal("")
@@ -809,15 +783,15 @@ func (s *Server) answer(c *call, b *body) {
 		defer cancel()
 	}
 	fw := s.forward(ctx, c.chain, c.outbound(b), c.tr)
-	// The destination is busy until the last token has been served, so it is
-	// released only when this returns, on every path.
+	// The destination is busy until the last token is served, so it is
+	// released when this returns.
 	defer fw.done()
 	answered := time.Now()
 	if fw.resp != nil {
 		defer func() { _ = fw.resp.Body.Close() }()
 	}
-	// Settled before the hang-up check, so a row the client left early still
-	// says how the route step's attempts ended.
+	// Settled before the hang-up check, so the row still shows how the route
+	// step's attempts ended.
 	if c.route.Router != "" {
 		s.settleRoute(c, fw)
 	}
@@ -825,8 +799,7 @@ func (s *Server) answer(c *call, b *body) {
 		s.hungUp(c, "before the model answered", fw.note())
 		return
 	}
-	// The destination that answered is the model this request is about now:
-	// its tokens, its price, its name in the answer.
+	// From here on the request is about the destination that answered.
 	c.model, c.alias = fw.model, fw.model.Alias
 	c.ev.Alias = c.alias
 	if fw.err != nil {
@@ -871,8 +844,8 @@ func (s *Server) answer(c *call, b *body) {
 	}
 	c.ev.Canceled = c.r.Context().Err() != nil
 	c.ev.Latency = time.Since(c.tr.start)
-	// If a later destination served the request, this is the only sign an
-	// earlier one failed, and it is a note rather than an error.
+	// When a later destination answered, an earlier failure is a note, not
+	// an error.
 	if c.ev.Status >= 400 {
 		c.ev.Error = appendNote(c.ev.Error, fw.note())
 	} else {
@@ -880,9 +853,9 @@ func (s *Server) answer(c *call, b *body) {
 	}
 	s.finish(c)
 	// Feeds latency route steps. Only real answers count, since a fast refusal
-	// would post the best score. Timed from when this destination was sent the
-	// request, so failed destinations, the upload and the filters do not count.
-	// Stamped now, not at the start, so a long stream does not expire it at once.
+	// would score best. Timed from when this destination got the request, so
+	// failed destinations, the upload and filters do not count. Stamped now,
+	// so a long stream does not expire it at once.
 	if c.ev.Status < 400 && !c.ev.Canceled && c.ev.TTFT > 0 {
 		s.load.observe(c.model.Key(), c.tr.start.Add(c.ev.TTFT).Sub(fw.sent), time.Now())
 	}
@@ -909,14 +882,14 @@ func (c *call) outbound(b *body) func(policy.Model) outbound {
 	}
 }
 
-// readOnFor is how long a request on the deployment's key goes on being
-// read after its client left: long enough for a model to finish its answer.
+// readOnFor is how long an answer on the deployment's key is still read after
+// the client left: long enough for the model to finish.
 const readOnFor = 15 * time.Minute
 
-// chainOnKey says a model the request may be sent to is on the deployment's
-// key. Such an answer is read to the end even if the client leaves: only its
-// end says what the provider charged, and an estimate would miss what was
-// never streamed, such as reasoning.
+// chainOnKey says some model in the chain is on the deployment's key. Such an
+// answer is read to the end even if the client leaves: only the end says what
+// the provider charged, and an estimate would miss unstreamed output such as
+// reasoning.
 func (c *call) chainOnKey() bool {
 	return slices.ContainsFunc(c.chain, func(m policy.Model) bool { return m.PlatformKey })
 }
@@ -948,9 +921,8 @@ func (a *afterHangUp) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// settleRoute records what a trying route step's attempts came to, and says
-// in a header where it sent the request. Both are set once the attempts are
-// over, whether a model answered or every destination failed.
+// settleRoute records how a trying route step's attempts ended, and names
+// where the request went in a header. It runs once the attempts are over.
 func (s *Server) settleRoute(c *call, fw forwarded) {
 	if !c.route.Chooses() {
 		c.decision.settle(fw)
@@ -968,8 +940,7 @@ func (s *Server) settleRoute(c *call, fw forwarded) {
 }
 
 // upstreamUnreachable answers a request no destination could be reached for.
-//
-// It counts nothing on keera_upstream_errors_total: send already has.
+// It does not count keera_upstream_errors_total: send already did.
 func (s *Server) upstreamUnreachable(c *call, fw forwarded) {
 	s.log.Error("inference plane unreachable", "error", fw.err, "model", c.alias,
 		httpx.LogIDs(c.r.Context()))
@@ -977,8 +948,7 @@ func (s *Server) upstreamUnreachable(c *call, fw forwarded) {
 	c.surf.shape.writeError(c.w, http.StatusBadGateway, "server_error", "upstream_unavailable",
 		"the inference plane could not be reached")
 	c.ev.Status = http.StatusBadGateway
-	// The row keeps the real dial error (which endpoint, refused or timed out),
-	// which the client is not told.
+	// The row keeps the real dial error, which the client is not shown.
 	c.ev.Error = appendNote("the inference plane could not be reached: "+fw.err.Error(),
 		fw.note())
 	c.ev.Latency = time.Since(c.tr.start)
@@ -1028,17 +998,16 @@ func (s *Server) relayStream(c *call, resp *http.Response, answered time.Time, p
 	if c.model.PlatformKey {
 		return
 	}
-	// The stream ended before its usage record: the client left, or it broke
-	// off. The tokens were still generated, so the request is charged on an
-	// estimate; otherwise any client could dodge its budget by cancelling.
+	// The stream ended before its usage record: the client left or it broke
+	// off. The tokens were still generated, so they are charged on an
+	// estimate, or any client could dodge its budget by cancelling.
 	c.ev.InputTokens = estimateInputTokens(payload)
 	c.ev.OutputTokens = stats.deltas
 	c.ev.Estimated = true
 }
 
 // relayBuffered reads a whole answer, translates it into the client's shape
-// and writes it out. An answer in the client's own API, native, is only given
-// the alias as its model.
+// and writes it. A native answer only gets the alias as its model.
 func (s *Server) relayBuffered(c *call, resp *http.Response, answered time.Time, native bool) {
 	body, ok := s.readAnswer(c, resp, answered)
 	if !ok {
@@ -1090,11 +1059,9 @@ func modelNotFound(alias string) string {
 	return "the model '" + alias + "' does not exist or this key may not use it"
 }
 
-// readAnswer reads a whole buffered answer, up to MaxResponseBytes.
-//
-// An answer it cannot read in full is answered with a 502 and false. Passing
-// on what arrived would hand the client cut JSON under the plane's 2xx, and
-// the usage record at its end would be lost.
+// readAnswer reads a whole buffered answer, up to MaxResponseBytes. If it
+// cannot read it all, it answers 502 and returns false: passing on part would
+// give the client cut JSON under a 2xx and lose the usage record.
 func (s *Server) readAnswer(c *call, resp *http.Response, answered time.Time) ([]byte, bool) {
 	raw, err := readCapped(resp.Body, s.opts.MaxResponseBytes)
 	if err == nil {
@@ -1145,12 +1112,10 @@ func setUsage(ev *store.Event, u *tokenUsage) {
 	ev.OutputTokens = u.OutputTokens
 }
 
-// finish charges the request and records it.
-//
-// What the filters and the router spent is added to the row's cost so a
-// guardrail cannot spend budget without showing up, while the token columns
-// stay the answering model's own. It was already charged to the budgets when
-// it was spent.
+// finish charges the request and records it. Filter and router spend is
+// added to the row's cost, so a guardrail cannot spend budget unseen; the
+// token columns stay the answering model's. That spend was charged to the
+// budgets when it happened.
 func (s *Server) finish(c *call) {
 	ev := c.ev
 	ev.Spans = c.tr.steps("")
@@ -1161,8 +1126,8 @@ func (s *Server) finish(c *call) {
 	}
 	cost, bills := answerCost(c.model, used)
 	ev.CostMicros, ev.Bills = cost, append(c.hookBills(), bills...)
-	// A subscription paid for this. What it would have cost on the API is kept
-	// to compare against, and charged to no budget.
+	// A subscription paid for this. The API price is kept for comparison and
+	// charged to no budget.
 	if c.model.Subscription {
 		ev.ListCostMicros, ev.CostMicros = ev.CostMicros, 0
 	}
@@ -1176,10 +1141,10 @@ func (s *Server) finish(c *call) {
 			reqs = append(reqs, tpmBucket(sc))
 		}
 		// Charged as of now, not the start: a stream can run for minutes, and
-		// a bucket told it is minutes younger than it is refills too much.
+		// an old timestamp would refill the bucket too much.
 		s.limiter.ChargeAll(reqs, tokens, time.Now())
-		// Limits per day or month, the key's and a router's, count them too.
-		// Their window is the one the request started in, as its row's is.
+		// Daily and monthly limits count them too, in the window the request
+		// started in.
 		s.budgets.Tally(c.scopes, policy.MeterTokens, int64(tokens), c.now)
 	}
 	s.record(ev)

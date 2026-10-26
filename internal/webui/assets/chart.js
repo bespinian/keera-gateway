@@ -1,12 +1,12 @@
 // The panel's charts, drawn as inline SVG by hand: a charting library would
-// be the largest dependency in a binary that has almost none.
+// be the largest dependency in a binary with almost none.
 
 import { h, svg, compact, money, num, empty } from "./ui.js";
 
 const PAD = { top: 12, right: 8, bottom: 22, left: 42 };
 
-// The width to draw at before the chart can be measured. Close to a real
-// card, so the first paint does not visibly shift.
+// The width before the chart can be measured, close to a real card so the
+// first paint does not shift.
 const GUESS_W = 900;
 const MIN_W = 280;
 
@@ -18,7 +18,7 @@ export function areaChart(points, { height = 190, bucket = "day" } = {}) {
   if (!points || points.length === 0) {
     return noRequests();
   }
-  // A single point has no line to draw, so it is widened into a flat pair.
+  // A single point has no line, so it becomes a flat pair.
   const data = points.length === 1 ? [points[0], { ...points[0] }] : points;
   return responsive((w, tip) => paintArea(data, w, height, { bucket, tip }));
 }
@@ -65,9 +65,9 @@ function swatch(l) {
   });
 }
 
-// responsive draws a chart in real pixels: a unit grid the browser stretches
-// would stretch the labels and the line too. A detached element has no width,
-// so it is drawn at a guess and redrawn once its width is known.
+// responsive draws in real pixels, as a stretched grid would stretch the
+// labels too. A detached element has no width, so it is drawn at a guess and
+// redrawn once its width is known.
 function responsive(paint) {
   const holder = h("div", { class: "chart-holder" });
   const tip = h("div", { class: "chart-tip", style: { display: "none" } });
@@ -89,7 +89,7 @@ function responsive(paint) {
 
   draw(GUESS_W);
   holder.append(tip);
-  // The height does not follow the width, so a redraw cannot trigger another
+  // The height does not follow the width, so a redraw cannot cause another
   // resize.
   new ResizeObserver((entries) => {
     draw(entries[entries.length - 1].contentRect.width);
@@ -97,8 +97,8 @@ function responsive(paint) {
   return holder;
 }
 
-// frame is what every chart shares: the scales, the grid, the time labels,
-// and a hover target per time that fills the tip through describe.
+// frame is what every chart shares: scales, grid, time labels, and a hover
+// target per time that fills the tip through describe.
 function frame(times, maxY, W, H, { bucket, tip, describe }) {
   const n = times.length;
   const innerW = W - PAD.left - PAD.right;
@@ -171,7 +171,7 @@ function frame(times, maxY, W, H, { bucket, tip, describe }) {
     });
   });
 
-  // Label as many positions as fit: a date needs about seventy pixels. The last
+  // Label as many positions as fit: a date needs about 70 pixels. The last
   // bucket is always named, and a label that would overlap it is dropped.
   const last = n - 1;
   const step = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(innerW / 70))));
@@ -248,8 +248,8 @@ function paintArea(data, W, H, { bucket, tip }) {
     `${line} L${x(data.length - 1).toFixed(1)},${base} ` +
     `L${x(0).toFixed(1)},${base} Z`;
 
-  // Failures are drawn as short bars along the baseline: they are usually rare
-  // enough to vanish on the same scale as requests, and they matter more.
+  // Failures are short bars along the baseline: they are rare enough to
+  // vanish on the requests' scale, and matter more.
   const maxErr = Math.max(1, ...data.map((p) => p.failed));
   const barW = Math.max(1.5, Math.min(9, innerW / data.length - 1.5));
   const errBars = data.map((p, i) => {
@@ -318,7 +318,6 @@ function bucketLabel(iso, bucket, long) {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-/** niceCeil rounds an axis maximum up to a round number. */
 function niceCeil(v) {
   const mag = Math.pow(10, Math.floor(Math.log10(v)));
   for (const m of [1, 1.5, 2, 3, 5, 10]) {
@@ -344,9 +343,8 @@ export function barList(
     { class: "bars" },
     rows.map((r, i) => {
       const v = value(r) || 0;
-      // Position picks the colour. A list whose rows mean something, such as
-      // an outcome split, passes `color`, so a row keeps its colour when rows
-      // above it drop out.
+      // Position picks the colour. A list such as an outcome split passes
+      // `color`, so a row keeps its colour when rows above it drop out.
       const color = colorFor
         ? colorFor(r)
         : `var(--s${((colorIndex + i) % 6) + 1})`;

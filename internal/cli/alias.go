@@ -1,8 +1,7 @@
 package cli
 
-// What the commands for entries named by an alias share: 'model', 'mcp',
-// 'filter' and 'router'. Each kind is a short list in one organisation, read
-// whole, because the control API has no endpoint for a single entry.
+// Shared by 'model', 'mcp', 'filter' and 'router'. Each list is read whole,
+// because the control API has no endpoint for a single entry.
 
 import (
 	"context"
@@ -12,13 +11,12 @@ import (
 	"time"
 )
 
-// aliasPath is a control API path for one entry of kind, such as "filters",
-// in orgID. suffix addresses a route under it, such as "/check".
+// aliasPath builds a path for one entry; suffix is a route under it, such as
+// "/check".
 func aliasPath(kind, orgID, alias, suffix string) string {
 	return inOrg("/v1/"+kind+"/"+url.PathEscape(alias)+suffix, orgID)
 }
 
-// findAlias reads the entry called alias from the organisation's list.
 func findAlias[T any](ctx context.Context, a *aliasRun, alias string, aliasOf func(T) string) (T, error) {
 	var zero T
 	entries, err := list[T](ctx, a.c, inOrg("/v1/"+a.kind, a.orgID))
@@ -33,8 +31,7 @@ func findAlias[T any](ctx context.Context, a *aliasRun, alias string, aliasOf fu
 	return zero, notFound(a.noun, alias, a.orgID, a.cmd)
 }
 
-// alreadyExists refuses an 'add' that would quietly replace the entry of the
-// same alias. Changing one is what 'set' is for.
+// alreadyExists stops 'add' from quietly replacing an entry; 'set' does that.
 func alreadyExists[T any](ctx context.Context, a *aliasRun, alias string, aliasOf func(T) string) error {
 	_, err := findAlias(ctx, a, alias, aliasOf)
 	switch {
@@ -47,9 +44,8 @@ func alreadyExists[T any](ctx context.Context, a *aliasRun, alias string, aliasO
 	return err
 }
 
-// startPut is where 'add' and 'set' begin. 'add' refuses an alias that is
-// taken and starts from fresh. 'set' starts from the stored entry, so a flag
-// left out keeps what is there.
+// startPut begins 'add' from fresh and 'set' from the stored entry, so a flag
+// left out keeps its value.
 func startPut[T any](ctx context.Context, a *aliasRun, alias string, fresh T, aliasOf func(T) string) (T, error) {
 	if a.verb == "add" {
 		return fresh, alreadyExists(ctx, a, alias, aliasOf)
@@ -60,8 +56,8 @@ func startPut[T any](ctx context.Context, a *aliasRun, alias string, fresh T, al
 	return findAlias(ctx, a, alias, aliasOf)
 }
 
-// checkProbe runs the check at path and prints what came back. A check that
-// did not pass fails the command, so a pipeline can gate on it.
+// checkProbe fails the command when the check does not pass, so a pipeline
+// can gate on it.
 func checkProbe[T any](ctx context.Context, c *client, path, what string, asJSON bool,
 	show func(*table, T), passed func(T) bool,
 ) error {
@@ -80,19 +76,18 @@ func checkProbe[T any](ctx context.Context, c *client, path, what string, asJSON
 	return nil
 }
 
-// aliasRun is one invocation of a command for entries named by an alias.
 type aliasRun struct {
 	*cmdRun
-	// kind is the control API's name for the list, such as "mcp-servers",
-	// and noun what one entry is called, such as "MCP server".
+	// kind is the API's name, such as "mcp-servers"; noun is for people, such
+	// as "MCP server".
 	kind, noun string
-	// addHint is the command that adds one, for an empty listing.
+	// addHint is shown on an empty listing.
 	addHint string
 	orgID   string
 }
 
-// newAliasRun is newCmdRun with the names the four alias commands print. The
-// caller declares its own flags, then calls parse.
+// newAliasRun is newCmdRun for the alias commands. The caller declares its
+// flags, then calls parse.
 func newAliasRun(cmd, kind, noun string, args []string) *aliasRun {
 	return &aliasRun{
 		cmdRun: newCmdRun(cmd, args),
@@ -150,8 +145,6 @@ func listAliases[T any](ctx context.Context, a *aliasRun, show func(*table, []T)
 	})
 }
 
-// reportAlias prints what the entry named by the first argument has done over
-// the since window.
 func reportAlias[T any](ctx context.Context, a *aliasRun, since time.Duration,
 	show func(w *table, alias string, since time.Duration, res T),
 ) error {
@@ -162,17 +155,14 @@ func reportAlias[T any](ctx context.Context, a *aliasRun, since time.Duration,
 	})
 }
 
-// putAlias writes an entry and prints what was stored.
 func putAlias[T any](ctx context.Context, a *aliasRun, alias string, body any,
 	show func(*table, T),
 ) error {
 	return doOut(ctx, a.c, "PUT", a.path(alias, ""), body, a.asJSON, show)
 }
 
-// deleteEntry deletes an entry and says so. Unless --yes was given it asks
-// first, saying what goes with it in lines. Clients and guardrails name it by
-// its alias, so the alias is what has to be typed back. --json prints the
-// control API's answer unchanged.
+// deleteEntry asks first unless --yes is given. The alias is typed back,
+// because clients and guardrails name the entry by it.
 func (a *aliasRun) deleteEntry(ctx context.Context, alias string, lines []string) error {
 	if !a.yes {
 		if err := confirm("Deleting the "+a.noun+" "+alias+":", lines, "alias", alias,

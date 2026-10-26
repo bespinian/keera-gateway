@@ -8,18 +8,16 @@ import (
 	"github.com/bespinian/keera-gateway/internal/catalog"
 )
 
-// Claude Code's model settings. `keera connect claude-code` writes them into
-// settings.json, and the Claude Code block shows the same, so both set Claude
-// Code up alike.
+// Claude Code's model settings, shared by `keera connect claude-code` and the
+// Claude Code block.
 
 // claudeFamilies are the models Claude Code asks for by Anthropic's own names,
 // for background work and in its /model picker, whatever its main model is.
 var claudeFamilies = []string{"opus", "sonnet", "haiku", "fable"}
 
-// ClaudeName is the name Claude Code is given for a model. For a model Claude
-// Code does not know, it assumes a 200K context. The [1m] suffix tells it the
-// window is 1M, and Claude Code takes the suffix off before it sends the
-// request.
+// ClaudeName is the name Claude Code is given for a model. Claude Code assumes
+// a 200K context for a model it does not know; the [1m] suffix says 1M, and is
+// taken off before the request is sent.
 func ClaudeName(m Model) string {
 	if m.MaxContext >= 1_000_000 {
 		return m.Alias + "[1m]"
@@ -29,7 +27,7 @@ func ClaudeName(m Model) string {
 
 // ClaudeEnv points Claude Code at main, and each family at the first of models
 // that is one, or else at main. The gateway knows none of Anthropic's names,
-// so a family left unset is a request nothing answers.
+// so every family must be set.
 func ClaudeEnv(models []Model, main Model) map[string]string {
 	env := map[string]string{"ANTHROPIC_MODEL": ClaudeName(main)}
 	for _, family := range claudeFamilies {
@@ -45,12 +43,10 @@ func ClaudeEnv(models []Model, main Model) map[string]string {
 	return env
 }
 
-// ClaudeOverrides tells Claude Code which Claude model each of Anthropic's
-// models is. Without it, Claude Code does not know the gateway's aliases, and
-// guesses what they support: Haiku would be sent adaptive thinking it then
-// refuses. Claude Code knows a model by Anthropic's id, and a dated model by
-// the dated one, so names gives the other ids a model goes by. The first model
-// by alias wins an id two share.
+// ClaudeOverrides tells Claude Code which Claude model each alias is.
+// Otherwise it guesses what they support, and sends Haiku adaptive thinking
+// it refuses. names gives the other ids a model goes by, such as its dated
+// one. The first model by alias wins an id two share.
 func ClaudeOverrides(models []Model, names map[string][]string) map[string]string {
 	overrides := map[string]string{}
 	for _, m := range models {

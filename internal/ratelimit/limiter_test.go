@@ -47,13 +47,11 @@ func TestLimiterContract(t *testing.T) {
 	testContract(t, func(*testing.T) limiter { return New() })
 }
 
-// testContract is the behaviour both limiters keep: a deployment switching
-// Redis on must not find its limits behaving differently. newLimiter gives an
-// empty limiter.
+// testContract is the behaviour both limiters share. newLimiter gives an empty
+// limiter.
 func testContract(t *testing.T, newLimiter func(t *testing.T) limiter) {
 	t.Run("Admit charges every level or none", func(t *testing.T) {
-		// The org allows plenty and the project almost nothing. Requests the
-		// project refuses must not spend the org's allowance.
+		// Requests the project refuses must not spend the org's allowance.
 		l := newLimiter(t)
 		now := time.Now()
 		reqs := []Requirement{
@@ -92,8 +90,8 @@ func testContract(t *testing.T, newLimiter func(t *testing.T) limiter) {
 			t.Errorf("Admit = %d, want 0 - the org is checked before the key", got)
 		}
 
-		// A token bucket in debt refuses at its own position, and the request
-		// limits before it are not charged for the attempt.
+		// A token bucket in debt refuses at its own index, and the limits
+		// before it are not charged.
 		l = newLimiter(t)
 		charge(l, "org|tpm", 100, 500, now)
 		if got := l.Admit(reqs, now); got != 1 {
@@ -104,8 +102,8 @@ func testContract(t *testing.T, newLimiter func(t *testing.T) limiter) {
 				"token limit must cost nothing", got)
 		}
 
-		// The index is an index into the caller's requirements, including
-		// the unlimited ones, which Redis is never sent.
+		// The index counts the unlimited requirements too, which Redis never
+		// sees.
 		l = newLimiter(t)
 		reqs = []Requirement{
 			{Key: "org|tpm", PerMinute: 0},
@@ -122,12 +120,10 @@ func testContract(t *testing.T, newLimiter func(t *testing.T) limiter) {
 	})
 
 	t.Run("a charge can overdraw, so one huge request is paid for later", func(t *testing.T) {
-		// Token limits are charged after the fact, so one very large request
-		// holds back the ones after it.
+		// One very large request holds back the ones after it.
 		l := newLimiter(t)
 		now := time.Now()
-		// The token-per-minute question: is the bucket still positive, taking
-		// nothing from it.
+		// Tokens per minute: is the bucket positive, taking nothing.
 		inCredit := func(at time.Time) bool {
 			return l.Admit([]Requirement{{Key: "k", PerMinute: 1000}}, at) < 0
 		}
@@ -177,8 +173,7 @@ func TestChangingTheConfiguredRateRetunesTheBucket(t *testing.T) {
 	for range 100 {
 		l.Allow("k", 600, now)
 	}
-	// Now the guardrail drops to 10/min. The bucket must not keep the larger
-	// burst.
+	// The guardrail drops to 10/min: the bucket must not keep the larger burst.
 	admitted := 0
 	for range 50 {
 		if l.Allow("k", 10, now) {
@@ -224,8 +219,8 @@ func TestConcurrentUse(_ *testing.T) {
 }
 
 func TestSweepKeepsABucketThatWasJustUsed(t *testing.T) {
-	// A new bucket must carry the time it was made. At the zero time it looks
-	// idle since year one, and the next sweep forgets a limit still in use.
+	// A new bucket at the zero time would look idle, and the next sweep would
+	// forget a limit in use.
 	l := New()
 	now := time.Now()
 	l.Allow("k", 60, now)

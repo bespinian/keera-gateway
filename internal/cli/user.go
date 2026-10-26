@@ -13,17 +13,14 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// roleNames is what --role and `keera user role` accept, in the panel's order.
-//
-// The operator role is left out: it spans organisations, so it only comes from
-// KEERA_OPERATORS or KEERA_OIDC_<NAME>_OPERATOR_GROUPS. The control plane
-// refuses it too; refusing here gives the clearer message.
+// roleNames is what --role accepts, in the panel's order. The operator role
+// spans organisations, so it only comes from KEERA_OPERATORS or
+// KEERA_OIDC_<NAME>_OPERATOR_GROUPS.
 var roleNames = []string{"member", "admin"}
 
 const roleHint = " (the operator role comes from KEERA_OPERATORS or " +
 	"KEERA_OIDC_<NAME>_OPERATOR_GROUPS)"
 
-// userRun is one 'keera user' invocation.
 type userRun struct {
 	*cmdRun
 	addRole    string
@@ -62,13 +59,11 @@ func userCmd(ctx context.Context, args []string) error {
 	}
 }
 
-// passkeyLinkOut is a set-up link as the control plane hands it out.
 type passkeyLinkOut struct {
 	URL       string    `json:"url"`
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-// printPasskeyLink tells the administrator what to do with a set-up link.
 func printPasskeyLink(w *table, email string, link passkeyLinkOut) {
 	_, _ = fmt.Fprintf(w, "\nSend this set-up link to %s privately. It works once, until %s:\n\n  %s\n",
 		email, link.ExpiresAt.Local().Format("2006-01-02 15:04"), style.cmd(link.URL))
@@ -86,8 +81,8 @@ func (r *userRun) add(ctx context.Context) error {
 		return err
 	}
 	email := strings.ToLower(strings.TrimSpace(r.fs.Arg(0)))
-	// The endpoint refuses somebody already here too. Asking first names
-	// their current role and the command that changes it.
+	// The endpoint refuses this too, but here the message names their role
+	// and the command that changes it.
 	switch existing, err := findUser(ctx, r.c, orgID, email); {
 	case err == nil:
 		return fmt.Errorf("%s is already in %s as %s; change that with: keera user role %s <role>",
@@ -119,8 +114,8 @@ func (r *userRun) add(ctx context.Context) error {
 	})
 }
 
-// passkeyLink hands out a new set-up link: for a new device, after a lost
-// passkey, or to move someone who has not signed in yet to passkeys.
+// passkeyLink hands out a new set-up link, such as for a new device or after a
+// lost passkey.
 func (r *userRun) passkeyLink(ctx context.Context) error {
 	user, err := r.find(ctx)
 	if err != nil {
@@ -142,8 +137,8 @@ func (r *userRun) list(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// Hidden as in the panel: a disabled person has left, and is kept only so
-	// their usage and audit entries have a name.
+	// Hidden as in the panel: a disabled person is kept only so their usage
+	// and audit entries have a name.
 	if !r.all {
 		users = slices.DeleteFunc(users, store.User.Disabled)
 	}
@@ -152,8 +147,7 @@ func (r *userRun) list(ctx context.Context) error {
 			printNone(w, "people", "keera user add <email>")
 			return
 		}
-		// The same columns as the panel's Users screen. The subject itself is
-		// in --json.
+		// The panel's columns. The subject is in --json.
 		w.header("ID\tEMAIL\tNAME\tROLE\tSTATE\tSIGNS IN WITH\tLAST ACTIVE\tADDED")
 		for _, u := range users {
 			state := statusWord("active")
@@ -172,8 +166,8 @@ func (r *userRun) list(ctx context.Context) error {
 	})
 }
 
-// signsInWith names where a person signs in: the identity provider from the
-// part of their subject before the first colon, or a passkey.
+// signsInWith names the identity provider from the subject before the first
+// colon, or a passkey.
 func signsInWith(subject string) string {
 	provider, _, _ := strings.Cut(subject, ":")
 	switch {
@@ -284,13 +278,11 @@ func (r *userRun) enable(ctx context.Context) error {
 	})
 }
 
-// find resolves the person named by the first argument in the organisation.
 func (r *userRun) find(ctx context.Context) (store.User, error) {
 	return findUser(ctx, r.c, r.org, r.fs.Arg(0))
 }
 
-// checkRole refuses a role the control plane would refuse, before anything is
-// sent.
+// checkRole refuses a bad role before anything is sent.
 func checkRole(role string) error {
 	if slices.Contains(roleNames, role) {
 		return nil
@@ -298,8 +290,7 @@ func checkRole(role string) error {
 	return fmt.Errorf("the role must be one of: %s%s", strings.Join(roleNames, ", "), roleHint)
 }
 
-// findUser resolves an email address or an id to a person. org is resolved
-// as resolveOrg does.
+// findUser takes an email address or an id.
 func findUser(ctx context.Context, c *client, org, who string) (store.User, error) {
 	return findNamed(ctx, c, org, who, "/v1/users", "person", "user",
 		func(u store.User) (string, string) { return u.ID, u.Email })

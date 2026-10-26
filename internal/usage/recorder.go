@@ -13,8 +13,8 @@ import (
 
 // Options tunes the batching.
 type Options struct {
-	// Buffer is how many events may be queued before writers start blocking,
-	// in each of the two queues: billed events and the rest.
+	// Buffer is how many events each queue, billed and the rest, holds before
+	// writers block.
 	Buffer int
 	// BatchSize is the largest batch sent in one round trip.
 	BatchSize int
@@ -23,8 +23,8 @@ type Options struct {
 	// BlockFor is how long a request waits for buffer space before its event
 	// is dropped. Short, so a stalled database does not stall inference.
 	BlockFor time.Duration
-	// WriteTimeout bounds one batch write. Without it a connection that hangs
-	// stops the only writer until TCP gives up, which can take minutes.
+	// WriteTimeout bounds one batch write, so a hung connection cannot stop
+	// the only writer for minutes.
 	WriteTimeout time.Duration
 }
 
@@ -46,20 +46,17 @@ func (o *Options) setDefaults() {
 	}
 }
 
-// Writer is where a finished batch goes. It is an interface so the batching
-// can be tested without a database.
+// Writer is where a finished batch goes. Tests use one without a database.
 type Writer interface {
 	WriteEvents(ctx context.Context, events []store.Event) error
 }
 
-// Recorder is the write side of the usage log. Events are buffered and written
-// in batches, so a completion does not wait for the database. If the database
-// is away longer than the buffer holds, events are dropped, logged and counted
-// in Dropped rather than blocking inference.
+// Recorder is the write side of the usage log. Events are written in batches,
+// so a completion does not wait for the database. When the buffer is full,
+// events are dropped, logged and counted rather than block inference.
 //
-// Billed events have their own queue, written first, so the events of refused
-// requests, which anyone can send, cannot crowd out what an organisation pays
-// for.
+// Billed events have their own queue, written first, so refused requests,
+// which anyone can send, cannot crowd them out.
 type Recorder struct {
 	st   Writer
 	log  *slog.Logger
@@ -68,8 +65,8 @@ type Recorder struct {
 	ch      chan store.Event
 	billed  chan store.Event
 	dropped atomic.Int64
-	// failing is set while the last write failed. The buffer will not drain
-	// soon then, so a request does not wait for space that is not coming.
+	// failing is set while the last write failed, so a request does not wait
+	// for space that is not coming.
 	failing atomic.Bool
 	written atomic.Int64
 	done    chan struct{}
@@ -155,8 +152,8 @@ func (r *Recorder) Run(ctx context.Context) {
 	}
 }
 
-// drain writes what is still queued. It gets its own context: the queued
-// events were already charged against budgets and are owed to the usage log.
+// drain writes what is still queued, on its own context: those events were
+// already charged against budgets.
 func (r *Recorder) drain(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
@@ -187,8 +184,8 @@ func (r *Recorder) flush(ctx context.Context) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, r.opts.WriteTimeout)
 	defer cancel()
-	// A failed batch is not retried: the write may have landed before the
-	// error, and a second copy would bill the requests twice.
+	// A failed batch is not retried: it may have landed, and a copy would bill
+	// twice.
 	err := r.st.WriteEvents(ctx, r.batch)
 	lost, partly := errors.AsType[*store.LostEvents](err)
 	switch {

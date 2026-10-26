@@ -10,47 +10,37 @@ import (
 )
 
 // Router chains the steps a request passes on its way to a model: filters,
-// route steps, rate limits, budgets and system prompts, in the order an
-// administrator drew them. A client names it where it names a model, so no
-// traffic goes through one without asking. The simplest router is one route
-// step.
+// route steps, rate limits, budgets and system prompts. A client names it
+// where it names a model.
 //
-// The steps form a tree. A filter or a limit hands the request on to one next
-// step. A route step splits it into a branch per destination, and a limit into
-// within and exceeded. Every branch ends at a model, or at a route step that
-// sends straight to its destinations. Branches never join again, so a step
-// always knows which way the request came.
+// The steps form a tree. A filter hands the request to one next step. A route
+// step splits it into a branch per destination, and a limit into within and
+// exceeded. Every branch ends at a model or a route step. Branches never join,
+// so a step always knows which way the request came.
 //
 // The key's guardrails wrap the router: their limits are checked before it,
-// and their filters and system prompt apply after it, on the way to the model
-// it chose. So a router cannot loosen what an administrator set.
+// and their filters and system prompt apply after it. So a router cannot
+// loosen what an administrator set.
 type Router struct {
-	OrgID string `json:"org_id"`
-	Alias string `json:"alias"`
-	// DisplayName and Description are for people, as a model's are.
-	DisplayName string `json:"display_name,omitempty"`
-	Description string `json:"description,omitempty"`
-	// Start is the first step every request meets.
-	Start     *Step     `json:"start"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	OrgID       string    `json:"org_id"`
+	Alias       string    `json:"alias"`
+	DisplayName string    `json:"display_name,omitempty"`
+	Description string    `json:"description,omitempty"`
+	Start       *Step     `json:"start"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // StepKind is what one step of a router does.
 type StepKind string
 
 const (
-	// StepFilter runs one of the organisation's filters over the request.
-	StepFilter StepKind = "filter"
-	// StepRoute chooses the model from a list of destinations.
-	StepRoute StepKind = "route"
-	// StepRateLimit counts requests and tokens through this step.
+	StepFilter    StepKind = "filter"
+	StepRoute     StepKind = "route"
 	StepRateLimit StepKind = "rate_limit"
-	// StepBudget counts what requests through this step cost.
-	StepBudget StepKind = "budget"
+	StepBudget    StepKind = "budget"
 	// StepModel sends the request to one model. It ends a branch.
-	StepModel StepKind = "model"
-	// StepSystemPrompt adds a system prompt to the requests that pass it.
+	StepModel        StepKind = "model"
 	StepSystemPrompt StepKind = "system_prompt"
 )
 
@@ -59,82 +49,70 @@ var stepKinds = []StepKind{
 	StepSystemPrompt,
 }
 
-// Limits reports whether the step counts requests, tokens or money.
 func (k StepKind) Limits() bool { return k == StepRateLimit || k == StepBudget }
 
-// Names reports whether the step uses one of the organisation's filters or
-// models, named in Ref.
+// Names reports whether the step names a filter or model in Ref.
 func (k StepKind) Names() bool { return k == StepFilter || k == StepModel }
 
 // Step is one node of a router.
 type Step struct {
-	// ID names the step inside its router. A limit's counters are kept under
-	// it, so a router edited around a limit keeps what it has counted.
+	// ID names the step in its router. A limit's counters are kept under it,
+	// so editing around a limit keeps what it counted.
 	ID   string   `json:"id"`
 	Kind StepKind `json:"kind"`
-	// Ref is the alias of the filter or model the step uses.
-	Ref string `json:"ref,omitempty"`
-	// Requests and Tokens are a rate limit's: the most it lets through per
-	// Period. Zero means no limit on that count.
+	Ref  string   `json:"ref,omitempty"`
+	// Requests and Tokens are a rate limit's, per Period. Zero is no limit.
 	Requests int64 `json:"requests,omitempty"`
 	Tokens   int64 `json:"tokens,omitempty"`
-	// BudgetMicros is a budget's: the most requests through it may cost per
-	// Period.
+	// BudgetMicros is a budget's, per Period.
 	BudgetMicros int64 `json:"budget_micros,omitempty"`
-	// Prompt is a system prompt step's text. It is added with the key's own
-	// system prompt, after every filter, so no filter can edit it; the step's
-	// place only decides which requests get it. On an instruction route step
-	// it is the instruction its model decides by.
+	// Prompt is a system prompt step's text. It is added after every filter,
+	// with the key's own, so no filter can edit it; the step's place only
+	// decides which requests get it. On an instruction route step it is the
+	// instruction.
 	Prompt string `json:"prompt,omitempty"`
 	// Mode, Model, Destinations, Ceilings and Fallback are a route step's.
-	// See Route, which the gateway reads them as.
+	// See Route.
 	Mode         RouteMode      `json:"mode,omitempty"`
 	Model        string         `json:"model,omitempty"`
 	Destinations []string       `json:"destinations,omitempty"`
 	Ceilings     map[string]int `json:"ceilings,omitempty"`
 	Fallback     string         `json:"fallback,omitempty"`
-	// Header and Values are a header step's: the request header it reads,
-	// and which of its values sends a request to which destination.
+	// Header and Values are a header step's.
 	Header string            `json:"header,omitempty"`
 	Values map[string]string `json:"values,omitempty"`
-	// Period is what a limit counts over: minute, day or month for a rate
-	// limit, which is minute when empty, and day or month for a budget,
-	// which is month when empty. Day and month start on UTC boundaries.
+	// Period is a limit's. Empty is a minute for a rate limit, a month for a
+	// budget.
 	Period Period `json:"period,omitempty"`
-	// Next is where a filter sends the request, and where a limit sends it
-	// while within the limit.
+	// Next follows a filter, or a limit while within it.
 	Next *Step `json:"next,omitempty"`
 	// Exceeded is where a limit sends a request over it. Nil refuses it.
 	Exceeded *Step `json:"exceeded,omitempty"`
-	// Branches is a route step's, keyed by destination: what follows once it
-	// chose that one. A destination without a branch is sent the request
-	// straight away.
+	// Branches is a route step's, keyed by destination. A destination without
+	// a branch gets the request straight away.
 	Branches map[string]*Step `json:"branches,omitempty"`
 }
 
-// MaxPerMinute bounds a rate limit per minute, which a token bucket counts in
+// MaxPerMinute bounds a per-minute rate limit, which a token bucket counts in
 // an int.
 const MaxPerMinute = 1 << 30
 
-// MaxStepPromptBytes bounds a system prompt step, as a guardrail's prompt is
-// bounded: it is sent with every request that passes it.
+// MaxStepPromptBytes bounds a system prompt step, which is sent with every
+// request that passes it.
 const MaxStepPromptBytes = 16 << 10
 
-// MaxRoutePromptBytes bounds a route step's instruction, at a quarter of a
-// filter's. It is sent on every request that reaches the step, together with
-// the destination list, and it has less to say.
+// MaxRoutePromptBytes bounds a route step's instruction, sent with every
+// request that reaches the step.
 const MaxRoutePromptBytes = 4 << 10
 
 // MaxRouterSteps bounds one router. Every step may cost a generation or a
-// counter, and a tree much larger than this is no longer readable.
+// counter.
 const MaxRouterSteps = 64
 
-// ScopeRouter is the scope of one limit step of a router. Its spend and
-// its rate buckets are kept like a project's, under the ids Scopes makes.
+// ScopeRouter is the scope of a router's limit step.
 const ScopeRouter ScopeType = "router"
 
-// Steps walks every step of the tree, each before what follows it. Branches
-// come in their destinations' order, so two walks agree.
+// Steps walks every step, each before what follows it, in a stable order.
 func (p Router) Steps() iter.Seq[*Step] {
 	return func(yield func(*Step) bool) {
 		walkSteps(p.Start, yield)
@@ -156,8 +134,8 @@ func walkSteps(s *Step, yield func(*Step) bool) bool {
 	return true
 }
 
-// Uses reports whether a step of the router names alias as a kind. A route
-// step uses a model it decides with or may send to.
+// Uses reports whether a step names alias as kind. A route step uses its
+// deciding model and its destinations.
 func (p Router) Uses(kind StepKind, alias string) bool {
 	for s := range p.Steps() {
 		switch {
@@ -171,7 +149,6 @@ func (p Router) Uses(kind StepKind, alias string) bool {
 	return false
 }
 
-// Route reads one route step of the router.
 func (p Router) Route(s *Step) Route {
 	return Route{
 		OrgID: p.OrgID, Router: p.Alias, Step: s.ID,
@@ -181,8 +158,7 @@ func (p Router) Route(s *Step) Route {
 	}
 }
 
-// Routes reads every route step of the router, in the order Steps walks
-// them.
+// Routes reads every route step, in the order Steps walks them.
 func (p Router) Routes() []Route {
 	var out []Route
 	for s := range p.Steps() {
@@ -193,14 +169,11 @@ func (p Router) Routes() []Route {
 	return out
 }
 
-// Scopes is what a limit step counts under. The ids hold the organisation
-// and the router, so two routers' steps never share one.
+// Scopes is what a limit step counts under. The ids hold the organisation and
+// router, so two routers never share one.
 //
-// A budget is one scope that counts money. A rate limit per minute is one
-// scope of token buckets, as a key's limits are. A rate limit per day or
-// month counts like a budget does instead, one scope for requests and one
-// for tokens: a bucket that refills over a month would be a different limit,
-// and a count kept only in memory would start again on every restart.
+// A per-minute rate limit uses token buckets. One per day or month counts like
+// a budget instead, since an in-memory count would reset on every restart.
 func (p Router) Scopes(s *Step) []Scope {
 	id := p.OrgID + "/" + p.Alias + "/" + s.ID
 	if s.Kind == StepBudget {
@@ -215,8 +188,8 @@ func (p Router) Scopes(s *Step) []Scope {
 }
 
 // quotas is a rate limit per day or month: a scope for requests and one for
-// tokens, each left out when zero. Their ids end in the meter, so they never
-// share a window with the budget of the same scope.
+// tokens, each left out when zero. The ids end in the meter, so they never
+// share a window with the same scope's budget.
 func quotas(t ScopeType, id string, p Period, requests, tokens int64) []Scope {
 	var out []Scope
 	for _, m := range []struct {
@@ -233,24 +206,22 @@ func quotas(t ScopeType, id string, p Period, requests, tokens int64) []Scope {
 	return out
 }
 
-// RateLimit and Budget read a limit step as the guardrail limit of its kind,
-// so the two are checked and counted alike.
+// RateLimit and Budget read a limit step as a guardrail limit, so both are
+// checked and counted alike.
 func (s *Step) RateLimit() RateLimit {
 	return RateLimit{Requests: s.Requests, Tokens: s.Tokens, Period: s.Period}
 }
 
 func (s *Step) Budget() Budget { return Budget{BudgetMicros: s.BudgetMicros, Period: s.Period} }
 
-// RouterRefs is what a router's steps may name: one organisation's models
-// and filters by alias.
+// RouterRefs is what a router's steps may name, by alias.
 type RouterRefs struct {
 	Models  map[string]Model
 	Filters map[string]Filter
 }
 
-// Reaches lists every model a request through the router may be sent to:
-// its model steps, and the destinations its route steps send to without a
-// branch. Allowing the router allows all of them.
+// Reaches lists every model the router may send to. Allowing the router
+// allows all of them.
 func (p Router) Reaches() []string {
 	var out []string
 	add := func(alias string) {
@@ -273,9 +244,7 @@ func (p Router) Reaches() []string {
 	return out
 }
 
-// Problem says what is wrong with the router, or "" when nothing is. Every
-// step must name something the organisation has, and every branch must end
-// at a model or a route step.
+// Problem says what is wrong with the router, or "".
 func (p Router) Problem(refs RouterRefs) string {
 	if !ValidAlias(p.Alias) {
 		return "'" + p.Alias + "' is not a usable alias; use lowercase letters, digits and inner hyphens"
@@ -369,14 +338,12 @@ func (s *Step) problem(refs RouterRefs) string {
 	return ""
 }
 
-// Warnings are orders that work but are most likely not meant. Today there is
-// one: a model that rewrites the request before a route step reads it, so the
-// step judges the redacted text. That can send to a hosted model what a step
-// reading the original would have kept inside.
+// Warnings are setups that work but are likely not meant. Today there is one:
+// a model rewrites the request before a route step reads it, so the step
+// judges the redacted text and may send out what it would have kept inside.
 //
-// A pattern filter is left out. It removes what has a shape, such as keys and
-// card numbers, which is not what a route step judges by, and the filters
-// guide recommends running it first.
+// Pattern filters are left out: what they remove is not what a route step
+// judges by.
 func (p Router) Warnings(refs RouterRefs) []string {
 	var out []string
 	var walk func(s *Step, rewrites []string)
@@ -409,7 +376,7 @@ func (p Router) Warnings(refs RouterRefs) []string {
 	return out
 }
 
-// stepName names a step in a message: its kind, and what it uses.
+// stepName names a step in a message.
 func stepName(s *Step) string {
 	switch s.Kind {
 	case StepRateLimit:
@@ -427,8 +394,6 @@ func stepName(s *Step) string {
 	return "the " + string(s.Kind) + " step '" + s.Ref + "'"
 }
 
-// routeProblem says what is wrong with a route step, in words that follow its
-// name.
 func (s *Step) routeProblem(refs RouterRefs) string {
 	if !s.Mode.Valid() {
 		return "has the mode '" + string(s.Mode) + "'; use instruction, size, header, " +
@@ -453,8 +418,7 @@ func (s *Step) routeProblem(refs RouterRefs) string {
 	case n == 0:
 		return "needs 'destinations': at least one model to send requests to"
 	case n > MaxDestinations && s.Mode.Decides():
-		// A small model asked to pick one word from a longer list tends to
-		// name whichever end of it it read last.
+		// A small model picking from a long list tends to name the last item.
 		return fmt.Sprintf("names %d destinations; the limit is %d, since a longer list is "+
 			"too much for the deciding model to choose from", n, MaxDestinations)
 	case n > MaxDestinations:
@@ -495,9 +459,8 @@ func (s *Step) routeProblem(refs RouterRefs) string {
 	return ""
 }
 
-// leftoverProblem refuses a model, prompt or fallback on a route step that
-// does not use it. None of them would do anything, but a reader would take
-// them as the reason its traffic goes where it goes.
+// leftoverProblem refuses a model, prompt or fallback the step does not use. It
+// would do nothing, but a reader would think it decides where traffic goes.
 func (s *Step) leftoverProblem() string {
 	mode := "a " + string(s.Mode) + " step"
 	switch {
@@ -515,11 +478,8 @@ func (s *Step) leftoverProblem() string {
 }
 
 // ceilingProblem refuses a size step that could not place every request.
-//
-// Every ceiling has to name a destination; one that does not is most likely
-// a typo. And exactly one destination must have no ceiling: with none, a
-// large request has nowhere to go, and with more, only the first is ever
-// chosen.
+// Exactly one destination must have no ceiling: with none, a large request has
+// nowhere to go, and with more, only the first is ever chosen.
 func (s *Step) ceilingProblem() string {
 	for alias := range s.Ceilings {
 		if !slices.Contains(s.Destinations, alias) {
@@ -539,11 +499,8 @@ func (s *Step) ceilingProblem() string {
 }
 
 // headerProblem refuses a header step that reads a credential, or whose
-// values do not account for its destinations.
-//
-// A value is compared in lowercase, so it is written in lowercase. Every
-// destination must be named by a value or be the fallback; otherwise no
-// request can reach it, and it would still be allowed with the router.
+// values miss a destination. Values are compared in lowercase. A destination
+// no value or fallback reaches would still be allowed with the router.
 func (s *Step) headerProblem() string {
 	switch {
 	case s.Header == "":
@@ -581,8 +538,7 @@ func (s *Step) headerProblem() string {
 	return ""
 }
 
-// ValuesTo is the values of a header step that send a request to dest, in
-// order.
+// ValuesTo returns the values that send a request to dest, sorted.
 func ValuesTo(values map[string]string, dest string) []string {
 	var out []string
 	for _, v := range slices.Sorted(maps.Keys(values)) {
@@ -593,15 +549,14 @@ func ValuesTo(values map[string]string, dest string) []string {
 	return out
 }
 
-// credentialHeaders are the headers a client signs in with, in lowercase. A
-// header step reading one would put the key in a routing decision.
+// credentialHeaders are the sign-in headers, in lowercase. A header step must
+// not route on a key.
 var credentialHeaders = map[string]bool{
 	"authorization": true, "proxy-authorization": true, "cookie": true,
 	"x-api-key": true, "x-keera-key": true,
 }
 
-// validHeaderName is the part of the HTTP token grammar people use for header
-// names.
+// validHeaderName allows the part of the HTTP token grammar people use.
 func validHeaderName(s string) bool {
 	if s == "" || len(s) > 64 || s[0] == '-' || s[len(s)-1] == '-' {
 		return false
@@ -617,8 +572,8 @@ func validHeaderName(s string) bool {
 	return true
 }
 
-// answererProblem says why a model cannot answer a request through a
-// router, in words that follow "which", or "" when it can.
+// answererProblem says why a model cannot answer through a router, in words
+// that follow "which", or "".
 func answererProblem(alias string, refs RouterRefs) string {
 	m, ok := refs.Models[alias]
 	switch {

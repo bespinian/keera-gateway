@@ -1,5 +1,4 @@
-// A router's route step: its modes, its form, and the check of what it would
-// do.
+// A router's route step: its modes, its form, and its check.
 //
 // A broken route step still returns good answers, just from the wrong model.
 // Only the split between its destinations shows it.
@@ -21,7 +20,6 @@ import {
 } from "../ui.js";
 import { facts } from "./detail.js";
 
-// MODES feeds both the mode tiles and the rows that name a mode.
 const MODES = [
   {
     value: "instruction",
@@ -61,7 +59,7 @@ const MODES = [
   },
 ];
 
-/** modeOf is a step's mode, instruction when left out. */
+/** modeOf defaults to instruction. */
 export function modeOf(step) {
   return step.mode || "instruction";
 }
@@ -71,18 +69,18 @@ export function modeName(mode) {
 }
 
 /** decides reports whether a step chooses by reading the request. With one
- *  destination there is nothing to choose, so the gateway does not ask. */
+ *  destination there is nothing to choose. */
 export function decides(step) {
   return modeOf(step) === "instruction" && (step.destinations || []).length > 1;
 }
 
 /** chooses reports whether a step picks one destination itself, and so has
- *  a fallback for when it cannot. */
+ *  a fallback. */
 export function chooses(step) {
   return decides(step) || modeOf(step) === "header";
 }
 
-/** valuesFor is the values of a header step that send a request to dest. */
+/** valuesFor is the header values that send a request to dest. */
 export function valuesFor(step, dest) {
   return Object.keys(step.values || {})
     .filter((v) => step.values[v] === dest)
@@ -90,8 +88,7 @@ export function valuesFor(step, dest) {
 }
 
 // measures reports whether the gateway works out this step's order. That
-// order is a reading of recent minutes on one replica, so screens must not
-// show it numbered.
+// order reflects recent minutes on one replica, so screens must not number it.
 function measures(mode) {
   return mode === "latency" || mode === "least-busy";
 }
@@ -113,7 +110,7 @@ function ordersBy(mode) {
   }
 }
 
-/** tokens renders a ceiling as it is typed, such as '32k'. */
+/** tokens renders a ceiling as typed, such as '32k'. */
 export function tokens(n) {
   return n >= 1000 && n % 1000 === 0 ? n / 1000 + "k" : String(n);
 }
@@ -126,7 +123,7 @@ function canDecide(m) {
 
 /** routeFields builds the form for a route step. read returns what it sets
  *  or throws what is missing. The mode comes first: it decides whether the
- *  list is a menu, an order, or a set of size bands. */
+ *  list is a menu, an order, or size bands. */
 export function routeFields(models, step) {
   const readers = models.filter(canDecide);
   const chatModels = readers.filter((m) => m.kind === "chat");
@@ -149,8 +146,7 @@ export function routeFields(models, step) {
     ),
   );
   const prompt = h("textarea", { class: "input", rows: "8" });
-  // A decision model answers a short question rather than following an
-  // instruction, so it gets its own example.
+  // A decision model answers a short question, so it gets its own example.
   const exampleFor = (alias) =>
     readers.find((m) => m.alias === alias)?.kind === "decision"
       ? DECISION_EXAMPLE
@@ -169,14 +165,12 @@ export function routeFields(models, step) {
   // On measured modes the order only breaks ties.
   const ranks = () => measures(chosen);
 
-  // Changing the mode hides unused fields rather than clearing them, so trying
-  // another tile loses nothing.
+  // Changing the mode hides unused fields rather than clearing them.
   const picker = modeTiles(MODES, chosen, (value) => {
     chosen = value;
     syncMode();
   });
-  // More room under it than between other fields: the strategy decides what
-  // every field below means.
+  // More room under it: the mode decides what every field below means.
   const modeField = h(
     "div",
     { class: "field", style: { marginBottom: "24px" } },
@@ -185,10 +179,10 @@ export function routeFields(models, step) {
     picker.chosenRow,
   );
 
-  // Dropdowns over the catalogue, so a step cannot name an unknown model. An
-  // array, not a set: on a fallback step the order is the configuration.
+  // Dropdowns, so a step cannot name an unknown model. An array, not a set:
+  // on a fallback step the order matters.
   const picked = [...(step.destinations || [])];
-  // One per dropdown. An empty one is not chosen yet, so it is no destination.
+  // One per dropdown. An empty one is not a destination yet.
   const slots = picked.length ? [...picked] : [""];
   const fallback = h("select", { class: "select" });
   const syncFallback = () => {
@@ -206,8 +200,8 @@ export function routeFields(models, step) {
     fallback.value = picked.includes(previous) ? previous : "";
   };
 
-  // Chosen in the wrong order, a fallback step serves everything from its
-  // second choice.
+  // In the wrong order, a fallback step serves everything from its second
+  // choice.
   const order = h("div", { class: "stack", style: { gap: "4px" } });
   const renderOrder = () => {
     if (picked.length === 0) {
@@ -263,8 +257,7 @@ export function routeFields(models, step) {
     );
   };
 
-  // perDestination fills list with a row per destination: its name, then
-  // what row gives for it.
+  // perDestination fills list with a row per destination.
   const perDestination = (list, row) => {
     list.replaceChildren(
       ...(picked.length
@@ -280,16 +273,15 @@ export function routeFields(models, step) {
     );
   };
 
-  // Kept here, not read off the inputs, so choosing a destination again keeps
-  // its ceiling.
+  // Kept here, not read off the inputs, so choosing a destination again
+  // keeps its ceiling.
   const ceilings = { ...(step.ceilings || {}) };
-  // Boxes holding something that is not a ceiling. Applying refuses them, as
-  // `keera router` does, rather than reading them as "no ceiling".
+  // Boxes holding something that is not a ceiling. Applying refuses them
+  // rather than reading them as "no ceiling".
   const badCeilings = new Set();
   const ceilingList = h("div", { class: "stack", style: { gap: "4px" } });
   const ceilingHint = h("div", { class: "hint" });
-  // Notes update on their own: rebuilding the rows would take the cursor out
-  // of the box being typed into.
+  // Notes update on their own: rebuilding the rows would move the cursor.
   const notes = new Map();
   const syncCeilingNotes = () => {
     for (const [alias, note] of notes) {
@@ -297,8 +289,8 @@ export function routeFields(models, step) {
         ? "tokens at most"
         : "takes what is larger than every ceiling";
     }
-    // The control plane needs exactly one destination without a ceiling;
-    // say so before it refuses.
+    // Exactly one destination needs no ceiling; say so before the control
+    // plane refuses.
     const open = picked.filter((alias) => !ceilings[alias]);
     ceilingHint.textContent =
       open.length === 1
@@ -319,7 +311,7 @@ export function routeFields(models, step) {
         placeholder: "no ceiling",
         value: ceilings[alias] ? tokens(ceilings[alias]) : "",
         onInput: () => {
-          // The CLI's form: whole tokens, where 'k' means a thousand.
+          // Whole tokens, where 'k' means a thousand, as in the CLI.
           const raw = box.value.trim().toLowerCase();
           const m = /^(\d+)(k?)$/.exec(raw);
           const n = m ? Number(m[1]) * (m[2] ? 1000 : 1) : 0;
@@ -346,8 +338,7 @@ export function routeFields(models, step) {
     ceilingHint,
   );
 
-  // A header step's values, as typed per destination. Kept here for the same
-  // reason as the ceilings.
+  // A header step's values per destination, kept like the ceilings.
   const headerName = h("input", {
     class: "input mono",
     placeholder: "X-Keera-Route",
@@ -405,8 +396,7 @@ export function routeFields(models, step) {
     renderCeilings();
     renderValues();
   };
-  // Each dropdown offers only what the others have not taken, so no model is
-  // named twice.
+  // Each dropdown offers only what the others have not taken.
   const renderDestinations = () => {
     destinationList.replaceChildren(
       ...slots.map((alias, i) => {
@@ -422,8 +412,7 @@ export function routeFields(models, step) {
             },
           },
           h("option", { value: "" }, "Choose a model"),
-          // A model that is gone stays named, so applying does not drop it
-          // unseen.
+          // A deleted model stays named, so applying does not drop it unseen.
           alias && !known
             ? h("option", { value: alias, selected: true }, alias)
             : null,
@@ -477,8 +466,8 @@ export function routeFields(models, step) {
   renderCeilings();
   renderValues();
 
-  // Fields only an instruction step has. Hidden, not disabled, so nobody
-  // writes an instruction the step then ignores.
+  // Fields only an instruction step has. Hidden, so nobody writes an
+  // instruction the step then ignores.
   const modelField = field(
     "Deciding model",
     model,
@@ -514,7 +503,7 @@ export function routeFields(models, step) {
     fallbackLabel.textContent = byHeader()
       ? "Without a known value"
       : "When it cannot decide";
-    // The right answer depends on the deployment, so the hint gives both.
+    // The answer depends on the deployment, so the hint gives both.
     fallbackHint.textContent = byHeader()
       ? "Where a request goes when its header is missing or names no " +
         "destination. Refused requests get a 400 that lists the values."
@@ -597,8 +586,8 @@ export function routeFields(models, step) {
   };
 }
 
-/** readValues turns the values typed per destination into the map a header
- *  step keeps, refusing a value given to two destinations. */
+/** readValues turns the typed values into a header step's map, refusing a
+ *  value given to two destinations. */
 export function readValues(picked, valueText) {
   const values = {};
   for (const alias of picked) {
@@ -619,10 +608,9 @@ export function readValues(picked, valueText) {
   return values;
 }
 
-/** checkReport shows what checking a router's route steps found: each
- *  sample and the model chosen, or each destination in the order tried.
- *  There is no pass: only the reader can judge the choices. Every sample
- *  going the same way is always wrong. */
+/** checkReport shows each sample and the model chosen, or each destination
+ *  in the order tried. There is no pass: only the reader can judge. Every
+ *  sample going the same way is always wrong. */
 export function checkReport(check) {
   modal({
     wide: true,
@@ -749,8 +737,8 @@ function routeProbe(probe, named) {
                 shrink: true,
                 cell: (hop) => (hop.ms ? ms(hop.ms) : dash()),
               },
-              // Why a destination is where it is, when the order is measured
-              // rather than written.
+              // Why a destination is where it is, when the order is
+              // measured.
               ranked || banded || labelled
                 ? {
                     label: banded ? "Takes" : labelled ? "For" : "Reading",
@@ -786,8 +774,8 @@ function routeProbe(probe, named) {
             d.error
               ? pill("Could not decide", "bad")
               : h("span", { class: "pill pill-good mono" }, d.chosen),
-            // A sample decided at 35% went there by a hair. Absent without
-            // backend probabilities.
+            // A sample decided at 35% went there by a hair. Needs backend
+            // probabilities.
             !d.error && d.confidence
               ? h(
                   "span",
@@ -812,9 +800,9 @@ function routeProbe(probe, named) {
   );
 }
 
-// PROMPT_EXAMPLE names kinds of request, not models, since the catalogue adds
-// what each model is for. It says which way to err, since a small model
-// deciding in one word is sometimes wrong.
+// PROMPT_EXAMPLE names kinds of request, not models, since the catalogue says
+// what each model is for. It says which way to err, as a small model is
+// sometimes wrong.
 const PROMPT_EXAMPLE = `Send small, simple requests to the cheapest model, \
 such as a rename or a commit message.
 
@@ -822,6 +810,6 @@ Send requests that need planning or reasoning to a more capable model.
 
 If you are unsure, choose the more capable model.`;
 
-// A decision model is offered each destination by its description alone. See
+// A decision model sees each destination's description only. See
 // docs/gateway.md#decision-models.
 const DECISION_EXAMPLE = "Which model should answer this request?";

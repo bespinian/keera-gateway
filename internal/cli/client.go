@@ -15,37 +15,28 @@ import (
 	"github.com/bespinian/keera-gateway/internal/httpx"
 )
 
-// client talks to the control API.
-//
-// base is the gateway's origin. Calls name paths relative to
-// httpx.ControlPrefix and send() adds the prefix, so call sites read like the
-// routes.
+// client talks to the control API. send adds httpx.ControlPrefix, so call
+// sites read like the routes.
 type client struct {
 	base string
-	// baseFrom says what chose base, so commands can tell which gateway they
-	// act on and why.
+	// baseFrom says what chose base.
 	baseFrom string
 	key      string
-	// signedIn is what `keera login` stored for this gateway, used when no
-	// operator key is set. See credentials.go.
+	// signedIn is used when no operator key is set.
 	signedIn signIn
-	// org is the organisation commands act on when they name none, and
-	// orgFrom what chose it. Empty means none was chosen.
+	// org is used when a command names none; orgFrom says what chose it.
 	org     string
 	orgFrom string
 	http    *http.Client
 }
 
-// urlFlag is the global --url, which Run takes off the arguments before any
-// command sees them.
 var urlFlag string
 
-// defaultBase is the hosted gateway, used when nothing names another.
+// defaultBase is the hosted gateway.
 const defaultBase = "https://gateway.keera.ch"
 
-// resolveBase decides which gateway this invocation talks to, and says what
-// decided it. The most deliberate choice wins: --url, then
-// KEERA_CONTROL_URL, then saved, the gateway of the last `keera login`.
+// resolveBase lets the most deliberate choice win: --url, then
+// KEERA_CONTROL_URL, then the gateway of the last `keera login`.
 func resolveBase(saved string) (base, from string) {
 	switch {
 	case urlFlag != "":
@@ -58,17 +49,13 @@ func resolveBase(saved string) (base, from string) {
 	return defaultBase, "the default"
 }
 
-// env reads a KEERA_ setting as the gateway does, without the spaces a
-// pasted value often brings.
+// env trims the spaces a pasted value often brings, as the gateway does.
 func env(name string) string {
 	return strings.TrimSpace(os.Getenv(name))
 }
 
-// newClient reads the environment and the credentials file.
-//
-// An exported operator key wins over a stored sign-in, because it was set on
-// purpose for this shell. A missing credential only fails at the first
-// request, so that `--help` works without one.
+// newClient lets an exported operator key win over a stored sign-in. A
+// missing credential only fails at the first request, so `--help` works.
 func newClient() *client {
 	// A file that cannot be read holds no sign-in.
 	creds, _ := loadCredentials()
@@ -78,8 +65,7 @@ func newClient() *client {
 		base:     base,
 		baseFrom: from,
 		key:      env("KEERA_OPERATOR_KEY"),
-		// No timeout of its own: send gives each request one, and a probe
-		// a longer one.
+		// send sets the timeout per request.
 		http: &http.Client{},
 	}
 	if c.key == "" {
@@ -93,7 +79,6 @@ func newClient() *client {
 	return c
 }
 
-// bearer is what this client presents, and empty when it has none.
 func (c *client) bearer() string {
 	if c.key != "" {
 		return c.key
@@ -101,7 +86,6 @@ func (c *client) bearer() string {
 	return c.signedIn.Token
 }
 
-// apiError carries a control-plane error envelope.
 type apiError struct {
 	Status  int
 	Message string
@@ -114,9 +98,8 @@ func (e *apiError) Error() string {
 	return e.Message
 }
 
-// errorMessage pulls the sentence out of a control-plane error envelope. The
-// sandbox attach surface reads a refused upgrade off a bare connection, not
-// through client.do, so it needs this too.
+// errorMessage is separate from client.do because sandbox attach reads a
+// refused upgrade off a bare connection.
 func errorMessage(raw []byte) string {
 	var envelope struct {
 		Error struct {
@@ -129,7 +112,6 @@ func errorMessage(raw []byte) string {
 	return strings.TrimSpace(envelope.Error.Message)
 }
 
-// credential is the bearer to present, or why there is none that works.
 func (c *client) credential() (string, error) {
 	cred := c.bearer()
 	switch {
@@ -144,22 +126,20 @@ func (c *client) credential() (string, error) {
 	return cred, nil
 }
 
-// do makes an authenticated call, and is what every command goes through.
 func (c *client) do(ctx context.Context, method, path string, in, out any) error {
 	raw, _, err := c.fetch(ctx, method, path, in)
 	return decode(raw, err, out)
 }
 
-// fetch is do for an answer that is a file, not JSON. The headers say what
-// the server named the file.
+// fetch is do for a file answer. The headers carry the file name.
 func (c *client) fetch(ctx context.Context, method, path string, in any) ([]byte, http.Header, error) {
 	cred, err := c.credential()
 	if err != nil {
 		return nil, nil, err
 	}
 	raw, header, err := c.send(ctx, method, path, cred, in)
-	// A refused token is a sign-in that ended elsewhere: it expired, the
-	// person's role changed, or they signed out everywhere.
+	// A refused token means the sign-in ended: it expired, the role changed,
+	// or they signed out everywhere.
 	var apiErr *apiError
 	if c.key == "" && errors.As(err, &apiErr) && apiErr.Status == http.StatusUnauthorized {
 		return nil, nil, fmt.Errorf("your sign-in to %s is no longer valid: run 'keera login' again", c.base)
@@ -167,7 +147,7 @@ func (c *client) fetch(ctx context.Context, method, path string, in any) ([]byte
 	return raw, header, err
 }
 
-// anon makes a call without a credential, for the sign-in routes.
+// anon is for the sign-in routes.
 func (c *client) anon(ctx context.Context, method, path string, in, out any) error {
 	raw, _, err := c.send(ctx, method, path, "", in)
 	return decode(raw, err, out)
@@ -180,14 +160,14 @@ func decode(raw []byte, err error, out any) error {
 	return json.Unmarshal(raw, out)
 }
 
-// maxAnswer bounds what is read of an answer. A receipt is the largest.
+// maxAnswer fits a receipt, the largest answer.
 const maxAnswer = 16 << 20
 
-// requestTimeout bounds a request whose caller set no deadline of its own.
+// requestTimeout applies when the caller set no deadline.
 const requestTimeout = 30 * time.Second
 
-// probeTimeout bounds a request that has the gateway call models, giving each
-// up to 30 seconds. Ctrl-C still ends it sooner.
+// probeTimeout is for a request that has the gateway call models, up to 30
+// seconds each.
 const probeTimeout = 10 * time.Minute
 
 func (c *client) send(ctx context.Context, method, path, cred string, in any) ([]byte, http.Header, error) {
@@ -216,8 +196,7 @@ func (c *client) send(ctx context.Context, method, path, cred string, in any) ([
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		// When the built-in default does not answer, the likelier cause is
-		// that the person meant their own deployment and never said so.
+		// They more likely meant their own deployment and never said so.
 		if c.baseFrom == "the default" {
 			return nil, nil, fmt.Errorf("reaching the control API at %s: %w; nothing said which "+
 				"gateway to use, so this is the built-in default - the hosted one. "+

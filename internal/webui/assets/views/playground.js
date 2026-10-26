@@ -1,6 +1,6 @@
-// The playground: a conversation with one model, to check the models answer.
-// Messages go out with one of the reader's own keys, through the same data
-// plane an editor uses, so they meet that key's guardrails, budgets and usage.
+// The playground: a chat with one model, to check that models answer.
+// Messages use one of the reader's own keys, through the same path an editor
+// takes, so that key's guardrails, budgets and usage apply.
 
 import { api, ApiError, chatTargets } from "../api.js";
 import {
@@ -20,9 +20,8 @@ import {
 } from "../ui.js";
 import { keyModels, noKey, noModel, usableKeys } from "./connect.js";
 
-/** session outlives a route change, so a look at Usage does not lose the
- *  conversation. It does not outlive a reload on purpose: a chat that comes
- *  back days later is a surprise. */
+/** session outlives a route change but, on purpose, not a reload: a chat
+ *  that comes back days later is a surprise. */
 const session = {
   keyID: "",
   model: "",
@@ -33,15 +32,15 @@ const session = {
 };
 
 export async function playgroundView(ctx) {
-  // Only the reader's own keys, because a message spends the key's budget.
+  // Only the reader's own keys, as a message spends the key's budget.
   const a = await api.access();
   const keys = usableKeys(a);
   if (!keys.length) return noKey(ctx, a);
   if (!keys.some((k) => k.id === session.keyID)) session.keyID = keys[0].id;
   const key = keys.find((k) => k.id === session.keyID);
 
-  // Routers too: this is the one screen that shows which model a router picks.
-  // Only what the key may call is offered, so nothing answers 404.
+  // Routers too: this screen shows which model a router picks. Only what the
+  // key may call is offered.
   const models = keyModels(await chatTargets(key.org_id), key.allowed_models);
   if (!models.length) {
     return h(
@@ -57,8 +56,8 @@ export async function playgroundView(ctx) {
   return chat(ctx, keys, key, models);
 }
 
-/** Changing the key redraws the screen, because the models on offer depend
- *  on it. */
+/** Changing the key redraws the screen, as the models on offer depend on
+ *  it. */
 function keyPicker(ctx, keys, onChange) {
   const el = h(
     "select",
@@ -98,9 +97,9 @@ function chat(ctx, keys, key, models) {
       onChange: () => {
         session.model = modelSelect.value;
         ctx.setSubtitle(subtitle(byAlias.get(session.model)));
-        // The empty state names the model, so it has to follow the picker. A
-        // full redraw is only safe while the thread is empty: mid-stream it
-        // would detach the node paint() is writing tokens into.
+        // The empty state names the model. A full redraw is only safe while
+        // the thread is empty: mid-stream it would detach the node paint()
+        // writes into.
         if (!session.messages.length) render();
       },
     },
@@ -121,7 +120,7 @@ function chat(ctx, keys, key, models) {
     "aria-label": "Message",
     onInput: () => autosize(input),
     onKeyDown: (e) => {
-      // Enter sends and shift-Enter breaks the line, as in every chat client.
+      // Enter sends and shift-Enter breaks the line.
       if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         submit();
@@ -129,7 +128,7 @@ function chat(ctx, keys, key, models) {
     },
   });
 
-  // Images wait here until the message they belong to is sent.
+  // Images wait here until their message is sent.
   let attached = [];
   const tray = h("div", { class: "composer-tray", hidden: true });
   const picker = h("input", {
@@ -139,7 +138,7 @@ function chat(ctx, keys, key, models) {
     hidden: true,
     onChange: async () => {
       const files = [...picker.files];
-      // Cleared, so choosing the same file again still fires a change.
+      // So choosing the same file again still fires a change.
       picker.value = "";
       for (const file of files) {
         try {
@@ -183,7 +182,7 @@ function chat(ctx, keys, key, models) {
               onClick: () => {
                 attached = attached.filter((x) => x !== a);
                 paintTray();
-                // The button is gone, so focus would be lost with it.
+                // The button is gone, so focus would be lost.
                 input.focus();
               },
             },
@@ -296,8 +295,8 @@ function chat(ctx, keys, key, models) {
 
   ctx.setSubtitle(subtitle(byAlias.get(session.model)));
 
-  // pinned tracks whether the reader is at the bottom, so a reader who
-  // scrolled up to reread is not pulled back down on the next token.
+  // pinned tracks whether the reader is at the bottom, so one who scrolled up
+  // is not pulled back down on the next token.
   let pinned = true;
   scroll.addEventListener("scroll", () => {
     pinned = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 40;
@@ -345,8 +344,8 @@ function chat(ctx, keys, key, models) {
     const images = attached.map((a) => a.url);
     if ((!text && !images.length) || abort) return;
 
-    // Sent before the placeholder joins the history, so the request carries no
-    // empty assistant turn.
+    // Before the placeholder joins, so the request has no empty assistant
+    // turn.
     const history = wireMessages(session.messages);
     if (session.system.trim())
       history.unshift({ role: "system", content: session.system.trim() });
@@ -376,9 +375,9 @@ function chat(ctx, keys, key, models) {
     input.disabled = true;
     attachBtn.disabled = true;
 
-    // While tokens arrive the message is redrawn as plain text once per
-    // animation frame, not per chunk, or a fast model makes the stream stutter.
-    // Only the first token and the first reasoning cost a full rebuild.
+    // While streaming, the message is redrawn as plain text once per frame,
+    // not per chunk, or a fast model stutters. Only the first token and the
+    // first reasoning cost a full rebuild.
     let node = thread.lastElementChild;
     let shape = { waiting: true, reasoning: false };
     let queued = false;
@@ -439,8 +438,8 @@ function chat(ctx, keys, key, models) {
       else
         reply.error =
           (err && err.message) || "The response ended unexpectedly.";
-      // A refused turn never reached the model, so it drops out of the history:
-      // a chat template may reject two user turns in a row.
+      // A refused turn never reached the model, so it leaves the history: a
+      // chat template may reject two user turns in a row.
       if (reply.error) ask.unsent = true;
     } finally {
       reply.streaming = false;
@@ -450,8 +449,8 @@ function chat(ctx, keys, key, models) {
       stopBtn.hidden = true;
       input.disabled = false;
       attachBtn.disabled = false;
-      // The finished message is drawn once more in full, which is where fenced
-      // code becomes a code block - mid-stream a fence is usually still open.
+      // Drawn once more in full, where fenced code becomes a code block:
+      // mid-stream a fence is usually still open.
       render();
       input.focus();
     }
@@ -462,8 +461,7 @@ function chat(ctx, keys, key, models) {
       model,
       messages,
       stream: true,
-      // Without asking, the gateway swallows the usage chunk it added for its
-      // own billing.
+      // Otherwise the gateway drops the usage chunk it added for billing.
       stream_options: { include_usage: true },
     };
     const temp = parseFloat(session.temperature);
@@ -480,8 +478,7 @@ function chat(ctx, keys, key, models) {
 
 function subtitle(model) {
   if (!model) return "";
-  // A router has no model or context window of its own: it picks one only
-  // once it has read the message.
+  // A router picks a model only once it has read the message.
   if (model.router) return "A router: it picks the model";
   const bits = [model.display_name || model.backend_model];
   if (model.max_context_tokens)
@@ -489,9 +486,9 @@ function subtitle(model) {
   return bits.filter(Boolean).join(" · ");
 }
 
-/** splitThink takes the thinking out of a reply that writes it inline as
- *  <think>…</think>, as MiniMax does, rather than in a reasoning field. Some
- *  chat templates open the tag in the prompt, so the reply only closes it. */
+/** splitThink takes inline <think>…</think> out of a reply, as MiniMax writes
+ *  it. Some chat templates open the tag in the prompt, so the reply only
+ *  closes it. */
 function splitThink(text) {
   const open = text.match(/^\s*<think>/);
   const end = text.indexOf("</think>");
@@ -504,8 +501,7 @@ function splitThink(text) {
   };
 }
 
-/** wireMessages keeps the turns that carry text or images, and drops any
- *  that failed. */
+/** wireMessages keeps turns with text or images and drops failed ones. */
 function wireMessages(messages) {
   return messages
     .filter((m) => !m.error && !m.unsent && (m.content || m.images?.length))
@@ -513,7 +509,7 @@ function wireMessages(messages) {
 }
 
 /** wireContent uses the OpenAI parts form only for turns with images, which
- *  only models that read images accept. */
+ *  only image models accept. */
 function wireContent(text, images) {
   if (!images || !images.length) return text;
   const parts = images.map((url) => ({
@@ -527,8 +523,8 @@ function wireContent(text, images) {
 // The formats every API that reads images accepts.
 const imageTypes = "image/png,image/jpeg,image/gif,image/webp";
 
-// Providers scale larger images down to about this size anyway, and every
-// image is sent again with each later message.
+// Providers scale images down to about this anyway, and each image is sent
+// again with every later message.
 const maxImageSide = 2048;
 
 async function readImage(file) {
@@ -541,7 +537,7 @@ async function readImage(file) {
   // Also checks that the file is an image at all.
   const bitmap = await createImageBitmap(file);
   const scale = maxImageSide / Math.max(bitmap.width, bitmap.height);
-  // A GIF is kept as it is, because redrawing it would drop its animation.
+  // Redrawing a GIF would drop its animation.
   if (scale >= 1 || file.type === "image/gif") {
     bitmap.close();
     return url;
@@ -665,7 +661,7 @@ function messageEl(msg, ctx, byAlias) {
     );
   }
 
-  // The cursor only appears once something arrives, so the wait shows one
+  // The cursor appears once something arrives, so the wait shows one
   // blinking thing, not two.
   const body = h("div", { class: "msg-body" });
   if (msg.streaming && !msg.content && !msg.reasoning) {
@@ -704,8 +700,8 @@ function messageEl(msg, ctx, byAlias) {
   );
 }
 
-/** reasoningEl shows a model's thinking, folded away. Without it, a model
- *  that only reasons looks broken. */
+/** reasoningEl shows a model's thinking, folded. Without it, a model that
+ *  only reasons looks broken. */
 function reasoningEl(msg) {
   return h(
     "details",
@@ -718,8 +714,7 @@ function reasoningEl(msg) {
 function footer(msg, ctx, byAlias) {
   const bits = [];
   if (msg.usage) {
-    // OpenAI field names: this is the chat completions response, not a Keera
-    // report.
+    // OpenAI field names, from the chat completions response.
     bits.push(
       `${num(msg.usage.prompt_tokens)} in`,
       `${num(msg.usage.completion_tokens)} out`,
@@ -729,9 +724,9 @@ function footer(msg, ctx, byAlias) {
       model &&
       (model.input_micros_per_mtok || model.output_micros_per_mtok)
     ) {
-      // The same sum as policy.Model.Cost: cache reads and writes are part of
-      // the prompt, each at its own rate, or the input rate when none is set.
-      // A prompt over the long-prompt threshold is charged those prices.
+      // Same sum as policy.Model.Cost: cache reads and writes are part of the
+      // prompt, each at its own rate, or the input rate when none is set. A
+      // prompt over the long-prompt threshold is charged those prices.
       const input = msg.usage.prompt_tokens || 0;
       const details = msg.usage.prompt_tokens_details || {};
       const cached = Math.min(Math.max(details.cached_tokens || 0, 0), input);
@@ -762,8 +757,8 @@ function footer(msg, ctx, byAlias) {
   return h("div", { class: "msg-foot" }, bits.join(" · "));
 }
 
-/** prose renders a reply: fenced blocks become code, the rest stays as typed.
- *  Every node is built from text, so model output is never parsed as markup. */
+/** prose turns fenced blocks into code and keeps the rest as typed. Every
+ *  node is built from text, so model output is never parsed as markup. */
 function prose(text) {
   const out = [];
   const parts = String(text).split(/\n?```/);

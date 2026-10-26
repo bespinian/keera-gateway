@@ -1,6 +1,5 @@
-// Package policy holds Keera Gateway's tenancy model: the org → project → key
-// hierarchy, the limits that attach at each level, and the rule for combining
-// them.
+// Package policy holds the tenancy model: the org → project → key hierarchy,
+// the limits at each level, and how they combine.
 package policy
 
 import (
@@ -31,13 +30,13 @@ type Period string
 const (
 	PeriodDay   Period = "day"
 	PeriodMonth Period = "month"
-	// PeriodMinute is for rate limits only. A token bucket counts it, which has
-	// no start, so Valid leaves it out: no budget can reset on it.
+	// PeriodMinute is for rate limits only. A token bucket has no start, so
+	// Valid leaves it out and no budget can reset on it.
 	PeriodMinute Period = "minute"
 )
 
-// Start returns the first instant of the period containing t. Budgets reset on
-// UTC boundaries in every deployment.
+// Start returns the start of the period containing t. Budgets always reset in
+// UTC.
 func (p Period) Start(t time.Time) time.Time {
 	t = t.UTC()
 	if p == PeriodMonth {
@@ -46,8 +45,7 @@ func (p Period) Start(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
 
-// Next returns the start of the period after the one containing t: when a
-// spent budget works again.
+// Next returns the start of the next period, when a spent budget works again.
 func (p Period) Next(t time.Time) time.Time {
 	start := p.Start(t)
 	if p == PeriodMonth {
@@ -58,17 +56,17 @@ func (p Period) Next(t time.Time) time.Time {
 
 func (p Period) Valid() bool { return p == PeriodDay || p == PeriodMonth }
 
-// Kind is the API surface a model is served on. A chat model cannot be reached
-// through /v1/embeddings and vice versa.
+// Kind is the API a model is served on. A chat model cannot be reached through
+// /v1/embeddings and vice versa.
 type Kind string
 
 const (
 	KindChat       Kind = "chat"
 	KindCompletion Kind = "completion"
 	KindEmbedding  Kind = "embedding"
-	// KindDecision is a model that answers a typed question with a probability
-	// per answer, and writes no text, such as Laya behind laya-serve. Only
-	// route steps and gate filters use one. No client can name it.
+	// KindDecision answers a typed question with a probability per answer and
+	// writes no text, such as Laya behind laya-serve. Only route steps and gate
+	// filters use one; clients cannot name it.
 	KindDecision Kind = "decision"
 )
 
@@ -80,107 +78,89 @@ func (k Kind) Valid() bool {
 // so the model behind it can change without any client changing.
 type Model struct {
 	Alias string `json:"alias"`
-	// OrgID is the organisation the model belongs to. Only that organisation
-	// can call it, so two organisations can each have a 'fast'.
+	// Only OrgID can call the model, so two organisations can each have a 'fast'.
 	OrgID        string   `json:"org_id"`
 	Kind         Kind     `json:"kind"`
 	Backends     []string `json:"backends"`
 	BackendModel string   `json:"backend_model"`
-	// Provider is the hosted provider this entry was declared from, or empty
-	// for a self-served model. The gateway uses it to pass the provider's own
-	// API through untranslated and to fix the few fields OpenAI refuses.
+	// Provider is the hosted provider, or empty for a self-served model. It
+	// lets the gateway pass the provider's own API through and fix the few
+	// fields OpenAI refuses.
 	Provider string `json:"provider,omitempty"`
-	// DisplayName is the model's name for people, such as Claude Haiku 5.5.
-	// Clients name the alias; this is only shown.
+	// DisplayName is only shown, such as Claude Haiku 5.5. Clients name the alias.
 	DisplayName string `json:"display_name,omitempty"`
-	// Description says what the model is for. Clients see it on /v1/models,
-	// and a route step reads it when choosing.
+	// Description is shown on /v1/models, and a route step reads it when choosing.
 	Description string `json:"description,omitempty"`
-	// Prices are micro-units per million tokens, so every money value stays an
-	// integer.
+	// Prices are micro-units per million tokens, so money stays an integer.
 	InputMicrosPerMTok  int64 `json:"input_micros_per_mtok"`
 	OutputMicrosPerMTok int64 `json:"output_micros_per_mtok"`
-	// CachedInputMicrosPerMTok prices an input token served from the provider's
-	// prompt cache. Providers discount these heavily and a coding agent's
-	// prompt is mostly cached, so the full input price would overstate cost.
-	// Zero means "not stated": see cachedInputMicros.
+	// CachedInputMicrosPerMTok prices an input token read from the provider's
+	// prompt cache. A coding agent's prompt is mostly cached, so the full input
+	// price would overstate cost. Zero means not stated: see cachedInputMicros.
 	CachedInputMicrosPerMTok int64 `json:"cached_input_micros_per_mtok"`
-	// CacheWriteMicrosPerMTok is the price of an input token the provider
-	// wrote to its prompt cache, which Anthropic and OpenAI charge more for.
-	// Zero means the input price: see cacheWriteMicros.
+	// CacheWriteMicrosPerMTok prices an input token written to the prompt
+	// cache, which Anthropic and OpenAI charge more for. Zero means the input
+	// price.
 	CacheWriteMicrosPerMTok int64 `json:"cache_write_micros_per_mtok"`
-	// LongPrompt prices a request whose prompt is longer than its threshold,
-	// for a provider that charges more for one, as Anthropic does for
-	// claude-haiku-5-5. Nil means one price for every length.
+	// LongPrompt prices a prompt above its threshold, for providers that charge
+	// more for long prompts. Nil means one price for every length.
 	LongPrompt *PriceTier `json:"long_prompt,omitempty"`
-	// MaxContext is advertised on /v1/models, and a request that cannot fit in
-	// it is refused. Without the tokeniser the check counts the least a request
-	// can be, so a request near the limit is left to the inference plane.
+	// MaxContext is shown on /v1/models, and a request that cannot fit is
+	// refused. Without a tokeniser the check counts the least a request can be,
+	// so a request near the limit is left to the inference plane.
 	MaxContext int `json:"max_context_tokens"`
-	// ReleaseDate is the day the model came out, as YYYY-MM-DD, or empty when
-	// nobody stated it. It tells a newer model from an older one.
+	// ReleaseDate is YYYY-MM-DD, or empty when not known.
 	ReleaseDate string `json:"release_date,omitempty"`
 	// Location is where the model runs, and so where prompts go: a country,
-	// such as ch or usa, or onprem for an inference plane of the deployment's
-	// own.
+	// such as ch or usa, or onprem.
 	Location string `json:"location"`
-	// APIKeyCiphertext is a credential set through the control plane, sealed
-	// with a key only the gateway's environment holds.
+	// APIKeyCiphertext is sealed with a key only the gateway's environment holds.
 	APIKeyCiphertext []byte `json:"-"`
-	// APIKey is that credential decrypted when the registry loads it. It lives
-	// only in memory.
+	// APIKey is the decrypted credential. It lives only in memory.
 	APIKey string `json:"-"`
-	// HasAPIKey tells the control panel a credential is stored, and nothing
-	// more about it.
+	// HasAPIKey tells the panel a credential is stored, and nothing more.
 	HasAPIKey bool `json:"has_api_key,omitempty"`
 	// Subscription says each caller's own Claude subscription pays. The
-	// gateway forwards the caller's sign-in and holds no credential of its
-	// own, and the prices only say what the request would cost on the API.
-	// See docs/subscriptions.md.
+	// gateway forwards the caller's sign-in, and the prices only say what the
+	// API would cost. See docs/subscriptions.md.
 	Subscription bool `json:"subscription,omitempty"`
-	// PlatformKey says the deployment holds the key for this model's
-	// provider, so the organisation sets none. The model is then sent to the
-	// provider's own endpoint at its list prices, and billed. See
-	// docs/billing.md.
+	// PlatformKey says the deployment holds the provider key, so the
+	// organisation sets none. Requests go to the provider at list prices and
+	// are billed. See docs/billing.md.
 	PlatformKey bool `json:"platform_key,omitempty"`
-	// Billing is how a model on the deployment's key is billed. The registry
-	// sets it, and it never leaves the gateway.
+	// Billing is set by the registry for a model on the deployment's key. It
+	// never leaves the gateway.
 	Billing *Billing `json:"-"`
-	// Limited says the organisation signed itself up and has not paid yet, so
-	// the gateway connects only to public addresses for it. Locked says it may
-	// not use this model yet: the model runs inside the deployment's network,
-	// or would be billed after the fact. The registry sets both, and OrgName
-	// so a refusal can name the organisation. See docs/sso.md.
+	// Limited says the organisation signed itself up and has not paid, so the
+	// gateway connects only to public addresses for it. Locked says it may not
+	// use this model yet: the model runs inside the deployment's network, or
+	// would be billed after the fact. OrgName lets a refusal name the
+	// organisation. The registry sets all three. See docs/sso.md.
 	Limited bool   `json:"-"`
 	Locked  bool   `json:"-"`
 	OrgName string `json:"-"`
 	Enabled bool   `json:"enabled"`
 }
 
-// Key names the model across all tenants. Per-model state, such as backend
-// measurements, is kept under it.
+// Key names the model across all tenants, for per-model state.
 func (m Model) Key() string { return ModelKey(m.OrgID, m.Alias) }
 
-// ModelKey is Key for a model known only by its organisation and alias.
 func ModelKey(orgID, alias string) string { return orgID + "/" + alias }
 
-// Tokens is what one answer used, as the provider reported it.
+// Tokens is what one answer used, as the provider reported.
 type Tokens struct {
 	Input int
-	// CachedInput and CacheWrite are parts of Input, not added to it: that is
-	// how providers report them.
+	// CachedInput and CacheWrite are parts of Input, as providers report them.
 	CachedInput int
 	CacheWrite  int
-	// CacheWriteHour is the part of CacheWrite kept for an hour rather than
-	// five minutes. Anthropic, the only provider that reports it, charges it
-	// at twice the input price.
+	// CacheWriteHour is the part of CacheWrite kept for an hour, not five
+	// minutes. Anthropic charges it at twice the input price.
 	CacheWriteHour int
 	Output         int
 }
 
-// clamped keeps the cache counts inside the input count. The counts come from
-// a provider's response, and a bad one must not produce a negative cost and
-// refund a budget.
+// clamped keeps the cache counts inside the input count, so a bad provider
+// response cannot make a negative cost and refund a budget.
 func (t Tokens) clamped() Tokens {
 	t.CachedInput = min(max(t.CachedInput, 0), t.Input)
 	t.CacheWrite = min(max(t.CacheWrite, 0), t.Input-t.CachedInput)
@@ -188,13 +168,12 @@ func (t Tokens) clamped() Tokens {
 	return t
 }
 
-// Cost returns what the given token counts cost, in micro-units.
+// Cost returns what t costs, in micro-units.
 func (m Model) Cost(t Tokens) int64 {
 	const perM = 1_000_000
 	t = t.clamped()
 	p := m.prices(t.Input)
-	// Divide once at the end: dividing each term would floor four times and
-	// always round the total down further.
+	// Divide once, so the total is rounded down only once.
 	return (int64(t.Input-t.CachedInput-t.CacheWrite)*p.InputMicrosPerMTok +
 		int64(t.CachedInput)*p.cachedInputMicros() +
 		int64(t.CacheWrite-t.CacheWriteHour)*p.cacheWriteMicros() +
@@ -202,7 +181,6 @@ func (m Model) Cost(t Tokens) int64 {
 		int64(t.Output)*p.OutputMicrosPerMTok) / perM
 }
 
-// prices is what a request with a prompt of inputTokens is charged at.
 func (m Model) prices(inputTokens int) PriceTier {
 	if t := m.LongPrompt; t != nil && inputTokens > t.AboveTokens {
 		return *t
@@ -215,9 +193,8 @@ func (m Model) prices(inputTokens int) PriceTier {
 	}
 }
 
-// PriceTier is what a request with a long prompt costs instead of a model's
-// own prices. The prompt is every input token, cached or not, which is how
-// providers measure it.
+// PriceTier replaces a model's prices for a long prompt. The prompt counts
+// every input token, cached or not, as providers measure it.
 type PriceTier struct {
 	// AboveTokens is the longest prompt still charged the model's own prices.
 	AboveTokens              int   `json:"above_tokens" yaml:"above_tokens"`
@@ -235,9 +212,8 @@ func (t PriceTier) Check() error {
 	return nil
 }
 
-// cachedInputMicros is the rate for one cached input token, or the full input
-// rate when none is stated. Zero means "not stated", not "free": a forgotten
-// price should err high rather than drop most of every prompt out of budgets.
+// cachedInputMicros falls back to the input rate. Zero means not stated, not
+// free: a forgotten price should err high.
 func (t PriceTier) cachedInputMicros() int64 {
 	if t.CachedInputMicrosPerMTok == 0 {
 		return t.InputMicrosPerMTok
@@ -245,9 +221,8 @@ func (t PriceTier) cachedInputMicros() int64 {
 	return t.CachedInputMicrosPerMTok
 }
 
-// cacheWriteMicros is the rate for one input token written to the cache: the
-// stated rate, or the input rate when none is stated, as for a provider that
-// charges nothing extra for a write.
+// cacheWriteMicros falls back to the input rate, for providers that charge
+// nothing extra for a write.
 func (t PriceTier) cacheWriteMicros() int64 {
 	if t.CacheWriteMicrosPerMTok == 0 {
 		return t.InputMicrosPerMTok
@@ -256,39 +231,32 @@ func (t PriceTier) cacheWriteMicros() int64 {
 }
 
 // Filter is a guardrail that reads a prompt before it is forwarded, and may
-// change or stop it. It keeps credentials, customer names and client data from
-// reaching a model outside the cluster. Its alias is scoped to an organisation.
+// change or stop it, so credentials and client data stay in the cluster. Its
+// alias is scoped to an organisation.
 type Filter struct {
 	OrgID string `json:"org_id"`
 	Alias string `json:"alias"`
-	// Model is the model the filter runs on. It should run inside the same
-	// infrastructure, or the prompt has left the cluster before it was
-	// redacted. A pattern filter has none.
+	// Model should run in the same infrastructure, or the prompt leaves the
+	// cluster before it is redacted. A pattern filter has none.
 	Model  string     `json:"model"`
 	Mode   FilterMode `json:"mode"`
 	Prompt string     `json:"prompt"`
-	// Rules are a pattern filter's whole definition, applied in order. Every
-	// other mode has none.
+	// Rules define a pattern filter, applied in order. Other modes have none.
 	Rules []FilterRule `json:"rules,omitempty"`
 	// Shadow runs the filter but enforces nothing: the request goes on as sent
-	// and what the filter would have done is recorded. It lets an instruction
-	// be tested on real traffic first. The filter still costs the same.
+	// and the outcome is recorded, to test on real traffic. It costs the same.
 	Shadow      bool      `json:"shadow,omitempty"`
 	Description string    `json:"description,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// FilterMode is what a filter does with the request it has read. Every mode can
-// stop a request; they differ in cost:
-//   - rewrite writes the whole conversation back, the only way to take a
-//     credential out of free text. It costs a second generation as long as
-//     the request.
-//   - gate answers with one word and never edits. It costs a few tokens and
-//     judges more reliably.
+// FilterMode is what a filter does with a request. Every mode can stop one:
+//   - rewrite writes the conversation back, the only way to take a credential
+//     out of free text. It costs a second generation as long as the request.
+//   - gate answers with one word and never edits. It is cheap and more reliable.
 //   - pattern runs no model: regular expressions replace or refuse. It suits
-//     things with a shape, like API keys and card numbers, but cannot
-//     recognise a name, so the usual setup is one of each.
+//     keys and card numbers but cannot recognise a name.
 //
 // The zero value is rewrite. See docs/filters.md.
 type FilterMode string
@@ -301,24 +269,21 @@ const (
 
 var filterModes = []FilterMode{FilterModeRewrite, FilterModeGate, FilterModePattern}
 
-// Valid reports whether m names a mode. The empty string does: it means
-// rewrite.
+// Valid reports whether m names a mode. Empty means rewrite.
 func (m FilterMode) Valid() bool { return m == "" || slices.Contains(filterModes, m) }
 
 func (m FilterMode) Gates() bool { return m == FilterModeGate }
 
-// Rewrites reports whether this filter edits the request rather than only
-// judging it. A pattern filter counts, whatever its rules say.
+// Rewrites reports whether the filter may edit the request. A pattern filter
+// counts, whatever its rules say.
 func (m FilterMode) Rewrites() bool { return !m.Gates() }
 
-// UsesModel reports whether this filter runs a model. Only a pattern filter
-// does not.
 func (m FilterMode) UsesModel() bool { return m != FilterModePattern }
 
 func (f Filter) UsesModel() bool { return f.Mode.UsesModel() }
 
-// ReadsWith is the model this filter reads requests with, or "" for a pattern
-// filter. The allow-list and subscription checks all ask it.
+// ReadsWith is the model the filter reads with, or "" for a pattern filter.
+// The allow-list and subscription checks use it.
 func (f Filter) ReadsWith() string {
 	if !f.UsesModel() {
 		return ""
@@ -326,37 +291,30 @@ func (f Filter) ReadsWith() string {
 	return f.Model
 }
 
-// MaxFilterRules bounds the rules in one pattern filter. Each runs on every
-// segment of every request, and a longer list is too long to read.
+// MaxFilterRules bounds a pattern filter. Each rule runs on every segment of
+// every request.
 const MaxFilterRules = 64
 
-// maxFilterPatternLen bounds one rule's expression. RE2 cannot backtrack
-// badly, so this is only about keeping rules readable.
+// maxFilterPatternLen only keeps rules readable: RE2 cannot backtrack badly.
 const maxFilterPatternLen = 512
 
-// FilterRule is one rule of a pattern filter: an expression, and what happens
-// to a segment it matches. A rule either replaces or refuses, never both.
+// FilterRule is one rule of a pattern filter. It either replaces or refuses,
+// never both.
 type FilterRule struct {
-	// Pattern is an RE2 expression in Go's regexp syntax, matched against each
-	// segment of the request.
+	// Pattern is matched against each segment of the request.
 	Pattern string `json:"pattern"`
-	// Replace is inserted literally: '$1' stays those two characters. The mode
-	// exists to be predictable, and expansion would surprise.
+	// Replace is inserted literally: '$1' is not expanded, to stay predictable.
 	Replace string `json:"replace,omitempty"`
-	// Refuse drops the request when this rule matches, instead of replacing.
-	Refuse bool `json:"refuse,omitempty"`
-	// Reason is the sentence a refusal gives the sender.
-	Reason string `json:"reason,omitempty"`
+	Refuse  bool   `json:"refuse,omitempty"`
+	Reason  string `json:"reason,omitempty"`
 }
 
-// MaxRefusalReasonBytes bounds the sentence a refusal gives the sender. It ends
-// up in an error body, a usage row and a log line, and a prompt can talk a
-// model into writing a long one.
+// MaxRefusalReasonBytes bounds a refusal's reason. It goes into an error body,
+// a usage row and a log line, and a prompt can talk a model into a long one.
 const MaxRefusalReasonBytes = 240
 
-// Valid reports whether the gateway could apply this rule, and what is wrong
-// when it could not. The message names the expression, not its index, because
-// the rule's author reads it.
+// Valid says what is wrong with the rule. Messages name the expression, not
+// its index, for the rule's author.
 func (r FilterRule) Valid() error {
 	switch {
 	case strings.TrimSpace(r.Pattern) == "":
@@ -381,8 +339,7 @@ func (r FilterRule) Valid() error {
 		return fmt.Errorf("the expression %q is not a valid regular expression: %w",
 			r.Pattern, err)
 	}
-	// An expression that matches the empty string matches at every position,
-	// so it would refuse everything or fill a request with replacements.
+	// A match on the empty string matches at every position.
 	if re.MatchString("") {
 		return fmt.Errorf("the expression %q matches the empty string, so it matches every "+
 			"request and every position in it. Anchor it or require at least one character",
@@ -391,77 +348,54 @@ func (r FilterRule) Valid() error {
 	return nil
 }
 
-// Route is how a route step decides which model answers a request. A Filter
+// Route is how a route step picks the model that answers a request. A Filter
 // changes a request; a route step changes where it goes.
 //
-// Most requests do not need the largest model, and some must not reach the one
-// outside the cluster. A client cannot judge that about its own prompt.
-//
-// A route step has no shadow mode, because the client named its router and
-// something has to answer. It has Fallback instead.
-//
-// Only an instruction step reads the request with a model; see RouteMode for
-// the others. Route is read off the step with Router.Route.
+// It has no shadow mode, because something has to answer. It has Fallback
+// instead. Router.Route builds it from a step.
 type Route struct {
-	OrgID string
-	// Router is the router the step belongs to, and Step its id.
+	OrgID  string
 	Router string
 	Step   string
-	// Mode decides what the other fields mean. See RouteMode.
+	// Mode decides what the other fields mean.
 	Mode RouteMode
-	// Model makes the decision on an instruction step. It should be fast and
-	// run inside the same infrastructure: it runs on every request, and a
+	// Model decides on an instruction step, the only mode with Model and
+	// Prompt. It should be fast and local: it runs on every request, and a
 	// hosted one sends the prompt out before deciding whether it may leave.
-	// Only an instruction step has Model and Prompt. With one destination it
-	// keeps them but does not ask.
 	Model  string
 	Prompt string
-	// Destinations are the models this step may choose between, in the order
-	// offered. A fallback step tries them in this order; latency and
-	// least-busy steps use it only to break ties. Allowing the router
-	// allows every destination.
+	// Destinations are the models the step may choose. A fallback step tries
+	// them in order; latency and least-busy use the order to break ties.
+	// Allowing the router allows every destination.
 	Destinations []string
-	// Ceilings is a size step's whole configuration: the largest request, in
-	// estimated tokens, each destination should take. A destination without a
-	// positive ceiling takes what is too big for the rest, and a size step
-	// needs exactly one. The estimate comes from the text's bytes, not a
-	// tokeniser; see docs/routers.md.
+	// Ceilings is a size step's largest request per destination, in tokens
+	// estimated from bytes. Exactly one destination has no ceiling and takes
+	// what is too big for the rest. See docs/routers.md.
 	Ceilings map[string]int
-	// Header and Values are a header step's: the request header it reads,
-	// and which of its values sends a request to which destination.
+	// Header is the request header a header step reads, and Values maps its
+	// values to destinations.
 	Header string
 	Values map[string]string
-	// Fallback is where an instruction or header step sends a request it
-	// could not decide. Empty refuses it. Neither is right in general: a step
-	// that saves money can fall back, one that keeps prompts in the cluster
-	// cannot. See docs/routers.md.
+	// Fallback is where a step sends a request it could not decide. Empty
+	// refuses it: a step that keeps prompts in the cluster must not fall back.
 	Fallback string
 }
 
-// Refuses reports whether this step stops a request it could not decide
-// instead of using a fallback.
 func (r Route) Refuses() bool { return r.Fallback == "" }
 
 // RouteMode is what chooses the model that answers a request.
 //
 // An instruction step has a small local model read the request and name a
 // destination. It is the only mode that costs a generation, and the only one a
-// prompt can argue with.
-//
-// The other modes never read the request's text, and differ in order:
+// prompt can argue with. The others never read the text:
 //   - fallback tries destinations in the written order.
-//   - latency tries the one that lately started answering fastest first.
+//   - latency tries the one that lately answered fastest first.
 //   - least-busy tries the one with fewest requests in flight first.
-//   - size picks the destination meant for the request's length; one too
-//     small to hold it always ranks last.
-//
-// A header step reads no text either. It sends the request where the value of
-// one of its headers says, so the client's own code chooses.
+//   - size picks the destination meant for the request's length.
+//   - header sends the request where one of its headers says.
 //
 // Least-busy suits destinations that are alike; latency suits ones that are
-// not, since queue depth cannot be compared across machines of different
-// speeds. Both use only what this process has seen. See
-// internal/gateway/load.go.
+// not. Both use only what this process has seen. See internal/gateway/load.go.
 //
 // The zero value is instruction.
 type RouteMode string
@@ -480,32 +414,27 @@ var routeModes = []RouteMode{
 	RouteModeSize, RouteModeHeader,
 }
 
-// Valid reports whether m names a mode. The empty string does: it means
-// instruction.
+// Valid reports whether m names a mode. Empty means instruction.
 func (m RouteMode) Valid() bool { return m == "" || slices.Contains(routeModes, m) }
 
-// Decides reports whether this mode asks a model to choose. Only instruction
-// does, and only it has Model and Prompt.
+// Decides reports whether this mode asks a model to choose.
 func (m RouteMode) Decides() bool { return m == "" || m == RouteModeInstruction }
 
-// Chooses reports whether this mode picks one destination itself, and so has
-// a Fallback for when it cannot. The other modes try their destinations in
-// turn.
+// Chooses reports whether this mode picks one destination, and so has a
+// Fallback. The other modes try their destinations in turn.
 func (m RouteMode) Chooses() bool { return m.Decides() || m == RouteModeHeader }
 
-// Chooses reports whether this step picks one destination before anything is
-// sent. An instruction step with one destination does not: it tries that one.
+// Chooses reports whether this step picks one destination before sending. An
+// instruction step with one destination does not.
 func (r Route) Chooses() bool { return r.Decides() || r.Mode == RouteModeHeader }
 
-// Decides reports whether this step asks a model to choose. An instruction
-// step with one destination has nothing to choose, so it sends every request
-// there without asking.
+// Decides reports whether this step asks a model. With one destination there
+// is nothing to ask.
 func (r Route) Decides() bool { return r.Mode.Decides() && len(r.Destinations) > 1 }
 
-// ReadsWith is the model this step reads requests with, or "" for a mode
-// that reads none. An instruction step with one destination keeps its
-// model, because it decides as soon as it has a second, so the allow-list and
-// subscription checks count it.
+// ReadsWith is the model the step reads with, or "". An instruction step with
+// one destination still counts its model for the allow-list and subscription
+// checks, since it decides once it has a second.
 func (r Route) ReadsWith() string {
 	if !r.Mode.Decides() {
 		return ""
@@ -514,8 +443,7 @@ func (r Route) ReadsWith() string {
 }
 
 // Measures reports whether this mode orders destinations by what this process
-// observed rather than the written order. Such an order is not worth recording
-// in reports, since it only reflects recent traffic on one replica.
+// observed. Such an order reflects one replica, so reports leave it out.
 func (m RouteMode) Measures() bool {
 	return m == RouteModeLatency || m == RouteModeLeastBusy
 }
@@ -526,16 +454,14 @@ func (m RouteMode) Sizes() bool { return m == RouteModeSize }
 
 func (r Route) Sizes() bool { return r.Mode.Sizes() }
 
-// Ceiling returns the largest request, in estimated tokens, this step gives
-// a destination, and whether there is one.
+// Ceiling returns a destination's ceiling, and whether it has one.
 func (r Route) Ceiling(alias string) (int, bool) {
 	n, ok := r.Ceilings[alias]
 	return n, ok && n > 0
 }
 
-// Unbounded names the destinations with no ceiling: where a request larger
-// than every ceiling goes. There must be exactly one, checked when the
-// router is saved.
+// Unbounded names the destinations with no ceiling. Saving a router checks
+// there is exactly one.
 func (r Route) Unbounded() []string {
 	out := make([]string, 0, 1)
 	for _, alias := range r.Destinations {
@@ -546,28 +472,24 @@ func (r Route) Unbounded() []string {
 	return out
 }
 
-// maxAliasLen bounds a model, router, filter or MCP server alias. People type
-// these, and `keera connect` writes them unquoted into editor configuration.
+// maxAliasLen bounds an alias. People type them, and `keera connect` writes
+// them unquoted into editor configuration.
 const maxAliasLen = 64
 
-// MaxHeaderValues bounds how many values a header step knows. Several may
-// name the same destination, but a longer list is no longer read by anyone.
+// MaxHeaderValues bounds how many values a header step knows.
 const MaxHeaderValues = 32
 
-// MaxDestinations bounds how many models one route step may choose between. The
-// list goes into the instruction on every request, and a small model choosing
-// between too many picks poorly.
+// MaxDestinations bounds a route step. The list goes into every instruction,
+// and a small model picks poorly among too many.
 const MaxDestinations = 16
 
-// ValidAlias reports whether s can name a model, a router, a filter or an MCP
-// server. They share one shape: clients type models and routers into the same
-// field, and an MCP server's alias is part of a URL. Sandbox classes have
-// their own rule, ValidClassName.
+// ValidAlias reports whether s can name a model, router, filter or MCP server.
+// They share one shape: models and routers go in the same field, and an MCP
+// alias is part of a URL.
 func ValidAlias(s string) bool { return validName(s, maxAliasLen) }
 
-// ValidModelAlias reports whether s can name a model. A model may also carry
-// its provider's name, as in "anthropic/claude-sonnet-4-5", so each part
-// between slashes has the alias shape.
+// ValidModelAlias also allows a provider prefix, as in
+// "anthropic/claude-sonnet-4-5".
 func ValidModelAlias(s string) bool {
 	if len(s) > maxAliasLen {
 		return false
@@ -583,18 +505,16 @@ func ValidModelAlias(s string) bool {
 // LocationOnPrem is the location of a model the deployment serves itself.
 const LocationOnPrem = "onprem"
 
-// ValidLocation reports whether s can name where a model runs. It is a short
-// name, not a fixed list, so a provider in a new country needs no new build.
+// ValidLocation takes any short name, not a fixed list, so a new country needs
+// no new build.
 func ValidLocation(s string) bool { return validName(s, 16) }
 
-// ValidReleaseDate reports whether s is a day written as YYYY-MM-DD.
 func ValidReleaseDate(s string) bool {
 	_, err := time.Parse(time.DateOnly, s)
 	return err == nil
 }
 
-// validName is the shape every name in this package shares: lowercase letters,
-// digits, and hyphens that neither open nor close the name.
+// validName allows lowercase letters, digits, and inner hyphens.
 func validName(s string, maxLen int) bool {
 	if s == "" || len(s) > maxLen {
 		return false
@@ -611,36 +531,29 @@ func validName(s string, maxLen int) bool {
 	return true
 }
 
-// Limits is one row of the guardrails table. A nil field means "inherit from
-// the level above".
+// Limits is one row of the guardrails table. A nil field inherits from the
+// level above.
 //
-// The allow-lists have no omitempty: an empty list allows nothing, and JSON
-// must keep it apart from null, which inherits.
+// The allow-lists have no omitempty: an empty list allows nothing, while null
+// inherits.
 type Limits struct {
 	AllowedModels []string `json:"allowed_models"`
-	// RateLimits and Budgets hold at most one of each per period, such as a
-	// budget per day beside one per month. Two over the same period would
-	// count the same window, and only the smaller would matter.
+	// RateLimits and Budgets hold at most one per period.
 	RateLimits []RateLimit `json:"rate_limits,omitempty"`
 	Budgets    []Budget    `json:"budgets,omitempty"`
-	// SystemPrompt is put ahead of a chat request's own messages. Levels
-	// concatenate rather than narrow: a level can add to what it inherits but
-	// never remove it.
+	// SystemPrompt goes before a chat request's messages. A level can add to
+	// what it inherits but never remove it.
 	SystemPrompt *string `json:"system_prompt,omitempty"`
-	// Filters are aliases, in the order they run. Like SystemPrompt, a level
-	// may add filters but never drop inherited ones.
+	// Filters are aliases in run order. A level may add but never drop them.
 	Filters []string `json:"filters,omitempty"`
-	// AllowedTools is the MCP tools this scope may call through the gateway:
-	// a server's alias for all of its tools, or 'alias/tool' for one. Nil
-	// inherits; see Resolved.AllowsTool.
+	// AllowedTools lists MCP servers by alias for all their tools, or
+	// 'alias/tool' for one. Nil inherits.
 	AllowedTools []string `json:"allowed_tools"`
-	// SandboxLimits is embedded so a policy row stays one flat object in JSON,
-	// SQL and on the command line.
+	// Embedded so a row stays one flat object in JSON, SQL and the CLI.
 	SandboxLimits
 }
 
-// RateLimit is the most a scope may use per Period. Zero means no limit on
-// that count.
+// RateLimit is the most a scope may use per Period. Zero means no limit.
 type RateLimit struct {
 	Requests int64 `json:"requests,omitempty"`
 	Tokens   int64 `json:"tokens,omitempty"`
@@ -648,7 +561,6 @@ type RateLimit struct {
 	Period Period `json:"period,omitempty"`
 }
 
-// Per is the period the limit counts over.
 func (r RateLimit) Per() Period {
 	if r.Period == "" {
 		return PeriodMinute
@@ -663,7 +575,6 @@ type Budget struct {
 	Period Period `json:"period,omitempty"`
 }
 
-// Per is the period the budget resets on.
 func (b Budget) Per() Period {
 	if b.Period == "" {
 		return PeriodMonth
@@ -671,12 +582,9 @@ func (b Budget) Per() Period {
 	return b.Period
 }
 
-// PerMinute reports whether the limit counts per minute, in token buckets,
-// rather than per day or month as a budget counts.
 func (r RateLimit) PerMinute() bool { return r.Per() == PeriodMinute }
 
-// Problem says what is wrong with the limit, in words that follow "a rate
-// limit", or "". A guardrail's and a router's are checked alike.
+// Problem says what is wrong, in words that follow "a rate limit", or "".
 func (r RateLimit) Problem() string {
 	switch {
 	case !r.PerMinute() && !r.Period.Valid():
@@ -690,8 +598,7 @@ func (r RateLimit) Problem() string {
 	return ""
 }
 
-// Problem says what is wrong with the budget, in words that follow "a
-// budget", or "".
+// Problem says what is wrong, in words that follow "a budget", or "".
 func (b Budget) Problem() string {
 	switch {
 	case !b.Per().Valid():
@@ -702,8 +609,8 @@ func (b Budget) Problem() string {
 	return ""
 }
 
-// count is what the limit counts under: per minute, the token buckets of the
-// scope's month, which it sets; per day or month, quotas of their own.
+// count sets a per-minute limit on the month's scope, and returns quotas for
+// one per day or month.
 func (r RateLimit) count(month *Scope) []Scope {
 	if p := r.Per(); p.Valid() {
 		return quotas(month.Type, month.ID, p, r.Requests, r.Tokens)
@@ -713,30 +620,27 @@ func (r RateLimit) count(month *Scope) []Scope {
 	return nil
 }
 
-// IsZero reports whether l sets nothing at all. It compares with the zero
-// value, so a field added later is counted without changing this.
+// IsZero compares with the zero value, so a new field needs no change here.
 func (l Limits) IsZero() bool { return reflect.DeepEqual(l, Limits{}) }
 
-// Scope is one level of the hierarchy with its own limits, carried on a
-// resolved key so the gateway can enforce each level separately.
+// Scope is one level's limits, carried on a resolved key so each level is
+// enforced separately.
 type Scope struct {
 	Type ScopeType `json:"type"`
 	ID   string    `json:"id"`
-	// Zero means unlimited for all three. RPM and TPM are a rate limit per
-	// minute; one per day or month is a scope in Resolved.Quotas. A level
-	// with a budget per day has a second scope for it, without RPM or TPM.
+	// Zero means unlimited. A rate limit per day or month is a scope in
+	// Resolved.Quotas. A budget per day gets a second scope without RPM or TPM.
 	RPM          int    `json:"rpm"`
 	TPM          int    `json:"tpm"`
 	BudgetMicros int64  `json:"budget_micros"`
 	Period       Period `json:"period"`
-	// Meter is what the scope counts over its period: money when empty, as
-	// for a budget, or requests or tokens, for a router's daily or monthly
-	// rate limit. Quota is the most it may count; zero is no limit.
+	// Meter is what the scope counts: money when empty, or requests or tokens
+	// for a daily or monthly rate limit. Quota is the most; zero is no limit.
 	Meter Meter `json:"meter,omitempty"`
 	Quota int64 `json:"quota,omitempty"`
 }
 
-// Meter is what a scope's period window counts. See Scope.
+// Meter is what a scope's window counts.
 type Meter string
 
 const (
@@ -745,8 +649,7 @@ const (
 	MeterTokens   Meter = "tokens"
 )
 
-// Amount is what one request adds to a window of this meter: its cost, one,
-// or its tokens.
+// Amount is what one request adds to a window of this meter.
 func (m Meter) Amount(costMicros, tokens int64) int64 {
 	switch m {
 	case MeterRequests:
@@ -761,14 +664,13 @@ func (m Meter) Amount(costMicros, tokens int64) int64 {
 type KeyKind string
 
 const (
-	// KeyStandard reaches every model its guardrails allow.
 	KeyStandard KeyKind = "standard"
 	// KeySubscription reaches only subscription models. It sits in a settings
 	// file in plain text, so a copy must not spend the organisation's money.
 	KeySubscription KeyKind = "subscription"
 )
 
-// Valid reports whether k is a kind of key. Empty is not one.
+// Valid reports whether k is a kind of key. Empty is not.
 func (k KeyKind) Valid() bool { return k == KeyStandard || k == KeySubscription }
 
 // Key identifies the principal behind a request.
@@ -780,11 +682,10 @@ type Key struct {
 	Kind      KeyKind
 }
 
-// Subscription reports whether the key only reaches subscription models.
 func (k Key) Subscription() bool { return k.Kind == KeySubscription }
 
-// PlanUsage is how much of a Claude plan's usage limit is used, as Anthropic
-// reports it on each answer. Utilisation is a fraction from 0 to 1.
+// PlanUsage is how much of a Claude plan's limit is used, as a fraction from
+// 0 to 1, as Anthropic reports it on each answer.
 type PlanUsage struct {
 	FiveHour         *float64   `json:"five_hour,omitempty"`
 	FiveHourResetsAt *time.Time `json:"five_hour_resets_at,omitempty"`
@@ -801,25 +702,20 @@ type Resolved struct {
 	Key Key
 	// AllowedModels nil means every enabled model of the organisation.
 	AllowedModels []string
-	// SystemPrompt is every level's prompt joined, outermost first. Empty
-	// means the conversation is forwarded as sent.
+	// SystemPrompt is every level's prompt joined, outermost first.
 	SystemPrompt string
-	// Filters is every level's filters in run order, outermost first, without
-	// repeats. They are aliases so a filter's definition is read per request
-	// rather than frozen into a cached key.
+	// Filters are every level's filters in run order, without repeats. They
+	// are aliases so a filter's definition is not frozen into a cached key.
 	Filters []string
 	// AllowedTools nil means every tool of every MCP server of the organisation.
 	AllowedTools []string
-	// Scopes runs outermost first: org, project if any, then the key. Rate
-	// limits and budgets are enforced at every level. Each level has a scope
-	// per month, which carries its rate limit per minute, and one per day
-	// when it has a budget per day.
+	// Scopes run outermost first: org, project if any, then key. Each level
+	// has a month scope, which carries its per-minute rate limit, and a day
+	// scope when it has a daily budget.
 	Scopes []Scope
-	// Quotas are the rate limits per day or month, one scope per level and
-	// count. They are kept apart from Scopes because a request counts against
-	// them only once it is let through.
-	Quotas []Scope
-	// Sandbox is what this key may hold of the sandbox pool.
+	// Quotas are the rate limits per day or month. They are apart from Scopes
+	// because a request counts against them only once let through.
+	Quotas  []Scope
 	Sandbox ResolvedSandbox
 }
 
@@ -827,17 +723,15 @@ func (r *Resolved) allowsModel(alias string) bool {
 	return r.AllowedModels == nil || slices.Contains(r.AllowedModels, alias)
 }
 
-// MayUse reports whether the key may call m: its kind reaches m, and its
-// guardrails allow it. A subscription model takes only a subscription key,
-// because only that key's requests carry the caller's sign-in.
+// MayUse reports whether the key may call m. A subscription model takes only a
+// subscription key, because only its requests carry the caller's sign-in.
 func (r *Resolved) MayUse(m Model) bool {
 	return r.Key.Subscription() == m.Subscription && r.allowsModel(m.Alias)
 }
 
-// MayCallRouter reports whether the key may name the router alias. The
-// allow-list covers the router, not the models it reaches: allowing a
-// router allows where it sends. A subscription key reaches none, which would
-// place it on models the organisation pays for.
+// MayCallRouter reports whether the key may name the router. Allowing a router
+// allows where it sends. A subscription key may call none, since a router
+// would put it on models the organisation pays for.
 func (r *Resolved) MayCallRouter(alias string) bool {
 	return r.allowsModel(alias) && !r.Key.Subscription()
 }
@@ -847,9 +741,8 @@ func (r *Resolved) MayCallRouter(alias string) bool {
 // A level can narrow what it inherits but never widen it: allow-lists
 // intersect and ceilings take the minimum. The exceptions:
 //
-//   - Budgets and rate limits are kept per level and checked separately. An
-//     org cap of 10,000 and a project cap of 1,000 must both hold.
-//   - System prompts concatenate outermost first, because text does not narrow.
+//   - Budgets and rate limits are kept per level, and each must hold.
+//   - System prompts concatenate outermost first.
 //   - Filters add up level by level.
 //   - Only the organisation grants repositories; the levels below narrow them.
 func Resolve(key Key, org, project, own *Limits) *Resolved {
@@ -882,8 +775,7 @@ func Resolve(key Key, org, project, own *Limits) *Resolved {
 				}
 			}
 		}
-		// The month's scope is there with no budget too: it is what the
-		// level's spend this month is counted under.
+		// The month scope exists even without a budget: spend is counted on it.
 		r.Scopes = append(r.Scopes, month)
 		if day != nil {
 			r.Scopes = append(r.Scopes, *day)
@@ -892,8 +784,8 @@ func Resolve(key Key, org, project, own *Limits) *Resolved {
 	return r
 }
 
-// narrow applies one level's limits to what the levels above it allowed. top
-// is the organisation's level, the only one that grants repositories.
+// narrow applies one level's limits. top is the organisation, the only level
+// that grants repositories.
 func (r *Resolved) narrow(lim *Limits, top bool) {
 	r.AllowedModels = intersect(r.AllowedModels, lim.AllowedModels)
 	r.SystemPrompt = JoinPrompts(r.SystemPrompt, deref(lim.SystemPrompt))
@@ -917,8 +809,7 @@ func narrowAllowList(cur, next []string, covers func(a, b string) bool) []string
 	return narrowList(cur, next, covers)
 }
 
-// narrowList keeps what both lists allow: of two entries where one covers the
-// other, the narrower.
+// narrowList keeps what both lists allow: the narrower of two matching entries.
 func narrowList(cur, next []string, covers func(a, b string) bool) []string {
 	out := []string{}
 	for _, a := range cur {
@@ -940,8 +831,7 @@ func narrowList(cur, next []string, covers func(a, b string) bool) []string {
 	return out
 }
 
-// JoinPrompts appends a system prompt to the ones before it. The
-// blank line keeps two instructions from running together.
+// JoinPrompts appends a system prompt, with a blank line between.
 func JoinPrompts(cur, next string) string {
 	next = strings.TrimSpace(next)
 	switch {
@@ -954,9 +844,8 @@ func JoinPrompts(cur, next string) string {
 	}
 }
 
-// appendFilters adds one level's filters to the ones above it, dropping
-// repeats. The first mention wins, so an organisation's filter runs before its
-// projects'. A second pass over the same text would find nothing new.
+// appendFilters drops repeats. The first mention wins, so an organisation's
+// filter runs before its projects'.
 func appendFilters(cur, next []string) []string {
 	for _, alias := range next {
 		if alias != "" && !slices.Contains(cur, alias) {
@@ -966,7 +855,7 @@ func appendFilters(cur, next []string) []string {
 	return cur
 }
 
-// minPositive is the smaller of two limits, where zero or less means no limit.
+// minPositive treats zero or less as no limit.
 func minPositive(a, b int) int {
 	switch {
 	case a <= 0:
@@ -986,15 +875,13 @@ func deref[T any](p *T) T {
 	return *p
 }
 
-// ErrBudgetExceeded is returned when a scope has spent its allowance for the
-// period. A developer reads it in their editor, so it says which budget, how
-// much, and when it resets.
+// ErrBudgetExceeded says which budget is spent, how much, and when it resets,
+// since a developer reads it in their editor.
 type ErrBudgetExceeded struct {
 	Scope  Scope
 	Spent  int64
 	Budget int64
-	// ResetsAt is the start of the next period. Zero leaves it out of the
-	// message.
+	// ResetsAt is the start of the next period. Zero leaves it out.
 	ResetsAt time.Time
 }
 
@@ -1008,8 +895,7 @@ func (e *ErrBudgetExceeded) Error() string {
 	return msg
 }
 
-// Possessive names a scope the way the developer it stopped reads it, without
-// an id.
+// Possessive names a scope for the developer it stopped, without an id.
 func (t ScopeType) Possessive() string {
 	switch t {
 	case ScopeOrg:
@@ -1023,16 +909,14 @@ func (t ScopeType) Possessive() string {
 	}
 }
 
-// FormatMicros renders micro-units exactly, with at least two decimals.
-// Prices use it, since a billed 0.125 must not read as 0.13, and so do exports
-// and headers a program reads.
+// FormatMicros renders micro-units exactly, with at least two decimals, for
+// prices, exports and headers. A billed 0.125 must not read as 0.13.
 func FormatMicros(micros int64) string {
 	return twoDecimals(strconv.FormatFloat(float64(micros)/1e6, 'f', -1, 64))
 }
 
-// FormatAmount renders a cost, a budget or a balance for a human, as the panel
-// does: two decimals from 1 up, and two significant digits below, because a
-// per-request cost rounded to two decimals would print "0.00".
+// FormatAmount renders money for people: two decimals from 1 up, and two
+// significant digits below, so a small cost does not print as "0.00".
 func FormatAmount(micros int64) string {
 	v := float64(micros) / 1e6
 	switch {
@@ -1041,8 +925,7 @@ func FormatAmount(micros int64) string {
 	case math.Abs(v) >= 1:
 		return strconv.FormatFloat(v, 'f', 2, 64)
 	}
-	// 'g' rounds to significant digits, and may write an exponent, so the
-	// rounded value is written again without one.
+	// 'g' may write an exponent, so the rounded value is written again.
 	rounded, _ := strconv.ParseFloat(strconv.FormatFloat(v, 'g', 2, 64), 64)
 	return twoDecimals(strconv.FormatFloat(rounded, 'f', -1, 64))
 }
@@ -1059,14 +942,12 @@ func twoDecimals(s string) string {
 	}
 }
 
-// FormatMoney is FormatAmount with the currency first: CHF 3.00. A table
-// whose header names the currency uses FormatAmount instead.
+// FormatMoney is FormatAmount with the currency first: CHF 3.00.
 func FormatMoney(micros int64) string {
 	return Currency + " " + FormatAmount(micros)
 }
 
-// FormatPrice is FormatMicros with the currency first, for a price shown on
-// its own.
+// FormatPrice is FormatMicros with the currency first.
 func FormatPrice(micros int64) string {
 	return Currency + " " + FormatMicros(micros)
 }
@@ -1076,28 +957,23 @@ var (
 	ErrUnknownKey = errors.New("policy: unknown key")
 	ErrKeyExpired = errors.New("policy: key expired")
 	ErrKeyRevoked = errors.New("policy: key revoked")
-	// ErrKeyPending is a key nobody has activated yet. It has no secret, so
-	// only something that names it by id, such as the playground, meets it.
+	// ErrKeyPending is a key not yet activated. It has no secret, so only
+	// lookups by id, such as the playground, meet it.
 	ErrKeyPending = errors.New("policy: key not activated")
 )
 
 // Source is what the gateway needs from the control plane. It is an interface
 // so the hot path can be tested without a database.
 type Source interface {
-	// Resolve maps a presented key to its combined policy. It runs on every
-	// inference request, so implementations should cache.
+	// Resolve runs on every inference request, so implementations should cache.
 	Resolve(ctx context.Context, presented string) (*Resolved, error)
 	Model(orgID, alias string) (Model, bool)
-	// Models lists an organisation's models, for /v1/models.
 	Models(orgID string) []Model
-	// Filter looks up an organisation's filter. An unknown alias refuses the
-	// request rather than skipping the filter.
+	// An unknown filter alias refuses the request rather than skipping it.
 	Filter(orgID, alias string) (Filter, bool)
-	// Router looks up an organisation's router. It is asked on every
-	// request, because only this says whether the 'model' field names a model
-	// or a router.
+	// Router is asked on every request: only it says whether 'model' names a
+	// model or a router.
 	Router(orgID, alias string) (Router, bool)
-	// Routers lists an organisation's routers, for /v1/models.
 	Routers(orgID string) []Router
 	MCPServer(orgID, alias string) (MCPServer, bool)
 }

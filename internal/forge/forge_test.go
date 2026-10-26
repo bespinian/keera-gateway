@@ -267,8 +267,8 @@ func TestDayAfter(t *testing.T) {
 
 func allowAll(string) error { return nil }
 
-// One forge credential reaches every tenant's repositories, so a forge mints
-// nothing the caller's guardrail has not allowed, and asks the forge nothing.
+// One forge credential reaches every tenant's repositories, so nothing is
+// minted, or asked of the forge, that the caller's guardrail does not allow.
 func TestMintAsksTheGuardrailBeforeTheForge(t *testing.T) {
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

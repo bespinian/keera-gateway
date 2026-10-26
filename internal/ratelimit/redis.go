@@ -11,12 +11,11 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// Redis decides the same buckets as Limiter with the tokens kept in Redis, so
-// all replicas share one allowance instead of having one each.
+// Redis decides the same buckets as Limiter, kept in Redis, so all replicas
+// share one allowance.
 //
-// Redis holds only the buckets, nothing that must be kept. So when it cannot
-// be reached, decisions fall back to the in-memory buckets rather than
-// refusing traffic. See degrade.
+// Redis holds nothing that must be kept, so when it cannot be reached,
+// decisions fall back to the in-memory buckets. See degrade.
 type Redis struct {
 	rdb     redis.Scripter
 	local   *Limiter
@@ -29,21 +28,20 @@ type Redis struct {
 	mu       sync.Mutex
 	view     map[string]view
 	complain time.Time
-	// resting is when to try Redis again after a failed round trip. Until
-	// then every decision is local, so an outage does not add the full
-	// timeout to every request.
+	// resting is when to try Redis again after a failure. Until then every
+	// decision is local, so an outage does not add the timeout to every
+	// request.
 	resting time.Time
 }
 
-// Reporter counts the admissions and token charges made locally because Redis
-// could not be reached. An interface, so this package depends on nothing.
+// Reporter counts the decisions made locally because Redis could not be
+// reached. An interface, so this package depends on nothing.
 type Reporter interface {
 	RateLimitFallback()
 }
 
-// view is one bucket as of the last answer Redis gave about it. Remaining and
-// Retry only feed advisory headers, so they extrapolate from it instead of
-// paying two more round trips per request.
+// view is one bucket as of Redis's last answer. Remaining and Retry only feed
+// advisory headers, so they extrapolate from it rather than ask again.
 type view struct {
 	tokens float64
 	at     time.Time
@@ -55,15 +53,14 @@ type RedisOptions struct {
 	// Prefix namespaces the keys, so two deployments can share one Redis.
 	// Defaults to DefaultRedisPrefix.
 	Prefix string
-	// Timeout bounds one round trip. It is short on purpose: every request
-	// waits for it, and a slow Redis should cost accuracy, not latency.
+	// Timeout bounds one round trip. Short on purpose: a slow Redis should
+	// cost accuracy, not latency.
 	Timeout time.Duration
 	// Metrics counts the fallbacks. Optional.
 	Metrics Reporter
 }
 
-// DefaultRedisPrefix is the key prefix when none is set. internal/config reads
-// it from here.
+// DefaultRedisPrefix is the key prefix when none is set.
 const DefaultRedisPrefix = "keera"
 
 const (
@@ -75,12 +72,11 @@ const (
 )
 
 // NewRedis returns a limiter that keeps its buckets in rdb, falling back to
-// local for any decision Redis could not answer. The caller passes local so it
-// keeps the one it sweeps.
+// local when Redis cannot answer. The caller passes local so it can sweep it.
 //
-// rdb must be a single endpoint, not a Redis Cluster: one script touches the
-// org's, project's and key's buckets at once, and a cluster would refuse keys in
-// different slots, so every decision would quietly go local.
+// rdb must be a single endpoint, not a Redis Cluster: one script touches
+// several buckets at once, and a cluster refuses keys in different slots, so
+// every decision would quietly go local.
 func NewRedis(rdb redis.Scripter, local *Limiter, opts RedisOptions, log *slog.Logger) *Redis {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
@@ -100,15 +96,14 @@ func NewRedis(rdb redis.Scripter, local *Limiter, opts RedisOptions, log *slog.L
 	return r
 }
 
-// refillSource starts both scripts. refill reads one bucket and adds what
-// has dripped in since it was last written, without capping it at the burst.
-// It returns the tokens and the time to store with them.
+// refillSource starts both scripts. refill reads one bucket and adds what has
+// dripped in since its last write, uncapped. It returns the tokens and the
+// time to store with them.
 //
-// The clock comes from the caller, not Redis TIME, so the arithmetic matches
-// the in-memory limiter and stays testable. A negative elapsed time is ignored,
-// and the stored time never moves back, so an earlier clock - another
-// replica's, or a long request charged late - can cost some refill but never
-// mint tokens.
+// The clock comes from the caller, not Redis TIME, so it matches the in-memory
+// limiter and stays testable. The stored time never moves back, so an earlier
+// clock, such as another replica's, can cost some refill but never mint
+// tokens.
 const refillSource = `
 local function refill(key, now, perSec, burst)
   local h = redis.call('HMGET', key, 't', 'ts')
@@ -121,8 +116,7 @@ end
 `
 
 // admitSource refills every bucket in the batch, decides them all, and charges
-// the Take ones only if all of them held. It is one script so it is one atomic
-// decision, as Limiter.Admit is under its lock.
+// the Take ones only if all held. One script, so one atomic decision.
 const admitSource = refillSource + `
 local now = tonumber(ARGV[1])
 local n = #KEYS
@@ -176,9 +170,8 @@ end
 return out
 `
 
-// chargeSource takes an amount known only once the request is over from
-// every bucket in KEYS, in one round trip. Like the in-memory bucket each may
-// go negative, so the requests that follow pay for a very large one.
+// chargeSource takes the amount known at the end of a request from every
+// bucket in KEYS. Each may go negative, as in memory.
 const chargeSource = refillSource + `
 local now = tonumber(ARGV[1])
 local n = tonumber(ARGV[2]) / 1000
@@ -200,8 +193,8 @@ end
 return out
 `
 
-// The Lua stays in named constants so a test can tell which script it is
-// answering; on the wire it is only a digest.
+// Named, so a test can tell which script it is answering: on the wire it is
+// only a digest.
 var (
 	admitScript  = redis.NewScript(admitSource)
 	chargeScript = redis.NewScript(chargeSource)
@@ -233,9 +226,9 @@ func (r *Redis) Admit(reqs []Requirement, now time.Time) int {
 	return -1
 }
 
-// bucketArgs adds each limited requirement's key and rate to args, and, when
-// admitting, the unit it takes. Unlimited requirements are left out, so at
-// maps each key back to its index in reqs.
+// bucketArgs adds each limited requirement's key and rate to args, and when
+// admitting, the unit it takes. Unlimited ones are left out, so at maps each
+// key back to its index in reqs.
 func (r *Redis) bucketArgs(reqs []Requirement, args []any, admit bool) (keys []string, _ []any, at []int) {
 	for i, req := range reqs {
 		if req.PerMinute <= 0 {
@@ -283,8 +276,7 @@ func (r *Redis) ChargeAll(reqs []Requirement, n float64, now time.Time) {
 }
 
 // Remaining reports how many units key's bucket still holds, from what the last
-// round trip saw. A key this replica has not seen yet is answered from the
-// in-memory buckets, since a local number beats an invented one.
+// round trip saw. A key not seen yet is answered from the in-memory buckets.
 func (r *Redis) Remaining(key string, perMinute int, now time.Time) int {
 	if perMinute <= 0 {
 		return -1
@@ -310,8 +302,7 @@ func (r *Redis) Retry(key string, perMinute int, now time.Time) time.Duration {
 }
 
 // Sweep forgets the views and in-memory buckets untouched for idle. The buckets
-// in Redis expire on their own, a minute after one full refill past their
-// last write.
+// in Redis expire on their own.
 func (r *Redis) Sweep(idle time.Duration, now time.Time) {
 	r.local.Sweep(idle, now)
 	r.mu.Lock()
@@ -352,9 +343,8 @@ func (r *Redis) extrapolate(key string, perMinute int, now time.Time) (float64, 
 	return min(t, burst), true
 }
 
-// degrade records that an admission or charge was made locally because Redis
-// could not answer it. The gateway keeps serving: Redis is optional
-// coordination, and the exact control is the budget in Postgres.
+// degrade records a decision made locally because Redis could not answer. The
+// gateway keeps serving: the budget in Postgres is the exact control.
 func (r *Redis) degrade(doing string, err error) {
 	if r.report != nil {
 		r.report.RateLimitFallback()
@@ -378,8 +368,8 @@ func (r *Redis) degrade(doing string, err error) {
 		"doing", doing, "error", err)
 }
 
-// skip reports whether Redis failed so recently that this admission or charge
-// is made locally without trying it. It is counted as a fallback too.
+// skip reports whether Redis failed so recently that this decision is made
+// locally without trying. It counts as a fallback too.
 func (r *Redis) skip() bool {
 	r.mu.Lock()
 	resting := time.Now().Before(r.resting)
@@ -392,8 +382,8 @@ func (r *Redis) skip() bool {
 
 func (r *Redis) key(key string) string { return r.prefix + ":rl:" + key }
 
-// context bounds one round trip. It is detached from the request, so a client
-// that hangs up cannot leave a shared bucket half charged.
+// context bounds one round trip, detached from the request, so a client that
+// hangs up cannot leave a shared bucket half charged.
 func (r *Redis) context() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), r.timeout)
 }

@@ -68,8 +68,7 @@ sandboxes:
 		t.Error("a class with no lifetime is a machine somebody has to remember " +
 			"to terminate; both bounds must be defaulted")
 	}
-	// Zero disk is a real answer: an agent sandbox exists for one task and
-	// pushes a branch at the end of it.
+	// Zero disk is fine: an agent sandbox does one task and pushes a branch.
 	if c.Disk != 0 {
 		t.Errorf("disk = %d, want 0 for a class that declared none", c.Disk)
 	}
@@ -227,8 +226,7 @@ func TestParseMiB(t *testing.T) {
 }
 
 func TestParseSandboxDeduplicates(t *testing.T) {
-	// A repeated purpose is somebody writing the same thing twice, not an
-	// instruction to do it twice.
+	// A repeated purpose is dropped.
 	c, err := ParseSandbox(Sandbox{
 		Name: "a", Image: "x",
 		Purposes: []string{"agent", "agent"},

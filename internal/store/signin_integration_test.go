@@ -31,14 +31,12 @@ func TestSessionsExpireAndAreTouchedAtMostOnceAMinute(t *testing.T) {
 	if su.User.Email != "dev@example.ch" || su.User.Role != "admin" || su.Session.CSRF != "csrf-1" {
 		t.Errorf("SessionUser = %+v, want the person and their CSRF token", su)
 	}
-	// An expired session is reported as missing, so no caller has to remember
-	// to check.
+	// An expired session is reported as missing.
 	if _, err := st.LookupSession(ctx, dead); err != ErrNotFound {
 		t.Errorf("an expired session gave %v, want ErrNotFound", err)
 	}
 
-	// PurgeExpired keeps the table bounded; nothing depends on it for
-	// correctness, which is why the expired row was already invisible above.
+	// PurgeExpired only keeps the table small.
 	if err := st.PurgeExpired(ctx); err != nil {
 		t.Fatalf("PurgeExpired: %v", err)
 	}
@@ -50,7 +48,7 @@ func TestSessionsExpireAndAreTouchedAtMostOnceAMinute(t *testing.T) {
 		t.Errorf("%d sessions after the purge, want only the live one", left)
 	}
 
-	// A role change has to take effect, which means signing the person out.
+	// A role change signs the person out.
 	if err := st.DeleteUserSessions(ctx, user.ID); err != nil {
 		t.Fatalf("DeleteUserSessions: %v", err)
 	}
@@ -75,7 +73,7 @@ func TestLoginFlowIsSingleUseAndExpires(t *testing.T) {
 	if flow.Verifier != "verifier-1" || flow.Nonce != "nonce-1" || flow.RedirectTo != "/projects" {
 		t.Errorf("flow = %+v, want the PKCE verifier, nonce and path", flow)
 	}
-	// A replayed callback finds nothing, so a stolen code cannot be used twice.
+	// A replayed callback finds nothing.
 	if _, err := st.TakeLoginFlow(ctx, "state-1"); err != ErrNotFound {
 		t.Errorf("the second take gave %v, want ErrNotFound", err)
 	}
@@ -103,15 +101,14 @@ func TestLinkUserAdoptsAPersonInsteadOfDuplicatingThem(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 
-	// An organisation that pre-creates its people, before anybody has signed
-	// in and so before any subject claim exists.
+	// A person added before any sign-in, with no subject yet.
 	pre, err := st.AddUser(ctx, "user_pre", f.orgID, "dev@example.ch", "", "member")
 	if err != nil {
 		t.Fatalf("AddUser: %v", err)
 	}
 
-	// The first sign-in matches on email and adopts the row, writing the
-	// subject back so it only ever happens once.
+	// The first sign-in matches on email and adopts the row, storing the
+	// subject.
 	linked, err := st.LinkUser(ctx, "user_new", Link{
 		OrgID: f.orgID, Email: "dev@example.ch", ExternalID: "sub-1", Role: "admin",
 	})
@@ -165,8 +162,8 @@ func TestLinkUserAdoptsAPersonInsteadOfDuplicatingThem(t *testing.T) {
 func TestFirstOrgOnAnEmptyDeployment(t *testing.T) {
 	st, ctx := db(t)
 
-	// Nothing to join yet: this is the only case where an operator-key sign-in
-	// should stand an organisation up.
+	// Nothing to join yet, the only case where an operator-key sign-in creates
+	// an organisation.
 	if _, err := st.FirstOrg(ctx); err != ErrNotFound {
 		t.Errorf("FirstOrg with no organisations gave %v, want ErrNotFound", err)
 	}
@@ -175,8 +172,7 @@ func TestFirstOrgOnAnEmptyDeployment(t *testing.T) {
 func TestOrgLookupsForASignIn(t *testing.T) {
 	st, ctx := db(t)
 
-	// Exactly one organisation: a dedicated or on-premises deployment, where a
-	// first sign-in needs no domain mapping at all.
+	// Exactly one organisation, as in a dedicated or on-premises deployment.
 	if _, err := st.CreateOrg(ctx, Org{ID: "org_1", Name: "Example Bank"}, OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
@@ -187,13 +183,11 @@ func TestOrgLookupsForASignIn(t *testing.T) {
 	if _, err := st.CreateOrg(ctx, Org{ID: "org_2", Name: "Another Bank"}, OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
-	// Two, so there is no "only" one and the guess must not be made.
+	// Two, so there is no only one.
 	if _, err := st.OnlyOrg(ctx); err != ErrNotFound {
 		t.Errorf("OnlyOrg with two organisations gave %v, want ErrNotFound", err)
 	}
-	// The operator key still has somewhere to belong once a second tenant
-	// exists. Answering "not found" here once made every sign-in create a new
-	// organisation.
+	// The operator key still joins the first organisation once a second exists.
 	if org, err := st.FirstOrg(ctx); err != nil || org.ID != "org_1" {
 		t.Errorf("FirstOrg = %+v, %v; want the organisation the deployment started with", org, err)
 	}
@@ -205,14 +199,14 @@ func TestOrgLookupsForASignIn(t *testing.T) {
 	if err := setDomain("org_2", "AnotherBank.CH"); err != nil {
 		t.Fatalf("UpdateOrg: %v", err)
 	}
-	// Matched case-insensitively: nobody types their own domain consistently.
+	// Matched case-insensitively.
 	if org, err := st.OrgByEmailDomain(ctx, "anotherbank.ch"); err != nil || org.ID != "org_2" {
 		t.Errorf("OrgByEmailDomain = %+v, %v", org, err)
 	}
 	if _, err := st.OrgByEmailDomain(ctx, "nobody.ch"); err != ErrNotFound {
 		t.Errorf("an unmapped domain gave %v, want ErrNotFound", err)
 	}
-	// Clearing it is how a tenant stops adopting sign-ins by domain.
+	// Clearing it stops adopting sign-ins by domain.
 	if err := setDomain("org_2", ""); err != nil {
 		t.Fatalf("UpdateOrg: %v", err)
 	}
@@ -222,24 +216,21 @@ func TestOrgLookupsForASignIn(t *testing.T) {
 	if err := setDomain("nobody", "x.ch"); err != ErrNotFound {
 		t.Errorf("setting a domain on a missing org gave %v, want ErrNotFound", err)
 	}
-	// One domain places sign-ins in one tenant, so a second claim is refused
-	// with its own error rather than a driver failure.
+	// A second claim to a domain is refused with its own error.
 	if err := setDomain("org_1", "shared.ch"); err != nil {
 		t.Fatalf("UpdateOrg: %v", err)
 	}
 	if err := setDomain("org_2", "Shared.CH"); !errors.Is(err, ErrDomainTaken) {
 		t.Errorf("a domain another organisation holds gave %v, want ErrDomainTaken", err)
 	}
-	// Setting the one it already has is not a collision with itself.
+	// Setting the one it already has is not a collision.
 	if err := setDomain("org_1", "shared.ch"); err != nil {
 		t.Errorf("re-setting an organisation's own domain gave %v", err)
 	}
 }
 
-// Matching on email adopts a row an administrator typed in. Unqualified, it
-// would also let a second identity provider take over a person the first
-// already vouched for, with their role: an address got past the weaker
-// directory would take the account in the stronger one.
+// Matching on email adopts a row an administrator added, but must not let a
+// second identity provider take over a person the first already vouched for.
 func TestLinkUserRefusesToTakeOverAnotherProvidersIdentity(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -274,9 +265,8 @@ func TestLinkUserRefusesToTakeOverAnotherProvidersIdentity(t *testing.T) {
 	}
 }
 
-// A login in flight remembers which provider it was started against, because
-// the callback has to complete the exchange with that provider's client and
-// every provider shares one redirect URI.
+// A login in flight remembers its provider, since every provider shares one
+// redirect URI.
 func TestLoginFlowRemembersItsProvider(t *testing.T) {
 	st, ctx := db(t)
 
@@ -298,8 +288,7 @@ func TestLoginFlowRemembersItsProvider(t *testing.T) {
 	}
 }
 
-// A refresh token is a working credential for the person's directory. It goes
-// once no enabled row uses it, and not before.
+// A refresh token goes once no enabled row uses it, and not before.
 func TestPurgeExpiredRemovesRefreshTokensNobodyUses(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)

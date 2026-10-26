@@ -48,8 +48,7 @@ function monthName(month) {
 
 export async function billingView(ctx) {
   const operator = ctx.state.me.unrestricted;
-  // Credit is one organisation's; an operator looking at all of them sees
-  // only the bill.
+  // An operator looking at all organisations sees only the bill.
   const credit =
     ctx.state.me.payments && !(operator && !ctx.orgID)
       ? await creditSection(ctx)
@@ -428,7 +427,7 @@ async function creditSection(ctx) {
       {
         label: "",
         shrink: true,
-        // Only money paid through PostFinance has a receipt: a grant has none.
+        // Only PostFinance payments have a receipt, not grants.
         cell: (p) =>
           p.state === "paid" && p.transaction_id
             ? iconButton(
@@ -470,7 +469,7 @@ async function creditSection(ctx) {
 }
 
 // returnBanner says how a payment went. A pending one is checked again for a
-// little while.
+// while.
 function returnBanner(ctx, p, a) {
   if (!p) return null;
   if (p.state === "paid") {
@@ -573,8 +572,8 @@ export function addCredit(ctx, res) {
       const started = await api.topUp(ctx.orgID, m, save.checked);
       remember("keera.billing.wait", null);
       location.assign(started.url);
-      // The page is leaving. The dialog stays, with its button off, so the
-      // payment cannot be started twice.
+      // The page is leaving. The dialog stays, its button off, so the payment
+      // cannot start twice.
       return new Promise(() => {});
     },
   });

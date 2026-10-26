@@ -241,8 +241,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 
 	if flow.CLI() {
 		// The browser goes on to the port `keera login` waits on. The session
-		// above is created either way, so the browser is signed in to the
-		// panel too.
+		// above signs it in to the panel too.
 		to, err := s.cliHandOver(r, flow, user)
 		if err != nil {
 			s.fail(w, err)
@@ -256,8 +255,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 
 // linkIdentity finds or creates the user for a signed-in identity, applies the
 // directory's role, and returns the role they had before. Reasons the person
-// can act on come back as forbidden, which each way of signing in shows in
-// its own way.
+// can act on come back as forbidden.
 func (s *Server) linkIdentity(r *http.Request, provider *authn.OIDC,
 	identity authn.Identity, orgID string,
 ) (user store.User, was string, err error) {
@@ -306,13 +304,13 @@ type placement struct {
 	invited string
 }
 
-// orgFor decides which tenant a sign-in belongs to: where the person already
-// is, and of several the one they used last, else the organisation of their
-// email domain. After that, a provider that allows sign-up sends the person to
-// choose; otherwise they land in the only organisation there is. Anything else
-// is refused, because the wrong tenant is worse than none.
+// orgFor decides which tenant a sign-in belongs to: where the person already is
+// (of several, the one used last), else the organisation of their email domain.
+// Then a provider that allows sign-up sends them to choose; otherwise they land
+// in the only organisation there is. Anything else is refused: the wrong tenant
+// is worse than none.
 //
-// An invitation is never joined without asking: anyone who administers an
+// An invitation is never joined without asking: any administrator of an
 // organisation without a domain can add any address to it.
 func (s *Server) orgFor(r *http.Request, provider *authn.OIDC, identity authn.Identity) (placement, error) {
 	ms, err := s.st.Memberships(r.Context(), identity.ExternalID(), "", false)
@@ -349,9 +347,9 @@ func (s *Server) orgFor(r *http.Request, provider *authn.OIDC, identity authn.Id
 		"; an operator has to create one and set its email domain")
 }
 
-// localLogin signs an operator in with the operator key, the way in before an
-// identity provider is set up. It grants only what the key grants, behind a
-// session, so the panel can be used.
+// localLogin signs an operator in with the operator key, before an identity
+// provider is set up. It grants only what the key grants, behind a session for
+// the panel.
 func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Key string `json:"key"`
@@ -418,13 +416,12 @@ func (s *Server) operatorKeyOrg(ctx context.Context) (string, error) {
 	return org.ID, nil
 }
 
-// syncRole updates a stored role to what this sign-in says, for the part the
-// identity provider decides. See roleAtSignIn.
+// syncRole updates a stored role to what this sign-in says. See roleAtSignIn.
 //
-// The operator role is the person's wherever they are. The admin role is the
-// directory's only in the organisation its addresses land in: in any other,
-// the directory of one tenant would decide who runs another. There, the role
-// the organisation gave stands, and a former operator becomes a member.
+// The operator role follows the person everywhere. The admin role comes from
+// the directory only in the organisation its addresses land in; otherwise one
+// tenant's directory would decide who runs another. There, the organisation's
+// own role stands, and a former operator becomes a member.
 func (s *Server) syncRole(r *http.Request, user *store.User, role authn.Role) error {
 	want, change := roleAtSignIn(user.Role, role, s.opts.Providers.AdminFromDirectory())
 	if !change {
@@ -483,9 +480,9 @@ func (s *Server) syncOtherRoles(r *http.Request, user store.User, role authn.Rol
 // database, fromIDP what this sign-in's claims map to, and adminFromDirectory
 // whether a group decides the admin role on this deployment.
 //
-// The operator role always follows configuration, so someone removed from it
-// is demoted at their next sign-in. The admin role follows the directory only
-// where a group decides it; elsewhere the stored role stands.
+// The operator role always follows configuration, so someone removed from it is
+// demoted at their next sign-in. The admin role follows the directory only
+// where a group decides it.
 func roleAtSignIn(stored string, fromIDP authn.Role, adminFromDirectory bool) (authn.Role, bool) {
 	if !adminFromDirectory &&
 		fromIDP != authn.RoleOperator && stored != string(authn.RoleOperator) {
@@ -506,8 +503,7 @@ func (s *Server) signedIn(w http.ResponseWriter, r *http.Request, user store.Use
 	}
 	entry["role"] = user.Role
 	if cli {
-		// Recorded apart, because "signed in at a terminal" is what an
-		// administrator reading the log looks for.
+		// Kept apart, because administrators look for sign-ins at a terminal.
 		entry["client"] = "command line"
 	}
 	if was != "" && was != user.Role {
@@ -629,23 +625,21 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request, p *authn.Principal) 
 		"sso":           s.opts.Providers.Enabled(),
 		// So the Users screen can name the provider each person signs in with.
 		"providers": s.providerList(),
-		// True when a directory group decides roles. The panel then shows
-		// roles instead of offering to change them.
+		// True when a directory group decides roles, so the panel shows them
+		// but cannot change them.
 		"roles_from_directory": s.opts.Providers.AdminFromDirectory(),
 		// Where a developer's editor sends its requests.
 		"gateway_url": s.gatewayURL(r),
 		// Where Keera Chat runs, so the panel can link to it. Empty without one.
 		"chat_url": s.opts.ChatURL,
-		// Whether this deployment lends out sandboxes. Without a driver the
-		// panel does not show them at all.
+		// Whether this deployment lends out sandboxes.
 		"sandboxes": s.opts.Sandboxes != nil,
-		// Whether this deployment holds a provider key of its own, and so
-		// bills organisations. Without one the panel hides Billing.
+		// Whether the deployment holds its own provider key, and so bills
+		// organisations.
 		"billing": len(s.opts.Platform) > 0,
 		// Whether organisations pay for those keys in advance, by card.
 		"payments": s.opts.Payments != nil,
-		// Whether Claude Code may come through on a Claude plan. Without it
-		// the panel offers no subscription models or keys.
+		// Whether Claude Code may come through on a Claude plan.
 		"claude_subscriptions": s.opts.ClaudeSubscriptions,
 		// Whether administrators can create passkey accounts, and whether
 		// this is one, which has passkeys to manage.
@@ -687,16 +681,14 @@ func (s *Server) orgName(ctx context.Context, orgID string) string {
 }
 
 // gatewayURL is the inference plane as a developer's client reaches it: the
-// panel's own origin plus httpx.InferencePrefix. It is the one place that
-// address is built.
+// panel's own origin plus httpx.InferencePrefix.
 func (s *Server) gatewayURL(r *http.Request) string {
 	return s.publicOrigin(r) + httpx.InferencePrefix
 }
 
-// publicOrigin is the address a browser reaches this panel on. PublicURL
-// wins over the Host header, because behind a proxy it is the name a browser
-// is known to use. Its path is kept: a gateway behind a proxy at
-// https://host/keera is reached there, not at the host's root.
+// publicOrigin is the address a browser reaches this panel on. PublicURL wins
+// over the Host header, since behind a proxy it is the name browsers use. Its
+// path is kept, for a gateway served under a path such as https://host/keera.
 func (s *Server) publicOrigin(r *http.Request) string {
 	if s.opts.PublicURL != "" {
 		if u, err := url.Parse(s.opts.PublicURL); err == nil && u.Host != "" {

@@ -22,8 +22,7 @@ type Payments struct {
 }
 
 // payments reads the PostFinance Checkout account and the VAT. Without an
-// account it is nil, and calls on the provider keys take nothing from an
-// organisation's credit.
+// account it is nil, and provider key calls take nothing from credit.
 func payments(platform catalog.Platform, publicURL string) (*Payments, error) {
 	space := env("KEERA_BILLING_POSTFINANCE_SPACE_ID", "")
 	user := env("KEERA_BILLING_POSTFINANCE_USER_ID", "")
@@ -88,9 +87,8 @@ func percentBP(raw string) (int64, error) {
 }
 
 // onThisMachine reports whether an http address is this machine, as in the
-// development loop. Only the person's own browser is sent back there, and it
-// reaches this machine without TLS. Browsers send every *.localhost name
-// there too, as passkeys rely on.
+// development loop, where the browser needs no TLS. Browsers send every
+// *.localhost name here too.
 func onThisMachine(raw string) bool {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "http" {

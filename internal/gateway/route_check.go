@@ -13,28 +13,27 @@ import (
 // RouteProbe is what checking one route step found.
 type RouteProbe struct {
 	Step string `json:"step"`
-	// Mode says which of the two checks this is: where the step would send
-	// things, or which of its destinations are up.
+	// Mode says which check this is: where the step would send requests, or
+	// which of its destinations are up.
 	Mode  policy.RouteMode `json:"mode"`
 	Model string           `json:"model,omitempty"`
-	// Destinations is what the step was offering when checked, which may be
-	// fewer than it was written with. A step quietly choosing between two of
-	// its four destinations is easily mistaken for one that works.
+	// Destinations is what the step offered when checked, which may be fewer
+	// than configured.
 	Destinations []string `json:"destinations"`
-	// Dropped names the destinations that were not offered, and why.
+	// Dropped names the destinations not offered, and why.
 	Dropped []string `json:"dropped,omitempty"`
 	// Decisions is what an instruction step did with each sample prompt.
 	Decisions []SampleDecision `json:"decisions,omitempty"`
-	// Chain is each destination of a trying step, in the order it would be
-	// tried, and whether it would answer.
+	// Chain is each destination of a trying step, in try order, and whether
+	// it would answer.
 	Chain   []RouteHop `json:"chain,omitempty"`
 	TotalMS int64      `json:"total_ms,omitempty"`
 	// CostMicros is what these runs cost, which is also what the step adds
 	// to every request.
 	CostMicros int64  `json:"cost_micros,omitempty"`
 	Error      string `json:"error,omitempty"`
-	// Warnings are problems that are not failures, chiefly a route step that
-	// answered the same way for every sample.
+	// Warnings are problems that are not failures, mainly a step that
+	// answered the same for every sample.
 	Warnings []string `json:"warnings,omitempty"`
 	OK       bool     `json:"ok"`
 }
@@ -42,42 +41,39 @@ type RouteProbe struct {
 // SampleDecision is one sample prompt and where the step sent it.
 type SampleDecision struct {
 	Prompt string `json:"prompt"`
-	// Asks says in a few words what the sample tests, so the destination next
-	// to it can be judged.
+	// Asks says in a few words what the sample tests.
 	Asks   string `json:"asks"`
 	Chosen string `json:"chosen,omitempty"`
 	// Confidence is the chosen destination's share of probability, from 0 to
-	// 1. A step at 0.3 on every sample cannot tell its destinations apart and
-	// may flip with a small change. Zero means unknown: the backend served no
-	// logprobs. See choice.go.
+	// 1. A step near 0.3 on every sample cannot tell its destinations apart.
+	// Zero means unknown: the backend served no logprobs. See choice.go.
 	Confidence float64 `json:"confidence,omitempty"`
 	// Error is a decision the step could not make. On a real request this
 	// means the fallback, or a refusal.
 	Error string `json:"error,omitempty"`
 }
 
-// RouteHop is one destination of a trying step, asked whether it is there.
-// The order matters: a chain whose first destination is down quietly runs on
-// its second choice and pays for it.
+// RouteHop is one destination of a trying step, checked for whether it
+// answers. Order matters: a chain whose first destination is down quietly
+// runs on its second, at that one's price.
 type RouteHop struct {
 	Alias string `json:"alias"`
-	// Answers is a lower bar than a model check: it answered, and not with its
-	// own failure. A model that is up but bad at tool calls would still be used.
+	// Answers is a lower bar than a model check: it answered without failing.
+	// A model that is up but bad at tool calls would still be used.
 	Answers bool  `json:"answers"`
 	Status  int   `json:"status,omitempty"`
 	MS      int64 `json:"ms,omitempty"`
-	// Note is what a model check found beyond reachability (a failed tool
-	// call, a different served model), or why it did not answer.
+	// Note is what a model check found beyond reachability, or why it did
+	// not answer.
 	Note string `json:"note,omitempty"`
-	// Reading says why this destination is where it is, on a step that ranks
-	// by measurement or by size. It is prose because it is one replica's view
-	// of the last few minutes. See loads.describe.
+	// Reading says why this destination is ranked here, on a step that ranks
+	// by measurement or size. It is one replica's view of the last few
+	// minutes. See loads.describe.
 	Reading string `json:"reading,omitempty"`
 }
 
 // routeCheckSamples is what a check asks a route step to place: a trivial
-// request, one that needs reasoning, and one carrying data that may not
-// leave. An instruction can get one right and another wrong.
+// request, one that needs reasoning, and one with data that must not leave.
 var routeCheckSamples = []struct{ prompt, asks string }{
 	{
 		"rename the variable `tmp2` in this function to something readable",
@@ -99,13 +95,9 @@ var routeCheckSamples = []struct{ prompt, asks string }{
 }
 
 // CheckRoute runs one route step over sample prompts and reports where each
-// went. A wrong router never fails a request: it answers from the wrong
-// model. Too eager, and renaming variables costs the large model's price; too
-// shy, and account numbers go to a hosted endpoint.
-//
-// Like a model or filter check, this is not a tenant's request: no rate
-// limit, budget or usage row, but a model on the deployment's key needs
-// credit and is billed.
+// went. A wrong router never fails a request; it silently picks the wrong
+// model. Like other checks, it has no rate limit, budget or usage row, but a
+// model on the deployment's key needs credit and is billed.
 func (s *Server) CheckRoute(ctx context.Context, rt policy.Route) RouteProbe {
 	p := RouteProbe{Step: rt.Step, Mode: rt.Mode}
 	if rt.Mode == policy.RouteModeHeader {
@@ -168,8 +160,7 @@ func (s *Server) sortDestinations(rt policy.Route) (kept, dropped []string) {
 	return kept, dropped
 }
 
-// routeCheckProblem says why an instruction step cannot be checked, or
-// returns empty when it can.
+// routeCheckProblem says why an instruction step cannot be checked, or "".
 func routeCheckProblem(rt policy.Route, destinations []string, m policy.Model, found bool) string {
 	switch {
 	case len(destinations) == 0:
@@ -185,16 +176,14 @@ func routeCheckProblem(rt policy.Route, destinations []string, m policy.Model, f
 	return ""
 }
 
-// checkChain asks each of a trying step's destinations whether it is there,
-// in the order they would be tried. It shows what nothing else does: a chain
-// quietly running on its second destination at that destination's price. On
-// a latency or least-busy step the order is itself a measurement, so two
-// checks a minute apart may differ.
+// checkChain checks each of a trying step's destinations, in try order. On a
+// latency or least-busy step the order is a measurement, so two checks a
+// minute apart may differ.
 func (s *Server) checkChain(ctx context.Context, rt policy.Route) RouteProbe {
 	p := RouteProbe{Step: rt.Step, Mode: rt.Mode}
 	if rt.Mode.Decides() {
 		// An instruction step with one destination tries it like a fallback
-		// step would.
+		// step.
 		p.Mode = policy.RouteModeFallback
 	}
 	p.Destinations, p.Dropped = s.sortDestinations(rt)
@@ -205,8 +194,7 @@ func (s *Server) checkChain(ctx context.Context, rt policy.Route) RouteProbe {
 			"through it is refused"
 		return p
 	}
-	// A size step's order depends on the request's size, so all its bands
-	// are reported.
+	// A size step's order depends on request size, so all bands are reported.
 	var bands []sizeBand
 	if rt.Sizes() {
 		bands = sizeBands(rt, p.Destinations)
@@ -273,7 +261,8 @@ func chainWarnings(p RouteProbe, rt policy.Route) []string {
 		}
 	}
 	// A size, latency or least-busy step moving traffic off its first
-	// destination is the step working. Only a written order means it is down.
+	// destination is working as meant. Only in a fixed order does it mean
+	// the first is down.
 	written := !rt.Sizes() && !rt.Measures()
 	switch {
 	case len(up) == 0:
@@ -292,8 +281,7 @@ func chainWarnings(p RouteProbe, rt policy.Route) []string {
 }
 
 // sampleWarnings says what a route step that answered the samples still got
-// wrong. The key one: sending a variable rename and a database migration to
-// the same model is an expensive way to hard-code a destination.
+// wrong, mainly sending every sample to the same model.
 func sampleWarnings(decisions []SampleDecision, rt policy.Route) []string {
 	var (
 		warnings []string

@@ -26,15 +26,11 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// `keera sandbox` - the machines this gateway lends out.
-//
-// Most verbs are JSON over the control API. Two are not: `proxy` copies bytes
-// between the attach surface and stdin/stdout, which is what ssh's
-// ProxyCommand wants, and `ssh` runs the developer's own ssh with `proxy` as
-// that command. An ssh transport is all VS Code's Remote-SSH and JetBrains
-// Gateway need, so `keera sandbox config` is the whole client setup.
+// `keera sandbox`: most verbs are JSON over the control API. `proxy` copies
+// bytes between the attach surface and stdin/stdout for ssh's ProxyCommand,
+// and `ssh` runs the developer's own ssh with it. VS Code and JetBrains only
+// need ssh, so `keera sandbox config` is the whole client setup.
 
-// sandboxRun is one 'keera sandbox' invocation.
 type sandboxRun struct {
 	*cmdRun
 
@@ -167,7 +163,7 @@ func (r *sandboxRun) create(ctx context.Context) error {
 	return doOut(ctx, r.c, "POST", "/v1/sandboxes", body, r.asJSON, printSandboxCreated)
 }
 
-// agent is `create` with --purpose agent set, so nobody has to type it.
+// agent is `create` with --purpose agent.
 func (r *sandboxRun) agent(ctx context.Context) error {
 	if r.task == "" {
 		return errors.New("--task is required for an agent sandbox; it is the instruction " +
@@ -177,10 +173,9 @@ func (r *sandboxRun) agent(ctx context.Context) error {
 	return sandboxCmd(ctx, args)
 }
 
-// agentFlags rebuilds the flags `keera sandbox agent` passes on to `up`.
-// Going back through the parser means `agent` gains whatever `up` gains.
-// Each goes as --name=value, because a bool flag does not take the next
-// argument: "--json true" would make "true" a second name.
+// agentFlags rebuilds the flags `agent` passes on to `up`, so `agent` gains
+// whatever `up` gains. Each goes as --name=value, because "--json true" would
+// make "true" a second name.
 func agentFlags(fs *flag.FlagSet) []string {
 	var out []string
 	fs.Visit(func(f *flag.Flag) {
@@ -246,8 +241,7 @@ func (r *sandboxRun) suspendOrResume(ctx context.Context) error {
 		printSandbox)
 }
 
-// usage spans every organisation the caller can see unless one is chosen, as
-// 'keera usage' does.
+// usage spans every organisation unless one is chosen, as 'keera usage' does.
 func (r *sandboxRun) usage(ctx context.Context) error {
 	q, err := reportQuery(ctx, r.c, r.org, nil, r.since, map[string]string{"group_by": r.by})
 	if err != nil {
@@ -274,9 +268,8 @@ func (r *sandboxRun) apply(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// One class at a time, as the endpoint takes them. The file is checked
-	// first, so a stop halfway is the control plane going away or refusing one
-	// class, such as its image, and a re-run is safe.
+	// One at a time, as the endpoint takes them. The file was checked, so a
+	// re-run after a stop halfway is safe.
 	classes := make([]policy.SandboxClass, len(entries))
 	for i, e := range entries {
 		path := aliasPath("sandbox-classes", orgID, e.Name, "")
@@ -292,8 +285,7 @@ func (r *sandboxRun) apply(ctx context.Context) error {
 	})
 }
 
-// deleteClass removes one of the organisation's classes. Sandboxes already
-// running on it keep their own copy of it, so they are not affected.
+// deleteClass does not affect running sandboxes, which keep their own copy.
 func (r *sandboxRun) deleteClass(ctx context.Context) error {
 	name := r.fs.Arg(0)
 	orgID, err := resolveOrg(ctx, r.c, r.org)
@@ -326,8 +318,7 @@ func (r *sandboxRun) deleteClass(ctx context.Context) error {
 }
 
 func (r *sandboxRun) classes(ctx context.Context) error {
-	// The organisation is required: the answer carries the guardrail a new
-	// sandbox gets, and without it the list would offer classes it refuses.
+	// Required, or the list would offer classes the guardrail refuses.
 	orgID, err := resolveOrg(ctx, r.c, r.org)
 	if err != nil {
 		return err
@@ -352,7 +343,7 @@ func (r *sandboxRun) classes(ctx context.Context) error {
 	})
 }
 
-// requireSandbox resolves a name, an id or an ssh host alias into a sandbox.
+// requireSandbox takes a name, an id or an ssh host alias.
 func requireSandbox(ctx context.Context, c *client, org, ref string) (store.Sandbox, error) {
 	ref = sandboxRef(ref)
 	var sb store.Sandbox
@@ -368,9 +359,8 @@ func requireSandbox(ctx context.Context, c *client, org, ref string) (store.Sand
 	return sb, err
 }
 
-// sshInto runs the developer's own ssh - their keys, agent and config - with
-// this command as its ProxyCommand, so the connection goes through the
-// gateway's one published port.
+// sshInto runs the developer's own ssh with this command as its ProxyCommand,
+// through the gateway's one published port.
 func sshInto(ctx context.Context, c *client, org, name string, rest []string) error {
 	self, err := os.Executable()
 	if err != nil {
@@ -391,11 +381,10 @@ func sshInto(ctx context.Context, c *client, org, name string, rest []string) er
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		if exit, ok := errors.AsType[*exec.ExitError](err); ok {
-			// ssh exits with the remote command's status, which a script needs.
+			// ssh exits with the remote command's status.
 			code := exit.ExitCode()
 			if code < 0 {
-				// Ended by a signal, usually Ctrl-C, which shells report as
-				// 128 plus SIGINT.
+				// Ended by a signal, usually Ctrl-C: 128 plus SIGINT.
 				code = 130
 			}
 			return ExitCode(code)
@@ -405,36 +394,33 @@ func sshInto(ctx context.Context, c *client, org, name string, rest []string) er
 	return nil
 }
 
-// sshOptions are the ssh options that reach a sandbox through proxy. `sandbox
-// ssh` passes them with -o and `sandbox config` prints them as a block.
+// sshOptions are passed with -o by `sandbox ssh` and printed by `sandbox
+// config`.
 func sshOptions(proxy string) [][2]string {
 	return [][2]string{
 		{"ProxyCommand", proxy},
-		// No host key is worth pinning: it belongs to the image, so every
-		// sandbox from that image shares it. The gateway has already
-		// authenticated and encrypted the connection.
+		// Every sandbox from an image shares its host key, and the gateway
+		// already authenticates and encrypts the connection.
 		{"StrictHostKeyChecking", "no"},
 		{"UserKnownHostsFile", "/dev/null"},
-		// Otherwise ssh warns about the above on every connection, which
-		// teaches people to ignore ssh warnings.
+		// Otherwise ssh warns about the above every time, which teaches people
+		// to ignore its warnings.
 		{"LogLevel", "ERROR"},
-		// The image refuses it too, but one built before that would not.
+		// The image refuses it too, but an older one would not.
 		{"ForwardAgent", "no"},
 	}
 }
 
-// proxyCommand is the ProxyCommand that reaches one sandbox through the
-// gateway at base. It names that gateway, so the proxy cannot end up at
-// another one: ssh runs it without this invocation's --url.
+// proxyCommand names the gateway, because ssh runs it without this
+// invocation's --url.
 func proxyCommand(self, base, target, orgID string) string {
 	return fmt.Sprintf("%s --url %s sandbox proxy %s --org %s",
 		proxyWord(self), proxyWord(base), target, orgID)
 }
 
-// proxyWord quotes s for the ProxyCommand when it has to be, as for a program
-// installed under a path with a space. ssh runs the command through a shell,
-// except on Windows, and reads a % as the start of a token, so a literal one
-// is doubled.
+// proxyWord quotes s when needed, as for a path with a space. ssh runs the
+// command through a shell, except on Windows, and reads % as a token, so a
+// literal one is doubled.
 func proxyWord(s string) string {
 	s = strings.ReplaceAll(s, "%", "%%")
 	safe := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/_.:=@+,-%"
@@ -451,21 +437,18 @@ func proxyWord(s string) string {
 	}
 }
 
-// sandboxUser is who a sandbox is entered as. It matches the uid the drivers
-// run the container under.
+// sandboxUser matches the uid the drivers run the container under.
 const sandboxUser = "keera"
 
-// sshHostPrefix starts a sandbox's ssh Host pattern. A prefix, so the pattern
-// cannot match a developer's other hosts.
+// sshHostPrefix keeps the ssh Host pattern from matching a developer's other
+// hosts.
 const sshHostPrefix = "sbx-"
 
-// sandboxRef reduces what was typed to a name or an id. ssh hands a
-// ProxyCommand %n, the whole hostname typed ("sbx-fix-login"), so the host
-// prefix is trimmed here rather than in the developer's ssh config.
+// sandboxRef trims the host prefix, because ssh hands a ProxyCommand the whole
+// hostname ("sbx-fix-login").
 func sandboxRef(s string) string { return strings.TrimPrefix(s, sshHostPrefix) }
 
-// proxyTo opens the attach surface and copies bytes between it and the given
-// streams. As a ProxyCommand those streams are ssh's own.
+// proxyTo copies bytes between the attach surface and the given streams.
 func proxyTo(ctx context.Context, c *client, org, ref string, port int,
 	in io.Reader, outw io.Writer,
 ) error {
@@ -485,8 +468,7 @@ func proxyTo(ctx context.Context, c *client, org, ref string, port int,
 	}
 	defer func() { _ = conn.Close() }()
 
-	// Whichever side closes first ends the process: ssh when the session is
-	// over, or sshd when the remote command exits.
+	// Whichever side closes first ends the process.
 	errs := make(chan error, 2)
 	go func() { _, err := io.Copy(conn, in); errs <- err }()
 	go func() { _, err := io.Copy(outw, conn); errs <- err }()
@@ -496,12 +478,11 @@ func proxyTo(ctx context.Context, c *client, org, ref string, port int,
 	return nil
 }
 
-// upgradeProtocol is the token the attach surface expects. It has to match
-// the one in internal/control/attach.go.
+// upgradeProtocol must match the one in internal/control/attach.go.
 const upgradeProtocol = "keera-sandbox/1"
 
-// dialUpgrade performs the HTTP upgrade by hand. http.Client cannot: it reads
-// and closes the response body, and what is wanted is the connection under it.
+// dialUpgrade upgrades by hand, because http.Client closes the response body
+// and the connection under it is what is wanted.
 func dialUpgrade(ctx context.Context, c *client, endpoint string) (net.Conn, error) {
 	u, err := url.Parse(endpoint)
 	if err != nil {
@@ -523,8 +504,8 @@ func dialUpgrade(ctx context.Context, c *client, endpoint string) (net.Conn, err
 	if err != nil {
 		return nil, fmt.Errorf("reaching the gateway at %s: %w", c.base, err)
 	}
-	// A dialled connection no longer watches the context, so close it on
-	// cancellation to make Ctrl-C immediate, during the upgrade and after.
+	// A dialled connection ignores the context; closing it makes Ctrl-C
+	// immediate.
 	context.AfterFunc(ctx, func() { _ = conn.Close() })
 	if err := req.Write(conn); err != nil {
 		_ = conn.Close()
@@ -541,14 +522,13 @@ func dialUpgrade(ctx context.Context, c *client, endpoint string) (net.Conn, err
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 		return nil, fmt.Errorf("the gateway refused the connection: %s", refusal(resp, raw))
 	}
-	// Bytes sent right after the 101 (on a fast sandbox, the ssh banner) are
-	// already in the reader's buffer, so the reader stays in front.
+	// Bytes sent right after the 101, such as the ssh banner, may already be
+	// in the reader's buffer.
 	return &bufferedConn{Conn: conn, r: br}, nil
 }
 
-// dialFor opens the transport for one URL, TLS or not. Verification uses the
-// system roots as everywhere else; a hand-rolled dial is where that gets left
-// off by mistake.
+// dialFor verifies TLS with the system roots; a hand-rolled dial is where that
+// gets left off by mistake.
 func dialFor(ctx context.Context, u *url.URL) (net.Conn, error) {
 	d := net.Dialer{Timeout: 15 * time.Second}
 	if u.Scheme != "https" {
@@ -561,8 +541,7 @@ func dialFor(ctx context.Context, u *url.URL) (net.Conn, error) {
 	return td.DialContext(ctx, "tcp", dialAddress(u))
 }
 
-// dialAddress is the host and port to dial for a URL, with the scheme's port
-// when the URL names none.
+// dialAddress uses the scheme's port when the URL names none.
 func dialAddress(u *url.URL) string {
 	if u.Port() != "" {
 		return u.Host
@@ -573,7 +552,6 @@ func dialAddress(u *url.URL) string {
 	return net.JoinHostPort(u.Hostname(), "80")
 }
 
-// refusal renders what the gateway said into one line for a terminal.
 func refusal(resp *http.Response, raw []byte) string {
 	if msg := errorMessage(raw); msg != "" {
 		return msg
@@ -581,8 +559,7 @@ func refusal(resp *http.Response, raw []byte) string {
 	return resp.Status
 }
 
-// bufferedConn is a connection with a reader in front of it, so bytes the
-// server sent before the response header was read are not lost.
+// bufferedConn keeps bytes that arrived with the response header.
 type bufferedConn struct {
 	net.Conn
 	r *bufio.Reader
@@ -590,10 +567,8 @@ type bufferedConn struct {
 
 func (b *bufferedConn) Read(p []byte) (int, error) { return b.r.Read(p) }
 
-// writeSSHConfig prints the block a developer adds to ~/.ssh/config. It is
-// printed rather than written, as `keera connect` does: editing somebody's own
-// ssh config would eventually break it. The block is on stdout and the rest on
-// stderr, so it can be appended straight to the file.
+// writeSSHConfig prints rather than edits ~/.ssh/config, which editing would
+// eventually break. Only the block goes to stdout, so it can be appended.
 func writeSSHConfig(base, orgID string) error {
 	self, err := os.Executable()
 	if err != nil {
@@ -651,7 +626,7 @@ func printSandbox(w *table, sb store.Sandbox) {
 		_, _ = fmt.Fprintf(w, "expires\t%s (%s)\n",
 			sb.ExpiresAt.Local().Format(time.RFC3339), expiresIn(sb.ExpiresAt))
 	}
-	// Wall time is what people recognise; core-seconds are what chargeback uses.
+	// Wall time for people, core-seconds for chargeback.
 	_, _ = fmt.Fprintf(w, "ran for\t%s (%s core-seconds)\n",
 		ranFor(sb.RunningSeconds), ranFor(sb.CoreSeconds()))
 	if sb.Purpose == policy.PurposeEngineer && sb.State == policy.SandboxReady {
@@ -715,7 +690,7 @@ func printSandboxUsage(w *table, by string, since time.Duration,
 
 func confirmSandboxTerminate(sb store.Sandbox) error {
 	return confirm("Terminating the sandbox "+sb.Name+":", []string{
-		// Said for every class: a home with no disk behind it is lost too.
+		// For every class: a home with no disk behind it is lost too.
 		"  its home volume goes with it - anything in /home/" + sandboxUser + " that is not pushed is lost",
 		"  its API key is revoked",
 		"What it cost and who it belonged to are kept.",
@@ -728,7 +703,6 @@ func sizeOf(cpuMillis, memoryMiB int) string {
 
 func coresOf(millis int) string { return policy.FormatCores(millis) + "c" }
 
-// mibOf renders a size in MiB, of memory or of disk.
 func mibOf(mib int) string {
 	if mib == 0 {
 		return "-"
@@ -736,8 +710,7 @@ func mibOf(mib int) string {
 	return policy.FormatMiB(mib)
 }
 
-// expiresIn is how long a sandbox has left. "in 3h12m" needs no arithmetic,
-// unlike a timestamp.
+// expiresIn reads "in 3h12m", which needs no arithmetic, unlike a timestamp.
 func expiresIn(at *time.Time) string {
 	if at == nil {
 		return "never"
@@ -767,12 +740,9 @@ func purposesOf(c policy.SandboxClass) string {
 	return strings.Join(names, ",")
 }
 
-// publicKeys is what may open a shell in a new sandbox.
-//
-// Given a path, it reads only that file, so somebody with several identities
-// can pick one. Otherwise it sends every *.pub in ~/.ssh: this command cannot
-// know which key ssh will offer, and accepting all of one person's own keys
-// is no weaker than accepting one.
+// publicKeys reads only path when given. Otherwise it sends every *.pub in
+// ~/.ssh: it cannot know which key ssh will offer, and accepting all of one
+// person's keys is no weaker than accepting one.
 func publicKeys(path string) ([]string, error) {
 	if path != "" {
 		raw, err := os.ReadFile(path)
@@ -800,7 +770,6 @@ func publicKeys(path string) ([]string, error) {
 	return keys, nil
 }
 
-// splitKeys pulls the key lines out of a file, dropping comments and blanks.
 func splitKeys(raw string) []string {
 	var out []string
 	for line := range strings.SplitSeq(raw, "\n") {

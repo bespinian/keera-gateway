@@ -1,10 +1,10 @@
 // Sandboxes: the machines this gateway lends out. A sandbox belongs to a
 // person in an organisation, uses its quota, and its agent calls the gateway
-// on a key minted for it.
+// on a key made for it.
 //
 // There is deliberately no way in from here. An administrator can see and
-// terminate every sandbox, since the quota and bill are theirs, but cannot
-// open a shell. Owners and operators attach with `keera sandbox ssh`.
+// terminate every sandbox but cannot open a shell. Owners and operators
+// attach with `keera sandbox ssh`.
 
 import { api } from "../api.js";
 import {
@@ -35,8 +35,7 @@ import {
 import { orgNameOf } from "./orgs.js";
 import { oldestProject } from "./projects.js";
 
-// showFinished lasts while the screen is open: a reload keeps it and leaving
-// resets it, like "Show revoked" on keys.
+// showFinished survives a reload but not leaving the screen.
 let showFinished = false;
 
 export async function sandboxesView(ctx) {
@@ -52,8 +51,8 @@ export async function sandboxesView(ctx) {
   const [list, cat, projects] = await Promise.all([
     api.sandboxes(ctx.orgID, { all: showFinished }),
     api.sandboxClasses(ctx.orgID),
-    // Only an administrator may pick a project. A member's sandbox goes in
-    // the organisation's oldest project.
+    // Only an admin may pick a project. A member's sandbox goes in the oldest
+    // project.
     canAdmin
       ? api.projects(ctx.orgID).catch(() => ({ data: [] }))
       : { data: [] },
@@ -88,9 +87,8 @@ export async function sandboxesView(ctx) {
         num(running),
         "the rest are starting, suspended, expired or failed",
       ),
-      // Core-seconds rather than wall time: two minutes of thirty-two cores is
-      // not two minutes of two, and a chargeback uses this number. Wall time
-      // is on each row.
+      // Core-seconds rather than wall time: two minutes of 32 cores is not two
+      // minutes of two. Wall time is on each row.
       stat(
         "Compute used",
         [
@@ -130,9 +128,8 @@ function head(ctx, classes, driver, limits, canAdmin, projects) {
   );
 }
 
-// limitNote compares the count with the quota. The quota is the one a new
-// sandbox meets in the oldest project, where it lands by default, and a
-// member's list holds only their own sandboxes.
+// limitNote compares the count with the quota of the oldest project, where a
+// new sandbox lands by default. A member's list holds only their own.
 function limitNote(limits, canAdmin) {
   if (!limits || !limits.max_sandboxes) return "no limit set";
   if (!canAdmin)
@@ -182,8 +179,8 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
             "div",
             {},
             h("span", { class: "mono muted" }, s.class),
-            // The machine it was given, not what the class says now: a class
-            // can change under a running sandbox.
+            // The machine it was given: a class can change under a running
+            // sandbox.
             h(
               "div",
               { class: "faint small" },
@@ -201,7 +198,7 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
             s.owner
               ? h("span", { class: "muted" }, s.owner)
               : h("span", { class: "faint" }, "No user"),
-            // Beside the owner, because together they say whose it is.
+            // Beside the owner: together they say whose it is.
             s.project_id
               ? h(
                   "div",
@@ -221,8 +218,7 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
         sortDir: "desc",
       },
       {
-        // Time remaining rather than a timestamp, because "in 40m" is what
-        // somebody acts on.
+        // Time remaining: "in 40m" is what someone acts on.
         label: "Expires",
         shrink: true,
         num: true,
@@ -239,8 +235,8 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
     {
       search: (s) => `${s.name} ${s.class} ${s.owner} ${s.repo}`,
       searchLabel: "sandboxes",
-      // Not a filter: finished sandboxes are fetched only on request, because
-      // the list is capped and the cap is for the live ones.
+      // Not a filter: finished sandboxes are fetched only on request, as the
+      // list is capped for the live ones.
       toggles: [
         {
           label: "Show finished",
@@ -377,8 +373,7 @@ function isolationCell(c, driver) {
       isolationLabel(c.isolation),
       c.isolation === "vm" ? "good" : "",
     );
-  // Such a class is refused at creation rather than run at a weaker tier, so
-  // say so here, before anyone tries.
+  // Such a class is refused at creation rather than run at a weaker tier.
   return h(
     "div",
     { class: "row-tight" },
@@ -418,8 +413,7 @@ function actions(ctx, s, canAdmin, me, driver) {
       ),
     );
   } else if (s.state === "ready" && s.purpose !== "agent") {
-    // An agent's sandbox runs its task to the end, so the control plane
-    // refuses to suspend it.
+    // An agent's sandbox runs its task to the end and cannot be suspended.
     const suspend = async () => {
       await api.suspendSandbox(s.id);
       toast(`${s.name} is suspending`, "good");
@@ -434,8 +428,7 @@ function actions(ctx, s, canAdmin, me, driver) {
             : "Release its compute. It has no volume, so its files are lost",
         },
         "Suspend",
-        // Without a volume, suspending loses as much as terminating, so it
-        // asks first too.
+        // Without a volume, suspending loses as much as terminating.
         home
           ? suspend
           : () =>
@@ -451,8 +444,8 @@ function actions(ctx, s, canAdmin, me, driver) {
       ),
     );
   }
-  // The server refuses to extend an expired or failed sandbox. An expired one
-  // is resumed instead; a failed one can only be terminated.
+  // An expired sandbox is resumed instead; a failed one can only be
+  // terminated.
   if (s.state !== "expired" && s.state !== "failed") {
     btns.push(
       h(
@@ -477,7 +470,6 @@ function actions(ctx, s, canAdmin, me, driver) {
   return h("div", { class: "row-tight" }, ...btns);
 }
 
-/** lifetimeInput asks for a lifetime in hours. */
 function lifetimeInput() {
   return h("input", {
     class: "input",
@@ -489,8 +481,7 @@ function lifetimeInput() {
   });
 }
 
-/** lifetime is what a lifetime input asks for, in the seconds the API takes,
- *  or nothing for the class's default. */
+/** lifetime is in seconds, or nothing for the class's default. */
 function lifetime(input) {
   const hours = input.value.trim();
   return hours ? { ttl_seconds: Math.round(Number(hours) * 3600) } : {};
@@ -563,8 +554,8 @@ function removeClass(ctx, c) {
   });
 }
 
-/** newSandbox is the create dialog. The ssh key is required, because a
- *  sandbox with an empty authorized_keys cannot be opened. */
+/** newSandbox is the create dialog. The ssh key is required: without it the
+ *  sandbox cannot be opened. */
 function newSandbox(ctx, classes, limits, projects) {
   const name = h("input", { class: "input", placeholder: "fix-login" });
   const cls = h(
@@ -578,8 +569,8 @@ function newSandbox(ctx, classes, limits, projects) {
       ),
     ),
   );
-  // The project decides the sandbox's quota, budget, rate limit, system prompt
-  // and models. The oldest is picked, as the control plane does by default.
+  // The project decides the sandbox's quota, limits, prompt and models. The
+  // oldest is the default, as in the control plane.
   const first = oldestProject(projects);
   const project = h(
     "select",
@@ -654,7 +645,7 @@ function newSandbox(ctx, classes, limits, projects) {
     done: (sb) => `${sb.name} is starting`,
     ctx,
     submit: () => {
-      // Checked here too, so the error shows beside the wrong field.
+      // So the error shows beside the field.
       const keys = key.value
         .split("\n")
         .map((l) => l.trim())
@@ -692,8 +683,8 @@ function newSandbox(ctx, classes, limits, projects) {
   });
 }
 
-/** projectName falls back to the id, because a member cannot read the
- *  project list. */
+/** projectName falls back to the id, as a member cannot read the project
+ *  list. */
 function projectName(ctx, id) {
   const known = (ctx.state.projects || []).find((t) => t.id === id);
   return known ? known.name : id;
@@ -738,7 +729,7 @@ function expiryCell(s) {
       ago(s.expires_at),
     );
   }
-  // Colour the last half hour, while somebody can still act on it.
+  // Colour the last half hour, while someone can still act.
   const tone = left < 30 * 60 * 1000 ? "warn" : "";
   return h(
     "span",
@@ -764,8 +755,7 @@ function gib(mib) {
   return mib % 1024 === 0 ? `${mib / 1024}Gi` : `${mib}Mi`;
 }
 
-/** allowed reports whether this reader could be given this class, so the
- *  create dialog offers only those. */
+/** allowed reports whether this reader could be given this class. */
 function allowed(c, limits, driver) {
   if (!delivers(driver, c.isolation)) return false;
   if (c.purposes && c.purposes.length && !c.purposes.includes("engineer")) {

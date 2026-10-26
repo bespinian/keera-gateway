@@ -2,21 +2,18 @@
 # deployment.
 #
 # A class name is a contract: people type it and repositories configure it, so
-# an administrator can change its image, isolation tier or memory without
-# anyone editing anything. A new organisation gets a copy of every class here,
-# its own to change. Existing organisations are not changed.
+# an administrator can change its image, isolation or memory without anyone
+# else editing anything. A new organisation gets its own copy of every class.
+# Existing organisations are not changed.
 #
-# It is read even without KEERA_SANDBOX_DRIVER; only starting a sandbox needs a
-# driver. Here that is podman, which only runs under `make dev`: see
-# "Sandboxes do not work in this shape" in README.md.
-#
-# The Helm chart's values mirror this example. The chart is not in this
-# repository: see "The other shapes" in docs/install.md.
+# It is read even without KEERA_SANDBOX_DRIVER. Here the driver is podman,
+# which only runs under `make dev`: see "Sandboxes do not work in this shape"
+# in README.md. The Helm chart's values mirror this example; see "The other
+# shapes" in docs/install.md.
 #
 # On this driver a sandbox has unrestricted outbound network access: the
-# internet, the host and the LAN. The single-host shape is for development and
-# for a host the deployment already trusts. See docs/sandboxes.md, "The
-# security boundary".
+# internet, the host and the LAN. Use it for development or on a trusted host.
+# See docs/sandboxes.md, "The security boundary".
 
 sandboxes:
   - name: standard
@@ -25,8 +22,8 @@ sandboxes:
     #   podman build -t localhost/keera-sandbox:dev sandbox
     image: localhost/keera-sandbox:dev
     # On a single host this is the OCI runtime KEERA_SANDBOX_RUNTIME_* names.
-    # Most hosts have only runc or crun, so "standard" is honest; a host with
-    # runsc can use "isolated" and set KEERA_SANDBOX_RUNTIME_ISOLATED=runsc.
+    # Most hosts have only runc or crun, so "standard"; a host with runsc can
+    # use "isolated" and set KEERA_SANDBOX_RUNTIME_ISOLATED=runsc.
     isolation: standard
     cpu: "4"
     memory: 8Gi
@@ -41,9 +38,8 @@ sandboxes:
     isolation: standard
     cpu: "2"
     memory: 4Gi
-    # No disk: an agent sandbox pushes a branch at the end of its task, so
-    # nothing is worth keeping, and it is never suspended. Podman keeps a home
-    # volume anyway.
+    # No disk: an agent sandbox pushes a branch at the end, so nothing is worth
+    # keeping, and it is never suspended. Podman keeps a home volume anyway.
     disk: ""
     default_ttl: 1h
     max_ttl: 4h

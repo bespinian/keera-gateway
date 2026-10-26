@@ -1,23 +1,16 @@
 // Package sandbox runs sandboxes: machines the gateway lends out for one task
-// or one working day. A sandbox is a container with the toolchain in it, a
-// persistent home, its own API key, and network access only where the
-// deployment allows it. An engineer attaches over ssh; an agent is started
-// inside one and never leaves it. See docs/sandboxes.md.
+// or one working day. A sandbox is a container with the toolchain, a
+// persistent home, its own API key, and limited network access. An engineer
+// attaches over ssh; an agent runs inside one. See docs/sandboxes.md.
 //
-// # The driver
-//
-// Everything is behind Driver, with two implementations. The Kubernetes driver
-// writes Sandbox objects for the agent-sandbox controller
-// (sigs.k8s.io/agent-sandbox). The podman driver runs local containers for
-// development and tests, such as `make dev`; it has weaker isolation and no
+// Everything is behind Driver. The Kubernetes driver writes Sandbox objects
+// for the agent-sandbox controller (sigs.k8s.io/agent-sandbox). The podman
+// driver runs local containers for development, with weaker isolation and no
 // warm pool.
 //
-// # No client-go
-//
-// The Kubernetes driver talks plain HTTPS to the API server and decodes only
-// the fields it reads. The binary is static, has few dependencies and must
-// vendor cleanly for air-gapped sites; client-go would grow the module graph
-// enormously to save a few hundred lines of JSON.
+// The Kubernetes driver talks plain HTTPS to the API server instead of using
+// client-go, which would grow the module graph a lot to save a few hundred
+// lines of JSON.
 package sandbox
 
 import (
@@ -31,56 +24,43 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// Errors a caller acts on. Anything else a driver returns is just reported.
+// Errors a caller acts on. Other driver errors are just reported.
 var (
-	// ErrNotFound means the sandbox no longer exists where the driver looks.
-	// Terminate treats it as success.
+	// Terminate treats ErrNotFound as success.
 	ErrNotFound = errors.New("sandbox: not found")
-	// ErrNotReady means the driver found a sandbox not running although its
-	// row said it was. The manager refuses a suspended one before asking.
+	// ErrNotReady means a sandbox was not running although its row said so.
 	ErrNotReady = errors.New("sandbox: not ready")
 )
 
-// Ref names one sandbox to a driver. It carries the gateway's id, and each
-// driver derives its own names from it, so a restarted gateway finds the
-// sandboxes it left running.
+// Ref names one sandbox to a driver. Drivers derive their names from it, so a
+// restarted gateway finds the sandboxes it left running.
 type Ref struct {
-	// ID is the sandbox id, "sbx_...".
 	ID string
-	// Name is what the developer called it. Drivers put it in the object's
-	// name, so it shows in kubectl and podman ps.
+	// Name is what the developer called it. It shows in kubectl and podman ps.
 	Name string
-	// Backing says whether the sandbox is a driver-made object or a claim on
-	// a warm pool. Empty means BackingSandbox.
+	// Backing is empty for BackingSandbox.
 	Backing Backing
 }
 
-// Claimed reports whether this sandbox came out of a warm pool.
 func (r Ref) Claimed() bool { return r.Backing == BackingClaim }
 
-// Spec is everything a driver needs to make one sandbox. It is fully resolved
-// before it gets here, so the drivers make no decisions and behave alike.
+// Spec is everything a driver needs to make one sandbox. It is fully resolved,
+// so drivers make no decisions and behave alike.
 type Spec struct {
 	Ref
-	// Class is the resolved catalogue entry. Drivers read the image, the
-	// resources and the isolation tier from it.
-	Class policy.SandboxClass
-	// Purpose decides the lifecycle. See policy.Purpose.
+	Class   policy.SandboxClass
 	Purpose policy.Purpose
-	// Owner, Org and Project are stamped onto the Kubernetes object or podman
-	// container, so operators see whose sandbox it is without the gateway.
-	// Owner is an email address where known, the only personal data put there.
+	// Owner, Org and Project are stamped onto the object, so operators see
+	// whose it is. Owner is an email address, the only personal data there.
 	Owner   string
 	Org     string
 	Project string
-	// Env is the sandbox's environment, API key included. The key sits in the
-	// pod spec rather than a Secret, as it lives no longer than the sandbox.
-	// Anybody who can read pods in the sandbox namespace can read it, which is
-	// why that namespace is kept to itself.
+	// Env includes the API key. It sits in the pod spec, not a Secret, as it
+	// lives no longer than the sandbox. Anyone who can read pods in the
+	// namespace can read it, so that namespace is kept to itself.
 	Env map[string]string
-	// Expires is when the driver should tear the sandbox down by itself. The
-	// Kubernetes controller enforces it too, so nothing is left behind if the
-	// gateway never comes back. Podman has no controller and ignores it.
+	// Expires is enforced by the Kubernetes controller too, so nothing is left
+	// if the gateway never comes back. Podman ignores it.
 	Expires time.Time
 }
 
@@ -88,85 +68,69 @@ type Spec struct {
 type Status struct {
 	Ref
 	State policy.SandboxState
-	// Detail says why, for a state that is not Ready. It reaches the
-	// developer, so the driver's own message ("0/6 nodes are available") is
-	// passed through as is.
+	// Detail says why a state is not Ready, in the driver's own words.
 	Detail string
-	// Address is where the gateway reaches the sandbox: a host or IP, without
-	// a port. Empty while it is not running.
+	// Address is a host or IP without a port. Empty while not running.
 	Address string
 	Node    string
-	// Exited says the process ended by itself, with success. For an agent's
-	// sandbox that is the task done, and the manager terminates it.
+	// Exited says the process ended by itself with success. For an agent,
+	// the task is done and the manager terminates it.
 	Exited bool
 }
 
-// Driver is what one deployment shape can do with sandboxes. Every method is
-// idempotent where it can be: creating a sandbox that exists returns its
-// status, terminating one that does not is success. The control plane does
-// not retry, so this keeps rows and reality in step after a dropped connection.
+// Driver runs sandboxes on one platform. Methods are idempotent where they can
+// be, which keeps rows and reality in step after a dropped connection.
 type Driver interface {
-	// Name is "kubernetes" or "podman", for logs and the panel.
+	// Name is "kubernetes" or "podman".
 	Name() string
-	// Capabilities says what this driver implements, so the control plane can
-	// refuse clearly instead of failing inside the driver.
+	// Capabilities lets the control plane refuse clearly instead of failing
+	// inside the driver.
 	Capabilities() Capabilities
-	// Create makes one sandbox and returns its status, usually Pending. It
-	// does not wait for readiness; the caller is an HTTP request.
+	// Create returns the status, usually Pending, without waiting for
+	// readiness.
 	Create(ctx context.Context, spec Spec) (Status, error)
 	Status(ctx context.Context, ref Ref) (Status, error)
 	// Suspend releases the compute and keeps the volume. Resume undoes it.
-	// Both are no-ops on a sandbox already in that state.
 	Suspend(ctx context.Context, ref Ref) error
 	Resume(ctx context.Context, ref Ref) error
-	// Revive starts an expired sandbox again on the volume it kept, with the
-	// environment and end in spec. Its old key and repository credential
-	// were revoked at expiry, so it needs new ones.
+	// Revive starts an expired sandbox again on its volume, with a new
+	// environment, since its old key was revoked at expiry.
 	Revive(ctx context.Context, spec Spec) error
-	// Extend moves when the driver will tear the sandbox down.
 	Extend(ctx context.Context, ref Ref, until time.Time) error
-	// Terminate removes the sandbox and everything it held, including the
-	// volume. A sandbox that is already gone is not an error.
+	// Terminate removes the sandbox and its volume. One already gone is not
+	// an error.
 	Terminate(ctx context.Context, ref Ref) error
-	// Dial opens a connection to one port of a running sandbox. It is the
-	// only way in: the control plane proxies authenticated callers to it.
+	// Dial is the only way in: the control plane proxies authenticated
+	// callers to it.
 	Dial(ctx context.Context, ref Ref, port int) (net.Conn, error)
 }
 
 type Capabilities struct {
-	// Isolation is the strongest tier this driver can deliver.
+	// Isolation is the strongest tier.
 	Isolation policy.Isolation
-	// Tiers is every tier it can deliver: standard, and each one with a
-	// runtime mapped. A class asking for another is refused rather than
-	// silently run with less.
+	// Tiers is standard, and each tier with a runtime mapped. A class asking
+	// for another is refused, not run with less.
 	Tiers []policy.Isolation
-	// Warm is whether this driver keeps a pool of started sandboxes.
-	Warm bool
+	Warm  bool
 }
 
-// The ports a sandbox serves. Only PortSSH is opened by the drivers; the range
-// bounds what the attach surface lets a caller reach.
+// The ports a sandbox serves.
 const (
-	// PortSSH is the shell, and the transport for remote editors. It is 2222,
-	// not 22: a sandbox runs as an ordinary user with every capability dropped
-	// and cannot bind a privileged port. Nobody types it; the gateway dials it.
+	// PortSSH is 2222, not 22: a sandbox runs without capabilities and cannot
+	// bind a privileged port.
 	PortSSH = 2222
-	// PortForwardMin and PortForwardMax bound what a developer may forward:
-	// unprivileged ports only.
+	// PortForwardMin and PortForwardMax bound what a developer may forward.
 	PortForwardMin = 1024
 	PortForwardMax = 65535
 )
 
 // ValidPort reports whether a port may be reached through the attach surface.
-// Only unprivileged ports are allowed: a privileged port is the only signal
-// that a port belongs to the sandbox itself, and nothing in a sandbox can bind
-// one anyway.
+// Nothing in a sandbox can bind a privileged port anyway.
 func ValidPort(p int) bool {
 	return p >= PortForwardMin && p <= PortForwardMax
 }
 
-// dialTimeout bounds one connection attempt to a sandbox. It is short because
-// the sandbox is close by and a developer is waiting at a terminal.
+// dialTimeout is short: the sandbox is close by and a developer is waiting.
 const dialTimeout = 10 * time.Second
 
 func dialSandbox(ctx context.Context, ref Ref, port int, addr string) (net.Conn, error) {
@@ -178,8 +142,8 @@ func dialSandbox(ctx context.Context, ref Ref, port int, addr string) (net.Conn,
 	return conn, nil
 }
 
-// capabilitiesFor is what a driver with these runtimes can deliver. Deriving
-// it from the mapping means a driver cannot claim a tier it has no runtime for.
+// capabilitiesFor derives tiers from the runtimes, so a driver cannot claim a
+// tier it has no runtime for.
 func capabilitiesFor(runtimes map[policy.Isolation]string, warm bool) Capabilities {
 	tiers := []policy.Isolation{policy.IsolationStandard}
 	for _, tier := range policy.Isolations {
@@ -187,12 +151,11 @@ func capabilitiesFor(runtimes map[policy.Isolation]string, warm bool) Capabiliti
 			tiers = append(tiers, tier)
 		}
 	}
-	// policy.Isolations is weakest first, so the last tier is the strongest.
+	// policy.Isolations is weakest first.
 	return Capabilities{Isolation: tiers[len(tiers)-1], Tiers: tiers, Warm: warm}
 }
 
-// runtimeFor is the runtime a class runs on with the given driver. The
-// standard tier never needs one mapped: empty means the platform's default.
+// runtimeFor returns empty for the standard tier: the platform's default.
 func runtimeFor(c policy.SandboxClass, runtimes map[policy.Isolation]string, driver string) (string, error) {
 	if c.Isolation == policy.IsolationStandard {
 		return runtimes[policy.IsolationStandard], nil
@@ -203,9 +166,8 @@ func runtimeFor(c policy.SandboxClass, runtimes map[policy.Isolation]string, dri
 	return "", noRuntime(c, driver)
 }
 
-// noRuntime refuses a class whose isolation tier has no runtime here. The
-// class is never run with a weaker one: a sandbox that claimed a kernel of its
-// own and did not have one would be worse than this refusal.
+// noRuntime refuses a class whose tier has no runtime here, rather than run it
+// with weaker isolation.
 func noRuntime(c policy.SandboxClass, driver string) error {
 	return Refuse("the sandbox class %q asks for %s isolation and the %s driver in this "+
 		"deployment has no runtime for it; set KEERA_SANDBOX_RUNTIME_%s (a RuntimeClass on "+
@@ -213,8 +175,7 @@ func noRuntime(c policy.SandboxClass, driver string) error {
 		c.Name, c.Isolation, driver, strings.ToUpper(string(c.Isolation)))
 }
 
-// The labels on every object a driver writes, Kubernetes or podman. They let a
-// platform engineer see whose sandbox it is without the panel.
+// The labels on every object a driver writes, so operators see whose it is.
 const (
 	labelManagedBy = "app.kubernetes.io/managed-by"
 	labelName      = "app.kubernetes.io/name"
@@ -223,15 +184,13 @@ const (
 	labelProject   = "keera.dev/project"
 	labelClass     = "keera.dev/class"
 	labelPurpose   = "keera.dev/purpose"
-	// annotationOwner is an email address. It is an annotation because a
-	// label value cannot hold an @, and an address should not be selectable.
+	// annotationOwner is an annotation because a label value cannot hold an @.
 	annotationOwner = "keera.dev/owner"
 )
 
-// objectName is the developer's name plus the tail of the id. The name alone
-// is not unique across organisations, and the id alone is unreadable in
-// `kubectl get pods`. It depends only on the Ref, so a restarted gateway finds
-// what it left running.
+// objectName is the developer's name plus the tail of the id: unique, and
+// readable in `kubectl get pods`. It depends only on the Ref, so a restarted
+// gateway finds what it left running.
 func objectName(ref Ref) string {
 	name := ref.Name
 	if name == "" {
@@ -240,8 +199,7 @@ func objectName(ref Ref) string {
 	return name + "-" + shortID(ref.ID)
 }
 
-// shortID is the end of an id without its prefix, which is enough to tell
-// objects apart in a name the cluster limits in length.
+// shortID is the end of an id, enough to tell objects apart in a short name.
 func shortID(id string) string {
 	if i := strings.IndexByte(id, '_'); i >= 0 {
 		id = id[i+1:]
@@ -252,8 +210,7 @@ func shortID(id string) string {
 	return id
 }
 
-// labelsFor is the label set on every object for a sandbox, shared with the
-// claim path and podman so they cannot drift.
+// labelsFor is shared by every driver path so the labels cannot drift.
 func labelsFor(spec Spec) map[string]string {
 	labels := map[string]string{
 		labelManagedBy: "keera",
@@ -279,13 +236,11 @@ func annotationsFor(spec Spec) map[string]string {
 	return annotations
 }
 
-// The home volume. It is one volume because everything that should survive a
-// suspend - working copy, build cache, shell history - lives under home. The
-// image's sshd_config and entrypoint use the same path and user.
+// The home volume holds everything that should survive a suspend. The image's
+// sshd_config and entrypoint use the same path and user.
 const (
 	homeVolume = "home"
 	homePath   = "/home/keera"
-	// sandboxUID is the user a sandbox runs as. sandbox/Containerfile says
-	// why it is fixed.
+	// sandboxUID is fixed; sandbox/Containerfile says why.
 	sandboxUID = 1000
 )

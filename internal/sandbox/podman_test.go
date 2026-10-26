@@ -14,8 +14,7 @@ import (
 )
 
 func TestPodmanKeepsSecretsOffItsCommandLine(t *testing.T) {
-	// Every user of the host can read a process's arguments, so a key or a
-	// token there would be anybody's.
+	// Every user can read a process's arguments.
 	t.Setenv("PATH", "/usr/bin")
 	p := &Podman{}
 	spec := Spec{Env: map[string]string{
@@ -79,14 +78,12 @@ func TestSSHGreets(t *testing.T) {
 	}
 }
 
-// fakePodman is a podman that answers `inspect` with one container in the
-// given state and fails everything else.
+// fakePodman answers `inspect` with one container in state and fails the rest.
 func fakePodman(t *testing.T, state string) *Podman {
 	return scriptedPodman(t, "if [ \"$1\" = inspect ]; then echo '[{\"State\":"+state+"}]'; exit 0; fi\n")
 }
 
-// scriptedPodman is a podman that runs script and fails whatever it lets
-// through.
+// scriptedPodman runs script and fails whatever it lets through.
 func scriptedPodman(t *testing.T, script string) *Podman {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "podman")

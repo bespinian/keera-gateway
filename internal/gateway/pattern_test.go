@@ -43,8 +43,7 @@ func TestPatternReplacesWhatItMatchesAndNothingElse(t *testing.T) {
 }
 
 func TestPatternReplacementIsLiteral(t *testing.T) {
-	// $1 in a replacement is two characters somebody typed, not the first
-	// capturing group.
+	// $1 in a replacement is literal text, not a capture group.
 	c := compileRules([]policy.FilterRule{
 		{Pattern: `secret=(\w+)`, Replace: "secret=$1-REDACTED"},
 	})
@@ -58,8 +57,7 @@ func TestPatternReplacementIsLiteral(t *testing.T) {
 }
 
 func TestPatternRulesRunInOrderAndSeeWhatCameBefore(t *testing.T) {
-	// A specific rule above a broad one narrows it only if each rule sees
-	// what the one before left.
+	// Each rule sees what the one before left.
 	c := compileRules([]policy.FilterRule{
 		{Pattern: `\bCH93 0076 2011 6238 5295 7\b`, Replace: "[HOUSE-ACCOUNT]"},
 		{Pattern: `\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4})+\b`, Replace: "[IBAN]"},
@@ -111,8 +109,7 @@ func TestPatternRefusalStopsTheSweep(t *testing.T) {
 }
 
 func TestPatternRefusalReasonIsBounded(t *testing.T) {
-	// It travels the same path as a model's reason, so it gets the same bound
-	// and flattening.
+	// Capped and flattened like a model's reason.
 	c := compileRules([]policy.FilterRule{
 		{Pattern: `x`, Refuse: true, Reason: "one\ntwo   three"},
 	})
@@ -127,8 +124,7 @@ func TestPatternRefusalReasonIsBounded(t *testing.T) {
 }
 
 func TestPatternWithNoRulesFailsClosed(t *testing.T) {
-	// A guardrail that passes everything is worse than one that is plainly
-	// broken.
+	// A guardrail that passes everything is worse than a broken one.
 	_, _, err := runPattern(compileRules(nil), []string{"anything"})
 	if err == nil {
 		t.Fatal("a pattern filter with no rules must not pass the request")
@@ -168,8 +164,7 @@ func TestPatternCacheRecompilesWhenTheFilterIsWritten(t *testing.T) {
 }
 
 func TestCheckPatternNamesTheRuleThatTouchedTheCode(t *testing.T) {
-	// The third sample is ordinary source. A rule that matches it will match
-	// real source too, and naming the rule makes the warning actionable.
+	// The third sample is ordinary source; a rule matching it is named.
 	s := &Server{}
 	f := patternFilter(policy.FilterRule{Pattern: `\bint\b`, Replace: "[NUMBER]"})
 	p := s.checkPattern(f, FilterProbe{Alias: f.Alias, Mode: f.Mode})
@@ -206,8 +201,8 @@ func TestCheckPatternWarnsWhenThePlantedSecretSurvives(t *testing.T) {
 }
 
 func TestCheckPatternReportsARefusalAsAnAnswer(t *testing.T) {
-	// The first two samples carry what a filter is written to stop, so a
-	// refusal may be the filter working. It is reported, not counted a fault.
+	// The first two samples carry what a filter should stop, so a refusal is
+	// reported, not counted as a fault.
 	s := &Server{}
 	f := patternFilter(policy.FilterRule{
 		Pattern: `AWS_SECRET_ACCESS_KEY`, Refuse: true, Reason: "a credential",
@@ -226,8 +221,8 @@ func TestCheckPatternReportsARefusalAsAnAnswer(t *testing.T) {
 }
 
 func TestPatternFilterRedactsWithoutTouchingABackend(t *testing.T) {
-	// End to end: the secret does not reach the model, nothing was generated
-	// to arrange that, and nothing was charged.
+	// End to end: the secret does not reach the model, and nothing was
+	// generated or charged.
 	h := filterHarness(t, func([]string) string {
 		t.Error("a pattern filter must not call a model")
 		return "[]"
@@ -243,8 +238,7 @@ func TestPatternFilterRedactsWithoutTouchingABackend(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 
-	// The first body upstream is the client's own request: no filter
-	// generation came before it.
+	// The first body upstream is the client's own request.
 	forwarded := string(<-h.upstreamBodies)
 	if strings.Contains(forwarded, "hunter2") {
 		t.Errorf("the secret reached the model: %s", forwarded)
@@ -257,8 +251,7 @@ func TestPatternFilterRedactsWithoutTouchingABackend(t *testing.T) {
 	}
 
 	ev := h.sink.last(t)
-	// The answering model's own 30 micro-units and not a unit more: a pattern
-	// filter adds nothing to the bill.
+	// Only the answering model's 30 micro-units: a pattern filter is free.
 	if ev.CostMicros != 30 {
 		t.Errorf("cost = %d, want only what the answering model cost", ev.CostMicros)
 	}
@@ -296,8 +289,8 @@ func TestPatternFilterRefusalStopsTheRequest(t *testing.T) {
 }
 
 func TestPatternFilterInShadowChangesNothing(t *testing.T) {
-	// In shadow, the rules run and what they would have done is recorded, but
-	// the request is forwarded exactly as sent.
+	// In shadow mode the rules run and are recorded, but the request is
+	// forwarded as sent.
 	h := filterHarness(t, func([]string) string { return "[]" }, nil)
 	f := patternFilter(
 		policy.FilterRule{Pattern: `\bhunter2\b`, Replace: "[CREDENTIAL]"})
@@ -324,8 +317,7 @@ func TestPatternFilterInShadowChangesNothing(t *testing.T) {
 }
 
 func TestPatternFilterWithBrokenRulesRefusesEverything(t *testing.T) {
-	// It fails closed, with a status that says an administrator has to fix
-	// it rather than that the client should retry.
+	// It fails closed, with a status that says an administrator must fix it.
 	h := filterHarness(t, func([]string) string { return "[]" }, nil)
 	h.src.filters = map[string]policy.Filter{
 		"org_1/redact": patternFilter(

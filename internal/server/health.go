@@ -8,9 +8,8 @@ import (
 	"time"
 )
 
-// health asks the server listening on addr whether it is ready. It exists
-// because the image is FROM scratch: a container health check has no shell or
-// curl, only this binary.
+// health asks the server listening on addr whether it is ready. The image is
+// FROM scratch, so a health check has no shell or curl, only this binary.
 func health(ctx context.Context, addr string) error {
 	url, err := readyURL(addr)
 	if err != nil {

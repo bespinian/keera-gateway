@@ -12,11 +12,10 @@ import (
 
 // The Messages API forwarded to Anthropic as it is. See native.go.
 
-// anthropicVersion is the API version sent when the client names none. It is
-// the only one Anthropic has published.
+// anthropicVersion is sent when the client names none. It is the only one
+// Anthropic has published.
 const anthropicVersion = "2023-06-01"
 
-// anthropicDialect implements dialect for `/v1/messages`.
 type anthropicDialect struct{}
 
 func (anthropicDialect) provider() string { return "anthropic" }
@@ -38,8 +37,7 @@ func (anthropicDialect) opening(b *body) (json.RawMessage, bool) {
 }
 
 // text is the system prompt, and the text and tool results of every turn.
-// Thinking blocks are left alone: they are signed, and one that was changed is
-// refused.
+// Thinking blocks are left alone, since they are signed.
 func (anthropicDialect) text(b *body) (textDoc, error) {
 	d := newTreeDoc()
 	system, err := d.root(b, "system")
@@ -78,9 +76,8 @@ func (anthropicDialect) text(b *body) (textDoc, error) {
 	return d, nil
 }
 
-// addTextBlock collects the text of a text block, of a search result, and of
-// a document: its title, its context and a source that is text. The model
-// reads all of it, and the translation keeps it too (see blockText).
+// addTextBlock collects the text of a text block, a search result or a
+// document. See blockText.
 func addTextBlock(d *treeDoc, block map[string]any) {
 	switch block["type"] {
 	case "text":
@@ -107,14 +104,14 @@ func addTextBlock(d *treeDoc, block map[string]any) {
 	}
 }
 
-// addSystem puts the system prompt first, as a block of its own, so the
-// client's blocks keep their cache markers.
+// addSystem puts the system prompt first as its own block, so the client's
+// blocks keep their cache markers.
 func (anthropicDialect) addSystem(b *body, prompt string) error {
 	return setSystem(b, prompt, true)
 }
 
-// setSystem adds the system prompt as a text block of its own, before the
-// client's system blocks or after them.
+// setSystem adds the system prompt as its own text block, before or after the
+// client's.
 func setSystem(b *body, prompt string, first bool) error {
 	var blocks []any
 	if raw, ok := b.value("system"); ok {
@@ -146,13 +143,12 @@ func setSystem(b *body, prompt string, first bool) error {
 	return nil
 }
 
-// needsNative is always empty: every Messages request can be translated.
 func (anthropicDialect) needsNative(*body) string { return "" }
 
 func (anthropicDialect) onKey(*body) string { return "" }
 
-// auth sends the key as x-api-key, which is what the Messages API reads, with
-// the client's API version and beta flags.
+// auth sends the key as x-api-key, with the client's API version and beta
+// flags.
 func (anthropicDialect) auth(client http.Header) func(http.Header, string) {
 	version := strings.TrimSpace(client.Get("Anthropic-Version"))
 	if version == "" {
@@ -168,8 +164,8 @@ func (anthropicDialect) auth(client http.Header) func(http.Header, string) {
 	}
 }
 
-// anthropicUsage is the usage record of the Messages API. Unlike OpenAI's,
-// its input count leaves out what was read from or written to the cache.
+// anthropicUsage is the Messages API's usage record. Unlike OpenAI's, its
+// input count leaves out cache reads and writes.
 type anthropicUsage struct {
 	InputTokens         int `json:"input_tokens"`
 	OutputTokens        int `json:"output_tokens"`
@@ -181,8 +177,8 @@ type anthropicUsage struct {
 	} `json:"cache_creation"`
 }
 
-// merge keeps the larger of each count. The stream reports them in pieces:
-// input at the start, output at the end, and later counts are running totals.
+// merge keeps the larger of each count, since the stream reports them in
+// pieces and as running totals.
 func (u *anthropicUsage) merge(o anthropicUsage) {
 	u.InputTokens = max(u.InputTokens, o.InputTokens)
 	u.OutputTokens = max(u.OutputTokens, o.OutputTokens)
@@ -191,8 +187,8 @@ func (u *anthropicUsage) merge(o anthropicUsage) {
 	u.CacheCreation.HourTokens = max(u.CacheCreation.HourTokens, o.CacheCreation.HourTokens)
 }
 
-// tokens is the record in the gateway's terms, where cache reads and writes
-// are part of the input.
+// tokens converts to the gateway's terms, where the cache counts are part of
+// the input.
 func (u anthropicUsage) tokens() *tokenUsage {
 	t := &tokenUsage{
 		InputTokens:  u.InputTokens + u.CacheCreationTokens + u.CacheReadTokens,
@@ -206,8 +202,7 @@ func (u anthropicUsage) tokens() *tokenUsage {
 
 func (anthropicDialect) usage(raw []byte) *tokenUsage { return usageOf[anthropicUsage](raw) }
 
-// usageOf reads the usage record at the top of a whole answer, in the shape
-// U of the answer's API.
+// usageOf reads the top-level usage record of a whole answer, in shape U.
 func usageOf[U any, P interface {
 	*U
 	tokens() *tokenUsage
@@ -225,18 +220,15 @@ func (anthropicDialect) stream(alias string) nativeStream {
 	return &anthropicStream{alias: alias}
 }
 
-// anthropicStream reads a Messages stream on its way through. Only the event
-// that opens the message and the one that closes it are decoded; the rest are
-// only counted.
+// anthropicStream reads a Messages stream on its way through. Only the
+// opening and closing events are decoded; the rest are counted.
 type anthropicStream struct {
 	alias string
 	usage anthropicUsage
-	// started and ended say whether the events carrying the counts arrived:
-	// the input comes when the message opens, the output when it closes.
+	// started and ended say whether the input and output counts arrived.
 	started, ended bool
 	deltas         int
-	// stopped says message_stop arrived. upstreamErr is an error event's
-	// message.
+	// stopped says message_stop arrived.
 	stopped     bool
 	upstreamErr string
 }
@@ -276,8 +268,8 @@ func (s *anthropicStream) failure() error {
 	return endedFailure(s.upstreamErr, s.stopped)
 }
 
-// counts keeps the input count of a stream cut short, which is exact, and
-// counts its output from the deltas.
+// counts keeps the exact input count of a stream cut short, and estimates its
+// output from the deltas.
 func (s *anthropicStream) counts() (*tokenUsage, int, bool) {
 	switch {
 	case s.ended:
@@ -291,12 +283,9 @@ func (s *anthropicStream) counts() (*tokenUsage, int, bool) {
 	}
 }
 
-// countTokens answers `POST /v1/messages/count_tokens`, which clients use to
-// see how full the context is.
-//
-// It is answered here, from an estimate, and never forwarded: forwarding
-// would send the prompt to Anthropic without its filters. The estimate errs
-// high, so a client that compacts on it compacts early rather than late.
+// countTokens answers `POST /v1/messages/count_tokens` with an estimate. It is
+// never forwarded, which would send the prompt to Anthropic unfiltered. The
+// estimate errs high, so a client compacts early rather than late.
 func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 	sh := anthropicShape{}
 	res, ok := s.authenticate(w, r, sh)
@@ -314,8 +303,7 @@ func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 		sh.writeError(w, http.StatusBadRequest, "", "", err.Error())
 		return
 	}
-	// Refused as a request to the model would be, so counting first tells a
-	// client nothing that sending would not.
+	// Refused as a request to the model would be.
 	alias, _ := b.str("model")
 	ref := aliasRefusal(alias)
 	var n named
@@ -331,18 +319,15 @@ func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 		sh.writeError(w, http.StatusBadRequest, "", "", err.Error())
 		return
 	}
-	// Tool declarations are part of the prompt too, and on a coding agent a
-	// large one. So are the system prompts: the guardrails', which every
-	// request gets, and a router's steps'.
+	// Tool declarations and added system prompts are part of the prompt too.
 	tools, _ := b.value("tools")
 	prompts := len(res.SystemPrompt) + mostPromptBytes(n.router.Start)
 	tokens := estimateTokens(doc.texts()) + (len(tools)+prompts)/bytesPerToken
 	httpx.WriteJSON(w, http.StatusOK, map[string]int{"input_tokens": tokens})
 }
 
-// mostPromptBytes is the most system prompt text one way through a router
-// adds. Which way a request goes is decided only when it is sent, and a
-// client that counts too high compacts early rather than overflowing.
+// mostPromptBytes is the most system prompt text any path through a router
+// adds, since the path is only decided when the request is sent.
 func mostPromptBytes(s *policy.Step) int {
 	if s == nil {
 		return 0

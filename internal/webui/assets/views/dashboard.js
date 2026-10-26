@@ -20,8 +20,7 @@ import { firstRun, firstRunDue, memberRun, memberRunDue } from "./firstrun.js";
 import { openFailed } from "./logfilters.js";
 import { orgNameOf } from "./orgs.js";
 
-// catalogue is the hosted providers, whose models the getting-started overview
-// names. Without them it names only the providers.
+// catalogue is the hosted providers, for the getting-started overview.
 function catalogue() {
   return api
     .providers()
@@ -32,12 +31,10 @@ function catalogue() {
 export async function dashboardView(ctx) {
   const since = currentRange();
 
-  // A dashboard of zeroes helps nobody. The checklist replaces it until there
-  // is traffic and, with card payments, until the organisation has had credit.
+  // A dashboard of zeroes helps nobody, so the checklist replaces it at first.
   if (isAdmin(ctx)) {
     const setup = await api.setup(ctx.orgID).catch(() => null);
-    // The sidebar names this screen from the same counts, read when the panel
-    // loaded. A step done since then renames it.
+    // The sidebar names this screen from these counts.
     if (setup) ctx.setSetup(setup);
     if (firstRunDue(ctx, setup)) {
       ctx.setTitle("Getting started");
@@ -88,8 +85,7 @@ export async function dashboardView(ctx) {
       compact(o.input_tokens + o.output_tokens),
       tokens(o.input_tokens, o.output_tokens),
     ),
-    // What Claude plans paid for is not part of the cost, so it is said
-    // beside it rather than added to it.
+    // What Claude plans paid for is shown beside the cost, not added to it.
     moneyStat(
       "Cost",
       o.cost_micros,
@@ -165,8 +161,7 @@ export async function dashboardView(ctx) {
         "div",
         { class: "card-body" },
         barList(o.top_models, {
-          // Across every organisation, two of them can each have a model of
-          // the same alias, so the row names whose it is.
+          // Across organisations, two can have a model of the same alias.
           label: (r) =>
             r.org_id ? `${r.group} · ${orgNameOf(ctx, r.org_id)}` : r.group,
           value: (r) => r.input_tokens + r.output_tokens,
@@ -204,8 +199,8 @@ export async function dashboardView(ctx) {
 }
 
 // A member gets a plain pill: their request log holds only their own keys'
-// requests, so it would not add up to the count. A link rather than a button,
-// so it can open in a new tab.
+// requests, so it would not match the count. A link, so it can open in a new
+// tab.
 function failureLink(ctx, ...content) {
   if (!isAdmin(ctx)) {
     return h("span", { class: "pill pill-bad" }, ...content);

@@ -5,15 +5,15 @@ import (
 	"time"
 )
 
-// A command-line sign-in: a one-time code the browser hands to the process
-// on somebody's laptop, and the token that code is exchanged for. The schema's
-// cli_codes and cli_tokens tables say why neither is a session.
+// A command-line sign-in: a one-time code the browser hands to the command
+// line, and the token it is exchanged for. The schema says why neither is a
+// session.
 
 // CLICode is a sign-in that has been authenticated and not yet collected.
 type CLICode struct {
 	UserID string
-	// Challenge is the S256 challenge the command line sent when it started
-	// this sign-in. Redeeming the code needs the matching verifier.
+	// Challenge is the command line's S256 challenge. Redeeming the code needs
+	// the matching verifier.
 	Challenge string
 }
 
@@ -27,8 +27,7 @@ func (s *Store) CreateCLICode(ctx context.Context, hash []byte, userID, challeng
 	return err
 }
 
-// TakeCLICode consumes a code. Like TakeLoginFlow it deletes and returns in one
-// statement, so a code copied from a browser or shell history is worthless.
+// TakeCLICode consumes a code in one statement, so a copied code is worthless.
 func (s *Store) TakeCLICode(ctx context.Context, hash []byte) (CLICode, error) {
 	var c CLICode
 	err := s.pool.QueryRow(ctx, `DELETE FROM cli_codes
@@ -37,8 +36,8 @@ func (s *Store) TakeCLICode(ctx context.Context, hash []byte) (CLICode, error) {
 	return c, notFound(err)
 }
 
-// CLITokenUser is the person a token belongs to. Like SessionUser it is one
-// query, because it runs on every command.
+// CLITokenUser is the person a token belongs to, in one query because it runs
+// on every command.
 type CLITokenUser struct {
 	User      User
 	Directory Directory
@@ -57,7 +56,7 @@ func (s *Store) CreateCLIToken(ctx context.Context, hash []byte, userID string,
 }
 
 // LookupCLIToken resolves a presented token. An expired one, or one of a
-// disabled person, is reported as missing, so no caller has to check either.
+// disabled person, is reported as missing.
 func (s *Store) LookupCLIToken(ctx context.Context, hash []byte) (CLITokenUser, error) {
 	var tu CLITokenUser
 	err := s.pool.QueryRow(ctx, `SELECT `+userColumnsOf("u.")+`, `+directoryColumns+`

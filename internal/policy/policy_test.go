@@ -35,8 +35,7 @@ func TestResolveIsRestrictOnly(t *testing.T) {
 			name:    "a project cannot widen the org list",
 			org:     &Limits{AllowedModels: []string{"keera-code"}},
 			project: &Limits{AllowedModels: []string{"keera-code", "keera-premium"}},
-			// The department administrator asked for keera-premium. The
-			// organisation never granted it, so it is not granted.
+			// The organisation never granted keera-premium.
 			wantModels: []string{"keera-code"},
 		},
 		{
@@ -58,9 +57,8 @@ func TestResolveIsRestrictOnly(t *testing.T) {
 }
 
 func TestResolveKeepsBudgetsPerScope(t *testing.T) {
-	// An org cap and a project cap are two limits that both have to hold, so they
-	// must not be collapsed into one the way the ceilings are. A budget per day
-	// beside one per month is a scope of its own.
+	// An org cap and a project cap must both hold, so they are not merged. A
+	// daily budget is a scope of its own.
 	got := Resolve(
 		Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
 		&Limits{Budgets: []Budget{{BudgetMicros: 10_000_000}}},
@@ -82,8 +80,8 @@ func TestResolveKeepsBudgetsPerScope(t *testing.T) {
 }
 
 func TestResolveCountsARateLimitPerDayOrMonth(t *testing.T) {
-	// Per minute is a token bucket on the level's scope. Per day or month is
-	// a count kept like spend, apart from the budget of the same level.
+	// Per minute is a token bucket. Per day or month is counted like spend,
+	// apart from the budget.
 	got := Resolve(
 		Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
 		&Limits{RateLimits: []RateLimit{{Requests: 600, Tokens: 100_000}}},
@@ -164,8 +162,7 @@ func TestMayCallRouter(t *testing.T) {
 }
 
 func TestPeriodStart(t *testing.T) {
-	// Budgets reset on UTC boundaries whatever the cluster's timezone, so a
-	// spend figure means the same thing in Zurich as in the report.
+	// Budgets reset in UTC whatever the cluster's timezone.
 	at := time.Date(2026, 9, 6, 1, 30, 0, 0, time.FixedZone("CEST", 2*3600))
 	if got := PeriodDay.Start(at); !got.Equal(time.Date(2026, 9, 5, 0, 0, 0, 0, time.UTC)) {
 		t.Errorf("day start = %v, want 2026-09-05T00:00:00Z (01:30 CEST is still the 5th in UTC)", got)
@@ -217,9 +214,8 @@ func TestModelCost(t *testing.T) {
 			0,
 		},
 
-		// A long prompt is charged the dearer prices for all of it, cached
-		// part and answer included. At the threshold: 50,000 at 0.10, 50,000
-		// cached at 0.01, a million out at 0.50.
+		// A long prompt pays the higher prices for all of it. At the
+		// threshold: 50,000 at 0.10, 50,000 cached at 0.01, a million out at 0.50.
 		{
 			"a long prompt at the threshold", long,
 			Tokens{Input: 100_000, CachedInput: 50_000, Output: 1_000_000},
@@ -233,16 +229,14 @@ func TestModelCost(t *testing.T) {
 			25_000 + 2_500 + 2_500_000,
 		},
 
-		// Cached tokens are charged at their own rate, and are part of the
-		// prompt, not added to it. A million-token prompt, 800,000 of it
-		// cached: 200,000 at 2.50 and 800,000 at 0.25 per million.
+		// Cached tokens are part of the prompt, at their own rate: 200,000 at
+		// 2.50 and 800,000 at 0.25 per million.
 		{
 			"cached input at its own rate", cached,
 			Tokens{Input: 1_000_000, CachedInput: 800_000},
 			500_000 + 200_000,
 		},
-		// The same prompt priced as if none of it had been cached. If the two
-		// ever come out equal, the discount is not applied.
+		// If this equals the case above, the discount is not applied.
 		{"the same prompt uncached", cached, Tokens{Input: 1_000_000}, 2_500_000},
 		// Zero means "not stated", not "free".
 		{
@@ -250,8 +244,8 @@ func TestModelCost(t *testing.T) {
 			Tokens{Input: 1_000_000, CachedInput: 800_000},
 			2_500_000,
 		},
-		// The counts come off somebody else's response body, so an impossible
-		// one has to price as something rather than as a refund.
+		// Counts come from a provider's response, so an impossible one must
+		// not price as a refund.
 		{
 			"more cached than the prompt",
 			Model{InputMicrosPerMTok: 2_500_000, CachedInputMicrosPerMTok: 250_000},
@@ -265,16 +259,14 @@ func TestModelCost(t *testing.T) {
 			2_500_000,
 		},
 
-		// A write to the cache costs more than the input price, and is part
-		// of the prompt, as a read is. 100,000 at 2.00, 600,000 cached at 0.20,
-		// 300,000 written at 2.50.
+		// A cache write is part of the prompt, as a read is. 100,000 at 2.00,
+		// 600,000 cached at 0.20, 300,000 written at 2.50.
 		{
 			"a cache write at its own rate", writes,
 			Tokens{Input: 1_000_000, CachedInput: 600_000, CacheWrite: 300_000},
 			200_000 + 120_000 + 750_000,
 		},
-		// Unstated, a write costs the input price, as on a provider that
-		// charges nothing more for one.
+		// Unstated, a write costs the input price.
 		{
 			"a cache write with no write rate", unstatedWrites,
 			Tokens{Input: 1_000_000, CacheWrite: 1_000_000},
@@ -286,8 +278,8 @@ func TestModelCost(t *testing.T) {
 				AboveTokens: 100_000, InputMicrosPerMTok: 500_000, CacheWriteMicrosPerMTok: 625_000,
 			},
 		}, Tokens{Input: 200_000, CacheWrite: 200_000}, 125_000},
-		// Reads and writes together cannot be more than the prompt: the
-		// 200,000 left after the reads are charged at the write rate.
+		// Reads and writes cannot exceed the prompt: the 200,000 left after
+		// the reads pay the write rate.
 		{"more reads and writes than the prompt", Model{
 			InputMicrosPerMTok: 1_000_000, CachedInputMicrosPerMTok: 100_000,
 			CacheWriteMicrosPerMTok: 1_250_000,
@@ -351,8 +343,7 @@ func TestValidAlias(t *testing.T) {
 			t.Errorf("ValidAlias(%q) = false, want true", alias)
 		}
 	}
-	// `keera connect` prints aliases into JSON and shell without escaping, so
-	// these shapes would break out of what it prints.
+	// `keera connect` prints aliases into JSON and shell without escaping.
 	invalid := []string{
 		"", "Keera-Code", "keera code", "keera_code", "-keera", "keera-",
 		"keera/code", "modèle", strings.Repeat("a", 65),
@@ -385,8 +376,7 @@ func TestValidModelAlias(t *testing.T) {
 }
 
 func TestAFilterWithNoModeWrittenDownIsARewriteFilter(t *testing.T) {
-	// Filters stored before there were modes all rewrote, so a row with no
-	// mode must not turn into one that only ever says no.
+	// Filters stored before there were modes all rewrote.
 	if !FilterMode("").Rewrites() {
 		t.Error("a filter with no mode written down does not rewrite")
 	}
@@ -405,8 +395,7 @@ func TestAFilterWithNoModeWrittenDownIsARewriteFilter(t *testing.T) {
 }
 
 func TestARouterWithNoFallbackRefusesWhatItCannotPlace(t *testing.T) {
-	// The two are one field rather than two, so that "where does a request go
-	// when the decision cannot be made" has exactly one answer per router.
+	// One field, so a failed decision has exactly one answer.
 	cheap := Route{Destinations: []string{"keera-small", "keera-large"}, Fallback: "keera-small"}
 	if cheap.Refuses() {
 		t.Error("a router with a fallback refuses; it has somewhere to send the request")
@@ -441,7 +430,7 @@ func TestBudgetRefusalNamesTheScopeAndTheReset(t *testing.T) {
 			t.Errorf("the message does not say %q: %s", want, msg)
 		}
 	}
-	// The developer cannot act on the id; it is noise in an editor's toast.
+	// The developer cannot act on the id.
 	if strings.Contains(msg, "project_9f2") {
 		t.Errorf("the message quotes an internal id: %s", msg)
 	}
@@ -467,8 +456,7 @@ func TestResolveConcatenatesSystemPrompts(t *testing.T) {
 			name:    "a project adds to the org rather than replacing it",
 			org:     &Limits{SystemPrompt: new("Answer in British English.")},
 			project: &Limits{SystemPrompt: new("Never suggest a new dependency.")},
-			// The department administrator cannot drop the organisation's
-			// instruction.
+			// A project cannot drop the organisation's instruction.
 			want: "Answer in British English.\n\nNever suggest a new dependency.",
 		},
 		{
@@ -501,8 +489,7 @@ func TestResolveConcatenatesSystemPrompts(t *testing.T) {
 	}
 }
 
-// A guardrail set on any one field is a guardrail, including the ones added
-// after IsZero was written.
+// Any one field set is a guardrail, including fields added later.
 func TestLimitsIsZeroCountsEveryField(t *testing.T) {
 	if !(Limits{}).IsZero() {
 		t.Error("the empty guardrail is not zero")

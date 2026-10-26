@@ -88,8 +88,7 @@ func TestCanManageKeyForIsSelfOnlyForAMember(t *testing.T) {
 	}{
 		{"member rotates their own", member, "org_a", "user_1", true},
 		{"member cannot rotate a colleague's", member, "org_a", "user_2", false},
-		// Attributed to nobody is what an administrator issues for a shared
-		// pipeline. It is not the member's.
+		// A key of nobody's, such as a pipeline's, is not the member's.
 		{"member cannot rotate an unattributed key", member, "org_a", "", false},
 		{"member cannot rotate in another organisation", member, "org_b", "user_1", false},
 		{"admin rotates anybody's in their own", admin, "org_a", "user_1", true},
@@ -106,9 +105,7 @@ func TestCanManageKeyForIsSelfOnlyForAMember(t *testing.T) {
 	}
 }
 
-// A member whose session carries no user row has no keys of their own. That
-// must not collapse into "the keys attributed to nobody", which are an
-// administrator's.
+// A member with no user row must not get the keys attributed to nobody.
 func TestCanManageKeyForNeedsAUser(t *testing.T) {
 	orphan := &Principal{Via: MethodSession, Role: RoleMember, OrgID: "org_a"}
 	if orphan.CanManageKeyFor("org_a", "") {
@@ -117,8 +114,7 @@ func TestCanManageKeyForNeedsAUser(t *testing.T) {
 }
 
 func TestEmptyOrgIDNeverMatches(t *testing.T) {
-	// A row with no organisation must not be readable by everyone whose own
-	// organisation is also unset.
+	// A row with no organisation must not match a principal with none.
 	orphan := &Principal{Via: MethodSession, Role: RoleAdmin}
 	if orphan.CanReadOrg("") || orphan.CanAdminOrg("") {
 		t.Error("an empty organisation id matched an empty principal organisation")
@@ -172,8 +168,7 @@ func TestRoleForPrefersTheDirectory(t *testing.T) {
 }
 
 func TestRoleForIgnoresEmptyConfiguredGroups(t *testing.T) {
-	// A blank entry from splitting an empty environment variable must not match
-	// every group, which would make everybody an operator.
+	// A blank entry from an empty variable must not make everybody an operator.
 	m := RoleMapping{OperatorGroups: []string{"", "   "}, Default: RoleMember}
 	if got := m.RoleFor("x@example.ch", []string{"", "engineering"}); got != RoleMember {
 		t.Errorf("RoleFor = %q, want member", got)

@@ -11,15 +11,10 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// parseFilterReply reads a rewrite filter's answer: the segments rewritten, or
-// a refusal.
-//
-// It is lenient about what surrounds the array (a code fence, some prose) and
-// strict about the array: the wrong number of segments means part of the
-// request was dropped or merged, and forwarding that would lose it.
-//
-// sent is what the filter was given. It tells a real refusal apart from a
-// request about a refusal that was echoed back.
+// parseFilterReply reads a rewrite filter's answer: the rewritten segments, or
+// a refusal. It is lenient about what surrounds the array, such as a code
+// fence, but strict about the segment count, since a wrong count means part of
+// the request was lost. sent tells a real refusal from an echoed one.
 func parseFilterReply(raw []byte, sent []string) ([]string, error) {
 	want := len(sent)
 	text, err := completionText(raw)
@@ -27,14 +22,12 @@ func parseFilterReply(raw []byte, sent []string) ([]string, error) {
 		return nil, err
 	}
 
-	// A refusal on its own line, as the protocol asks. A single segment echoed
-	// back unchanged is a filter that ignored the format, not a verdict, so it
-	// falls through to the error it is.
+	// A single segment echoed back unchanged is not a verdict: the filter
+	// ignored the format.
 	if reason, ok := refusalReason(text); ok && (want != 1 || text != sent[0]) {
 		return nil, &filterRefusedError{reason: reason}
 	}
 
-	// Read from the first bracket to the last, past any fence or prose.
 	start, end := strings.IndexByte(text, '['), strings.LastIndexByte(text, ']')
 	if start < 0 || end < start {
 		return nil, errors.New("it answered with prose rather than a JSON array; " +
@@ -55,8 +48,7 @@ func parseFilterReply(raw []byte, sent []string) ([]string, error) {
 	return out, nil
 }
 
-// completionText reads the one message a filter's model answered with. Both
-// modes read the same envelope; only what is inside it differs.
+// completionText reads the message a filter's model answered with.
 func completionText(raw []byte) (string, error) {
 	var envelope struct {
 		Choices []struct {
@@ -78,17 +70,13 @@ func completionText(raw []byte) (string, error) {
 	return text, nil
 }
 
-// parseGateReply reads a gate's verdict, and how sure of it the model was. A
-// nil error is a request that may go.
+// parseGateReply reads a gate's verdict and how sure the model was. A nil
+// error means the request may go.
 //
-// The written word decides whenever it is one of the two answers, since that
-// is what an administrator checked before going live. The first token's
-// distribution is used only when the text says neither, such as a verdict in
-// bold or after a sentence. At temperature 0 that token is what the model
-// would have written had it kept to the format. See choice.go.
-//
-// Anything neither reading can place is an error, so a gate only lets a
-// request through by clearly saying so.
+// The written word decides when it is one of the two answers, since that is
+// what an administrator checked. The first token's distribution is used only
+// when the text says neither. Anything else is an error, so a gate only allows
+// a request by clearly saying so.
 func parseGateReply(raw []byte) (float64, error) {
 	allow, share, read := readVerdict(raw)
 
@@ -119,8 +107,7 @@ func parseGateReply(raw []byte) (float64, error) {
 		if allow {
 			return share, nil
 		}
-		// It refused and explained instead of writing the word, so the
-		// explanation becomes the reason, bounded like any other.
+		// It explained instead of writing the word, so that is the reason.
 		reason := sanitizeReason(text)
 		if reason == "" {
 			reason = gateUnwrittenReason
@@ -132,23 +119,18 @@ func parseGateReply(raw []byte) (float64, error) {
 		"than a verdict")
 }
 
-// gateUnwrittenReason stands in when a gate refused without a sentence. The
-// sender is owed some reason.
+// gateUnwrittenReason stands in when a gate refused without a sentence.
 const gateUnwrittenReason = "the guardrail refused this request without saying what it found"
 
 // gateRefusalTokens and gateAllowTokens are the words a gate's answer may
-// begin with: the one the protocol asks for, and a variant small models often
-// write.
-//
-// Gates are read more leniently than rewrite filters, whose answers are the
-// sender's own prose: a loose match there could drop a request because of how
-// a sentence began. An unmatched gate answer is refused anyway.
+// begin with, including variants small models often write. Rewrite filters
+// are read more strictly, since their answers are the sender's own prose.
 var (
 	gateRefusalTokens = []string{filterRefusalToken, "REFUSE"}
 	gateAllowTokens   = []string{"ALLOW", "ALLOWED"}
 )
 
-// anyVerdict reads the first of these words that the answer begins with.
+// anyVerdict reads the first of words that s begins with.
 func anyVerdict(s string, words []string) (string, bool) {
 	for _, word := range words {
 		if reason, ok := verdictReason(s, word); ok {
@@ -158,18 +140,15 @@ func anyVerdict(s string, words []string) (string, bool) {
 	return "", false
 }
 
-// refusalReason reads a refusal out of one line of a filter's answer, and
-// reports whether that is what the line is.
-//
-// The word must stand alone: "REFUSEDXYZ" or prose that mentions it later is
-// not a verdict. Dropping a request over a coincidence of spelling is the
-// mistake to avoid.
+// refusalReason reads a refusal from one line of a filter's answer. The word
+// must stand alone at the start: "REFUSEDXYZ" or a later mention is not a
+// verdict.
 func refusalReason(s string) (string, bool) {
 	return verdictReason(s, filterRefusalToken)
 }
 
-// verdictReason reads a one-word answer, and the reason a model may have put
-// after it, and reports whether the word is the one being looked for.
+// verdictReason reports whether s starts with word, and returns any reason
+// after it.
 func verdictReason(s, word string) (string, bool) {
 	// Emphasis or a fence around the word is still the word.
 	s = strings.Trim(s, "`*#>_ \t\n\r")
@@ -180,8 +159,7 @@ func verdictReason(s, word string) (string, bool) {
 	if rest == "" {
 		return "", true
 	}
-	// The reason follows a separator: the colon the protocol asks for, or one
-	// a model writes instead.
+	// The protocol asks for a colon, but models use others too.
 	for _, sep := range []string{":", ".", "—", "-", " ", "\t", "\n", "\r"} {
 		if after, ok := strings.CutPrefix(rest, sep); ok {
 			return sanitizeReason(after), true
@@ -191,11 +169,8 @@ func verdictReason(s, word string) (string, bool) {
 }
 
 // unanimousRefusal reads a refusal the filter put in every slot of the array
-// instead of on its own line, a mistake the protocol invites. Forwarding it
-// would replace the whole request with the word REFUSED.
-//
-// A segment returned exactly as sent is an echo, not a verdict: a user asking
-// why their connection was REFUSED is not asking to be refused.
+// instead of on its own line. A segment returned as sent is an echo, not a
+// verdict: a user asking why their connection was REFUSED is not refused.
 func unanimousRefusal(out, sent []string) (string, bool) {
 	if len(out) == 0 {
 		return "", false
@@ -216,11 +191,8 @@ func unanimousRefusal(out, sent []string) (string, bool) {
 	return reason, true
 }
 
-// sanitizeReason reduces a filter's sentence to one bounded line of text.
-//
-// The sentence is a model's prose and ends up in an error body, a usage row
-// and a log line. So whitespace runs become one space, control characters are
-// dropped, and the length is capped on a rune boundary.
+// sanitizeReason reduces a model's sentence to one bounded line, since it ends
+// up in an error body, a usage row and a log line.
 func sanitizeReason(s string) string {
 	var (
 		b         strings.Builder
@@ -252,7 +224,7 @@ func sanitizeReason(s string) string {
 	if !truncated {
 		return b.String()
 	}
-	// Room is made for the ellipsis, so the cap holds for what is shown.
+	// Make room for the ellipsis, so the cap holds.
 	out := b.String()
 	for len(out)+len(ellipsis) > policy.MaxRefusalReasonBytes {
 		_, size := utf8.DecodeLastRuneInString(out)
@@ -263,7 +235,7 @@ func sanitizeReason(s string) string {
 
 const ellipsis = "…"
 
-// shorten cuts s to n bytes, between characters, and marks the cut.
+// shorten cuts s to n bytes, between characters, and adds an ellipsis.
 func shorten(s string, n int) string {
 	if len(s) <= n {
 		return s

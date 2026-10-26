@@ -17,20 +17,11 @@ import (
 	"github.com/bespinian/keera-gateway/internal/httpx"
 )
 
-// Signing in at a terminal.
-//
-// KEERA_OPERATOR_KEY is shared, never expires, can do everything, and the
-// audit log cannot say who used it. `keera login` instead signs a person in
-// through the identity provider or a passkey and stores a credential of their
-// own, with their role and an expiry. The operator key stays for automation
-// and for setting up a new deployment.
-//
-// The flow is RFC 8252's loopback redirect; cliauth.go on the gateway is the
-// other half.
+// `keera login` gives a person a credential of their own, with their role and
+// an expiry, unlike the shared KEERA_OPERATOR_KEY. The flow is RFC 8252's
+// loopback redirect; cliauth.go on the gateway is the other half.
 
-// loginCmd signs this machine in to a gateway.
 func loginCmd(ctx context.Context, args []string) error {
-	// Run has already taken the global --url, so the client uses it.
 	r := newCmdRun("login", args)
 	fs := r.fs
 	provider := fs.String("provider", "",
@@ -91,7 +82,7 @@ func loginCmd(ctx context.Context, args []string) error {
 		return err
 	}
 
-	// Store the token before anything else can fail.
+	// Stored before anything else can fail.
 	cred := signIn{Token: token.Token, ExpiresAt: token.ExpiresAt}
 	if err := saveSignIn(c.base, cred); err != nil {
 		return fmt.Errorf("storing the sign-in: %w", err)
@@ -113,16 +104,15 @@ func loginCmd(ctx context.Context, args []string) error {
 	fmt.Printf("This sign-in expires on %s. 'keera logout' ends it sooner.\n",
 		token.ExpiresAt.Local().Format("2 January 2006"))
 	if env("KEERA_OPERATOR_KEY") != "" {
-		// Otherwise nothing they run next uses the sign-in, and nothing says so.
+		// Otherwise nothing they run next uses the sign-in.
 		fmt.Fprintln(os.Stderr, styleErr.warn("\nNote: KEERA_OPERATOR_KEY is set in this "+
 			"shell, and it wins. Unset it to run commands as yourself."))
 	}
 	return nil
 }
 
-// backToOrg puts a new sign-in in the organisation this machine was last in,
-// as the browser does, and remembers where it now is. An organisation the
-// person is no longer in is forgotten.
+// backToOrg returns a new sign-in to the organisation this machine was last
+// in, as the browser does.
 func backToOrg(ctx context.Context, c *client, me identity) (identity, error) {
 	if me.Unrestricted {
 		// An operator's choice is only kept here, and still stands.
@@ -139,8 +129,6 @@ func backToOrg(ctx context.Context, c *client, me identity) (identity, error) {
 	return me, saveOrg(c.base, me.OrgID)
 }
 
-// logoutCmd ends this machine's sign-in, and with --all every one this person
-// holds.
 func logoutCmd(ctx context.Context, args []string) error {
 	r := newCmdRun("logout", args)
 	fs := r.fs
@@ -155,7 +143,6 @@ func logoutCmd(ctx context.Context, args []string) error {
 		fmt.Printf("Not signed in to %s.\n", c.base)
 		return nil
 	case c.signedIn.Token == "":
-		// The operator key is not a sign-in, and cannot be ended from here.
 		return fmt.Errorf("not signed in to %s: this shell is using "+
 			"KEERA_OPERATOR_KEY, which is the deployment's own credential. "+
 			"Unset it to stop using it", c.base)
@@ -165,8 +152,7 @@ func logoutCmd(ctx context.Context, args []string) error {
 	if *all {
 		path += "?all=1"
 	}
-	// Clear the local file whatever the gateway says, so a token it already
-	// forgot does not stay behind.
+	// The local file is cleared whatever the gateway says.
 	err := c.do(ctx, "POST", path, nil, nil)
 	if forget := forgetSignIn(c.base); forget != nil {
 		return forget
@@ -184,7 +170,6 @@ func logoutCmd(ctx context.Context, args []string) error {
 	return nil
 }
 
-// whoamiCmd says who the credential in use belongs to, and which gateway.
 func whoamiCmd(ctx context.Context, args []string) error {
 	r := newCmdRun("whoami", args)
 	if done, err := r.parse(); done {
@@ -218,25 +203,20 @@ func whoamiCmd(ctx context.Context, args []string) error {
 	return nil
 }
 
-// identity is what /v1/me says, the same answer the panel gets.
 type identity struct {
 	UserID  string `json:"user_id"`
 	Email   string `json:"email"`
 	Role    string `json:"role"`
 	OrgID   string `json:"org_id"`
 	OrgName string `json:"org_name"`
-	// Unrestricted is true of an operator, who sees every organisation.
+	// Unrestricted is true of an operator.
 	Unrestricted bool `json:"unrestricted"`
-	// Orgs are the organisations this person can switch to, when there are
-	// several.
-	Orgs []membership `json:"orgs,omitempty"`
-	// Sandboxes is whether the deployment lends out sandboxes.
-	Sandboxes bool `json:"sandboxes"`
-	// ClaudeSubscriptions is whether it takes Claude subscriptions.
-	ClaudeSubscriptions bool `json:"claude_subscriptions"`
+	// Orgs is only set when there are several.
+	Orgs                []membership `json:"orgs,omitempty"`
+	Sandboxes           bool         `json:"sandboxes"`
+	ClaudeSubscriptions bool         `json:"claude_subscriptions"`
 }
 
-// membership is one organisation a person is in, or was invited to.
 type membership struct {
 	ID      string `json:"org_id"`
 	Name    string `json:"org_name"`
@@ -250,11 +230,10 @@ func whoami(ctx context.Context, c *client) (identity, error) {
 	return me, err
 }
 
-// describe is one line naming the person, their role and their organisation.
 func describe(me identity) string {
 	who := me.Email
 	if who == "" {
-		// The operator key is nobody, as the audit log says too.
+		// The operator key belongs to nobody.
 		who = "the operator key"
 	}
 	line := who
@@ -270,9 +249,8 @@ func describe(me identity) string {
 	return line
 }
 
-// chooseProvider settles which identity provider to sign in through before a
-// browser is opened. With several and none named, it refuses rather than
-// guess: the wrong one can put an account in the wrong tenant.
+// chooseProvider refuses to guess between several providers: the wrong one can
+// put an account in the wrong tenant.
 func chooseProvider(ctx context.Context, c *client, named string) (string, error) {
 	var cfg struct {
 		SSO       bool `json:"sso"`
@@ -296,8 +274,7 @@ func chooseProvider(ctx context.Context, c *client, named string) (string, error
 			names = append(names, p.Name)
 		}
 	}
-	// A passkey sign-in is named like a provider, and runs in the browser
-	// the same way.
+	// A passkey sign-in is named and run like a provider.
 	if cfg.Passkeys {
 		names = append(names, authn.PasskeyProvider)
 	}
@@ -317,8 +294,6 @@ func chooseProvider(ctx context.Context, c *client, named string) (string, error
 		named, c.base, strings.Join(names, ", "))
 }
 
-// waitForCallback serves the loopback listener until the browser arrives with
-// a code, and shows the person a page they can close.
 func waitForCallback(ctx context.Context, ln net.Listener, state string) (string, error) {
 	type result struct {
 		code string
@@ -370,8 +345,7 @@ func waitForCallback(ctx context.Context, ln net.Listener, state string) (string
 		_ = srv.Shutdown(shutdown)
 	}()
 
-	// Wait as long as the gateway allows the whole sign-in, not just the code:
-	// the person may still be at a password or consent screen.
+	// The person may still be at a password or consent screen.
 	timeout := time.NewTimer(authn.FlowTTL)
 	defer timeout.Stop()
 
@@ -386,11 +360,9 @@ func waitForCallback(ctx context.Context, ln net.Listener, state string) (string
 	}
 }
 
-// finishInBrowser is the one-sentence page the person is left looking at.
-//
-// It is always dark, in the panel's dark colours, to avoid a flash of white
-// during a terminal session. The colours are inlined because the panel's
-// stylesheet lives on the gateway, not on this loopback port.
+// finishInBrowser is always dark, to avoid a flash of white during a terminal
+// session. The colours are inlined because the panel's stylesheet lives on
+// the gateway.
 func finishInBrowser(w http.ResponseWriter, status int, message string) {
 	// The panel's --bad for anything that went wrong, its --text otherwise.
 	colour := "#ececef"
@@ -424,12 +396,10 @@ func finishInBrowser(w http.ResponseWriter, status int, message string) {
 <body><main><h1>Keera</h1><p>%s</p></main></body></html>`, colour, message)
 }
 
-// openInBrowser sends somebody to the sign-in. It is a variable so a test can
-// stand in for the browser and drive a whole sign-in.
+// openInBrowser is a variable so a test can stand in for the browser.
 var openInBrowser = openBrowser
 
-// openBrowser asks the desktop to open a URL, and says nothing when it
-// cannot: the URL has already been printed.
+// openBrowser says nothing when it fails: the URL has already been printed.
 func openBrowser(target string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
@@ -447,8 +417,7 @@ func openBrowser(target string) {
 	go func() { _ = cmd.Wait() }()
 }
 
-// machineLabel names this machine in the sign-in, so an audit entry says
-// which terminal it was. It decides nothing.
+// machineLabel only tells an audit entry which terminal it was.
 func machineLabel() string {
 	host, err := os.Hostname()
 	if err != nil || host == "" {

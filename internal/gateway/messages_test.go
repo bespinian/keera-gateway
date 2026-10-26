@@ -7,8 +7,7 @@ import (
 	"testing"
 )
 
-// decodeAs translates a request with sh and unmarshals the chat completion
-// request it became.
+// decodeAs translates a request with sh and unmarshals the result.
 func decodeAs(t *testing.T, sh shape, in string) map[string]any {
 	t.Helper()
 	raw, err := decodeRaw(sh, in)
@@ -22,7 +21,6 @@ func decodeAs(t *testing.T, sh shape, in string) map[string]any {
 	return out
 }
 
-// decodeRaw is a shape's translation of in, written out.
 func decodeRaw(sh shape, in string) ([]byte, error) {
 	b, _, err := sh.decodeBody([]byte(in))
 	if err != nil {
@@ -31,7 +29,6 @@ func decodeRaw(sh shape, in string) ([]byte, error) {
 	return b.encode(), nil
 }
 
-// messagesOf pulls the translated messages array out as a list of maps.
 func messagesOf(t *testing.T, req map[string]any) []map[string]any {
 	t.Helper()
 	arr, ok := req["messages"].([]any)
@@ -50,8 +47,7 @@ func messagesOf(t *testing.T, req map[string]any) []map[string]any {
 }
 
 func TestDecodeMovesTheSystemPromptIntoTheConversation(t *testing.T) {
-	// A system prompt sent as blocks, as a client marking a prompt cache does,
-	// must reach the model as one first message.
+	// A system prompt sent as blocks reaches the model as one first message.
 	req := decodeAs(t, anthropicShape{}, `{
 		"model": "keera-code",
 		"max_tokens": 100,
@@ -75,9 +71,7 @@ func TestDecodeMovesTheSystemPromptIntoTheConversation(t *testing.T) {
 }
 
 func TestDecodeKeepsASystemTurnInItsPlace(t *testing.T) {
-	// Claude Code sends system turns between the others (the
-	// mid-conversation-system beta). Refusing them refuses every request it
-	// makes.
+	// Claude Code sends system turns mid-conversation (a beta).
 	req := decodeAs(t, anthropicShape{}, `{
 		"model": "keera-code",
 		"max_tokens": 100,
@@ -102,8 +96,7 @@ func TestDecodeKeepsASystemTurnInItsPlace(t *testing.T) {
 }
 
 func TestDecodeKeepsTheGuardrailAbleToGoFirst(t *testing.T) {
-	// serve prepends the guardrail's system prompt with prependSystem, which
-	// needs a messages array whatever the client sent.
+	// prependSystem needs a messages array whatever the client sent.
 	req := decodeAs(t, anthropicShape{}, `{"model":"keera-code","max_tokens":1,
 		"messages":[{"role":"user","content":"hi"}]}`)
 	raw, err := json.Marshal(req)
@@ -123,7 +116,6 @@ func TestDecodeKeepsTheGuardrailAbleToGoFirst(t *testing.T) {
 	}
 }
 
-// decodeThrough unmarshals an already-translated body.
 func decodeThrough(t *testing.T, raw []byte) map[string]any {
 	t.Helper()
 	var out map[string]any
@@ -134,9 +126,7 @@ func decodeThrough(t *testing.T, raw []byte) map[string]any {
 }
 
 func TestDecodeTurnsToolUseIntoToolCalls(t *testing.T) {
-	// A tool call is an assistant content block in one API and a tool_calls
-	// entry in the other, and the arguments change from a document to a string
-	// carrying that document.
+	// A tool_use block becomes a tool_calls entry, with arguments as a string.
 	req := decodeAs(t, anthropicShape{}, `{
 		"model": "keera-code",
 		"max_tokens": 100,
@@ -183,9 +173,8 @@ func TestDecodeTurnsToolUseIntoToolCalls(t *testing.T) {
 }
 
 func TestDecodePutsToolResultsBeforeTheUserText(t *testing.T) {
-	// A Messages turn can carry both a tool result and something the person
-	// typed. The tool message has to come first: it answers the assistant turn
-	// before it, and a user message in between would break that pairing.
+	// The tool message comes before the user's text, so it follows the
+	// assistant turn it answers.
 	req := decodeAs(t, anthropicShape{}, `{
 		"model": "keera-code",
 		"max_tokens": 100,
@@ -208,9 +197,8 @@ func TestDecodePutsToolResultsBeforeTheUserText(t *testing.T) {
 }
 
 func TestDecodeMovesAToolResultImageToTheUserTurn(t *testing.T) {
-	// A tool that returned a screenshot has nowhere to put it in the OpenAI
-	// shape: the tool role carries text only. Dropping it would silently lose
-	// the thing the tool was called for.
+	// The OpenAI tool role carries text only, so a screenshot moves to the
+	// user turn.
 	req := decodeAs(t, anthropicShape{}, `{
 		"model": "keera-code",
 		"max_tokens": 100,
@@ -244,9 +232,8 @@ func TestDecodeMovesAToolResultImageToTheUserTurn(t *testing.T) {
 }
 
 func TestDecodeIgnoresFieldsWithNoCounterpart(t *testing.T) {
-	// A client sends capabilities the gateway has never heard of as new
-	// top-level fields. Rejecting them would break the client on the release
-	// that introduced them, so they are dropped and the request still runs.
+	// Unknown top-level fields are dropped, so a new client release still
+	// works.
 	req := decodeAs(t, anthropicShape{}, `{
 		"model": "keera-code",
 		"max_tokens": 100,
@@ -329,8 +316,7 @@ func TestDecodeTranslatesToolsAndToolChoice(t *testing.T) {
 }
 
 func TestDecodeDropsAnthropicServerTools(t *testing.T) {
-	// A server tool runs on Anthropic's servers. Declared to another model as a
-	// function with no schema, it would be a tool nothing can run.
+	// A server tool runs on Anthropic's servers, so nothing else can run it.
 	req := decodeAs(t, anthropicShape{}, `{
 		"model": "keera-code",
 		"max_tokens": 100,
@@ -415,8 +401,7 @@ func TestEncodeBuildsAMessagesResponse(t *testing.T) {
 	if !strings.HasPrefix(out.ID, "msg_") {
 		t.Errorf("id = %q, want a msg_ identifier", out.ID)
 	}
-	// The alias is the API contract; naming the backend model here would hand
-	// the client the one detail the alias exists to keep swappable.
+	// The alias, not the backend model, so the backend stays swappable.
 	if out.Model != "keera-code" {
 		t.Errorf("model = %q, want the alias, not the served name", out.Model)
 	}
@@ -469,8 +454,7 @@ func TestEncodeBuildsToolUseBlocks(t *testing.T) {
 }
 
 func TestEncodeSurvivesUnparseableToolArguments(t *testing.T) {
-	// Models do emit invalid JSON. An empty object beats a response the client
-	// cannot parse.
+	// Invalid JSON becomes an empty object.
 	body, _ := anthropicShape{}.encode([]byte(`{
 		"choices": [{"message":{"tool_calls":[{"id":"call_1","type":"function",
 			"function":{"name":"read","arguments":"{\"path\": "}}]},
@@ -496,8 +480,7 @@ func TestEncodeMapsStopReasons(t *testing.T) {
 }
 
 func TestEncodeTranslatesAnUpstreamError(t *testing.T) {
-	// The wording is passed through unchanged: some clients recover from a
-	// refusal by matching on it.
+	// The wording is unchanged, since some clients match on it.
 	body, status := anthropicShape{}.encode(
 		[]byte(`{"error":{"message":"temperature must be at most 2",`+
 			`"type":"invalid_request_error","code":"invalid_value"}}`),
@@ -525,9 +508,7 @@ func TestEncodeTranslatesAnUpstreamError(t *testing.T) {
 }
 
 func TestEncodeWordsAContextOverflowAsTheMessagesAPIDoes(t *testing.T) {
-	// Claude Code compacts on "prompt is too long" and lowers max_tokens on
-	// the other sentence. A backend's own words for the same thing stop the
-	// session instead.
+	// Claude Code compacts or lowers max_tokens only on Anthropic's wording.
 	for _, tc := range []struct{ name, upstream, want string }{
 		{
 			"vllm, prompt alone",
@@ -586,8 +567,8 @@ func TestEncodeWordsAContextOverflowAsTheMessagesAPIDoes(t *testing.T) {
 }
 
 func TestEncodeReportsAnUnreadableSuccessAsAFailure(t *testing.T) {
-	// A 200 that is not a completion, such as an ingress error page, must not
-	// reach the client as a success.
+	// A 200 that is not a completion, such as an ingress error page, is not a
+	// success.
 	body, status := anthropicShape{}.encode([]byte(`<html>gateway timeout</html>`),
 		"keera-code", 200)
 	if status != 502 {
@@ -599,8 +580,7 @@ func TestEncodeReportsAnUnreadableSuccessAsAFailure(t *testing.T) {
 }
 
 func TestErrorTypesFollowTheStatus(t *testing.T) {
-	// A client decides whether to retry, re-authenticate or stop on this
-	// value, so each status has to arrive under the name that API gives it.
+	// Clients decide whether to retry on this value.
 	for status, want := range map[int]string{
 		400: "invalid_request_error", 401: "authentication_error",
 		402: "billing_error", 403: "permission_error", 404: "not_found_error",
@@ -614,8 +594,7 @@ func TestErrorTypesFollowTheStatus(t *testing.T) {
 }
 
 func TestSearchResultsAndTextDocumentsReachTheModelAsText(t *testing.T) {
-	// A search_result's source is a string where an image's is an object. It
-	// used to fail the whole content array, and so the request.
+	// A search_result's source is a string, unlike an image's.
 	in := `{"model":"m","messages":[{"role":"user","content":[` +
 		`{"type":"search_result","source":"https://a.ch","title":"A","content":[{"type":"text","text":"found"}]},` +
 		`{"type":"document","title":"Notes","source":{"type":"text","media_type":"text/plain","data":"plain doc"}},` +

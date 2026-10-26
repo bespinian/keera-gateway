@@ -11,8 +11,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// stepNames is the steps of one request in the order they were recorded. The
-// chart is read as a sequence, so the order is what most of these tests check.
+// stepNames is the steps of one request in recorded order, which most of
+// these tests check.
 func stepNames(spans []store.Span) []string {
 	out := make([]string, 0, len(spans))
 	for _, sp := range spans {
@@ -58,8 +58,8 @@ func TestServedRequestRecordsItsSteps(t *testing.T) {
 	}
 }
 
-// The chart breaks down the latency beside it, so the steps start where it
-// does, run in order, and end inside it.
+// The steps break down the latency: they start with it, run in order, and
+// end inside it.
 func TestStepsAddUpToTheRequestTheyAreOn(t *testing.T) {
 	h := newHarness(t, jsonBackend(`{"choices":[{"message":{"content":"hi"}}],
 		"usage":{"prompt_tokens":10,"completion_tokens":5}}`), nil, nil)
@@ -88,8 +88,7 @@ func TestStepsAddUpToTheRequestTheyAreOn(t *testing.T) {
 	}
 }
 
-// A refused request is the one a chart is most often opened for, so the step it
-// was stopped in is recorded rather than dropped, and it says what stopped it.
+// A refused request keeps the step it stopped in, with what stopped it.
 func TestRefusalRecordsTheStepItWasStoppedIn(t *testing.T) {
 	h := newHarness(t, jsonBackend(`{}`), nil, nil)
 
@@ -110,8 +109,8 @@ func TestRefusalRecordsTheStepItWasStoppedIn(t *testing.T) {
 	}
 }
 
-// A streamed answer is two steps: waiting is the model deciding what to say,
-// and streaming is it saying it.
+// A streamed answer is two steps: waiting for the first token, then
+// streaming.
 func TestStreamedAnswerIsRecordedAsWaitingAndThenStreaming(t *testing.T) {
 	h := newHarness(t, sseBackend(
 		`{"choices":[{"delta":{"content":"he"}}]}`,
@@ -123,7 +122,7 @@ func TestStreamedAnswerIsRecordedAsWaitingAndThenStreaming(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	// The request is not over, and so is not recorded, until the stream is.
+	// The request is recorded only when the stream ends.
 	if _, err := io.ReadAll(resp.Body); err != nil {
 		t.Fatal(err)
 	}
@@ -141,8 +140,8 @@ func TestStreamedAnswerIsRecordedAsWaitingAndThenStreaming(t *testing.T) {
 	}
 }
 
-// The destinations a fallback step gave up on are why such a request was slow,
-// and the row names only the model that answered.
+// Failed destinations of a fallback step are traced, since the row names only
+// the model that answered.
 func TestFallbackStepRecordsEveryDestinationItTried(t *testing.T) {
 	h := chainHarness(t, chainRoute(), map[string]int{"small-served": 503})
 
@@ -163,15 +162,14 @@ func TestFallbackStepRecordsEveryDestinationItTried(t *testing.T) {
 	if !slices.Equal(tried, want) {
 		t.Errorf("the destinations recorded were %v, want %v", tried, want)
 	}
-	// A fallback step decides nothing, so it has no span of its own: the
-	// time it cost is the failed attempt above, drawn as itself.
+	// A fallback step decides nothing, so it has no span of its own; its
+	// cost is the failed attempt above.
 	if slices.Contains(stepNames(ev.Spans), store.SpanRoute) {
 		t.Errorf("a fallback step was drawn as a decision: %v", stepNames(ev.Spans))
 	}
 }
 
-// A filter is a second model answering a second question, and on a request
-// that felt slow it is as often the answer as the model is.
+// A filter's model call is traced, since it often explains a slow request.
 func TestFilterIsRecordedAsAStepOfItsOwn(t *testing.T) {
 	h := filterHarness(t, redactor, nil)
 
@@ -189,8 +187,7 @@ func TestFilterIsRecordedAsAStepOfItsOwn(t *testing.T) {
 	if sp.Note == "" {
 		t.Error("the filter step says nothing about what the filter did")
 	}
-	// It has to sit where it ran: after the request was admitted and before
-	// anything was sent to a model.
+	// It sits where it ran: after admission, before the model.
 	order := stepNames(ev.Spans)
 	if slices.Index(order, store.SpanFilter) < slices.Index(order, store.SpanAdmit) ||
 		slices.Index(order, store.SpanFilter) > slices.Index(order, store.SpanUpstream) {
@@ -198,8 +195,7 @@ func TestFilterIsRecordedAsAStepOfItsOwn(t *testing.T) {
 	}
 }
 
-// An instruction step's own generation is time the request waited before it
-// was sent anywhere, and the bar carries where it decided to send it.
+// An instruction step's generation is traced, with where it sent the request.
 func TestRouteDecisionIsRecordedWithWhereItSent(t *testing.T) {
 	h := routeHarness(t, picks("keera-large"), autoRoute(), nil)
 
@@ -224,8 +220,7 @@ func TestRouteDecisionIsRecordedWithWhereItSent(t *testing.T) {
 	}
 }
 
-// Authentication is time the client waited whether or not the key was in cache,
-// so the clock starts before it rather than after.
+// The client waits for authentication too, so the clock starts before it.
 func TestTheClockStartsBeforeTheKeyIsResolved(t *testing.T) {
 	h := newHarness(t, jsonBackend(`{"choices":[{"message":{"content":"hi"}}]}`), nil, nil)
 	h.post(t, "/v1/chat/completions",

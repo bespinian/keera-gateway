@@ -9,27 +9,21 @@ import (
 	"strings"
 )
 
-// Hosting is which side of the customer's boundary a model is served on.
-// It is derived from the backend URL rather than stored, so a repointed
-// backend cannot make it wrong. A model's default location comes from it too:
-// see LocationFromBackends.
+// Hosting is which side of the customer's network a model is served on. It is
+// derived from the backend URL, not stored, so a repointed backend cannot make
+// it wrong.
 type Hosting string
 
 const (
-	// HostedInternal is a backend inside the deployment's own network: a
-	// service name, a private address, the loopback.
 	HostedInternal Hosting = "internal"
-	// HostedExternal is a backend reached over the public internet. Prompts
-	// sent to it leave.
 	HostedExternal Hosting = "external"
-	// HostedUnknown is a model with no backend, or a backend URL this cannot
-	// read. A screen that says what leaves must not guess.
+	// HostedUnknown is a model with no backend, or an unreadable backend URL.
+	// A screen that says what leaves must not guess.
 	HostedUnknown Hosting = "unknown"
 )
 
-// Hosting says whether this model's prompts stay inside the network. With
-// several backends, external beats unknown and unknown beats internal: the
-// answer is only as good as the weakest backend.
+// Hosting is only as good as the weakest backend: external beats unknown, and
+// unknown beats internal.
 func (m Model) Hosting() Hosting {
 	if len(m.Backends) == 0 {
 		return HostedUnknown
@@ -46,15 +40,14 @@ func (m Model) Hosting() Hosting {
 	return out
 }
 
-// HostingOf says which side of the network one URL is on.
 func HostingOf(raw string) Hosting {
 	h, _ := hostingOf(raw)
 	return h
 }
 
-// LockedMessage is what a signed-up organisation that has not paid yet is told
-// about a model, MCP server or sandbox it may not use yet. It names the
-// organisation, so a person in several knows which one to add credit to.
+// LockedMessage is what an organisation that has not paid is told about
+// something it may not use yet. It names the organisation, so a person in
+// several knows which one to add credit to.
 func LockedMessage(orgName string) string {
 	if orgName == "" {
 		orgName = "this organisation"
@@ -62,9 +55,9 @@ func LockedMessage(orgName string) string {
 	return orgName + " needs to add credit before it can use all features"
 }
 
-// LocationFromBackends is the location of a model that states none and names
-// no provider. A backend inside the network is onprem. A URL outside it does
-// not say which country the model runs in, so that is an error asking for it.
+// LocationFromBackends is the location of a model that states none. A backend
+// inside the network is onprem. An outside URL does not say which country, so
+// it is an error.
 func (m Model) LocationFromBackends() (string, error) {
 	if m.Hosting() == HostedInternal {
 		return LocationOnPrem, nil
@@ -73,9 +66,8 @@ func (m Model) LocationFromBackends() (string, error) {
 		"address does not say where it runs - state it, such as ch or usa", m.Endpoint())
 }
 
-// CheckBackend says what is wrong with where a model is sent and what it
-// asks for there, or nil when nothing is. The control API and template files
-// share it, so both refuse the same entries.
+// CheckBackend says what is wrong with a model's backends, or nil. The control
+// API and template files share it.
 func (m Model) CheckBackend() error {
 	switch {
 	case len(m.Backends) == 0:
@@ -94,8 +86,7 @@ func (m Model) CheckBackend() error {
 	return nil
 }
 
-// Endpoint is the host that decided Hosting, so the screen can show the reason
-// for its mark. The path and any credential in the URL are left out.
+// Endpoint is the host that decided Hosting, without path or credential.
 func (m Model) Endpoint() string {
 	var first string
 	for _, b := range m.Backends {
@@ -110,9 +101,8 @@ func (m Model) Endpoint() string {
 	return first
 }
 
-// internalSuffixes are domains that do not resolve outside a network:
-// Kubernetes' cluster domain (".local" covers ".cluster.local"), mDNS, and the
-// usual private ones.
+// internalSuffixes are domains that do not resolve outside a network.
+// ".local" covers Kubernetes' ".cluster.local".
 var internalSuffixes = []string{
 	".local", ".localdomain", ".localhost", ".internal", ".intranet",
 	".lan", ".home.arpa", ".svc",
@@ -133,15 +123,13 @@ func hostingOf(raw string) (Hosting, string) {
 	return nameHosting(name), u.Host
 }
 
-// parseBackend parses a backend URL that has a host.
 func parseBackend(raw string) (*url.URL, bool) {
 	raw = strings.TrimSpace(raw)
 	u, err := url.Parse(raw)
 	if err != nil {
 		return nil, false
 	}
-	// A bare host like "vllm:8000" parses with no host at all, so read it
-	// again as the host it is.
+	// A bare host like "vllm:8000" parses with no host, so read it again.
 	if u.Host == "" {
 		u, err = url.Parse("//" + raw)
 		if err != nil {
@@ -151,11 +139,9 @@ func parseBackend(raw string) (*url.URL, bool) {
 	return u, u.Host != ""
 }
 
-// InsideNetwork are the addresses inside a network, not on the public
-// internet: loopback, "this network" and the unspecified address, link-local,
-// private, carrier-grade NAT (which Tailscale uses), unique local IPv6, and
-// multicast. A backend on one is hosted inside, and the gateway's dialers keep
-// an organisation from them when it may not reach inside. See
+// InsideNetwork are the addresses not on the public internet, including
+// carrier-grade NAT, which Tailscale uses. The gateway's dialers keep an
+// organisation from them when it may not reach inside; see
 // internal/gateway/egress.go.
 var InsideNetwork = []netip.Prefix{
 	netip.MustParsePrefix("127.0.0.0/8"),
@@ -173,8 +159,8 @@ var InsideNetwork = []netip.Prefix{
 	netip.MustParsePrefix("ff00::/8"),
 }
 
-// addrHosting classifies an address. A prefix never contains an address with
-// a zone, or an IPv4 address written as IPv6, so both are taken off first.
+// addrHosting drops the zone and IPv4-in-IPv6 form first, since no prefix
+// contains them.
 func addrHosting(addr netip.Addr) Hosting {
 	addr = addr.WithZone("").Unmap()
 	for _, p := range InsideNetwork {

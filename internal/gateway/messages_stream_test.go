@@ -14,15 +14,13 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// sseEvent is one event read back off a Messages or Responses stream.
 type sseEvent struct {
 	name    string
 	payload map[string]any
 }
 
 // readEvents parses a Messages or Responses stream into its events. It is
-// strict about framing: an event with no name or unparseable data is a stream
-// a client's SDK would reject.
+// strict about framing, as a client's SDK would be.
 func readEvents(t *testing.T, raw string) []sseEvent {
 	t.Helper()
 	var out []sseEvent
@@ -45,8 +43,7 @@ func readEvents(t *testing.T, raw string) []sseEvent {
 		if ev.name == "" {
 			t.Fatalf("an event arrived with no name; an SDK cannot dispatch it:\n%s", block)
 		}
-		// The type in the payload and the name in the frame have to agree:
-		// clients dispatch on one or the other and there is no telling which.
+		// Clients dispatch on either the payload type or the frame name.
 		if got, ok := ev.payload["type"].(string); !ok || got != ev.name {
 			t.Errorf("event %q carries type %v; the two must agree", ev.name, ev.payload["type"])
 		}
@@ -63,7 +60,6 @@ func names(events []sseEvent) []string {
 	return out
 }
 
-// pipeAs runs a chat completion stream through sh's translation.
 func pipeAs(t *testing.T, sh shape, chunks ...string) []sseEvent {
 	t.Helper()
 	var buf bytes.Buffer
@@ -76,8 +72,7 @@ func pipeAs(t *testing.T, sh shape, chunks ...string) []sseEvent {
 }
 
 func TestMessagesStreamOpensAndClosesTheMessage(t *testing.T) {
-	// A client waits for message_stop before it considers the turn over, so
-	// every stream has to produce the full envelope.
+	// A client waits for message_stop, so every stream needs the full envelope.
 	events := pipeAs(t, anthropicShape{},
 		`{"choices":[{"delta":{"role":"assistant","content":""}}]}`,
 		`{"choices":[{"delta":{"content":"Hel"}}]}`,
@@ -129,9 +124,7 @@ func TestMessagesStreamOpensAndClosesTheMessage(t *testing.T) {
 }
 
 func TestMessagesStreamNeverForwardsTheUsageChunk(t *testing.T) {
-	// The gateway asks for a usage record the client never requested. Its
-	// numbers belong in message_delta: a chunk with no choices is not an event
-	// this protocol has.
+	// The usage chunk the gateway asked for belongs in message_delta.
 	events := pipeAs(t, anthropicShape{},
 		`{"choices":[{"delta":{"content":"x"}}]}`, stopChunk,
 		`{"choices":[],"usage":{"prompt_tokens":4,"completion_tokens":1,"total_tokens":5}}`,
@@ -149,8 +142,7 @@ func TestMessagesStreamNeverForwardsTheUsageChunk(t *testing.T) {
 }
 
 func TestMessagesStreamBuildsToolUseBlocks(t *testing.T) {
-	// Argument fragments leave whole, as one input_json_delta inside an open
-	// tool_use block that closes before the message ends.
+	// Argument fragments leave whole, as one input_json_delta.
 	events := pipeAs(t, anthropicShape{},
 		`{"choices":[{"delta":{"content":"looking"}}]}`,
 		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function",`+
@@ -161,8 +153,7 @@ func TestMessagesStreamBuildsToolUseBlocks(t *testing.T) {
 		`{"choices":[],"usage":{"prompt_tokens":20,"completion_tokens":8,"total_tokens":28}}`,
 	)
 
-	// The text block must be closed before the tool block opens: blocks are
-	// sequential and a client indexes them in the order they arrive.
+	// The text block must close before the tool block opens.
 	want := []string{
 		"message_start", "content_block_start", "content_block_delta", // text
 		"content_block_stop",
@@ -199,8 +190,7 @@ func TestMessagesStreamBuildsToolUseBlocks(t *testing.T) {
 }
 
 func TestMessagesStreamSeparatesParallelToolCalls(t *testing.T) {
-	// Two tool calls in one turn are two blocks. Sharing one would merge two
-	// argument documents into an unparseable third.
+	// Two tool calls are two blocks, or their arguments would merge.
 	events := pipeAs(t, anthropicShape{},
 		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function",`+
 			`"function":{"name":"a","arguments":"{}"}}]}}]}`,
@@ -235,9 +225,7 @@ func TestMessagesStreamSeparatesParallelToolCalls(t *testing.T) {
 }
 
 func TestMessagesStreamEndsAFailedStreamWithAnError(t *testing.T) {
-	// Closed with message_stop, a broken stream would read as a finished turn,
-	// with a tool call cut short in it. An error event ends it and tells the
-	// client to try again.
+	// A broken stream ends with an error event, not a finished turn.
 	for name, upstream := range map[string]string{
 		"cut off": "data: " + `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1",` +
 			`"function":{"name":"write","arguments":"{\"content\":\"half"}}]}}]}` + "\n\n",
@@ -273,8 +261,7 @@ func TestMessagesStreamEndsAFailedStreamWithAnError(t *testing.T) {
 }
 
 func TestMessagesStreamIsWellFormedWithNoContentAtAll(t *testing.T) {
-	// An upstream that finished without a word still has to produce a message
-	// a client can parse and discard.
+	// An empty answer is still a whole message.
 	events := pipeAs(t, anthropicShape{}, stopChunk)
 	if got := names(events); !slices.Equal(got, []string{"message_start", "message_delta", "message_stop"}) {
 		t.Errorf("events = %v, want an empty but complete message", got)
@@ -307,8 +294,8 @@ func TestMessagesStreamReportsUsageForBilling(t *testing.T) {
 }
 
 func TestATranslatedStreamCountsReasoningAsTheFirstToken(t *testing.T) {
-	// The translation drops reasoning, so the client's first event is the
-	// text. The model started earlier, and that is what the first token is.
+	// Reasoning is dropped, but the first token is still when the model
+	// started.
 	start := time.Now()
 	stats, err := anthropicShape{}.pipe(io.Discard, func() {}, paused(pause,
 		"data: "+`{"choices":[{"delta":{"role":"assistant"}}]}`+"\n\n",
@@ -325,16 +312,14 @@ func TestATranslatedStreamCountsReasoningAsTheFirstToken(t *testing.T) {
 	if got >= 2*pause {
 		t.Errorf("first token after %v, want under %v: the reasoning was not counted", got, 2*pause)
 	}
-	// A client that hangs up is charged on the deltas, so reasoning counts
-	// here as it does on the chat API.
+	// A hang-up is charged on the deltas, so reasoning counts.
 	if stats.deltas != 2 {
 		t.Errorf("deltas = %d, want 2: the reasoning and the text", stats.deltas)
 	}
 }
 
 func TestMessagesSurfaceEnforcesTheSamePolicyAsChat(t *testing.T) {
-	// The point of translating rather than proxying: an Anthropic-shaped
-	// client passes the same guardrail and accounting as every other client.
+	// An Anthropic client passes the same guardrails and accounting as others.
 	res := policy.Resolve(
 		policy.Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
 		&policy.Limits{
@@ -435,8 +420,7 @@ func TestMessagesSurfaceStreamsEndToEnd(t *testing.T) {
 }
 
 func TestMessagesSurfaceRefusesInItsOwnErrorShape(t *testing.T) {
-	// A refusal a client cannot parse reaches a developer as a blank failure,
-	// so the gateway's own refusals are in the Messages shape too.
+	// The gateway's own refusals are in the Messages shape too.
 	h := newHarness(t, jsonBackend(`{}`), nil, nil)
 
 	resp := h.post(t, "/v1/messages",
@@ -461,8 +445,7 @@ func TestMessagesSurfaceRefusesInItsOwnErrorShape(t *testing.T) {
 	if out.Error.Message == "" {
 		t.Error("the refusal carries no message; a developer has nothing to act on")
 	}
-	// A refusal is still a request that happened, and still the one a
-	// developer asks about afterwards.
+	// A refusal is still recorded.
 	if ev := h.sink.last(t); ev.Status != http.StatusNotFound {
 		t.Errorf("the refusal was recorded with status %d, want 404", ev.Status)
 	}
@@ -484,8 +467,7 @@ func TestMessagesSurfaceCannotReachANonChatModel(t *testing.T) {
 }
 
 func TestMessagesSurfaceAcceptsTheApiKeyHeader(t *testing.T) {
-	// Which header carries the credential is a client setting, not part of
-	// the key. Picking the other one must not give a 401 nobody can explain.
+	// The client may send the key in either header.
 	h := newHarness(t, jsonBackend(`{"choices":[{"message":{"content":"hi"},`+
 		`"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`), nil, nil)
 
@@ -548,7 +530,7 @@ func TestMessagesSurfaceTranslatesAnUpstreamRefusal(t *testing.T) {
 	if !strings.Contains(string(body), `"type":"error"`) {
 		t.Errorf("body = %s, want a Messages error envelope", body)
 	}
-	// The wording is what a client matches on to recover from a refusal.
+	// Clients match on the wording.
 	if !strings.Contains(string(body), "prompt is too long") {
 		t.Errorf("body = %s, want the upstream wording carried through", body)
 	}
@@ -571,13 +553,12 @@ func TestConnectionWarmingProbeIsAnswered(t *testing.T) {
 }
 
 func TestMessagesStreamPingsWhileTheUpstreamIsSilent(t *testing.T) {
-	// A client aborts a stream that goes quiet, and the long quiet is before
-	// the first token, while a big prompt is read. Pings fill that gap.
+	// Pings keep a quiet stream alive before the first token.
 	restore := anthropicPingInterval
 	anthropicPingInterval = 5 * time.Millisecond
 	t.Cleanup(func() { anthropicPingInterval = restore })
 
-	// A source that stalls before it says anything, then answers.
+	// A source that stalls, then answers.
 	src := io.MultiReader(
 		&slowReader{delay: 60 * time.Millisecond},
 		strings.NewReader(sseStream(`{"choices":[{"delta":{"content":"x"}}]}`, stopChunk)),
@@ -593,7 +574,7 @@ func TestMessagesStreamPingsWhileTheUpstreamIsSilent(t *testing.T) {
 		t.Fatalf("the silence carried no ping; the client would see a dead connection:\n%v",
 			names(events))
 	}
-	// The pings must not displace the turn: it still opens, delivers and closes.
+	// The turn still opens, delivers and closes.
 	var turn []string
 	for _, e := range events {
 		if e.name != "ping" {
@@ -609,8 +590,8 @@ func TestMessagesStreamPingsWhileTheUpstreamIsSilent(t *testing.T) {
 	}
 }
 
-// slowReader blocks once, the way an inference plane reading a long prompt
-// does, and then reports EOF.
+// slowReader blocks once, like a backend reading a long prompt, then reports
+// EOF.
 type slowReader struct {
 	delay time.Duration
 	done  bool
@@ -624,8 +605,7 @@ func (s *slowReader) Read([]byte) (int, error) {
 	return 0, io.EOF
 }
 
-// syncBuffer is a bytes.Buffer the race detector is happy to see written by the
-// pipe and read by the test.
+// syncBuffer is a bytes.Buffer safe to write and read from two goroutines.
 type syncBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -644,9 +624,7 @@ func (b *syncBuffer) String() string {
 }
 
 func TestMessagesStreamReadsAToolCallLargerThanTheReadBuffer(t *testing.T) {
-	// A real tool call's arguments (a file, a patch) can be a line longer than
-	// one read of the upstream. Reading part of it as a whole chunk would hand
-	// the client broken JSON.
+	// A tool call's arguments can be a line longer than one read.
 	args := `{"content":"` + strings.Repeat("a", 3*readBuffer) + `"}`
 	quoted, err := json.Marshal(args)
 	if err != nil {
@@ -676,9 +654,7 @@ func TestMessagesStreamReadsAToolCallLargerThanTheReadBuffer(t *testing.T) {
 }
 
 func TestMessagesStreamWritesNothingOnceTheClientIsGone(t *testing.T) {
-	// Pings come from a timer, not from the goroutine reading the stream. A
-	// ping after the pipe returned would write to a response the handler has
-	// already finished with.
+	// Pings come from a timer, so none may come after the pipe returned.
 	restore := anthropicPingInterval
 	anthropicPingInterval = time.Millisecond
 	t.Cleanup(func() { anthropicPingInterval = restore })
@@ -696,8 +672,8 @@ func TestMessagesStreamWritesNothingOnceTheClientIsGone(t *testing.T) {
 	}
 }
 
-// failingWriter fails every write after the first few, as a closed connection
-// does.
+// failingWriter fails every write after the first few, like a closed
+// connection.
 type failingWriter struct {
 	mu     sync.Mutex
 	after  int
@@ -721,9 +697,7 @@ func (w *failingWriter) count() int {
 }
 
 func TestMessagesStreamSendsArgumentsThatAreNotJSONAsEmpty(t *testing.T) {
-	// Small models do write broken arguments. A buffered answer gets {} for
-	// them, and so does a stream: an Anthropic SDK fails the whole answer on
-	// arguments it cannot parse.
+	// Broken arguments become {}, as in a buffered answer.
 	events := pipeAs(t, anthropicShape{},
 		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1",`+
 			`"function":{"name":"Bash","arguments":"{not "}}]}}]}`,
@@ -737,7 +711,7 @@ func TestMessagesStreamSendsArgumentsThatAreNotJSONAsEmpty(t *testing.T) {
 }
 
 func TestMessagesStreamCutOffSendsNoPartOfAToolCall(t *testing.T) {
-	// A call cut short could still read as a command, a shorter one.
+	// A call cut short could still read as a shorter command.
 	var buf bytes.Buffer
 	_, err := anthropicShape{}.pipe(&buf, func() {}, strings.NewReader(sseStream(
 		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1",`+

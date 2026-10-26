@@ -41,15 +41,13 @@ const ROLES = [
   },
 ];
 
-// The operator role crosses organisations, so only the gateway's configuration
-// grants it (KEERA_OPERATORS or an operator group). It still shows in the Role
-// column.
+// The operator role crosses organisations, so only the configuration grants
+// it (KEERA_OPERATORS or an operator group).
 const ASSIGNABLE = ROLES.filter((r) => r.key !== "operator");
 
 export const TONE = { operator: "accent", admin: "good", member: "" };
 
-// isPasskeyAccount mirrors authn.IsPasskeyAccount: the account signs in with
-// passkeys, not through a directory.
+// isPasskeyAccount mirrors authn.IsPasskeyAccount.
 const isPasskeyAccount = (u) =>
   (u.external_id || "").startsWith("keera:passkey:");
 
@@ -78,7 +76,7 @@ export function signsInWith(u) {
 }
 
 /** identityProvider is the logo and name of where a person signs in, or
- *  null before they are linked to an identity. */
+ *  null before they are linked. */
 function identityProvider(me, u) {
   if (isPasskeyAccount(u)) return [passkeyMark(), "Passkey"];
   const name = (u.external_id || "").split(":")[0];
@@ -96,7 +94,7 @@ function passkeyMark() {
 export async function peopleView(ctx) {
   const users = (await api.users(ctx.orgID)).data || [];
   // Not when a group decides roles: the directory reapplies them on the next
-  // sign-in, so a change here would not keep.
+  // sign-in.
   const canAssign = !ctx.state.me.roles_from_directory;
   const active = users.filter((u) => !u.disabled_at).length;
   ctx.setSubtitle(
@@ -158,15 +156,15 @@ export async function peopleView(ctx) {
         },
       },
       {
-        // Widest role first, to show who has more than they should.
+        // Widest role first, to show who has too much.
         label: "Role",
         shrink: true,
         sortKey: (u) => ({ operator: 0, admin: 1, member: 2 })[u.role] ?? 3,
         cell: (u) => pill(roleLabel(u.role), TONE[u.role] || ""),
       },
       {
-        // The later of their last sign-in and their last request through one
-        // of their keys: an agent working all week counts, not only the panel.
+        // The later of their last sign-in and last request with their keys:
+        // an agent working all week counts.
         label: "Last active",
         shrink: true,
         sortKey: (u) =>
@@ -206,8 +204,7 @@ export async function peopleView(ctx) {
           if (u.id === ctx.state.me.user_id) {
             return h("span", { class: "faint" }, "you");
           }
-          // The configuration grants the operator role, so there is nothing to
-          // edit.
+          // The configuration grants the operator role.
           if (u.role === "operator") {
             return h(
               "span",
@@ -215,8 +212,8 @@ export async function peopleView(ctx) {
               "from the configuration",
             );
           }
-          // Turning somebody off works the same whether roles come from the
-          // directory or from here: the directory cannot revoke their keys.
+          // Works whether roles come from the directory or from here: the
+          // directory cannot revoke their keys.
           const toggle = u.disabled_at
             ? h(
                 "button",
@@ -313,8 +310,8 @@ function addPerson(ctx) {
   });
   const canAssign = !ctx.state.me.roles_from_directory;
   const role = roleSelect("member");
-  // Without a directory a passkey is the only way in, so it is the only
-  // choice: the API refuses the other.
+  // Without a directory a passkey is the only way in; the API refuses the
+  // other.
   const signIn = h(
     "select",
     { class: "select" },
@@ -344,7 +341,7 @@ function addPerson(ctx) {
               "it here when they leave. You get a set-up link to send them.",
           )
         : null,
-      // A line each: run together they read as one sentence.
+      // A line each, or they read as one sentence.
       canAssign
         ? field(
             "Role",
@@ -361,8 +358,8 @@ function addPerson(ctx) {
         email.focus();
         return false;
       }
-      // Left empty, the control plane picks the way this gateway signs
-      // people in, as it does for `keera user add`.
+      // Left empty, the control plane picks how this gateway signs people
+      // in.
       const user = await api.addUser(
         ctx.orgID || ctx.state.me.org_id,
         email.value.trim(),

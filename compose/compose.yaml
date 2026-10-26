@@ -15,20 +15,17 @@ services:
     image: localhost/keera-gateway:latest
     restart: unless-stopped
     ports:
-      # One port serves everything by path: the control panel at /, the
-      # inference API under /api, the control API under /control, and sandbox
-      # attach under /sandbox. Open http://127.0.0.1:8080 for the panel.
+      # One port serves everything: the panel at /, inference under /api, the
+      # control API under /control, and sandbox attach under /sandbox.
       #
-      # Bound to loopback unless KEERA_BIND says otherwise. Publishing it
-      # publishes the control API too, so put a TLS proxy in front of anything
-      # beyond a development machine.
+      # Bound to loopback unless KEERA_BIND says otherwise. Beyond a
+      # development machine, put a TLS proxy in front.
       - "${KEERA_BIND:-127.0.0.1}:8080:8080"
     volumes:
       # ",z" relabels for SELinux hosts; harmless elsewhere.
       - ./models.yaml:/etc/keera/models.yaml:ro,z
       - ./sandboxes.yaml:/etc/keera/sandboxes.yaml:ro,z
-    # Every setting in .env reaches the gateway, so a new one needs no edit
-    # here. docs/install.md explains them.
+    # Every setting in .env reaches the gateway. docs/install.md explains them.
     env_file: .env
     # These win over .env.
     environment:
@@ -37,16 +34,14 @@ services:
       KEERA_SECRET_KEY: ${KEERA_SECRET_KEY:?set KEERA_SECRET_KEY in .env - see .env.example}
       KEERA_MODELS_FILE: /etc/keera/models.yaml
       # Read even without a sandbox driver, so new organisations have the
-      # classes once one is switched on. See README.md.
+      # classes once one is on. See README.md.
       KEERA_SANDBOXES_FILE: /etc/keera/sandboxes.yaml
-      # `make dev` reads the same .env, so these override its settings: the
-      # port is the one published below, whatever .env gives make dev, and
-      # the podman driver cannot run inside this container.
+      # `make dev` reads the same .env, so these override it: the port is the
+      # one published below, and the podman driver cannot run in here.
       KEERA_ADDR: ":8080"
       KEERA_SANDBOX_DRIVER: ""
     healthcheck:
-      # A scratch image has no shell or curl, so the binary checks the running
-      # server's /readyz itself.
+      # A scratch image has no shell or curl, so the binary checks /readyz.
       test: ["CMD", "/keera-gateway", "health"]
       interval: 10s
       timeout: 5s
@@ -56,8 +51,8 @@ services:
       keera-db:
         condition: service_healthy
 
-  # The inference backend: llama.cpp on CPU, so this runs on a laptop with no
-  # GPU. compose.gpu.yaml replaces it with vLLM on a GPU host.
+  # The inference backend: llama.cpp on CPU, for a laptop with no GPU.
+  # compose.gpu.yaml replaces it with vLLM on a GPU host.
   #
   # TOOL CALLING DOES NOT WORK ON THIS BACKEND: calls come back as prose, the
   # ToolCallAsText failure internal/gateway/probe.go names. See README.md.
@@ -67,13 +62,11 @@ services:
     # The image's entrypoint is /app/llama-server, so this is arguments only.
     command:
       # -hf downloads from Hugging Face on first start and caches it. The tag
-      # after the colon picks the quantisation; Q4_K_M is llama.cpp's default,
-      # named so the file says what it runs.
+      # picks the quantisation; Q4_K_M is the default, named to be explicit.
       - -hf
       - ${KEERA_LLAMA_MODEL:-Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF:Q4_K_M}
-      # Like vLLM's --served-model-name: the id reported on /v1/models and in
-      # every response. It must match backend_model in models.yaml, so either
-      # backend works without a catalogue edit.
+      # Like vLLM's --served-model-name. It must match backend_model in
+      # models.yaml, so either backend works without a catalogue edit.
       - --alias
       - keera-speed
       # llama.cpp defaults to 8080. The catalogue, the healthcheck and vLLM on
@@ -81,29 +74,23 @@ services:
       - --port
       - "8000"
       # Keep in step with max_context_tokens in models.yaml: the gateway refuses
-      # anything larger (`fits` in internal/gateway/window.go), so a mismatch
-      # shows only when a long prompt is refused.
+      # anything larger, so a mismatch shows only when a long prompt is refused.
       - -c
       - "16384"
-      # One slot, so a single request gets the whole KV pool, as a
-      # one-developer demo wants. A second request queues instead of halving
-      # the window.
+      # One slot, so a request gets the whole KV pool. A second one queues
+      # instead of halving the window.
       - -np
       - "1"
-      # Without it llama.cpp answers any request with tools with a 500, "tools
-      # param requires --jinja flag". Recent builds default to it, but it decides
-      # whether coding agents work, so it is passed anyway. Some chat templates
-      # fail to render under it, so confirm with `keera model check keera-speed`.
+      # Without it, a request with tools gets a 500. Recent builds default to
+      # it, but coding agents depend on it. Some chat templates fail to render
+      # under it, so confirm with `keera model check keera-speed`.
       - --jinja
-      # llama.cpp serves a chat UI on /. Port 8000 is not published, but the
-      # backend should not be a second, unauthenticated front end anyway.
+      # No chat UI on /: the backend must not be an unauthenticated front end.
       - --no-webui
     environment:
-      # Where -hf downloads to. Otherwise the weights are fetched again on every
-      # recreate.
+      # Where -hf downloads to, so a recreate does not fetch the weights again.
       LLAMA_CACHE: /models
-      # The image presets this, and passing --host as well logs a warning on
-      # every start, so it is set here as a variable.
+      # The image presets this; passing --host too logs a warning.
       LLAMA_ARG_HOST: 0.0.0.0
     volumes:
       - llama-cache:/models
@@ -116,12 +103,11 @@ services:
       start_period: 120s
 
   # Keera Decider: Laya, a 421M classifier, served by laya-serve. It answers
-  # routers and gate filters in one forward pass on a CPU, and writes no text.
-  # models.yaml lists it as a decision model. See
+  # routers and gate filters in one pass on CPU. See
   # docs/gateway.md#decision-models.
   #
-  # laya-serve has no authentication unless LAYA_API_KEY is set, so, like
-  # keera-engine, it is not published.
+  # laya-serve has no authentication without LAYA_API_KEY, so it is not
+  # published.
   keera-decider:
     build: decider
     image: localhost/keera-decider:latest
@@ -137,8 +123,7 @@ services:
       start_period: 300s
 
   keera-db:
-    # Major version pinned: the volume is mounted where Postgres 18 keeps its
-    # data, and a new major cannot read an old one's files.
+    # Major version pinned: a new major cannot read an old one's files.
     image: docker.io/library/postgres:18
     restart: unless-stopped
     environment:

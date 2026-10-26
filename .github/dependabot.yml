@@ -1,6 +1,5 @@
-# Weekly, and grouped per ecosystem, so updates arrive as a few pull requests
-# rather than one per dependency. Security updates are not grouped and still
-# arrive as soon as an advisory is published.
+# Weekly and grouped per ecosystem, so updates come as a few pull requests.
+# Security updates are not grouped and arrive at once.
 version: 2
 
 updates:

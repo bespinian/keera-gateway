@@ -19,8 +19,8 @@ const subKey = "keera_sk_subscription"
 const claudeToken = "sk-ant-oat01-secret"
 
 // subscriptionHarness is providerHarness with keera-frontier paid by each
-// caller's Claude plan, and a subscription key next to the standard one. The
-// backend answers with the plan headers Anthropic sends a signed-in caller.
+// caller's Claude plan, and a subscription key. The backend answers with
+// Anthropic's plan headers.
 func subscriptionHarness(t *testing.T, res *policy.Resolved) (*harness, chan seenRequest) {
 	t.Helper()
 	backend := func(w http.ResponseWriter, _ *http.Request) {
@@ -47,8 +47,8 @@ func subscriptionHarness(t *testing.T, res *policy.Resolved) (*harness, chan see
 	return h, seen
 }
 
-// claudeCode sends what Claude Code signed in to a Claude plan sends. Each
-// header in extra is set too, and an empty value removes it.
+// claudeCode sends what a signed-in Claude Code sends. Headers in extra are
+// set too; an empty value removes one.
 func claudeCode(t *testing.T, h *harness, path, body string, extra map[string]string) *http.Response {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, h.url(path), strings.NewReader(body))
@@ -103,8 +103,7 @@ func TestASubscriptionRequestForwardsTheCallersSignIn(t *testing.T) {
 			t.Errorf("%s forwarded as %q, want %q", name, got.header.Get(name), want)
 		}
 	}
-	// The Keera key is the gateway's business, and there is no key of the
-	// organisation's to send.
+	// The Keera key stays here, and there is no organisation key to send.
 	for _, name := range []string{KeyHeader, "X-Api-Key"} {
 		if v := got.header.Get(name); v != "" {
 			t.Errorf("%s = %q was forwarded to Anthropic", name, v)
@@ -119,8 +118,8 @@ func TestASubscriptionRequestForwardsTheCallersSignIn(t *testing.T) {
 		t.Errorf("an upstream header that is not the plan's reached the client: %q", v)
 	}
 
-	// The plan paid: no spend, no budget charged, and the API price kept to
-	// compare against (100 + 900/10 + 50*4).
+	// The plan paid: no spend or budget charge, and the API price kept for
+	// comparison (100 + 900/10 + 50*4).
 	ev := h.sink.last(t)
 	if ev.CostMicros != 0 || h.budgets.total() != 0 {
 		t.Errorf("cost = %d, charged %d; want nothing, the plan paid", ev.CostMicros, h.budgets.total())
@@ -141,8 +140,8 @@ func TestASubscriptionRequestForwardsTheCallersSignIn(t *testing.T) {
 }
 
 func TestASubscriptionRequestKeepsClaudeCodesSystemPromptFirst(t *testing.T) {
-	// Claude Code's first system block identifies it, and Anthropic removes
-	// it only when it comes first, so the guardrail's prompt goes after it.
+	// Anthropic removes Claude Code's identifying block only when it comes
+	// first, so the guardrail's prompt goes after it.
 	prompt := "obey the org"
 	res := policy.Resolve(policy.Key{ID: "key_sub", OrgID: testOrg, Kind: policy.KeySubscription},
 		&policy.Limits{SystemPrompt: &prompt}, nil, nil)
@@ -199,8 +198,7 @@ func TestEachKindOfKeyReachesOnlyItsOwnModels(t *testing.T) {
 }
 
 func TestASubscriptionKeyReachesAModelByAnthropicsName(t *testing.T) {
-	// Claude Code asks for some background work by Anthropic's own names,
-	// whatever its settings say.
+	// Claude Code asks for some background work by Anthropic's own names.
 	h, seen := subscriptionHarness(t, nil)
 	// A disabled model on the same backend model is passed over.
 	old := h.src.models["keera-frontier"]
@@ -234,8 +232,7 @@ func TestASubscriptionKeyReachesAModelByAnthropicsName(t *testing.T) {
 }
 
 func TestASubscriptionKeyCanLookUpAModelByAnthropicsName(t *testing.T) {
-	// What a key may send it may also look up, so a client that checks the
-	// model first is not turned away from one it could use.
+	// What a key may send it may also look up.
 	h, _ := subscriptionHarness(t, nil)
 	for key, want := range map[string]int{subKey: http.StatusOK, testKey: http.StatusNotFound} {
 		req, _ := http.NewRequest(http.MethodGet, h.url("/v1/models/claude-opus-5-20260101"), nil)
@@ -283,8 +280,7 @@ func TestASubscriptionKeyGoesInItsOwnHeader(t *testing.T) {
 }
 
 func TestAClaudeSignInWithoutAKeeraKeyIsToldWhatToRun(t *testing.T) {
-	// What every request looks like once an administrator has pointed Claude
-	// Code here and the person has not set it up yet.
+	// Claude Code pointed here before the person set it up.
 	h, _ := subscriptionHarness(t, nil)
 	resp := claudeCode(t, h, "/v1/messages", planMessage, map[string]string{KeyHeader: ""})
 	body, _ := io.ReadAll(resp.Body)
@@ -349,7 +345,7 @@ func TestPlanUsageIsReadOffTheHeaders(t *testing.T) {
 }
 
 // errorOf reads an error answer's code and message. The Anthropic shape has
-// no code, as Anthropic's own errors have none.
+// no code.
 func errorOf(t *testing.T, resp *http.Response) (code, msg string) {
 	t.Helper()
 	var doc struct {
@@ -365,8 +361,8 @@ func errorOf(t *testing.T, resp *http.Response) (code, msg string) {
 	return doc.Error.Code, doc.Error.Message
 }
 
-// Claude subscriptions are off unless the deployment turns them on. Then a
-// subscription key reaches nothing, and a sign-in is told to use a Keera key.
+// Claude subscriptions are off by default: a subscription key reaches
+// nothing, and a sign-in is told to use a Keera key.
 func TestClaudeSubscriptionsAreOffByDefault(t *testing.T) {
 	h, _ := subscriptionHarness(t, nil)
 	h.srv.opts.ClaudeSubscriptions = false

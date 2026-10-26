@@ -7,20 +7,15 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// purgeBatch bounds one DELETE. Every replica writes to the usage log all the
-// time, so retention deletes a few thousand rows at a time instead of holding
-// locks for one huge delete. An interrupted run still makes progress.
+// purgeBatch bounds one DELETE, so retention does not hold locks on the busy
+// usage log for long, and an interrupted run still makes progress.
 const purgeBatch = 5000
 
 // PurgeUsage deletes usage events, filter runs and tool calls older than
-// before, and the closed spend windows that go with them. Nothing reads a
-// closed window: budgets check the open day and month, and reports read the
-// events and usage_daily, which is kept for ever.
-//
-// It returns how many rows went, so an operator can see retention working.
+// before, and the closed spend windows, which nothing reads. It returns how
+// many rows went.
 func (s *Store) PurgeUsage(ctx context.Context, before time.Time) (int64, error) {
-	// Filter runs and tool calls describe the same requests, so they are kept
-	// no longer.
+	// Filter runs and tool calls describe the same requests, so they go too.
 	var events int64
 	for _, table := range []string{"usage_events", "filter_runs", "tool_calls"} {
 		n, err := s.purgeBefore(ctx, table, before)
@@ -30,9 +25,7 @@ func (s *Store) PurgeUsage(ctx context.Context, before time.Time) (int64, error)
 		}
 	}
 	// Only windows that ended before the cutoff go. A month that began before
-	// it may still be open: with seven days' retention, the current month
-	// started before the cutoff from the 8th on, and deleting it would reset
-	// every monthly budget.
+	// it may still be open, and deleting it would reset every monthly budget.
 	tag, err := s.pool.Exec(ctx, `DELETE FROM spend
 		WHERE (period = 'day' AND period_start < $1)
 		   OR (period = 'month' AND period_start < $2)`,
@@ -44,16 +37,14 @@ func (s *Store) PurgeUsage(ctx context.Context, before time.Time) (int64, error)
 }
 
 // PurgeEnded deletes the sandboxes that ended before before, and the keys
-// revoked or expired before it. It runs with usage retention: by then the
-// usage they would name is gone, and a sandbox's row is itself usage.
+// revoked or expired before it. It runs with usage retention, since a
+// sandbox's row is itself usage.
 //
-// A sandbox has ended when it is no longer live (see liveSandbox), however old
-// it is. A failed row has no end time, so the last time it was seen working
-// stands in for one.
+// A sandbox has ended when it is no longer live (see liveSandbox). A failed
+// row has no end time, so the last time it was seen working stands in.
 //
 // Sandboxes go first, so their keys can go in the same run. A key a sandbox
-// still names stays: that sandbox may be revived, and its row says whose it
-// was.
+// still names stays, since that sandbox may be revived.
 func (s *Store) PurgeEnded(ctx context.Context, before time.Time) (int64, error) {
 	sandboxes, err := inBatches(ctx, func() (int64, error) {
 		tag, err := s.pool.Exec(ctx, `DELETE FROM sandboxes WHERE id IN (
@@ -67,8 +58,8 @@ func (s *Store) PurgeEnded(ctx context.Context, before time.Time) (int64, error)
 		return sandboxes, err
 	}
 	keys, err := inBatches(ctx, func() (int64, error) {
-		// Guardrails and spend name a key by plain id with no foreign key, so
-		// they are cleared in the same statement.
+		// Guardrails and spend have no foreign key to the key, so they are
+		// cleared in the same statement.
 		var n int64
 		err := s.pool.QueryRow(ctx, `
 			WITH gone AS (
@@ -89,10 +80,8 @@ func (s *Store) PurgeEnded(ctx context.Context, before time.Time) (int64, error)
 	return sandboxes + keys, err
 }
 
-// PurgeAudit deletes audit entries older than before.
-//
-// It is set apart from usage retention because the two serve different
-// readers: finance for usage, compliance for the audit log.
+// PurgeAudit deletes audit entries older than before. It has its own retention
+// because compliance, not finance, reads the audit log.
 func (s *Store) PurgeAudit(ctx context.Context, before time.Time) (int64, error) {
 	return s.purgeBefore(ctx, "audit_log", before)
 }
@@ -107,8 +96,7 @@ func (s *Store) purgeBefore(ctx context.Context, table string, before time.Time)
 }
 
 // inBatches runs batch, which deletes at most purgeBatch rows, until a batch
-// comes back short. On error it still reports how many rows went, so the
-// numbers stay readable.
+// comes back short. On error it still reports how many rows went.
 func inBatches(ctx context.Context, batch func() (int64, error)) (int64, error) {
 	var total int64
 	for {

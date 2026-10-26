@@ -3,12 +3,11 @@
 #
 # Laid out for SLSA Build L3: the build cannot forge its own provenance.
 #
-# - The build jobs run our code (make, go, podman) and get no id-token
-#   permission, so nothing they run can get a signing token. Only the
+# - The build jobs run our code and get no id-token permission. Only the
 #   provenance jobs get one, and they check out nothing and run only GitHub's
-#   actions, signing the image digest and archives they are handed.
-# - This is a reusable workflow, so the signature names this file, not the
-#   caller. `gh attestation verify --signer-workflow` checks for it.
+#   actions, signing the digest and archives they are handed.
+# - As a reusable workflow, the signature names this file, not the caller.
+#   `gh attestation verify --signer-workflow` checks for it.
 name: Release build
 
 on:
@@ -33,13 +32,11 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # The Containerfile would write the vendor tree itself. Writing it here
-      # keeps the image build offline.
+      # Written here, so the image build stays offline.
       - name: Vendor dependencies
         run: go mod vendor
 
-      # The image is named after the binary, so only the owner comes from the
-      # environment. ghcr.io needs a lowercase path, and owner names may not be.
+      # ghcr.io needs a lowercase path, and owner names may not be.
       - name: Name the image
         id: image
         run: |
@@ -48,8 +45,7 @@ jobs:
           echo "ref=ghcr.io/$owner/keera-gateway:${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
       # `sbom` depends on `image`, so it describes the image this job pushes.
-      # VERSION is what `keera version` reports, since the build context has no
-      # .git for the toolchain to stamp from.
+      # VERSION is stamped in, as the build context has no .git.
       - name: Build the image and its SBOM
         run: make sbom GATEWAY_IMAGE='${{ steps.image.outputs.ref }}' VERSION="$GITHUB_REF_NAME"
 
@@ -90,8 +86,8 @@ jobs:
         with:
           subject-name: ${{ needs.image.outputs.name }}
           subject-digest: ${{ needs.image.outputs.digest }}
-          # Also stored next to the image, so `gh attestation verify` and cosign
-          # find it from the image alone, which is all a customer has.
+          # Also stored next to the image, so it can be verified from the image
+          # alone.
           push-to-registry: true
 
   cli:
@@ -132,8 +128,7 @@ jobs:
           name: dist
           path: build/dist
 
-      # Each archive is its own subject, so `gh attestation verify` works on a
-      # single downloaded file.
+      # One subject per archive, so a single download can be verified.
       - name: Attest the build
         uses: actions/attest-build-provenance@v4
         with:
@@ -157,8 +152,8 @@ jobs:
           name: dist
           path: build/dist
 
-      # A tag pushed from a workstation has no release yet; one cut from the web
-      # interface does.
+      # A tag pushed from a workstation has no release yet; one from the web
+      # does.
       - name: Publish the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

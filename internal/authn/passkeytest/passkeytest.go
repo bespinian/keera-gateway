@@ -27,8 +27,7 @@ type Authenticator struct {
 	// Flags are the authenticator data flags. New sets user present and user
 	// verified.
 	Flags byte
-	// Count is the signature counter. Zero stays zero, like a synced passkey;
-	// anything else goes up by one per signature.
+	// Count stays zero, like a synced passkey, or goes up by one per signature.
 	Count uint32
 	// UserHandle is what a sign-in reports as the passkey's owner.
 	UserHandle []byte
@@ -79,8 +78,7 @@ func (a *Authenticator) Register(challenge string) authn.Registration {
 	if err != nil {
 		panic(err)
 	}
-	// The COSE key that would follow is left out: the gateway reads the key
-	// from public_key instead.
+	// No COSE key: the gateway reads the key from public_key.
 	data := a.header(a.Flags | 0x40)
 	data = append(data, make([]byte, 16)...)
 	data = binary.BigEndian.AppendUint16(data, uint16(len(a.ID)))

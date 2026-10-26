@@ -26,9 +26,8 @@ type Event struct {
 	UserID    string
 	KeyID     string
 	Alias     string
-	// Client is what the client called itself: a known coding agent's name,
-	// otherwise the product token of its User-Agent, or empty. It is a claim,
-	// never a credential; see internal/connect/identify.go.
+	// Client is what the client called itself, such as a coding agent's name or
+	// its User-Agent product. It is a claim, never a credential.
 	Client string
 	// RequestID is the id the gateway answered with in X-Request-Id, and
 	// ClientRequestID the client's own X-Client-Request-Id, or empty.
@@ -36,22 +35,21 @@ type Event struct {
 	ClientRequestID string
 	InputTokens     int
 	// CachedInputTokens is the part of InputTokens the provider served from its
-	// prompt cache at a lower price. It lets a row be checked against an
-	// invoice. Zero for self-hosted models, which cache nothing.
+	// prompt cache at a lower price.
 	CachedInputTokens int
 	// CacheWriteTokens is the part of InputTokens the provider wrote to its
 	// prompt cache, which some charge more for.
 	CacheWriteTokens int
 	// CacheWriteHourTokens is the part of CacheWriteTokens kept for an hour.
-	// It is not stored: it only prices the request.
+	// It only prices the request and is not stored.
 	CacheWriteHourTokens int
 	OutputTokens         int
 	CostMicros           int64
-	// ListCostMicros is what a request a subscription paid for would have
-	// cost at the model's API prices. No budget is charged it.
+	// ListCostMicros is what a subscription request would have cost at API
+	// prices. No budget is charged it.
 	ListCostMicros int64
-	// Plan is how much of the caller's Claude plan is used, on a request a
-	// subscription paid for. Only the newest one per key is kept.
+	// Plan is how much of the caller's Claude plan a subscription request used.
+	// Only the newest one per key is kept.
 	Plan      *policy.PlanUsage
 	Status    int
 	Latency   time.Duration
@@ -59,51 +57,46 @@ type Event struct {
 	Stream    bool
 	Estimated bool
 	Canceled  bool
-	// Error is what the caller was told went wrong, empty on success: the
-	// inference plane's wording for an upstream failure, the guardrail's for a
-	// refusal.
+	// Error is what the caller was told went wrong, empty on success.
 	Error string
-	// Note is what went wrong on the way to an answer that was served all the
-	// same, such as a router falling back. Unlike Error, it does not make the
-	// request a failure.
+	// Note is a problem on a request that was still served, such as a router
+	// falling back. Unlike Error, it does not make the request a failure.
 	Note string
-	// SessionKey names the agent conversation this request belongs to. It is a
-	// hash of what the client sent, never the conversation itself, and empty
-	// for a request that belongs to none. See internal/gateway/session.go.
+	// SessionKey names the agent conversation of this request: a hash, never
+	// the conversation itself. Empty when there is none.
 	SessionKey string
-	// FilterRuns is what each of this request's filters did, in the order they
-	// ran. They ride on the event so both are written in the same batch.
+	// FilterRuns is what each filter did, in order. They ride on the event so
+	// both are written in the same batch.
 	FilterRuns []FilterRun
 	// Router is the router the request named, empty for one that named a
 	// model. Alias is still the model that answered.
 	Router string
-	// RouterOutcome says whether the router's last route step decided, fell
-	// back, or could not decide. RouterMS is what deciding added to the wait.
-	// Both are empty when no route step ran.
+	// RouterOutcome says whether the last route step decided, fell back, or
+	// could not decide. RouterMS is the time deciding took. Both are empty when
+	// no route step ran.
 	RouterOutcome RouterOutcome
 	RouterMS      int64
-	// Spans is where this request's latency went, step by step. See spans.go.
+	// Spans is where this request's latency went, step by step.
 	Spans []Span
-	// Scopes the cost is charged against, so the spend roll-up does not have
-	// to work out the hierarchy again.
+	// Scopes the cost is charged against, so the roll-up need not work them out.
 	Scopes []policy.Scope
-	// Tool is set on a tool call through the MCP proxy. The event is then
-	// written to tool_calls rather than usage_events. See mcp.go.
+	// Tool is set on a tool call through the MCP proxy. The event then goes to
+	// tool_calls rather than usage_events.
 	Tool *ToolCall
-	// Bills is every call this event made to a model on the deployment's
-	// own provider key. Each is a row in billing_lines.
+	// Bills is every call this event made on the deployment's own provider
+	// key, one row each in billing_lines.
 	Bills []policy.BillLine
 	// BillsOnly is a check's calls: billed, but not a request, so no usage
 	// row is written for it.
 	BillsOnly bool
 }
 
-// maxErrorBytes bounds the message kept on a usage row. Upstreams may answer
-// with a stack trace or the whole prompt, and a reader only needs the start.
+// maxErrorBytes bounds the error kept on a usage row. Upstreams may answer
+// with a stack trace or the whole prompt.
 const maxErrorBytes = 1000
 
 // LostEvents is what WriteEvents returns when Postgres refused some events
-// even on their own. The others were written.
+// even one by one. The others were written.
 type LostEvents struct {
 	N   int
 	Err error
@@ -115,13 +108,12 @@ func (e *LostEvents) Error() string {
 
 func (e *LostEvents) Unwrap() error { return e.Err }
 
-// WriteEvents inserts a batch of usage events and their filter runs, adds
-// them to the spend and daily roll-ups, and announces that the log has grown,
-// in one round trip. pg_notify with no listener does nothing.
+// WriteEvents inserts a batch of usage events and their filter runs, adds them
+// to the spend and daily roll-ups, and notifies listeners, in one round trip.
 //
-// A batch is one transaction, so one row Postgres refuses would lose the
-// whole batch. Each event is then written again on its own; one still
-// refused keeps its bills but loses its usage row.
+// A batch is one transaction, so one refused row would lose it all. Each event
+// is then retried on its own; one still refused keeps its bills but loses its
+// usage row.
 func (s *Store) WriteEvents(ctx context.Context, events []Event) error {
 	if len(events) == 0 {
 		return nil
@@ -157,7 +149,7 @@ func (s *Store) WriteEvents(ctx context.Context, events []Event) error {
 }
 
 // refused reports whether Postgres itself refused a write. A batch is one
-// transaction, so nothing of a refused one was written.
+// transaction, so then nothing of it was written.
 func refused(err error) bool {
 	_, ok := errors.AsType[*pgconn.PgError](err)
 	return ok
@@ -165,9 +157,9 @@ func refused(err error) bool {
 
 // writeBatch writes events in one round trip.
 //
-// Spend is summed per window here rather than upserted per event. A batch has
-// hundreds of events but touches only a few spend rows, and one upsert per
-// event held locks on those busy rows until the batch committed.
+// Spend is summed per window here rather than upserted per event: a batch
+// touches only a few busy spend rows, and an upsert per event held their locks
+// until commit.
 func (s *Store) writeBatch(ctx context.Context, events []Event) error {
 	batch := &pgx.Batch{}
 	spend := make(map[spendKey]int64)
@@ -208,9 +200,8 @@ func (s *Store) writeBatch(ctx context.Context, events []Event) error {
 	return s.pool.SendBatch(ctx, batch).Close()
 }
 
-// clean makes every text an event carries fit for Postgres, which refuses a
-// NUL byte or invalid UTF-8 in text and JSON. Much of it is what a client or
-// an upstream sent, such as the model name or an error message.
+// clean makes every text in an event fit for Postgres, which refuses NUL bytes
+// and invalid UTF-8. Much of it comes from clients or upstreams.
 func (e *Event) clean() {
 	for _, s := range []*string{
 		&e.Alias, &e.Client, &e.Error, &e.Note, &e.SessionKey, &e.Router,
@@ -244,7 +235,6 @@ func cleanText(s string) string {
 	return s
 }
 
-// queueEvent adds one event's usage row and its filter runs to the batch.
 func queueEvent(batch *pgx.Batch, e Event) {
 	if e.Tool != nil {
 		queueToolCall(batch, e)
@@ -270,9 +260,9 @@ func queueEvent(batch *pgx.Batch, e Event) {
 	queueFilterRuns(batch, e, e.Alias)
 }
 
-// queuePlans keeps the newest plan usage of each key. A row from another
-// replica's later batch can arrive first, so an older reading never replaces a
-// newer one. Keys are sorted so every replica takes the row locks in one order.
+// queuePlans keeps the newest plan usage of each key. Another replica's later
+// batch can arrive first, so an older reading never replaces a newer one. Keys
+// are sorted so every replica locks rows in the same order.
 func queuePlans(batch *pgx.Batch, plans map[string]policy.PlanUsage) {
 	for _, keyID := range slices.Sorted(maps.Keys(plans)) {
 		p := plans[keyID]
@@ -290,7 +280,7 @@ func queuePlans(batch *pgx.Batch, plans map[string]policy.PlanUsage) {
 	}
 }
 
-// queueFilterRuns adds an event's filter runs to the batch, against what the
+// queueFilterRuns adds an event's filter runs to the batch, under the name the
 // request was addressed to.
 func queueFilterRuns(batch *pgx.Batch, e Event, alias string) {
 	for _, f := range e.FilterRuns {
@@ -303,11 +293,9 @@ func queueFilterRuns(batch *pgx.Batch, e Event, alias string) {
 	}
 }
 
-// spendKey is one budget window: the row the roll-up upserts into.
-//
-// The period start is part of it because a batch can cross midnight or a month
-// boundary. It is safe as a map key because Period.Start always builds its
-// result in UTC, so equal windows are identical values.
+// spendKey is one budget window: the row the roll-up upserts into. The period
+// start is part of it because a batch can cross midnight. It is safe as a map
+// key because Period.Start always returns UTC.
 type spendKey struct {
 	scopeType policy.ScopeType
 	scopeID   string
@@ -315,8 +303,8 @@ type spendKey struct {
 	start     time.Time
 }
 
-// spendOrder sorts the windows a batch touches. Every replica writes the same
-// few rows, and taking their locks in one fixed order avoids deadlocks.
+// spendOrder sorts the windows a batch touches, so every replica locks them in
+// the same order and none deadlock.
 func spendOrder(spend map[spendKey]int64) []spendKey {
 	return slices.SortedFunc(maps.Keys(spend), func(a, b spendKey) int {
 		return cmp.Or(
@@ -337,8 +325,7 @@ type SpendRow struct {
 	Micros      int64            `json:"micros"`
 }
 
-// LoadSpend reads every spend row for the currently open day and month
-// windows. The gateway refreshes its budget view from this.
+// LoadSpend reads every spend row for the open day and month windows.
 func (s *Store) LoadSpend(ctx context.Context, now time.Time) ([]SpendRow, error) {
 	return queryAll(ctx, s.pool, scanSpendRow, `SELECT scope_type, scope_id, period, period_start, micros
 		FROM spend WHERE (period = 'day' AND period_start = $1)
@@ -356,8 +343,7 @@ func scanSpendRow(r row) (SpendRow, error) {
 type UsageBucket struct {
 	Group string `json:"group"`
 	// OrgID is set only when a report across every organisation groups by
-	// model: two organisations can each have a model of the same alias, and
-	// they are two rows, not one.
+	// model, since two organisations can each have a model of the same alias.
 	OrgID        string `json:"org_id,omitempty"`
 	Requests     int64  `json:"requests"`
 	InputTokens  int64  `json:"input_tokens"`
@@ -368,15 +354,13 @@ type UsageBucket struct {
 	SubscriptionMicros int64 `json:"subscription_micros"`
 }
 
-// ReportScope narrows a report to one project, key, person or model inside the
-// organisation. The zero value is the whole tenant. The usage reports and the
-// request log share it, so an entity's screen is narrowed the same way
-// throughout.
+// ReportScope narrows a report or the request log to one project, key, person
+// or model. The zero value is the whole tenant.
 type ReportScope struct {
 	ProjectID string
 	KeyID     string
 	UserID    string
-	// Alias is the model, named the way a client names it.
+	// Alias is the model, as a client names it.
 	Alias string
 }
 
@@ -397,8 +381,8 @@ func (sc ReportScope) args() []any {
 }
 
 // narrow renders the scope's conditions for a query whose last parameter is
-// number n, with each column prefixed by table ("e." or ""). The numbers are
-// computed, so adding a parameter to a query cannot shift them silently.
+// number n, with each column prefixed by table ("e." or ""). Computing the
+// numbers keeps a new parameter from shifting them silently.
 func (sc ReportScope) narrow(table string, n int) string {
 	return fmt.Sprintf(scopeClause, table, n+1, n+2, n+3, n+4)
 }
@@ -411,7 +395,7 @@ type UsageQuery struct {
 	GroupBy string // project, key, user, model, client, day or org; empty or anything else means DefaultGroupBy
 }
 
-// DefaultGroupBy is the grouping a usage report gets when it asks for none.
+// DefaultGroupBy is the grouping a usage report gets by default.
 const DefaultGroupBy = "model"
 
 // groupBy is q.GroupBy, or DefaultGroupBy for one Usage does not know.
@@ -422,8 +406,8 @@ func (q UsageQuery) groupBy() string {
 	return DefaultGroupBy
 }
 
-// groupColumns maps the public group_by values to columns, which keeps the
-// caller's string out of the SQL text.
+// groupColumns maps group_by values to columns, keeping the caller's string
+// out of the SQL.
 var groupColumns = map[string]string{
 	"project": "COALESCE(project_id, '')",
 	"key":     "COALESCE(key_id, '')",
@@ -446,11 +430,9 @@ func GroupBys() []string {
 	return slices.Sorted(maps.Keys(groupColumns))
 }
 
-// Usage aggregates the event log for the usage report.
-//
-// Cost and tokens add up every row, as budgets do: a refused or failed
-// request can still have paid for a filter or router call. Requests counts
-// only what was served, as the keys screen does.
+// Usage aggregates the event log for the usage report. Cost and tokens add up
+// every row, as budgets do, since a refused or failed request can still have
+// paid for a filter or router call. Requests counts only what was served.
 func (s *Store) Usage(ctx context.Context, q UsageQuery) ([]UsageBucket, error) {
 	src, from, to := sourceFor(q.From, q.To)
 	groupBy := q.groupBy()
@@ -464,9 +446,8 @@ func (s *Store) Usage(ctx context.Context, q UsageQuery) ([]UsageBucket, error) 
 	if groupBy == "day" {
 		order = "grp"
 	}
-	// The alias is whatever the client sent, so a mistyped name is on its
-	// refusal's row. A name that was never served and cost nothing is not a
-	// model; the request log still shows the refusal.
+	// The alias is whatever the client sent, so hide names that were never
+	// served and cost nothing, such as typos. The request log still shows them.
 	having := ""
 	if groupBy == "model" {
 		having = ` HAVING ` + src.served + ` > 0
@@ -502,12 +483,12 @@ type UsageLine struct {
 	Counts []int64 `json:"counts"`
 }
 
-// chartLines is how many groups get a line of their own. The panel has six
-// series colours, and the sixth is for the rest.
+// chartLines is how many groups get their own line. The panel has six colours,
+// and the sixth is for the rest.
 const chartLines = 5
 
-// UsageChart draws the report Usage lists over time. It counts what Usage
-// counts, so the lines add up to the report's served requests.
+// UsageChart draws the Usage report over time. It counts what Usage counts, so
+// the lines add up to the report's served requests.
 func (s *Store) UsageChart(ctx context.Context, q UsageQuery) (UsageChart, error) {
 	src, from, to := sourceFor(q.From, q.To)
 	groupBy := q.groupBy()
@@ -516,15 +497,13 @@ func (s *Store) UsageChart(ctx context.Context, q UsageQuery) (UsageChart, error
 	if q.OrgID == "" && groupBy == "model" {
 		org = "org_id"
 	}
-	// Each day is a single point on a chart over days, so a report by day
-	// draws one line.
+	// A report by day draws one line, as each day is one point.
 	if groupBy == "day" {
 		col = "''"
 	}
 	c := UsageChart{Bucket: chartBucket(from, to)}
 
-	// Every bucket in the window is listed, as on the dashboard, so a quiet
-	// stretch shows as a dip.
+	// Every bucket in the window is listed, so a quiet stretch shows as a dip.
 	var err error
 	c.At, err = queryAll(ctx, s.pool, func(r row) (time.Time, error) {
 		var t time.Time
@@ -614,11 +593,9 @@ func scanUsageBucket(r row) (UsageBucket, error) {
 	return b, err
 }
 
-// Audit appends one control-plane action to the audit log. The gateway path
-// does not write here; its record is the usage event.
-//
-// orgID is the tenant the action happened in, so no tenant can read another's
-// history.
+// Audit appends one control-plane action to the audit log. Inference requests
+// are recorded as usage events instead. orgID is the tenant the action
+// happened in, so no tenant can read another's history.
 func (s *Store) Audit(ctx context.Context, actor, orgID, action, targetType, targetID string, detail any) error {
 	var raw []byte
 	if detail != nil {
@@ -645,24 +622,21 @@ type AuditEntry struct {
 	Detail     json.RawMessage `json:"detail,omitempty"`
 }
 
-// AuditQuery narrows the audit log. Every field is optional; the zero value is
-// "the most recent entries of this tenant".
+// AuditQuery narrows the audit log. Every field is optional.
 type AuditQuery struct {
 	OrgID  string
 	Actor  string
 	Action string
 	From   time.Time
 	To     time.Time
-	// Before pages backwards to entries with a lower id. Ids only grow, so it
-	// stays stable while the log is written to, unlike an offset.
+	// Before pages backwards to entries with a lower id, which stays stable
+	// while the log grows, unlike an offset.
 	Before int64
 	Limit  int
 }
 
-// ListAudit returns audit entries matching q, newest first.
-//
-// An empty OrgID means every tenant, which only an operator asks for. Anyone
-// else sees only their own organisation's entries.
+// ListAudit returns audit entries matching q, newest first. An empty OrgID
+// means every tenant, which only an operator asks for.
 func (s *Store) ListAudit(ctx context.Context, q AuditQuery) ([]AuditEntry, error) {
 	q.Limit = pageLimit(q.Limit, 100, 5000)
 	return queryAll(ctx, s.pool, scanAuditEntry, `SELECT id, ts, actor, action, COALESCE(target_type,''),
@@ -683,8 +657,8 @@ func scanAuditEntry(r row) (AuditEntry, error) {
 	return a, err
 }
 
-// AuditFacets is what the log can be filtered by: the actions and actors that
-// actually occur in this tenant, so no filter is offered that matches nothing.
+// AuditFacets is the actions and actors that occur in a tenant's log, so no
+// filter is offered that matches nothing.
 type AuditFacets struct {
 	Actions []string `json:"actions"`
 	Actors  []string `json:"actors"`
@@ -715,8 +689,8 @@ func (s *Store) AuditFilters(ctx context.Context, orgID string) (AuditFacets, er
 	return f, err
 }
 
-// truncate bounds a string to n bytes without splitting a rune. It marks the
-// cut, so a shortened message does not look like the whole one.
+// truncate bounds a string to n bytes without splitting a rune, and marks the
+// cut.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s

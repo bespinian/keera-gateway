@@ -9,58 +9,53 @@ import (
 	"time"
 )
 
-// A sandbox is a machine the gateway lends out. This file is its part of the
-// tenancy model: the classes an organisation offers, and how much of them a
-// scope may hold. internal/sandbox runs them. See docs/sandboxes.md.
+// A sandbox is a machine the gateway lends out. This file holds the classes an
+// organisation offers and how much a scope may hold. internal/sandbox runs
+// them. See docs/sandboxes.md.
 
 // Isolation is how firmly a sandbox is separated from the node it runs on.
 //
 // It states intent rather than a runtime name, because clusters name their
-// gVisor RuntimeClass differently ("gvisor", "runsc", "sandboxed"). A
-// deployment maps these three onto its own names once, so the catalogue stays
-// portable. Each tier costs more than the one before.
+// gVisor RuntimeClass differently. A deployment maps the three tiers to its
+// own names, so the catalogue stays portable.
 type Isolation string
 
 const (
-	// IsolationStandard is the cluster's usual container runtime, with the
-	// hardening every sandbox gets: a non-root user, no privilege escalation,
-	// no capabilities. The boundary is the host kernel, which suits a
-	// developer's own code but not running a model's output.
+	// IsolationStandard is the usual container runtime, hardened: non-root, no
+	// privilege escalation, no capabilities. The boundary is the host kernel,
+	// which suits a developer's own code but not a model's output.
 	IsolationStandard Isolation = "standard"
 	// IsolationIsolated puts a userspace kernel (gVisor) in front of the
-	// host's, so a kernel bug reached from inside hits a process, not the
-	// machine. It slows syscall-heavy work and lacks io_uring, some FUSE
-	// mounts and nested containers, but needs no special hardware, so every
-	// deployment can offer it.
+	// host's, so a kernel bug hits a process, not the machine. It slows
+	// syscall-heavy work and lacks some features, but needs no special
+	// hardware.
 	IsolationIsolated Isolation = "isolated"
-	// IsolationVM gives the sandbox its own kernel in a virtual machine (Kata
-	// Containers). It costs a second or two of boot and about 100 MB per
-	// sandbox, and needs hardware virtualisation, which nodes that are VMs
-	// themselves may not have. That is why it is not the only tier.
+	// IsolationVM gives the sandbox its own kernel in a VM (Kata Containers).
+	// It costs a second or two of boot and about 100 MB, and needs hardware
+	// virtualisation, which nodes that are VMs may not have.
 	IsolationVM Isolation = "vm"
 )
 
 // Isolations is every tier, weakest first.
 var Isolations = []Isolation{IsolationStandard, IsolationIsolated, IsolationVM}
 
-// Valid reports whether i names a tier. The empty string does not, because
-// nobody should have to guess a sandbox's isolation. catalog.ParseSandbox
-// fills it in first.
+// Valid reports whether i names a tier. Empty does not: nobody should guess a
+// sandbox's isolation. catalog.ParseSandbox fills it in first.
 func (i Isolation) Valid() bool { return slices.Contains(Isolations, i) }
 
-// Purpose is who a sandbox was made for. It decides the lifecycle: how long it
-// may sit idle, what happens then, whether anyone may attach, and whether its
-// requests form one task or a day's work.
+// Purpose is who a sandbox was made for. It decides the lifecycle: idle time,
+// what happens then, whether anyone may attach, and whether its requests form
+// one task or a day's work.
 type Purpose string
 
 const (
-	// PurposeEngineer is a person's own machine. People attach to it, it is
-	// suspended rather than destroyed when idle because the volume holds their
-	// work, and it states no session because its requests are a day's work.
+	// PurposeEngineer is a person's own machine. People attach to it, and it
+	// is suspended, not destroyed, when idle, because the volume holds their
+	// work.
 	PurposeEngineer Purpose = "engineer"
 	// PurposeAgent is one task's machine. Nothing attaches to it, it is
-	// terminated when its time runs out, and it states its own session id
-	// because it is one task. See docs/sessions.md.
+	// terminated when its time runs out, and it states its own session id.
+	// See docs/sessions.md.
 	PurposeAgent Purpose = "agent"
 )
 
@@ -68,45 +63,33 @@ var Purposes = []Purpose{PurposeEngineer, PurposeAgent}
 
 func (p Purpose) Valid() bool { return slices.Contains(Purposes, p) }
 
-// Attachable reports whether a person may open a shell on this sandbox. Only on
-// an engineer's: an agent sandbox promises that nothing left it but a branch,
-// and an unrecorded shell session would break that promise.
+// Attachable reports whether a person may open a shell. An agent sandbox
+// promises nothing left it but a branch, and a shell would break that.
 func (p Purpose) Attachable() bool { return p != PurposeAgent }
 
-// SandboxClass is one entry in an organisation's sandbox catalogue: a machine a
-// developer or an agent can ask for by name.
-//
-// Like a model alias, the name goes into command lines and repository
-// configuration, so an administrator can change what is behind it without
-// anyone editing anything.
+// SandboxClass is one entry in an organisation's sandbox catalogue. Like a
+// model alias, people use the name, so what is behind it can change.
 type SandboxClass struct {
-	// OrgID is the organisation the class belongs to. Only its people and
-	// agents can ask for it.
-	OrgID string `json:"org_id"`
-	Name  string `json:"name"`
-	// Description says why to pick this class over another.
+	OrgID       string `json:"org_id"`
+	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
-	// Image is the OCI image the sandbox runs. It should have the toolchain
-	// already installed: installing on start is slow, and impossible on an
-	// air-gapped site.
+	// Image should have the toolchain installed: installing on start is slow,
+	// and impossible on an air-gapped site.
 	Image     string    `json:"image"`
 	Isolation Isolation `json:"isolation"`
-	// CPU is in millicores and Memory in mebibytes, the units both drivers
-	// share. Disk is the persistent volume in mebibytes; zero keeps nothing
-	// across a suspend.
+	// CPU is in millicores and Memory in mebibytes. Disk is the persistent
+	// volume in mebibytes; zero keeps nothing across a suspend.
 	CPU    int `json:"cpu_millis"`
 	Memory int `json:"memory_mib"`
 	Disk   int `json:"disk_mib"`
 	// DefaultTTLSeconds applies when nobody asks for a lifetime, and
-	// MaxTTLSeconds caps what anybody may ask for before policy narrows it.
-	// Without an expiry, somebody has to remember to terminate the machine.
+	// MaxTTLSeconds caps what anybody may ask for.
 	DefaultTTLSeconds int `json:"default_ttl_seconds"`
 	MaxTTLSeconds     int `json:"max_ttl_seconds"`
-	// Warm is how many idle sandboxes are kept started so asking for one is
-	// instant. They cost resources all the time. Zero is the default.
+	// Warm is how many idle sandboxes are kept started, so asking for one is
+	// instant. They cost resources all the time.
 	Warm int `json:"warm"`
-	// Purposes are what this class may be asked for. Empty means both, so a
-	// deployment can put agents on the VM tier and people on a cheaper one.
+	// Purposes are what this class may be asked for. Empty means both.
 	Purposes  []Purpose `json:"purposes,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -124,8 +107,7 @@ func (c SandboxClass) Allows(p Purpose) bool {
 	return len(c.Purposes) == 0 || slices.Contains(c.Purposes, p)
 }
 
-// TTLFor returns the lifetime a sandbox of this class gets when asked for
-// want, capped at the class's MaxTTL. Zero want is the class's default.
+// TTLFor caps want at MaxTTL. Zero want is the class's default.
 func (c SandboxClass) TTLFor(want time.Duration) time.Duration {
 	if want <= 0 {
 		want = c.DefaultTTL()
@@ -136,57 +118,47 @@ func (c SandboxClass) TTLFor(want time.Duration) time.Duration {
 	return want
 }
 
-// maxSandboxName keeps a sandbox name short, because it is also a hostname in
-// the cluster and part of an ssh config Host pattern.
+// maxSandboxName is short because the name is also a hostname and part of an
+// ssh config Host pattern.
 const maxSandboxName = 40
 
-// maxClassName keeps a class name inside a Kubernetes label value, which
-// allows 63 characters, and inside the name of the class's warm pool, which
-// adds 15 more.
+// maxClassName fits a Kubernetes label value (63), with 15 to spare for the
+// warm pool's name.
 const maxClassName = 40
 
 func ValidClassName(s string) bool { return validName(s, maxClassName) }
 
-// ValidSandboxName reports whether s is a name a sandbox may have. It becomes
-// a DNS label in the cluster and what a developer types after
-// `keera sandbox ssh`.
+// ValidSandboxName reports whether s can name a sandbox. It becomes a DNS
+// label.
 func ValidSandboxName(s string) bool { return validName(s, maxSandboxName) }
 
-// SandboxState is where one sandbox is in its life. It is one enum so every
-// caller has one column to read.
+// SandboxState is where one sandbox is in its life.
 type SandboxState string
 
 const (
-	// SandboxPending is asked for and not yet usable: scheduling, pulling,
-	// booting. If it stays here, the row's Detail says why.
+	// SandboxPending is not yet usable. If it stays, the row's Detail says why.
 	SandboxPending SandboxState = "pending"
-	// SandboxReady is up, reachable and inside its lifetime.
-	SandboxReady SandboxState = "ready"
-	// SandboxSuspended has released its compute and kept its volume. Resuming
-	// reverses it.
+	SandboxReady   SandboxState = "ready"
+	// SandboxSuspended has released its compute and kept its volume.
 	SandboxSuspended SandboxState = "suspended"
-	// SandboxExpired has run out of lifetime and lost its key, but keeps its
-	// volume. This is an engineer's sandbox, whose owner has not said they are
-	// done. Resuming gives it a new key and a new lifetime.
+	// SandboxExpired is an engineer's sandbox that ran out of lifetime and lost
+	// its key, but keeps its volume. Resuming gives it a new key and lifetime.
 	SandboxExpired SandboxState = "expired"
-	// SandboxFailed means the driver gave up: the pod died, the node went
-	// away, the claim could not be met.
+	// SandboxFailed means the driver gave up.
 	SandboxFailed SandboxState = "failed"
-	// SandboxTerminated is gone, with the row kept so its cost and purpose
-	// still resolve.
+	// SandboxTerminated is gone. The row stays so its cost still resolves.
 	SandboxTerminated SandboxState = "terminated"
 )
 
-// Live reports whether this state still holds resources, which is what a
-// quota counts. A failed engineer sandbox holds its volume too, which
-// store.Sandbox.Live adds, since that depends on the purpose.
+// Live reports whether this state holds resources, which a quota counts. A
+// failed engineer sandbox keeps its volume too; store.Sandbox.Live adds that.
 func (s SandboxState) Live() bool {
 	return s == SandboxPending || s == SandboxReady || s == SandboxSuspended ||
 		s == SandboxExpired
 }
 
 // Running reports whether compute is allocated. A suspended sandbox is live
-// but not running: it holds its volume and no CPU.
+// but not running.
 func (s SandboxState) Running() bool {
 	return s == SandboxPending || s == SandboxReady
 }
@@ -196,39 +168,31 @@ func (s SandboxState) Final() bool {
 	return s == SandboxTerminated || s == SandboxFailed
 }
 
-// SandboxLimits is the part of Limits about sandboxes: four ceilings and two
-// allow-lists. They combine like every other limit: minimum for a ceiling,
-// intersection for a list.
+// SandboxLimits is the part of Limits about sandboxes. They combine like every
+// other limit.
 type SandboxLimits struct {
-	// MaxSandboxes is how many live sandboxes this scope may hold at once.
-	// Zero means unlimited, as for every ceiling here.
-	MaxSandboxes *int `json:"max_sandboxes,omitempty"`
-	// MaxSandboxTTLSeconds caps any one sandbox's lifetime. It is in seconds
-	// because it passes through JSON, SQL and a form field.
+	// MaxSandboxes counts live sandboxes. Zero means unlimited, as for every
+	// ceiling here.
+	MaxSandboxes         *int `json:"max_sandboxes,omitempty"`
 	MaxSandboxTTLSeconds *int `json:"max_sandbox_ttl_seconds,omitempty"`
-	// SandboxClasses is the allow-list of classes. Nil means every class, as
-	// a nil AllowedModels means every model.
+	// SandboxClasses nil means every class.
 	SandboxClasses []string `json:"sandbox_classes"`
-	// MaxSandboxCPU and MaxSandboxMemory cap one sandbox's size, in millicores
-	// and mebibytes. A class above the cap is refused, not shrunk.
+	// A class above MaxSandboxCPU or MaxSandboxMemory is refused, not shrunk.
 	MaxSandboxCPU    *int `json:"max_sandbox_cpu_millis,omitempty"`
 	MaxSandboxMemory *int `json:"max_sandbox_memory_mib,omitempty"`
-	// AllowedRepos is which repositories a sandbox may check out, by their
-	// path on the forge: "bankb/core" for one, "bankb" for all under it, or
-	// "*" for any. Nil inherits. Unlike the other lists, a scope where no level
-	// sets it may check out nothing: one forge credential can reach every
-	// tenant's repositories, so someone has to say which are whose.
+	// AllowedRepos are forge paths a sandbox may check out: "bankb/core" for
+	// one, "bankb" for all under it, or "*" for any. Nil inherits. Unlike the
+	// other lists, if no level sets it nothing is allowed: one forge
+	// credential can reach every tenant's repositories.
 	AllowedRepos []string `json:"allowed_repos"`
 }
 
-// IsZero reports whether l sets nothing. See Limits.IsZero.
+// IsZero works like Limits.IsZero.
 func (l SandboxLimits) IsZero() bool { return reflect.DeepEqual(l, SandboxLimits{}) }
 
-// ResolvedSandbox is the sandbox half of Resolved, with every level's limits
-// combined.
+// ResolvedSandbox is the sandbox part of Resolved.
 type ResolvedSandbox struct {
-	// MaxSandboxes, MaxSandboxTTLSeconds, MaxSandboxCPU and MaxSandboxMemory
-	// are zero for unlimited.
+	// The ceilings are zero for unlimited.
 	MaxSandboxes         int      `json:"max_sandboxes"`
 	MaxSandboxTTLSeconds int      `json:"max_sandbox_ttl_seconds"`
 	SandboxClasses       []string `json:"sandbox_classes"`
@@ -242,14 +206,13 @@ func (r ResolvedSandbox) allowsClass(name string) bool {
 	return r.SandboxClasses == nil || slices.Contains(r.SandboxClasses, name)
 }
 
-// MaxTTL is the resolved lifetime ceiling, or zero for none.
+// MaxTTL is zero for no limit.
 func (r ResolvedSandbox) MaxTTL() time.Duration {
 	return time.Duration(r.MaxSandboxTTLSeconds) * time.Second
 }
 
-// Admits reports whether this scope may run a sandbox of class c, and why not
-// when it may not. The refused developer reads it, so it names the ceiling and
-// what was asked for.
+// Admits says why this scope may not run class c, or nil. The message names
+// the ceiling and what was asked for.
 func (r ResolvedSandbox) Admits(c SandboxClass) error {
 	if !r.allowsClass(c.Name) {
 		return fmt.Errorf("the sandbox class %q is not allowed here; this scope may use %s",
@@ -269,8 +232,7 @@ func (r ResolvedSandbox) Admits(c SandboxClass) error {
 // anyRepo in AllowedRepos allows every repository the forge credential reaches.
 const anyRepo = "*"
 
-// AdmitsRepo reports whether a sandbox here may check out the repository at
-// path on the forge, and why not when it may not.
+// AdmitsRepo says why a sandbox here may not check out path, or nil.
 func (r ResolvedSandbox) AdmitsRepo(path string) error {
 	if r.AllowedRepos == nil {
 		return errors.New("no repository is allowed for sandboxes here; an operator sets " +
@@ -302,8 +264,7 @@ func ValidRepoPattern(s string) bool {
 	return true
 }
 
-// repoCovers reports whether pattern allows path: the same path, a path under
-// it, or anything for "*". Forges ignore case in paths, so this does too.
+// repoCovers ignores case, as forges do.
 func repoCovers(pattern, path string) bool {
 	if pattern == anyRepo {
 		return true
@@ -312,8 +273,7 @@ func repoCovers(pattern, path string) bool {
 	return path == pattern || strings.HasPrefix(path, pattern+"/")
 }
 
-// narrowRepos combines two levels' repository lists. Nil cur allows nothing,
-// so a lower level cannot add to it.
+// narrowRepos: nil cur allows nothing, so a lower level cannot add to it.
 func narrowRepos(cur, next []string) []string {
 	if cur == nil || next == nil {
 		return cur
@@ -321,7 +281,6 @@ func narrowRepos(cur, next []string) []string {
 	return narrowList(cur, next, repoCovers)
 }
 
-// FormatCores renders millicores as cores.
 func FormatCores(m int) string {
 	if m%1000 == 0 {
 		return fmt.Sprintf("%d", m/1000)
@@ -329,7 +288,7 @@ func FormatCores(m int) string {
 	return fmt.Sprintf("%.1f", float64(m)/1000)
 }
 
-// FormatMiB renders mebibytes, in gibibytes when it divides evenly.
+// FormatMiB uses Gi when it divides evenly.
 func FormatMiB(m int) string {
 	if m >= 1024 && m%1024 == 0 {
 		return fmt.Sprintf("%dGi", m/1024)
@@ -337,9 +296,8 @@ func FormatMiB(m int) string {
 	return fmt.Sprintf("%dMi", m)
 }
 
-// narrow applies one level's sandbox limits to what the levels above allowed.
-// Only the organisation's level, top, grants repositories: one forge
-// credential reaches every tenant's, and a project must not reach past its own.
+// narrow applies one level's sandbox limits. Only the organisation (top)
+// grants repositories: one forge credential reaches every tenant's.
 func (r *ResolvedSandbox) narrow(lim *Limits, top bool) {
 	r.MaxSandboxes = minPositive(r.MaxSandboxes, deref(lim.MaxSandboxes))
 	r.MaxSandboxTTLSeconds = minPositive(r.MaxSandboxTTLSeconds, deref(lim.MaxSandboxTTLSeconds))

@@ -46,10 +46,9 @@ type cliLogin struct {
 // KEERA_CHAT_URL.
 const ChatCallbackPath = "/auth/callback"
 
-// panelHint is what the panel's form is told about where a sign-in goes once
-// it is done, added to the state after the #: ".cli", ".chat" or nothing for
-// the panel itself. It only picks the form's words; the flow decides where
-// the sign-in goes.
+// panelHint tells the panel's form where a sign-in goes once done, added to the
+// state after the #: ".cli", ".chat" or nothing for the panel. It only picks
+// the form's words; the flow decides where the sign-in goes.
 func (c cliLogin) panelHint(chatURL string) string {
 	switch {
 	case c.Redirect == "":
@@ -217,9 +216,8 @@ func (s *Server) cliToken(w http.ResponseWriter, r *http.Request) {
 }
 
 // cliTokenTTL is how long a new command-line token lasts. A month relies on
-// asking the directory again while it lasts; for a directory account without
-// a refresh token, that cannot happen, so it lasts as long as a browser
-// session.
+// asking the directory again meanwhile. A directory account without a refresh
+// token cannot be asked, so its token lasts as long as a browser session.
 func (s *Server) cliTokenTTL(r *http.Request, user store.User) (time.Duration, error) {
 	if s.directoryOf(user) == nil {
 		return authn.CLITokenTTL, nil

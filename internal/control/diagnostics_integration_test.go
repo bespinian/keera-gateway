@@ -15,8 +15,7 @@ import (
 )
 
 // What `keera doctor` and `keera guardrail effective` answer, against a real
-// database, since both report over its rows. They skip without
-// KEERA_TEST_DATABASE_URL; `make test-integration` provides one.
+// database, since both report over its rows.
 
 // diagnosed brings up a deployment with one organisation, one project, one key
 // and a broken filter.

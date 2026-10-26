@@ -10,7 +10,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// The release date is read as text, so an unstated one is simply empty.
+// The release date is read as text, so a missing one is empty.
 const modelColumns = `SELECT alias, org_id, kind, backends, backend_model, provider,
 	display_name, description, input_micros_per_mtok, output_micros_per_mtok, cached_input_micros_per_mtok,
 	cache_write_micros_per_mtok, long_prompt_tokens, long_input_micros_per_mtok,
@@ -59,10 +59,8 @@ func (s *Store) UpsertModel(ctx context.Context, m policy.Model, cred Credential
 }
 
 // Credential says what an upsert does with a row's stored credential. The
-// zero value keeps it, so an edit that does not mention one leaves it alone.
-//
-// It is written in the same statement as the row, so a model or MCP server
-// that moves to a new host never sits there with the old host's key.
+// zero value keeps it. It is written in the same statement as the row, so a
+// row that moves to a new host never holds the old host's key.
 type Credential struct {
 	set    bool
 	sealed []byte
@@ -118,8 +116,8 @@ func upsertModel(ctx context.Context, db querier, m policy.Model, cred Credentia
 	return err
 }
 
-// DeleteModel removes one of an organisation's models, and takes it off the
-// organisation's allow-list, where adding it put it.
+// DeleteModel removes one of an organisation's models and takes it off the
+// organisation's allow-list.
 func (s *Store) DeleteModel(ctx context.Context, orgID, alias string) error {
 	return s.deleteAllowed(ctx, "models", orgID, alias, nil)
 }

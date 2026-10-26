@@ -11,15 +11,14 @@ import (
 	"testing"
 )
 
-// ssh hands a ProxyCommand the whole hostname typed, so behind a Host pattern
-// of "sbx-*" the command is asked about "sbx-fix-login", not "fix-login".
+// ssh hands a ProxyCommand the whole hostname, so with a Host pattern of
+// "sbx-*" it gets "sbx-fix-login", not "fix-login".
 func TestSandboxRefAcceptsTheSSHHostAlias(t *testing.T) {
 	cases := map[string]string{
 		"fix-login":         "fix-login",
 		"sbx-fix-login":     "fix-login",
 		"sbx_06c1k2rt8g3m4": "sbx_06c1k2rt8g3m4",
-		// The prefix is stripped once, so a sandbox called "sbx-thing" is
-		// reached as "sbx-sbx-thing".
+		// The prefix is stripped once.
 		"sbx-sbx-thing": "sbx-thing",
 		"":              "",
 	}
@@ -100,8 +99,8 @@ func TestSandboxApplyChecksTheFileBeforeItWritesAnything(t *testing.T) {
 	}
 }
 
-// A bool flag passed on as "--json true" would leave "true" behind as a
-// second name, and `up` would refuse it.
+// A bool flag passed on as "--json true" would leave "true" as a second name,
+// which `up` would refuse.
 func TestAgentFlagsSurviveTheParser(t *testing.T) {
 	fs := flag.NewFlagSet("agent", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "")
@@ -138,16 +137,14 @@ func TestProxyCommandQuotesAnInstallPathWithASpace(t *testing.T) {
 	}
 }
 
-// ssh runs the ProxyCommand as a new process, without this invocation's
-// --url, so the command has to name the gateway itself. Otherwise the proxy
-// could reach whichever gateway was signed in to last.
+// ssh runs the ProxyCommand without this invocation's --url, so the command
+// must name the gateway, or it could reach the one signed in to last.
 func TestProxyCommandNamesTheGateway(t *testing.T) {
 	cmd := proxyCommand("/usr/bin/keera", "https://keera.example.ch", "%n", "org_1")
 	want := "/usr/bin/keera --url https://keera.example.ch sandbox proxy %n --org org_1"
 	if cmd != want {
 		t.Errorf("proxy command = %q, want %q", cmd, want)
 	}
-	// And the command it names parses back to that gateway.
 	t.Cleanup(func() { urlFlag = "" })
 	rest, err := takeURL(strings.Fields(cmd)[1:])
 	if err != nil {
@@ -161,8 +158,8 @@ func TestProxyCommandNamesTheGateway(t *testing.T) {
 	}
 }
 
-// Sandbox usage is a report: with no organisation chosen it spans every one
-// the caller can see, so an operator with several is not asked to pick one.
+// With no organisation chosen, sandbox usage spans every one the caller can
+// see.
 func TestSandboxUsageSpansEveryOrganisationWithoutOrg(t *testing.T) {
 	f := newFakeControl(t, map[string]any{
 		"GET /v1/me": map[string]any{"role": "operator"},
@@ -191,8 +188,7 @@ func TestSandboxUsageSpansEveryOrganisationWithoutOrg(t *testing.T) {
 	}
 }
 
-// An IPv6 literal is bracketed once, not again around the brackets the URL
-// already has.
+// An IPv6 literal that already has brackets is not bracketed again.
 func TestDialAddressAddsTheSchemesPort(t *testing.T) {
 	cases := map[string]string{
 		"https://gateway.example":      "gateway.example:443",

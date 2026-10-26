@@ -22,8 +22,7 @@ func TestHostingTellsWhatLeavesTheNetworkApartFromWhatDoesNot(t *testing.T) {
 		{"a model with no backend at all", nil, HostedUnknown},
 		{"something that is not a URL", []string{"::not a url"}, HostedUnknown},
 		{
-			// The gateway forwards to whichever it picks, so the promise is
-			// only as good as the weakest entry.
+			// The gateway may pick any, so the weakest entry decides.
 			name:     "one external backend among internal ones",
 			backends: []string{"http://vllm:8000/v1", "https://api.anthropic.com/v1"},
 			want:     HostedExternal,
@@ -44,9 +43,7 @@ func TestHostingTellsWhatLeavesTheNetworkApartFromWhatDoesNot(t *testing.T) {
 }
 
 func TestEndpointNamesTheHostThatDecidedTheClassification(t *testing.T) {
-	// The host on the screen has to be the reason for the mark beside it: a
-	// model drawn outside the boundary that names its internal backend would
-	// be a screen nobody can check.
+	// The host shown has to be the reason for the mark beside it.
 	m := Model{Backends: []string{"http://vllm:8000/v1", "https://api.anthropic.com/v1"}}
 	if got := m.Endpoint(); got != "api.anthropic.com" {
 		t.Errorf("Endpoint() = %q, want the external backend", got)
@@ -54,7 +51,7 @@ func TestEndpointNamesTheHostThatDecidedTheClassification(t *testing.T) {
 	if got := (Model{Backends: []string{"http://vllm:8000/v1"}}).Endpoint(); got != "vllm:8000" {
 		t.Errorf("Endpoint() = %q, want host and port and nothing else", got)
 	}
-	// A credential in a backend URL is not a thing to put on a screen.
+	// A credential in a backend URL must not be shown.
 	secret := Model{Backends: []string{"https://user:pw@api.example.com/v1"}}
 	if got := secret.Endpoint(); got != "api.example.com" {
 		t.Errorf("Endpoint() = %q, which carries the URL's credentials", got)

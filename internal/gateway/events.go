@@ -8,28 +8,23 @@ import (
 )
 
 // The Messages and Responses surfaces both turn a chat completion stream into
-// explicit events: blocks, or output items, open and close by index around
-// the deltas. This file is what the two share.
+// events where blocks or output items open and close around the deltas. This
+// file holds what they share.
 
 // eventStream re-emits a chat completion stream in another API's events.
 type eventStream interface {
 	chunk(payload []byte) error
-	// finish closes the stream, after the last chunk or a failure. cut is why
-	// the upstream stream ended without a whole answer, or nil.
+	// finish closes the stream. cut is why the upstream ended early, or nil.
 	finish(cut error) error
-	// failure is why a stream that was read to its end is still not a whole
-	// answer, or nil.
+	// failure is why a fully read stream is still not a whole answer, or nil.
 	failure() error
 	counts() (usage *tokenUsage, deltas int, firstAt time.Time)
 }
 
-// pipeEvents forwards a chat completion stream as the events of the stream
-// newStream makes, which writes them with send. A ping is sent whenever the
-// upstream is quiet for every; every <= 0 sends none.
-//
-// Events are written as they are made, by the goroutine reading upstream.
-// Only the pings come from elsewhere, a timer, since they are needed exactly
-// when that goroutine is waiting.
+// pipeEvents forwards a chat completion stream as the events newStream makes.
+// A ping is sent whenever the upstream is quiet for every; every <= 0 sends
+// none. Pings come from a timer, since they are needed exactly when the
+// reading goroutine is waiting.
 func pipeEvents(dst io.Writer, flush func(), src io.Reader, limit int64, every time.Duration,
 	newStream func(send func([]byte) error) eventStream,
 ) (streamStats, error) {
@@ -40,8 +35,8 @@ func pipeEvents(dst io.Writer, flush func(), src io.Reader, limit int64, every t
 	if readErr == nil {
 		readErr = st.failure()
 	}
-	// The stream is closed even after an upstream failure: a client waiting
-	// for its end would hang. A client that is gone is sent nothing more.
+	// Close the stream even after an upstream failure, or the client hangs.
+	// A client that is gone gets nothing more.
 	if !out.failed() {
 		if err := st.finish(readErr); err != nil && readErr == nil {
 			readErr = err
@@ -62,13 +57,12 @@ func (c *chatChunks) counts() (*tokenUsage, int, time.Time) {
 }
 
 // streamFailure is an upstream stream that ended without a whole answer. Its
-// message can be shown to the client.
+// message is safe to show the client.
 type streamFailure struct{ msg string }
 
 func (f streamFailure) Error() string { return f.msg }
 
-// cutMessage is what the client is told of a stream cut short. Any other
-// error is the connection breaking.
+// cutMessage is what the client is told of a stream cut short.
 func cutMessage(cut error) string {
 	if f, ok := errors.AsType[streamFailure](cut); ok {
 		return f.msg
@@ -76,13 +70,10 @@ func cutMessage(cut error) string {
 	return "the connection to the model broke before the answer was finished"
 }
 
-// failure reports an error the upstream sent in place of a chunk, and a stream
-// that stopped before it said why it stopped. Every backend ends a whole
-// answer with a finish reason.
+// failure reports an error the upstream sent, or a stream that stopped without
+// a finish reason, which every backend sends at the end of a whole answer.
 func (c *chatChunks) failure() error { return endedFailure(c.upstreamErr, c.finishReason != "") }
 
-// endedFailure is why a stream read to its end is not a whole answer: the
-// error the upstream sent, or no sign that the answer ended.
 func endedFailure(upstreamErr string, ended bool) error {
 	switch {
 	case upstreamErr != "":
@@ -93,7 +84,6 @@ func endedFailure(upstreamErr string, ended bool) error {
 	return nil
 }
 
-// frame is one server-sent event.
 func frame(name string, data []byte) []byte {
 	buf := make([]byte, 0, len(name)+len(data)+16)
 	buf = append(buf, "event: "...)
@@ -105,9 +95,8 @@ func frame(name string, data []byte) []byte {
 
 var pingEvent = frame("ping", []byte(`{"type":"ping"}`))
 
-// blocks tracks the one block of a stream that is open. Blocks open and close
-// in sequence, so a fragment of another kind, or of another tool call, closes
-// the open one first.
+// blocks tracks the one open block of a stream. Blocks open and close in
+// sequence, so a fragment of another kind or tool call closes the open one.
 type blocks struct {
 	// open is the index of the open block, or -1.
 	open   int
@@ -116,8 +105,8 @@ type blocks struct {
 	tool int
 }
 
-// enter makes the open block the one a fragment belongs to: text, or the tool
-// call at index. If it is not, closeOpen closes it and open opens the next.
+// enter makes sure the open block is the one a fragment belongs to: text, or
+// the tool call at index. If not, closeOpen closes it and open opens the next.
 func (b *blocks) enter(isTool bool, index int, closeOpen, open func() error) error {
 	if b.open >= 0 && b.isTool == isTool && (!isTool || b.tool == index) {
 		return nil
@@ -128,8 +117,8 @@ func (b *blocks) enter(isTool bool, index int, closeOpen, open func() error) err
 	return open()
 }
 
-// pinger writes a stream's events, and a ping whenever nothing has been
-// written for a whole interval. With no interval it only writes.
+// pinger writes a stream's events, and a ping whenever nothing was written for
+// a whole interval.
 type pinger struct {
 	dst   io.Writer
 	flush func()
@@ -169,9 +158,8 @@ func (p *pinger) write(ev []byte) error {
 	return nil
 }
 
-// tick pings if the stream has been quiet for the interval, and sets itself
-// for when the next interval would end. Moving the timer here, rather than
-// on every write, keeps it off the per-token path.
+// tick pings if the stream was quiet for the interval and resets the timer.
+// Resetting here, not on every write, keeps it off the per-token path.
 func (p *pinger) tick() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -195,8 +183,7 @@ func (p *pinger) failed() bool {
 	return p.err != nil
 }
 
-// stop ends the pings and returns the first failed write. Nothing is written
-// once it returns.
+// stop ends the pings and returns the first failed write.
 func (p *pinger) stop() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()

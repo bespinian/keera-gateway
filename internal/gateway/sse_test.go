@@ -31,8 +31,8 @@ const (
 )
 
 func TestPipeSSEDropsTheUsageChunkTheGatewayAskedFor(t *testing.T) {
-	// The client never sent stream_options, so it is not expecting a chunk with
-	// an empty choices array. Some clients treat one as a malformed response.
+	// The client never sent stream_options, so it does not expect a chunk
+	// with empty choices. Some clients treat one as malformed.
 	var out bytes.Buffer
 	in := sseStream(deltaChunk, deltaChunk, usageChunk)
 
@@ -74,8 +74,8 @@ func TestPipeSSEKeepsTheUsageChunkTheClientAskedFor(t *testing.T) {
 }
 
 func TestPipeSSEKeepsAChunkThatCarriesBothContentAndUsage(t *testing.T) {
-	// With continuous_usage_stats a chunk has usage *and* choices. Dropping one
-	// of those would swallow generated content.
+	// With continuous_usage_stats a chunk has usage and choices. Dropping it
+	// would lose content.
 	both := `{"choices":[{"delta":{"content":"x"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`
 	var out bytes.Buffer
 	if _, err := pipeSSE(&out, func() {}, strings.NewReader(sseStream(both)), "", true, DefaultMaxResponseBytes); err != nil {
@@ -87,8 +87,8 @@ func TestPipeSSEKeepsAChunkThatCarriesBothContentAndUsage(t *testing.T) {
 }
 
 func TestPipeSSECountsDeltasForACancelledStream(t *testing.T) {
-	// No usage chunk ever arrives, because the client hung up. The delta count
-	// is what the request is charged on instead of nothing at all.
+	// The client hung up, so no usage chunk arrives. The request is charged
+	// on the delta count instead.
 	in := "data: " + deltaChunk + "\n\ndata: " + deltaChunk + "\n\ndata: " + deltaChunk + "\n\n"
 	stats, err := pipeSSE(io.Discard, func() {}, strings.NewReader(in), "", true, DefaultMaxResponseBytes)
 	if err != nil {
@@ -102,8 +102,7 @@ func TestPipeSSECountsDeltasForACancelledStream(t *testing.T) {
 	}
 }
 
-// A stream passed on is the client's to judge, but the row has to say when it
-// was no whole answer.
+// The row says when a passed-on stream was not a whole answer.
 func TestPipeSSESaysWhenAStreamWasNoWholeAnswer(t *testing.T) {
 	for _, tc := range []struct {
 		in, want string
@@ -156,8 +155,8 @@ func TestPipeSSEForwardsATruncatedFinalEvent(t *testing.T) {
 }
 
 func TestPipeSSEReportsAWriteFailure(t *testing.T) {
-	// A client disconnecting mid-stream surfaces as a write error, and the
-	// caller needs it to know the request was cut short.
+	// A client leaving mid-stream shows as a write error, which tells the
+	// caller the request was cut short.
 	want := errors.New("client gone")
 	_, err := pipeSSE(errWriter{want}, func() {}, strings.NewReader(sseStream(deltaChunk)), "", true, DefaultMaxResponseBytes)
 	if !errors.Is(err, want) {
@@ -175,8 +174,7 @@ func TestPipeSSERecordsWhenTheFirstTokenReachedTheClient(t *testing.T) {
 	}
 }
 
-// afterPause reads r, but only once pause has passed: an upstream that opens
-// the answer at once and writes its first token later.
+// afterPause reads r only once pause has passed.
 type afterPause struct {
 	r      io.Reader
 	pause  time.Duration
@@ -204,9 +202,8 @@ func paused(pause time.Duration, parts ...string) io.Reader {
 const pause = 50 * time.Millisecond
 
 func TestPipeSSEDoesNotCountTheOpeningAsTheFirstToken(t *testing.T) {
-	// A role chunk and a keep-alive can come long before the model writes
-	// anything. Counting them would make the first token look faster than the
-	// client saw it.
+	// A role chunk and a keep-alive can come long before the first token, so
+	// they do not count.
 	opening := ": keep-alive\n\n" +
 		`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}` + "\n\n"
 	start := time.Now()
@@ -256,8 +253,7 @@ func TestGeneratedTellsTokensFromTheOpeningAndTheEnd(t *testing.T) {
 }
 
 func TestPipeSSEFlushesEveryEvent(t *testing.T) {
-	// Without a flush per event the whole stream arrives at once, which is the
-	// difference between an editor that types and one that pauses then dumps.
+	// Without a flush per event the whole stream arrives at once.
 	flushes := 0
 	in := sseStream(deltaChunk, deltaChunk)
 	if _, err := pipeSSE(io.Discard, func() { flushes++ }, strings.NewReader(in), "", true, DefaultMaxResponseBytes); err != nil {
@@ -293,8 +289,7 @@ func (e errWriter) Write([]byte) (int, error) { return 0, e.err }
 var _ io.Writer = errWriter{}
 
 func TestPipeSSEEmitsLargeEventsWithoutWaiting(t *testing.T) {
-	// A tool call with a big argument object must not be held back waiting for
-	// a blank line that is arbitrarily far away.
+	// A big tool call must not be held back waiting for a far blank line.
 	big := `{"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"` +
 		strings.Repeat("a", maxEventBytes) + `"}}]}}]}`
 	var out bytes.Buffer
@@ -307,8 +302,8 @@ func TestPipeSSEEmitsLargeEventsWithoutWaiting(t *testing.T) {
 }
 
 func TestPipeSSEReadsAChunkLargerThanTheReadBuffer(t *testing.T) {
-	// A tool call with large arguments arrives as one long line. Read as two
-	// lines, it would be broken JSON, and the token counts it bills would be lost.
+	// A large tool call arrives as one long line. Read as two, it would be
+	// broken JSON and its usage would be lost.
 	chunk := `{"choices":[{"delta":{"content":"` + strings.Repeat("x", 3*readBuffer) +
 		`"}}],"usage":{"prompt_tokens":40000,"completion_tokens":11,"total_tokens":40011}}`
 	var out bytes.Buffer
@@ -334,9 +329,8 @@ func TestPipeSSEReadsAChunkLargerThanTheReadBuffer(t *testing.T) {
 	}
 }
 
-// The cached share of the prompt rides in the same usage chunk, one level
-// down. Missing it would price a streamed request at up to ten times what the
-// provider charges.
+// The cached share of the prompt is nested in the usage chunk. Missing it
+// would overprice a streamed request up to tenfold.
 func TestPipeSSEReadsTheCachedShareOfThePrompt(t *testing.T) {
 	const cachedUsageChunk = `{"id":"1","choices":[],"usage":{"prompt_tokens":100,` +
 		`"completion_tokens":7,"total_tokens":107,"prompt_tokens_details":{"cached_tokens":90}}}`
@@ -349,16 +343,14 @@ func TestPipeSSEReadsTheCachedShareOfThePrompt(t *testing.T) {
 	if stats.usage == nil {
 		t.Fatal("the usage record was not captured")
 	}
-	// The prompt count is the whole prompt, and the cached count is a share of
-	// it rather than something to add to it.
+	// The prompt count is the whole prompt; the cached count is part of it.
 	if stats.usage.InputTokens != 100 || stats.usage.cached() != 90 {
 		t.Errorf("usage = %d in, %d cached; want 100 and 90",
 			stats.usage.InputTokens, stats.usage.cached())
 	}
 }
 
-// An inference plane of your own caches nothing and sends no such object,
-// which has to read as nothing cached rather than as a missing number.
+// A self-hosted plane sends no cache object, which reads as nothing cached.
 func TestPipeSSEReadsNoCachedShareAsNoneCached(t *testing.T) {
 	stats, err := pipeSSE(io.Discard, func() {},
 		strings.NewReader(sseStream(deltaChunk, usageChunk)), "", true, DefaultMaxResponseBytes)
@@ -371,8 +363,8 @@ func TestPipeSSEReadsNoCachedShareAsNoneCached(t *testing.T) {
 }
 
 func TestHasUsageSkipsANullUsage(t *testing.T) {
-	// With include_usage, OpenAI sends "usage":null in every chunk. Decoding
-	// each of them would put a JSON decode on every token.
+	// With include_usage, OpenAI sends "usage":null in every chunk, which
+	// must not be decoded on every token.
 	for payload, want := range map[string]bool{
 		deltaChunk: false,
 		usageChunk: true,
@@ -394,8 +386,7 @@ func TestPipeSSEStopsALineThatNeverEnds(t *testing.T) {
 	}
 }
 
-// KEERA_MAX_RESPONSE_BYTES bounds one event of every streamed shape, not only
-// a buffered answer.
+// KEERA_MAX_RESPONSE_BYTES also caps one event of every streamed shape.
 func TestStreamsHonourTheResponseLimit(t *testing.T) {
 	long := sseStream(`{"choices":[{"delta":{"content":"` + strings.Repeat("x", 4*readBuffer) + `"}}]}`)
 	for name, sh := range map[string]shape{
@@ -434,8 +425,8 @@ func TestFlushBeforeReadJoinsEventsThatArriveTogether(t *testing.T) {
 }
 
 func TestFlushBeforeReadFlushesBeforeWaiting(t *testing.T) {
-	// One byte per read: every event is followed by a read that could wait, so
-	// each must reach the client before it.
+	// One byte per read: each event must reach the client before the next
+	// read, which could wait.
 	in := sseStream(deltaChunk, deltaChunk)
 	if n := pipeFlushes(t, iotest.OneByteReader(strings.NewReader(in))); n != 3 {
 		t.Errorf("flushed %d times, want 3: one per event when each arrives alone", n)
@@ -443,8 +434,8 @@ func TestFlushBeforeReadFlushesBeforeWaiting(t *testing.T) {
 }
 
 func TestAPingReachesTheClientWhileTheUpstreamWaits(t *testing.T) {
-	// The ping is written while the reading goroutine waits on the upstream,
-	// so it must not wait for that read to end before it is flushed.
+	// The ping is written while the read waits on the upstream, and must be
+	// flushed without waiting for it.
 	restore := anthropicPingInterval
 	anthropicPingInterval = time.Millisecond
 	t.Cleanup(func() { anthropicPingInterval = restore })

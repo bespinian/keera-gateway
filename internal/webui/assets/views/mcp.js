@@ -1,6 +1,5 @@
 // The MCP page: the tools an agent calls, behind the same keys and guardrails
-// as the models. A server belongs to one organisation, and its administrators
-// add and change it.
+// as the models. A server belongs to one organisation.
 
 import { api } from "../api.js";
 import {
@@ -29,8 +28,8 @@ import {
 } from "../ui.js";
 import { toolCallTable } from "./tools.js";
 
-// mcpView lists the servers and the address a client uses for each. An
-// administrator also sees the tool call counts and the latest calls.
+// mcpView lists the servers and each one's address. An admin also sees the
+// tool calls.
 export async function mcpView(ctx) {
   const canEdit = isAdmin(ctx);
   const since = currentRange();
@@ -133,8 +132,7 @@ export async function mcpView(ctx) {
       : "An administrator adds them.",
   });
 
-  // A failed read says so, rather than showing an address without its host
-  // or a period without calls.
+  // A failed read says so, rather than showing partial data.
   const wrap = h(
     "div",
     {},
@@ -242,7 +240,6 @@ function callsOf(summary, alias) {
 
 function editServer(ctx, existing) {
   const m = existing || { enabled: true };
-  // A new server belongs to the organisation in view.
   const orgID = existing ? existing.org_id : ctx.orgID;
   const input = (value, props = {}) =>
     h("input", {
@@ -267,8 +264,7 @@ function editServer(ctx, existing) {
   // "Bearer ", which is not what an empty field does.
   const authHeader = input(m.auth_header, { class: "input mono" });
 
-  // Write-only: the control plane never sends a credential back, so an empty
-  // field leaves the stored one alone.
+  // Write-only: an empty field keeps the stored credential.
   const apiKey = h("input", {
     class: "input",
     type: "password",
@@ -328,7 +324,7 @@ function editServer(ctx, existing) {
       if (problem) throw new Error(problem);
       if (!url.value.trim())
         throw new Error("The server's address is required.");
-      // Sent only when typed or cleared: sending "" on every save would wipe it.
+      // Sent only when typed or cleared: "" would wipe it.
       let credential;
       if (clearKey && clearKey.checked) credential = "";
       else if (apiKey.value) credential = apiKey.value;

@@ -1,5 +1,4 @@
-// Command keera administers a Keera Gateway. It only uses the control API,
-// never the database, so it works the same against any gateway.
+// Command keera administers a Keera Gateway through the control API only.
 package main
 
 import (
@@ -14,7 +13,7 @@ import (
 
 func main() { os.Exit(run()) }
 
-// run is the command, apart from os.Exit, so that its deferred calls run.
+// run is kept apart from os.Exit so its deferred calls run.
 func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

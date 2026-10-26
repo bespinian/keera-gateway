@@ -7,34 +7,29 @@ import (
 	"sync"
 )
 
-// Compression for the control plane. The panel's assets and reports shrink to
-// about a third, and there is often no proxy in front to do it. The inference
-// plane is left alone: buffering a streamed completion would delay it.
+// Compression for the control plane, as there is often no proxy in front to do
+// it. The inference plane is left alone: buffering would delay a stream.
 
-// compressMinBytes is the smallest response worth compressing. Below it the
-// gzip framing is a large part of what is sent.
+// compressMinBytes is the smallest response worth compressing.
 const compressMinBytes = 1 << 10
 
 // gzipPool reuses compressors: each carries about 300KB of state.
 var gzipPool = sync.Pool{
 	New: func() any {
-		// Not BestCompression, as the embedded assets get: per request, the
-		// last few percent cost more CPU than they save.
+		// Not BestCompression: per request, it costs more CPU than it saves.
 		zw, _ := gzip.NewWriterLevel(nil, gzip.DefaultCompression)
 		return zw
 	},
 }
 
 // AcceptsGzip reports whether an Accept-Encoding header asks for gzip. A
-// substring test is enough: there is no other encoding on offer, and a client
-// that cannot read gzip does not name it.
+// substring test is enough, as no other encoding is on offer.
 func AcceptsGzip(header string) bool {
 	return strings.Contains(header, "gzip")
 }
 
-// compressibleType reports whether a Content-Type is worth gzipping.
-// text/event-stream is excluded: a compressor's buffer would hold back the live
-// request log.
+// compressibleType reports whether a Content-Type is worth gzipping. Not
+// text/event-stream: the buffer would hold back the live request log.
 func compressibleType(ct string) bool {
 	switch ct = MediaType(ct); ct {
 	case "application/json", "image/svg+xml":
@@ -47,25 +42,23 @@ func compressibleType(ct string) bool {
 
 // Compress gzips the responses of next for clients that asked for it.
 //
-// The choice waits for the first write, when the content type and body size
-// are known. Until then the body is held, so a small response can still go out
-// uncompressed. A response that already has a Content-Encoding, like the
-// panel's precompressed assets, is left alone.
+// It decides on the first write, once the content type and size are known, so
+// a small response can still go out plain. A response that already has a
+// Content-Encoding is left alone.
 func Compress(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Set even when not compressing: the resource varies, so a cache must
-		// not serve the plain answer to everyone.
+		// Set even when not compressing, so a cache does not serve the plain
+		// answer to everyone.
 		w.Header().Set("Vary", "Accept-Encoding")
-		// An upgrade hands the connection over, and nothing may be written to
-		// it afterwards, not even the headers a gzip answer would close with.
+		// After an upgrade nothing may be written to the connection.
 		if r.Header.Get("Upgrade") != "" || !AcceptsGzip(r.Header.Get("Accept-Encoding")) {
 			next.ServeHTTP(w, r)
 			return
 		}
 		cw := &compressWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(cw, r)
-		// Not deferred: after a panic the middleware above can only send its
-		// 500 while the status line is still unsent.
+		// Not deferred: after a panic, the middleware above can only send its
+		// 500 if the status line is unsent.
 		cw.close()
 	})
 }
@@ -75,10 +68,8 @@ type compressWriter struct {
 	http.ResponseWriter
 
 	status int
-	// held is the body written before the decision. The write that takes it
-	// past compressMinBytes decides.
-	held []byte
-	// decided is set once the headers are sent.
+	// held is the body written before the decision.
+	held    []byte
 	decided bool
 	gz      *gzip.Writer
 }
@@ -134,7 +125,7 @@ func (c *compressWriter) decide(worthwhile bool) error {
 }
 
 // close finishes the response, deciding for a handler that wrote less than
-// the threshold or nothing at all, like a 204 or 304.
+// the threshold or nothing, like a 204 or 304.
 func (c *compressWriter) close() {
 	if !c.decided {
 		_ = c.decide(false)
@@ -150,8 +141,7 @@ func (c *compressWriter) close() {
 }
 
 // FlushError forces the decision and pushes everything through, so a streamed
-// response reaches the client. An event stream is not compressed, so after the
-// first flush this is a pass-through.
+// response reaches the client.
 func (c *compressWriter) FlushError() error {
 	if !c.decided {
 		if err := c.decide(true); err != nil {
@@ -166,6 +156,6 @@ func (c *compressWriter) FlushError() error {
 	return http.NewResponseController(c.ResponseWriter).Flush()
 }
 
-// Unwrap lets http.NewResponseController reach past this wrapper, for example
-// to set the write deadline the streamed request log needs.
+// Unwrap lets http.NewResponseController reach past this wrapper, such as to
+// set the request log stream's write deadline.
 func (c *compressWriter) Unwrap() http.ResponseWriter { return c.ResponseWriter }

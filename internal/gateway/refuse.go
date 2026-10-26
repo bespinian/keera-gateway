@@ -19,19 +19,17 @@ type refusal struct {
 	typ    string
 	code   string
 	msg    string
-	// advise appends the "here is where to look" sentence to what the client
-	// is told. It is a flag, so the usage row keeps only the refusal itself.
+	// advise adds the "where to look" sentence for the client only; the
+	// usage row keeps just the refusal.
 	advise bool
 	// retry is how long the client should wait, for limits that lift on their
 	// own.
 	retry time.Duration
 }
 
-// refuse answers a request the gateway turned away, and records it.
-//
-// A refusal gets a usage row like any other request, because it is the event
-// a developer asks about later ("my editor stopped working"). The model is not
-// charged; what a router or filter spent before the refusal is on the row.
+// refuse answers a request the gateway turned away, and records it. A refusal
+// gets a usage row, since developers ask about it later. The model is not
+// charged; what a router or filter spent is on the row.
 func (s *Server) refuse(c *call, ref refusal) {
 	s.limitHeaders(c.w, c.res, c.tr.start)
 	if ref.retry > 0 {
@@ -41,16 +39,14 @@ func (s *Server) refuse(c *call, ref refusal) {
 
 	ev := c.ev
 	ev.Status = ref.status
-	// The status says a guardrail stopped the request; the message says which
-	// one and what it was set to.
+	// The message says which guardrail stopped the request and its setting.
 	ev.Error = ref.msg
-	// The step the request was stopped in is closed and named by the code.
+	// The trace step it stopped in is closed and named by the code.
 	s.closeEarly(c, ev, ref.code, metricModel(s.src, ev.OrgID, ev.Alias))
 }
 
-// closeEarly records a request that ended before a model answered it. The row
-// carries what the router and the filters spent, so no early end drops what
-// they already charged to the budgets.
+// closeEarly records a request that ended before a model answered. The row
+// carries what the router and filters already charged to the budgets.
 func (s *Server) closeEarly(c *call, ev store.Event, note, metricAlias string) {
 	ev.Latency = time.Since(c.tr.start)
 	ev.CostMicros = c.hookMicros()
@@ -62,7 +58,7 @@ func (s *Server) closeEarly(c *call, ev store.Event, note, metricAlias string) {
 }
 
 // statusClientClosed is the status of a request the client gave up on before
-// it was answered. Nothing was sent back; 499 is the name nginx gives that.
+// an answer, as nginx names it.
 const statusClientClosed = 499
 
 // hungUp records a request whose client left before it was answered.
@@ -74,14 +70,13 @@ func (s *Server) hungUp(c *call, while, note string) {
 	s.closeEarly(c, ev, "client_closed", ev.Alias)
 }
 
-// unknownModel is the model label a refusal carries when the model it names is
-// not one of the organisation's models or routers.
+// unknownModel is the model label for a name that is none of the
+// organisation's models or routers.
 const unknownModel = "unknown"
 
-// metricModel bounds the model label to the organisation's models and
-// routers. Metric series are never cleaned up, and a refused request's model
-// is whatever the client sent: a new name on every request would grow the
-// registry until the process ran out of memory.
+// metricModel limits the model label to the organisation's models and
+// routers. Metric series are never cleaned up, so free client text as a label
+// would grow the registry until memory runs out.
 func metricModel(src policy.Source, orgID, alias string) string {
 	if alias == "" {
 		return ""
@@ -95,8 +90,8 @@ func metricModel(src policy.Source, orgID, alias string) string {
 	return unknownModel
 }
 
-// advise appends where to go and look. From inside an editor the message is
-// the only place a developer learns the panel exists.
+// advise appends where to look. In an editor, this message is the only way a
+// developer learns of the panel.
 func (s *Server) advise(msg string) string {
 	if s.opts.PanelURL == "" {
 		return msg
@@ -112,15 +107,11 @@ func (s *Server) told(ref refusal) string {
 	return ref.msg
 }
 
-// checkRates checks the rate limits of every scope.
-//
-// Each scope has its own limits, so an org-wide ceiling and a per-key ceiling
-// both hold. All of them are decided at once: charging the outer scopes and
-// then refusing at an inner one would spend allowance on a request that was
-// never sent. Outer scopes come first, and requests before tokens, so the
-// limit reported is the one an administrator expects to bind first.
-//
-// It only decides. The refusal is written by refuse.
+// checkRates checks the rate limits of every scope, so org-wide and per-key
+// limits both hold. All are decided at once: charging outer scopes and then
+// refusing at an inner one would spend allowance on a request never sent.
+// Outer scopes come first, and requests before tokens, so the reported limit
+// is the one an administrator expects. It only decides; refuse answers.
 func (s *Server) checkRates(scopes []policy.Scope, now time.Time) (refusal, bool) {
 	type check struct {
 		scope policy.Scope
@@ -153,12 +144,9 @@ func (s *Server) checkRates(scopes []policy.Scope, now time.Time) (refusal, bool
 	}, false
 }
 
-// checkQuotas checks the rate limits per day or month, a guardrail's or a
-// router's: requests or tokens counted in the windows budgets use. Like
-// checkRates, it only decides.
-//
-// It is 429, as a rate limit per minute is, with a Retry-After of when the
-// window starts again.
+// checkQuotas checks the daily and monthly rate limits of guardrails and
+// routers, counted in the budget windows. Like checkRates, it only decides.
+// It answers 429 with a Retry-After of when the window resets.
 func (s *Server) checkQuotas(scopes []policy.Scope, now time.Time) (refusal, bool) {
 	for _, sc := range scopes {
 		if sc.Quota <= 0 {
@@ -185,24 +173,20 @@ func (s *Server) checkQuotas(scopes []policy.Scope, now time.Time) (refusal, boo
 	return refusal{}, true
 }
 
-// tpmBucket is a scope's token bucket, which a request is checked against
-// before it is sent and charged to once its tokens are counted.
+// tpmBucket is a scope's token bucket, checked before sending and charged
+// once the tokens are counted.
 func tpmBucket(sc policy.Scope) ratelimit.Requirement {
 	return ratelimit.Requirement{Key: bucketKey(sc, "tpm"), PerMinute: sc.TPM}
 }
 
-// rateMessage names the limit that bound and its number, for the developer
-// whose agent just stopped.
+// rateMessage names the limit that was hit and its value.
 func rateMessage(sc policy.Scope, limit int, unit string) string {
 	return fmt.Sprintf("%s is over its rate limit of %d %s per minute",
 		sc.Type.Possessive(), limit, unit)
 }
 
-// limitHeaders states what is left of this key's allowance. They go on every
-// answer, not only on refusals, so a client can see a limit coming.
-//
-// Only the tightest scope is reported, so the client does not have to work out
-// which one binds.
+// limitHeaders states what is left of this key's allowance, on every answer,
+// so a client can see a limit coming. Only the tightest scope is reported.
 func (s *Server) limitHeaders(w http.ResponseWriter, res *policy.Resolved, now time.Time) {
 	s.budgetHeaders(w.Header(), res, now)
 	s.rateHeaders(w.Header(), res, now)
@@ -224,8 +208,7 @@ func (s *Server) budgetHeaders(h http.Header, res *policy.Resolved, now time.Tim
 	h.Set("X-Keera-Budget-Reset", sc.Period.Next(now).Format(time.RFC3339))
 }
 
-// rateHeaders uses the OpenAI header names, so clients that already read them
-// need nothing new.
+// rateHeaders uses the OpenAI header names, which clients already read.
 func (s *Server) rateHeaders(h http.Header, res *policy.Resolved, now time.Time) {
 	sc, left, ok := tightest(res.Scopes, func(sc policy.Scope) (int, bool) {
 		if sc.RPM <= 0 {

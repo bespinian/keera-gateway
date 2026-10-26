@@ -11,12 +11,11 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// Suspend releases a sandbox's compute and keeps its volume.
 func (m *Manager) Suspend(ctx context.Context, sb store.Sandbox) error {
 	if sb.State == policy.SandboxSuspended {
 		return nil
 	}
-	// Resuming starts an agent's task again from the start.
+	// Resuming would start an agent's task again.
 	if sb.Purpose == policy.PurposeAgent {
 		return Refuse("sandbox %s is an agent's; it runs its task to the end and is not "+
 			"suspended. Terminate it to stop it", sb.Name)
@@ -28,16 +27,15 @@ func (m *Manager) Suspend(ctx context.Context, sb store.Sandbox) error {
 	if err := m.driver.Suspend(ctx, refOf(sb)); err != nil {
 		return err
 	}
-	// Stop the clock now, not at the next sweep, so the time in between is
-	// not charged.
+	// Stop the clock now, not at the next sweep.
 	m.stopClock(ctx, sb.ID)
 	return m.st.ObserveSandbox(ctx, sb.ID, store.SandboxObservation{
 		State: policy.SandboxSuspended, Detail: "suspended; its volume is kept",
 	})
 }
 
-// Resume brings a suspended or expired sandbox back. limits is the owner's
-// sandbox guardrail as it is now, which an expired sandbox is held to again.
+// Resume brings a suspended or expired sandbox back. An expired one is held to
+// the owner's current limits.
 func (m *Manager) Resume(ctx context.Context, sb store.Sandbox, limits policy.ResolvedSandbox) error {
 	switch {
 	case sb.State == policy.SandboxReady || sb.State == policy.SandboxPending:
@@ -57,17 +55,14 @@ func (m *Manager) Resume(ctx context.Context, sb store.Sandbox, limits policy.Re
 	return m.observeResumed(ctx, sb, time.Time{})
 }
 
-// gone marks a sandbox the driver no longer has as failed and refuses to
-// resume it.
+// gone marks a sandbox the driver no longer has as failed.
 func (m *Manager) gone(ctx context.Context, sb store.Sandbox) error {
 	m.fail(ctx, sb.ID, errors.New("the sandbox is no longer there; its volume went with it"))
 	return Refuse("sandbox %s is no longer there; its volume went with it", sb.Name)
 }
 
-// observeResumed records a resumed sandbox's state. It reads the state back
-// instead of writing "resuming": a podman sandbox is already running here,
-// while a pod still has to be scheduled. expires is the new end of a revived
-// sandbox, and zero otherwise.
+// observeResumed reads the state back, since a podman sandbox is already
+// running while a pod is still scheduling. expires is zero unless revived.
 func (m *Manager) observeResumed(ctx context.Context, sb store.Sandbox, expires time.Time) error {
 	status, err := m.driver.Status(ctx, refOf(sb))
 	if err != nil {
@@ -82,15 +77,14 @@ func (m *Manager) observeResumed(ctx context.Context, sb store.Sandbox, expires 
 	return nil
 }
 
-// revive starts an expired sandbox again, as if it were new but on the volume
-// it kept: a new key, a new repository credential and the class's default
-// lifetime, all under the guardrail as it is now.
+// revive starts an expired sandbox as if new, but on its volume: a new key,
+// credential and default lifetime, under the current guardrail.
 func (m *Manager) revive(ctx context.Context, sb store.Sandbox, limits policy.ResolvedSandbox) error {
 	if sb.Purpose != policy.PurposeEngineer {
 		return Refuse("sandbox %s is an agent's; its task is over, so it is not resumed", sb.Name)
 	}
-	// The machine is the one it was, so it keeps its own copy of the class.
-	// The class as it is now only decides the lifetime.
+	// The machine keeps its own copy of the class. The current class only
+	// decides the lifetime.
 	machine := standIn(sb)
 	lifetime, err := m.lifetimeClass(ctx, sb)
 	if err != nil {
@@ -138,8 +132,7 @@ func (m *Manager) revive(ctx context.Context, sb store.Sandbox, limits policy.Re
 	return m.observeResumed(ctx, sb, expires)
 }
 
-// lifetimeClass is the class that decides a sandbox's new lifetime: its class
-// as it is now, or standIn if the class was deleted since.
+// lifetimeClass is the current class, or standIn if it was deleted.
 func (m *Manager) lifetimeClass(ctx context.Context, sb store.Sandbox) (policy.SandboxClass, error) {
 	class, err := m.st.SandboxClass(ctx, sb.OrgID, sb.Class)
 	if errors.Is(err, store.ErrNotFound) {
@@ -148,10 +141,9 @@ func (m *Manager) lifetimeClass(ctx context.Context, sb store.Sandbox) (policy.S
 	return class, err
 }
 
-// standIn is the row's own copy of its class: the machine the sandbox is. It
-// also stands in for a class deleted while the sandbox lived. The row does not
-// record the class's lifetimes, so it gets the defaults; anything based on the
-// sandbox's own age would grow with each extend or resume.
+// standIn is the row's own copy of its class. The row has no lifetimes, so it
+// gets the defaults; one based on the sandbox's age would grow with each
+// extend.
 func standIn(sb store.Sandbox) policy.SandboxClass {
 	return policy.SandboxClass{
 		OrgID: sb.OrgID, Name: sb.Class, Image: sb.Image, Isolation: sb.Isolation,
@@ -161,8 +153,8 @@ func standIn(sb store.Sandbox) policy.SandboxClass {
 	}
 }
 
-// stillStarting reads a driver's "expired" for a sandbox whose new end is
-// still ahead as the cluster not having caught up yet, rather than as the end.
+// stillStarting treats "expired" before the new end as the cluster not having
+// caught up.
 func stillStarting(status Status, expires, now time.Time) Status {
 	if status.State == policy.SandboxExpired && expires.After(now) {
 		status.State, status.Detail = policy.SandboxPending, "waiting for the cluster to start it again"
@@ -170,11 +162,8 @@ func stillStarting(status Status, expires, now time.Time) Status {
 	return status
 }
 
-// Extend moves when a sandbox ends.
-//
-// The new lifetime counts from now, not from the old end, and is clamped by
-// the same ceilings as creation. So extending again and again never adds up
-// to a sandbox that lives for ever.
+// Extend moves when a sandbox ends. The new lifetime counts from now and is
+// clamped like at creation, so repeated extends never add up.
 func (m *Manager) Extend(ctx context.Context, sb store.Sandbox, want time.Duration,
 	limits policy.ResolvedSandbox,
 ) (time.Time, error) {
@@ -207,16 +196,13 @@ func (m *Manager) Extend(ctx context.Context, sb store.Sandbox, want time.Durati
 	return until, nil
 }
 
-// Terminate removes a sandbox and revokes its key.
-//
-// The driver goes first, so a failure leaves a working sandbox with a working
-// key. A failed revoke only logs: the sandbox is gone and the key expires by
-// itself.
+// Terminate removes a sandbox and revokes its key. The driver goes first, so a
+// failure leaves a working sandbox with a working key. A failed revoke only
+// logs, as the key expires by itself.
 func (m *Manager) Terminate(ctx context.Context, sb store.Sandbox) error {
 	return m.terminate(ctx, sb, "terminated")
 }
 
-// terminate is Terminate, with the detail to leave on the row.
 func (m *Manager) terminate(ctx context.Context, sb store.Sandbox, detail string) error {
 	if sb.State == policy.SandboxTerminated {
 		return nil
@@ -234,17 +220,14 @@ func (m *Manager) terminate(ctx context.Context, sb store.Sandbox, detail string
 type Offboarded struct {
 	Terminated int `json:"terminated"`
 	Suspended  int `json:"suspended"`
-	// Failed is how many could not be stopped. The log says why.
+	// Failed counts what could not be stopped. The log says why.
 	Failed int `json:"failed"`
 }
 
-// Offboard stops everything a person's sandboxes can still do, for when they
-// are disabled. Their keys are already revoked by then.
-//
-// An agent's sandbox, or one that has not started, is terminated. An
-// engineer's is suspended, because its volume may hold work somebody else
-// needs; an administrator can terminate it later. Either way its repository
-// credential is revoked.
+// Offboard stops a disabled person's sandboxes. Their keys are already
+// revoked. An agent's, or one not started, is terminated. An engineer's is
+// suspended, since its volume may hold work others need. Repository
+// credentials are revoked.
 func (m *Manager) Offboard(ctx context.Context, userID string) (Offboarded, error) {
 	var done Offboarded
 	live, err := m.st.ListSandboxes(ctx, store.SandboxQuery{UserID: userID, Limit: 500})

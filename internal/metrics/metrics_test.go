@@ -7,13 +7,11 @@ import (
 	"testing"
 )
 
-// The exposition is hand-rolled, so only these tests stand between a scrape and
-// output a parser rejects. They mostly check the shape, not the numbers: every
-// family declares itself before its samples, no series is written twice, and
-// histograms are cumulative, which is easy to get wrong in a plausible way.
+// The exposition is hand-rolled, so these tests check its shape: every family
+// is declared before its samples, no series is written twice, and histograms
+// are cumulative.
 
-// sample is one line of the exposition, already split into the parts a scrape
-// reads it as.
+// sample is one parsed line of the exposition.
 type sample struct {
 	name   string
 	labels string
@@ -25,8 +23,8 @@ type exposition struct {
 	samples []sample
 	help    map[string]string
 	typ     map[string]string
-	// declaredBefore records, per metric name, whether a TYPE line for it was
-	// seen before its first sample.
+	// declaredBefore records, per metric, whether its TYPE line came before
+	// its first sample.
 	declaredBefore map[string]bool
 }
 
@@ -78,8 +76,7 @@ func parse(t *testing.T, raw string) exposition {
 			}
 			name, labels = head[:open], head[open+1:len(head)-1]
 		}
-		// A family declares itself once, ahead of its samples. A scrape that
-		// meets a sample first has to guess the type.
+		// Otherwise a scrape has to guess the type.
 		if _, declared := e.declaredBefore[name]; !declared {
 			e.declaredBefore[name] = e.typ[family(name)] != ""
 		}
@@ -92,10 +89,8 @@ func parse(t *testing.T, raw string) exposition {
 	return e
 }
 
-// splitSample separates a sample line into its series and its value.
-//
-// It cannot cut at the first space: a quoted label value may hold spaces and
-// braces, so it finds the brace that closes the label set.
+// splitSample separates a sample line into its series and its value. A label
+// value may hold spaces and braces, so it finds the brace that closes the set.
 func splitSample(line string) (head, value string, ok bool) {
 	end := -1
 	if open := strings.IndexByte(line, '{'); open >= 0 {
@@ -121,8 +116,7 @@ func splitSample(line string) (head, value string, ok bool) {
 	return line[:end+1] + head, value, ok
 }
 
-// family strips the suffix a histogram's own series carry, so that
-// keera_x_bucket is found under the TYPE line for keera_x.
+// family strips a histogram series' suffix, so keera_x_bucket maps to keera_x.
 func family(name string) string {
 	for _, suffix := range []string{"_bucket", "_count", "_sum"} {
 		if base, ok := strings.CutSuffix(name, suffix); ok {
@@ -132,7 +126,7 @@ func family(name string) string {
 	return name
 }
 
-// find returns the value of one series, and whether it was there at all.
+// find returns the value of one series, and whether it was there.
 func (e exposition) find(name, labels string) (float64, bool) {
 	for _, s := range e.samples {
 		if s.name == name && s.labels == labels {
@@ -152,9 +146,8 @@ func render(t *testing.T, r *Registry) exposition {
 }
 
 func TestAnEmptyRegistryIsStillAValidExposition(t *testing.T) {
-	// A gateway that has served nothing is still scraped, and empty families
-	// must declare themselves, or a dashboard built before the first request
-	// has nothing to draw.
+	// Empty families still declare themselves, so dashboards work before the
+	// first request.
 	e := render(t, New())
 
 	for _, want := range []string{
@@ -199,12 +192,10 @@ func TestEveryFamilyDeclaresItselfBeforeItsSamples(t *testing.T) {
 	}
 }
 
-// The histograms are accumulated by hand. Buckets that are not cumulative still
-// scrape, and quietly report the wrong quantile.
+// Buckets that are not cumulative still scrape, and report wrong quantiles.
 func TestHistogramBucketsAreCumulativeAndEndAtTheCount(t *testing.T) {
 	r := New()
-	// Spread over the range, with one above the top bound so the +Inf bucket is
-	// not empty: a sum that forgot it would still look plausible.
+	// One value above the top bound, so the +Inf bucket is not empty.
 	for _, seconds := range []float64{0.01, 0.2, 0.2, 3, 45, 600} {
 		r.Observe("gpt-oss", "org_1", 200, seconds, 10)
 	}
@@ -284,8 +275,7 @@ func TestHistogramBucketsAreCumulativeAndEndAtTheCount(t *testing.T) {
 }
 
 func TestTheHistogramSumIsStatedInTheUnitItsNamePromises(t *testing.T) {
-	// Kept in microseconds so the counter stays an integer, but written in
-	// seconds, as the name says.
+	// Kept in microseconds, written in seconds.
 	r := New()
 	r.Overhead("gpt-oss", "org_1", 0.002)
 	r.Overhead("gpt-oss", "org_1", 0.004)
@@ -312,8 +302,7 @@ func TestEachCounterLandsUnderItsOwnLabels(t *testing.T) {
 	r := New()
 	r.Observe("gpt-oss", "org_1", 200, 0.3, 120)
 	r.Observe("gpt-oss", "org_1", 200, 0.3, 80)
-	// A different status is a different series, not the same one: the split
-	// between them is how a deployment sees refusals.
+	// Each status is its own series: that is how refusals show.
 	r.Observe("gpt-oss", "org_1", 429, 0.01, 0)
 	r.Observe("gpt-oss", "org_2", 200, 0.3, 5)
 	r.UpstreamError("gpt-oss", "org_1")
@@ -334,8 +323,7 @@ func TestEachCounterLandsUnderItsOwnLabels(t *testing.T) {
 		{"keera_tokens_total", `model="gpt-oss",org="org_2",status="200"`, 5},
 		{"keera_upstream_errors_total", `model="gpt-oss",org="org_1"`, 2},
 		{"keera_ratelimit_fallback_total", "", 1},
-		// A gauge, so it goes down again. The number that matters is what is
-		// open now, not how many were ever opened.
+		// A gauge: what is open now, not how many were ever opened.
 		{"keera_inflight_requests", "", 2},
 	}
 	for _, tc := range tests {
@@ -351,9 +339,7 @@ func TestEachCounterLandsUnderItsOwnLabels(t *testing.T) {
 }
 
 func TestAFallbackIsCountedWhereTheRateLimiterReportsIt(t *testing.T) {
-	// The Redis limiter takes a Reporter rather than this registry, so it
-	// depends on nothing. This is the only thing making a degraded ceiling
-	// visible.
+	// This is the only sign that the limits fell back to per replica.
 	var r any = New()
 	reporter, ok := r.(interface{ RateLimitFallback() })
 	if !ok {
@@ -369,9 +355,8 @@ func TestAFallbackIsCountedWhereTheRateLimiterReportsIt(t *testing.T) {
 }
 
 func TestALabelValueCannotBreakOutOfItsQuotes(t *testing.T) {
-	// Aliases and outcomes are validated elsewhere, so a quote should never get
-	// here. Pinned anyway: one label written with %s instead of %q breaks the
-	// whole scrape, and nothing would point here.
+	// Aliases are validated elsewhere, but one label written with %s instead
+	// of %q would break the whole scrape.
 	r := New()
 	r.Observe(`a"b`, "org\n1", 200, 0.3, 1)
 	r.FilterRun("pii", "org_1", "refused: said \"no\"", false, 0.1, 0)
@@ -387,8 +372,8 @@ func TestALabelValueCannotBreakOutOfItsQuotes(t *testing.T) {
 }
 
 func TestALabelSetIsOnlyEverOneSeries(t *testing.T) {
-	// Keys are NUL-joined and split again to be written. A value holding the
-	// separator would land under the wrong series and silently under-count.
+	// Keys are NUL-joined, so a value holding NUL would land under the wrong
+	// series.
 	r := New()
 	r.Observe("gpt\x00oss", "org_1", 200, 0.3, 1)
 

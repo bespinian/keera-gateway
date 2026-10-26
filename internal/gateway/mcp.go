@@ -18,36 +18,30 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// The MCP proxy: the gateway in front of the MCP servers an agent calls, as it
-// is in front of the models.
-//
-// A tool call is where an agent's data leaves for somewhere other than a
-// model: an issue tracker, a chat channel, a cloud API. So a client reaches an
-// MCP server through /api/mcp/{alias} with its Keera key, and the gateway
+// The MCP proxy sits in front of the MCP servers an agent calls, since a tool
+// call sends an agent's data somewhere other than a model. A client reaches a
+// server through /api/mcp/{alias} with its Keera key, and the gateway
 //
 //   - lists only the tools the key may call, and refuses the others,
-//   - runs the key's filters over a call's arguments before they leave,
+//   - runs the key's filters over a call's arguments,
 //   - presents the server's credential, which never reaches a laptop,
-//   - and records every call: which tool, what came of it, how long it took
-//     and how much went each way, but never what.
+//   - and records every call, but never its content.
 //
 // It speaks MCP's Streamable HTTP transport and passes everything else
-// through: sessions, notifications, the server's own requests, resources and
-// prompts.
+// through.
 
 // mcpClientHeaders are the client's headers the server is sent, with every
-// Mcp-Param-* header. Everything else stays behind, above all the client's
-// Authorization, which is its Keera key.
+// Mcp-Param-* header. The rest stay behind, above all Authorization, which
+// holds the Keera key.
 var mcpClientHeaders = []string{
 	"Accept", "Content-Type", "Mcp-Session-Id", "Mcp-Protocol-Version", "Mcp-Method", "Mcp-Name",
 	"Last-Event-Id",
 }
 
-// mcpParamPrefix starts the headers that copy a tool call's arguments, which
-// MCP added in its 2026-07-28 version.
+// mcpParamPrefix starts the headers that copy a tool call's arguments, added
+// in MCP 2026-07-28.
 const mcpParamPrefix = "Mcp-Param-"
 
-// JSON-RPC error codes the proxy answers with itself.
 const (
 	rpcParseError     = -32700
 	rpcMethodNotFound = -32601
@@ -55,21 +49,19 @@ const (
 	rpcHeaderMismatch = -32020
 )
 
-// partialMethods are the requests a key that may call only some of a server's
-// tools may send it. Resources, prompts and completions read the server's data
-// outside any tool. Listing tasks would show other keys' tasks, because the
-// server sees one identity for all of them. A method MCP adds later is refused
-// until it is added here.
+// partialMethods are the requests a key limited to some of a server's tools
+// may send. Resources, prompts and completions read data outside any tool, and
+// listing tasks would show other keys' tasks, since the server sees one
+// identity. New MCP methods are refused until added here.
 var partialMethods = []string{
 	"initialize", "ping", "tools/list", "tools/call", "logging/setLevel",
 	"tasks/get", "tasks/result", "tasks/cancel",
 }
 
-// hiddenCapabilities are what a server is not shown to offer a key that may
-// call only some of its tools, so the client does not ask for them.
+// hiddenCapabilities are hidden from a key limited to some tools, so the
+// client does not ask for them.
 var hiddenCapabilities = []string{"resources", "prompts", "completions"}
 
-// rpcMessage is one JSON-RPC message: a request, a notification or a response.
 type rpcMessage struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id,omitempty"`
@@ -89,48 +81,44 @@ func (m rpcMessage) isRequest() bool { return m.Method != "" && len(m.ID) > 0 }
 
 func (m rpcMessage) isResponse() bool { return m.Method == "" && len(m.ID) > 0 }
 
-// idKey is a request id as a map key. A string id and a number id are
-// different ids, and stay so.
+// idKey is a request id as a map key. The string id "1" and number id 1 stay
+// different.
 func idKey(id json.RawMessage) string { return string(bytes.TrimSpace(id)) }
 
-// mcpExchange is one HTTP request to an MCP server, and what the gateway waits
-// to hear back about.
+// mcpExchange is one HTTP request to an MCP server.
 type mcpExchange struct {
 	s   *Server
 	w   http.ResponseWriter
 	r   *http.Request
 	res *policy.Resolved
 	srv policy.MCPServer
-	// session is the session the client named in a header, hashed, or empty.
+	// session is the hashed session the client named in a header, or empty.
 	session string
 	client  string
 	// header is what the server is sent of the client's headers.
 	header http.Header
-	// pending is every request the answer will carry that the gateway acts on,
-	// by id.
+	// pending is the requests whose answers the gateway acts on, by id.
 	pending map[string]*pendingRPC
-	// held is the credit its tool calls' filters hold. It is given back once
-	// every call has been recorded, which charges what they spent.
+	// held is the credit the tool calls' filters hold, released once every
+	// call is recorded.
 	held int64
-	// counted is the tool call counted against the key's rate limits per day
-	// or month, until the exchange ends. A POST carries one at most.
+	// counted is the tool call counted against the key's daily or monthly
+	// limits until the exchange ends. A POST carries one at most.
 	counted *pendingRPC
 }
 
-// pendingRPC is one request waiting for its response.
 type pendingRPC struct {
 	method   string
 	tool     string
 	start    time.Time
 	argBytes int
 	filters  filterRun
-	// admitted says the call was let through, and so counts against the
-	// key's rate limits per day or month.
+	// admitted means the call counts against the key's daily or monthly limits.
 	admitted bool
 }
 
 // mcpBegin authenticates the caller and finds the server. A server the key
-// may not call a single tool of is reported as missing, like a model.
+// may not call any tool of is reported as missing.
 func (s *Server) mcpBegin(w http.ResponseWriter, r *http.Request) (*mcpExchange, bool) {
 	res, ok := s.authenticate(w, r, openAIShape{})
 	if !ok {
@@ -138,8 +126,8 @@ func (s *Server) mcpBegin(w http.ResponseWriter, r *http.Request) (*mcpExchange,
 	}
 	alias := r.PathValue("alias")
 	srv, found := s.src.MCPServer(res.Key.OrgID, alias)
-	// A subscription key reaches no MCP server: a server holds the
-	// organisation's credentials, and the key sits in a settings file.
+	// A subscription key, which sits in a settings file, reaches no MCP server,
+	// since a server holds the organisation's credentials.
 	if !found || !srv.Enabled || !res.AllowsServer(alias) || res.Key.Subscription() {
 		httpx.WriteNotFound(w, "mcp_server_not_found",
 			s.advise("the MCP server '"+alias+"' does not exist or this key may not use it"))
@@ -172,7 +160,6 @@ func (s *Server) mcpBegin(w http.ResponseWriter, r *http.Request) (*mcpExchange,
 	return x, true
 }
 
-// mcpPost carries the client's messages to the server, and the answer back.
 func (s *Server) mcpPost(w http.ResponseWriter, r *http.Request) {
 	x, ok := s.mcpBegin(w, r)
 	if !ok {
@@ -195,16 +182,16 @@ func (s *Server) mcpPost(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// mcpForward carries a GET, which opens the server's own event stream, or a
-// DELETE, which ends a session. Neither has a body to inspect.
+// mcpForward carries a GET, which opens the server's event stream, or a
+// DELETE, which ends a session.
 func (s *Server) mcpForward(w http.ResponseWriter, r *http.Request) {
 	if x, ok := s.mcpBegin(w, r); ok {
 		x.forward(r.Method, nil)
 	}
 }
 
-// forward sends one request to the server, with the client's headers it may
-// see and the server's credential, and relays the answer.
+// forward sends one request to the server with its credential, and relays the
+// answer.
 func (x *mcpExchange) forward(method string, payload []byte) {
 	var body io.Reader
 	if payload != nil {
@@ -229,13 +216,12 @@ func (x *mcpExchange) forward(method string, payload []byte) {
 	x.relay(resp)
 }
 
-// inspect reads the client's messages, answers the ones the gateway refuses
-// itself, and returns what to forward. forward is false when the answer has
-// already been written.
+// inspect reads the client's messages, answers the ones it refuses, and
+// returns what to forward. forward is false when the answer was written.
 //
-// Every message is forwarded as the gateway read it, re-encoded, so a server
-// that reads JSON differently - the first of two repeated keys, say - cannot
-// be sent a call other than the one that was checked.
+// Messages are re-encoded as the gateway read them, so a server that reads
+// JSON differently, such as repeated keys, gets exactly the call that was
+// checked.
 func (x *mcpExchange) inspect(raw []byte) (out []byte, forward bool) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) > 0 && trimmed[0] == '[' {
@@ -264,9 +250,8 @@ func (x *mcpExchange) inspect(raw []byte) (out []byte, forward bool) {
 	return encoded, true
 }
 
-// inspectBatch handles an array of messages, which MCP versions before
-// 2025-06-18 allowed. A tool call must come on its own, so that a refusal can
-// be the whole answer.
+// inspectBatch handles a batch, which MCP allowed before 2025-06-18. A tool
+// call must come alone, so a refusal can be the whole answer.
 func (x *mcpExchange) inspectBatch(raw []byte) ([]byte, bool) {
 	var msgs []rpcMessage
 	if json.Unmarshal(raw, &msgs) != nil {
@@ -292,15 +277,15 @@ func (x *mcpExchange) inspectBatch(raw []byte) ([]byte, bool) {
 	return encoded, true
 }
 
-// await notes a request whose answer the gateway reads on the way back.
+// await notes a request whose answer the gateway reads.
 func (x *mcpExchange) await(m rpcMessage) {
 	if m.isRequest() && (m.Method == "tools/list" || m.Method == "initialize") {
 		x.pending[idKey(m.ID)] = &pendingRPC{method: m.Method, start: time.Now()}
 	}
 }
 
-// mayRequest refuses a request a key that may call only some of the server's
-// tools may not send. It reports whether the message may go on.
+// mayRequest refuses what a key limited to some tools may not send. It
+// reports whether the message may go on.
 func (x *mcpExchange) mayRequest(m rpcMessage) bool {
 	if !m.isRequest() || x.res.AllowsWholeServer(x.srv.Alias) ||
 		slices.Contains(partialMethods, m.Method) {
@@ -312,9 +297,8 @@ func (x *mcpExchange) mayRequest(m rpcMessage) bool {
 	return false
 }
 
-// refuseUnanswerable refuses a tool call sent as a notification, without an
-// id. It would get no answer to trim or record, and a server that ran it
-// anyway would run a tool nobody checked. It reports whether it answered.
+// refuseUnanswerable refuses a tool call without an id, which would get no
+// answer to record. It reports whether it answered.
 func (x *mcpExchange) refuseUnanswerable(m rpcMessage) bool {
 	if m.Method != "tools/call" || len(m.ID) > 0 {
 		return false
@@ -324,11 +308,9 @@ func (x *mcpExchange) refuseUnanswerable(m rpcMessage) bool {
 	return true
 }
 
-// headersMatch checks the Mcp-Method and Mcp-Name headers against the message,
-// as MCP asks of anything that reads the body. The gateway decides on the
-// body, but a load balancer behind it may route on the headers. A client of a
-// version before 2026-07-28 sends neither. It reports whether they match, and
-// answers when they do not.
+// headersMatch checks the Mcp-Method and Mcp-Name headers against the body, as
+// MCP asks, since a load balancer behind the gateway may route on them. Older
+// clients send neither. On a mismatch it answers and reports false.
 func (x *mcpExchange) headersMatch(msg rpcMessage) bool {
 	why := ""
 	if m := x.r.Header.Get("Mcp-Method"); m != "" && m != msg.Method {
@@ -345,8 +327,8 @@ func (x *mcpExchange) headersMatch(msg rpcMessage) bool {
 	return false
 }
 
-// mcpName is what the Mcp-Name header carries for a message: the name of the
-// tool or prompt, the URI of the resource, or nothing.
+// mcpName is what Mcp-Name should carry: a tool or prompt name, a resource
+// URI, or nothing.
 func mcpName(msg rpcMessage) string {
 	var p struct {
 		Name string `json:"name"`
@@ -362,7 +344,7 @@ func mcpName(msg rpcMessage) string {
 	return ""
 }
 
-// The markers around a header value MCP carries in Base64, because it is not
+// The markers around a header value MCP sends in Base64 because it is not
 // plain ASCII.
 const (
 	base64Open  = "=?base64?"
@@ -374,7 +356,6 @@ func inBase64(v string) bool {
 		strings.HasPrefix(v, base64Open) && strings.HasSuffix(v, base64Close)
 }
 
-// decodeHeaderValue reads an Mcp-Name or Mcp-Param-* value.
 func decodeHeaderValue(v string) (string, bool) {
 	if !inBase64(v) {
 		return v, true
@@ -383,7 +364,6 @@ func decodeHeaderValue(v string) (string, bool) {
 	return string(raw), err == nil
 }
 
-// encodeHeaderValue writes a value as MCP puts it in a header.
 func encodeHeaderValue(v string) string {
 	plain := v != "" && v == strings.TrimSpace(v) && !inBase64(v)
 	for i := 0; plain && i < len(v); i++ {
@@ -395,11 +375,9 @@ func encodeHeaderValue(v string) string {
 	return base64Open + base64.StdEncoding.EncodeToString([]byte(v)) + base64Close
 }
 
-// syncParams keeps the Mcp-Param-* headers true to arguments a filter
-// rewrote, so that a value taken out of the body does not leave in a header.
-// Which argument a header copies is in the tool's schema, which the gateway
-// does not hold, so it finds the argument by the value the client sent. A
-// value still in the arguments where it was is left as it is.
+// syncParams updates the Mcp-Param-* headers after a filter rewrote the
+// arguments, so a value removed from the body does not leave in a header. The
+// gateway lacks the tool's schema, so it finds the argument by its old value.
 func (x *mcpExchange) syncParams(before, after json.RawMessage) {
 	var old, cur any
 	if json.Unmarshal(before, &old) != nil || json.Unmarshal(after, &cur) != nil {
@@ -428,9 +406,8 @@ func (x *mcpExchange) syncParams(before, after json.RawMessage) {
 	}
 }
 
-// stringPaths finds where a string is in decoded arguments, first path first.
-// A header copies only a value reached through object keys, never through an
-// array.
+// stringPaths finds where a string is in decoded arguments. A header copies
+// only values reached through object keys, never arrays.
 func stringPaths(v any, want string, at []string, found [][]string) [][]string {
 	switch v := v.(type) {
 	case string:
@@ -445,7 +422,6 @@ func stringPaths(v any, want string, at []string, found [][]string) [][]string {
 	return found
 }
 
-// valueAt is the value at a path of object keys, or nil.
 func valueAt(v any, path []string) any {
 	for _, k := range path {
 		m, ok := v.(map[string]any)
@@ -457,9 +433,8 @@ func valueAt(v any, path []string) any {
 	return v
 }
 
-// toolCall decides one tool call: whether the key may make it, and what the
-// filters make of its arguments. It returns false when the call was answered
-// here.
+// toolCall checks whether the key may make a tool call and runs the filters
+// over its arguments. It returns false when the call was answered here.
 func (x *mcpExchange) toolCall(msg *rpcMessage) bool {
 	p := &pendingRPC{method: msg.Method, start: time.Now()}
 	params, err := parseBody(msg.Params)
@@ -477,8 +452,7 @@ func (x *mcpExchange) toolCall(msg *rpcMessage) bool {
 	args, _ := params.value("arguments")
 	p.argBytes = len(args)
 
-	// A tool the key may not call is hidden from its list, so to the client it
-	// is a tool that does not exist, which MCP answers with this error.
+	// The tool is hidden from the key's list, so answer as for an unknown tool.
 	if !x.res.AllowsTool(x.srv.Alias, p.tool) {
 		why := "Unknown tool: " + p.tool + ". This key may not call '" + x.srv.Alias + "/" +
 			p.tool + "' through the gateway"
@@ -505,8 +479,7 @@ func (x *mcpExchange) toolCall(msg *rpcMessage) bool {
 			x.s.budgets.Charge(x.res.Scopes, run.micros, time.Now())
 		}
 		if ref != nil {
-			// A refusal is the tool's answer, so the model reads why and can
-			// carry on, as it would after any failed tool.
+			// The refusal is the tool's answer, so the model can carry on.
 			outcome := store.ToolRefused
 			if ref.code != codeFilterRefused {
 				outcome = store.ToolNoResult
@@ -515,7 +488,7 @@ func (x *mcpExchange) toolCall(msg *rpcMessage) bool {
 			return false
 		}
 		if x.r.Context().Err() != nil {
-			// Recorded all the same, or what the filters spent would be lost.
+			// Recorded anyway, or what the filters spent would be lost.
 			x.record(p, store.ToolNoResult, "the client hung up while a filter was running", 0)
 			return false
 		}
@@ -526,15 +499,14 @@ func (x *mcpExchange) toolCall(msg *rpcMessage) bool {
 			x.syncParams(before, args)
 		}
 	}
-	// Re-encoded from what was read, rewritten or not. See inspect.
+	// See inspect.
 	msg.Params = params.encode()
 	x.pending[idKey(msg.ID)] = p
 	return true
 }
 
-// argumentsText is what filters read in a tool call: every string anywhere in
-// its arguments. Keys are not text, and numbers and booleans are left as they
-// are.
+// argumentsText is what filters read in a tool call: every string value in
+// its arguments.
 func argumentsText(b *body) (textDoc, error) {
 	d := newTreeDoc()
 	args, err := d.root(b, "arguments")
@@ -548,8 +520,8 @@ func argumentsText(b *body) (textDoc, error) {
 	return d, nil
 }
 
-// addStrings collects every string inside a decoded value. Keys are read in
-// order, so a filter is shown the same segments in the same order each time.
+// addStrings collects every string in a decoded value. Keys are sorted, so a
+// filter sees the same order each time.
 func addStrings(d *treeDoc, v any) {
 	switch v := v.(type) {
 	case map[string]any:
@@ -572,11 +544,9 @@ func addStrings(d *treeDoc, v any) {
 	}
 }
 
-// admit holds a tool call to the key's rate limits, as a model request is. A
-// call costs nothing unless filters read it, so only then does a budget stop
-// it. Filters on the deployment's key hold the most they may cost, as a
-// request's do. It returns why a call is refused, or "", for a failed tool
-// result, so the model reads why.
+// admit holds a tool call to the key's rate limits. A call costs nothing
+// unless filters read it, so only then does a budget apply. It returns why a
+// call is refused, or "".
 func (x *mcpExchange) admit(argBytes int) (held int64, why string) {
 	now := time.Now()
 	if ref, ok := x.s.checkRates(x.res.Scopes, now); !ok {
@@ -602,8 +572,7 @@ func (x *mcpExchange) admit(argBytes int) (held int64, why string) {
 	return held, ""
 }
 
-// toolFailed answers a tool call with a result that tells the model the call
-// failed and why, and records it.
+// toolFailed answers a tool call with an error result and records it.
 func (x *mcpExchange) toolFailed(p *pendingRPC, id json.RawMessage, outcome store.ToolOutcome, why string) {
 	result, _ := json.Marshal(map[string]any{
 		"content": []map[string]string{{"type": "text", "text": x.s.advise(why)}},
@@ -613,8 +582,8 @@ func (x *mcpExchange) toolFailed(p *pendingRPC, id json.RawMessage, outcome stor
 	x.record(p, outcome, why, 0)
 }
 
-// rpcFail answers the client's POST with a JSON-RPC error of the gateway's
-// own. A message without an id is answered with a null one, as JSON-RPC asks.
+// rpcFail answers with a JSON-RPC error. A message without an id gets a null
+// one, as JSON-RPC asks.
 func (x *mcpExchange) rpcFail(status int, id json.RawMessage, code int, msg string) {
 	if len(id) == 0 {
 		id = json.RawMessage("null")
@@ -625,13 +594,12 @@ func (x *mcpExchange) rpcFail(status int, id json.RawMessage, code int, msg stri
 	})
 }
 
-// relay writes the server's answer to the client, reading every message in it
-// the gateway was waiting for.
+// relay writes the server's answer to the client, reading the messages the
+// gateway waits for.
 func (x *mcpExchange) relay(resp *http.Response) {
 	status := resp.StatusCode
-	// The server refusing the gateway's credential is not the client's fault.
-	// Passed on, it would read as a bad Keera key, and the client would start
-	// signing in to the server itself.
+	// Passed on, the server refusing the gateway's credential would read as a
+	// bad Keera key, and the client would try to sign in to the server itself.
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
 		msg := "the MCP server '" + x.srv.Alias + "' refused the gateway's credential for it " +
 			"(it answered " + http.StatusText(status) + "); an administrator has to " +
@@ -658,7 +626,6 @@ func (x *mcpExchange) relay(resp *http.Response) {
 	case "application/json":
 		raw, err := readCapped(resp.Body, x.s.opts.MaxResponseBytes)
 		if err != nil {
-			// Cut JSON would reach the client as the server's own answer.
 			msg := "the answer from the MCP server '" + x.srv.Alias + "' could not be read"
 			x.failPending(msg + ": " + err.Error())
 			httpx.WriteError(x.w, http.StatusBadGateway, "server_error", "mcp_unavailable", msg)
@@ -670,18 +637,16 @@ func (x *mcpExchange) relay(resp *http.Response) {
 		x.w.WriteHeader(status)
 		_, _ = x.w.Write(raw)
 	default:
-		// Anything else is not MCP, so only its status is passed on. The body
-		// could be any page the server's address reaches.
+		// Not MCP, so only the status is passed on.
 		x.w.Header().Del("Content-Type")
 		x.w.WriteHeader(status)
 	}
 	x.failPending("the MCP server answered " + http.StatusText(status) + " without a result")
 }
 
-// unreachable answers a request the server could not be reached for.
 func (x *mcpExchange) unreachable(err error) {
 	if x.r.Context().Err() != nil {
-		// Recorded all the same, or what the filters spent would be lost.
+		// Recorded anyway, or what the filters spent would be lost.
 		x.failPending("the client hung up before the MCP server answered")
 		return
 	}
@@ -692,18 +657,17 @@ func (x *mcpExchange) unreachable(err error) {
 	httpx.WriteError(x.w, http.StatusBadGateway, "server_error", "mcp_unavailable", msg)
 }
 
-// mcpEvents reads the server's event stream for pipeNative.
 type mcpEvents struct{ x *mcpExchange }
 
 func (e mcpEvents) event(payload []byte) []byte { return e.x.serverMessage(payload) }
 
 func (e mcpEvents) counts() (*tokenUsage, int, bool) { return nil, 0, false }
 
-// failure is nil: an MCP stream has no event that ends it.
+// failure is nil, since no MCP event ends a stream.
 func (e mcpEvents) failure() error { return nil }
 
-// serverMessage reads one message, or a batch, from the server. It returns it
-// rewritten, or nil to send it as it came.
+// serverMessage reads a message or batch from the server. It returns it
+// rewritten, or nil to send it unchanged.
 func (x *mcpExchange) serverMessage(raw []byte) []byte {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || (len(x.pending) == 0 && x.res.AllowedTools == nil) {
@@ -732,9 +696,8 @@ func (x *mcpExchange) serverMessage(raw []byte) []byte {
 	}
 	p, ok := x.pending[idKey(msg.ID)]
 	if !ok {
-		// An answer to a request made on another connection, as on a stream
-		// the client resumed. Its tool call cannot be matched to a row, but a
-		// tool list is still trimmed.
+		// An answer to a request from another connection, as on a resumed
+		// stream. A tool list is still trimmed.
 		p = &pendingRPC{method: "tools/list"}
 	}
 	delete(x.pending, idKey(msg.ID))
@@ -761,8 +724,8 @@ func (x *mcpExchange) serverMessage(raw []byte) []byte {
 	return nil
 }
 
-// capabilities takes what the key may not use out of an initialize result,
-// and returns nil when it needs no change. See partialMethods.
+// capabilities removes what the key may not use from an initialize result,
+// or returns nil if nothing changes. See partialMethods.
 func (x *mcpExchange) capabilities(result json.RawMessage) json.RawMessage {
 	if x.res.AllowsWholeServer(x.srv.Alias) {
 		return nil
@@ -784,16 +747,12 @@ func (x *mcpExchange) capabilities(result json.RawMessage) json.RawMessage {
 	return out
 }
 
-// publicScope is how a server marks a list any caller may be served from a
-// cache.
+// publicScope marks a list any caller may be served from a cache.
 var publicScope = json.RawMessage(`"public"`)
 
-// toolList takes the tools the key may not call out of a tools/list result,
-// and returns nil when it needs no change.
-//
-// What the gateway lists depends on the key, so a list the server marks
-// public is marked private. A shared cache in front of the gateway would
-// otherwise serve one key's list to another.
+// toolList removes the tools the key may not call from a tools/list result,
+// or returns nil if nothing changes. A public list is marked private, since
+// it depends on the key and a shared cache would serve it to other keys.
 func (x *mcpExchange) toolList(result json.RawMessage) json.RawMessage {
 	var r map[string]json.RawMessage
 	if len(result) == 0 || json.Unmarshal(result, &r) != nil {
@@ -813,8 +772,8 @@ func (x *mcpExchange) toolList(result json.RawMessage) json.RawMessage {
 	return out
 }
 
-// allowedTools takes the tools the key may not call out of a list of tools,
-// and returns nil when there is nothing to take out.
+// allowedTools removes the tools the key may not call, or returns nil if
+// there are none.
 func (x *mcpExchange) allowedTools(list json.RawMessage) json.RawMessage {
 	var tools []json.RawMessage
 	if x.res.AllowedTools == nil || json.Unmarshal(list, &tools) != nil {
@@ -836,10 +795,8 @@ func (x *mcpExchange) allowedTools(list json.RawMessage) json.RawMessage {
 	return out
 }
 
-// toolOutcome reads what a tool result says came of the call. Since MCP's
-// 2026-07-28 version a server that needs the user's input answers with a
-// request for it, and the client sends the call again with the answers. That
-// second call is a row of its own.
+// toolOutcome reads a tool result's outcome. Since MCP 2026-07-28, a server
+// may ask for user input; the client's second call is a row of its own.
 func toolOutcome(result json.RawMessage) store.ToolOutcome {
 	var r struct {
 		IsError    bool   `json:"isError"`
@@ -855,7 +812,7 @@ func toolOutcome(result json.RawMessage) store.ToolOutcome {
 	return store.ToolOK
 }
 
-// failPending records every tool call still waiting as one that got no result.
+// failPending records every waiting tool call as having no result.
 func (x *mcpExchange) failPending(msg string) {
 	for id, p := range x.pending {
 		if p.method == "tools/call" {

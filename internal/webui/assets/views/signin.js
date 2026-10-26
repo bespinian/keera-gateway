@@ -1,8 +1,7 @@
-// The sign-in screen: a button per identity provider, a username and password
-// form for an LDAP directory, and passkeys where they are on. With none of
-// these, or at ?operator_key=1, it asks for the operator key, which is how a
-// new deployment is set up. It also hands a sign-in over to `keera login` or
-// to Keera Chat.
+// The sign-in screen: a button per identity provider, a password form for
+// LDAP, and passkeys where they are on. With none of these, or at
+// ?operator_key=1, it asks for the operator key, which sets up a new
+// deployment. It also hands a sign-in over to `keera login` or Keera Chat.
 
 import { api, ApiError } from "../api.js";
 import { getPasskey, passkeysSupported } from "../webauthn.js";
@@ -18,9 +17,9 @@ import {
   banner,
 } from "../ui.js";
 
-/** passkeySignInFlow is the passkey sign-in /auth/login started, such as for
- *  `keera login --provider passkey`, as { flow, to }, or null. It comes after
- *  the #, so it never reaches a server log. */
+/** passkeySignInFlow is the passkey sign-in /auth/login started, as
+ *  { flow, to }, or null. It comes after the #, so it never reaches a server
+ *  log. */
 export function passkeySignInFlow() {
   const m = location.hash.match(
     /^#passkey-sign-in=([A-Za-z0-9_-]+)(?:\.(cli|chat))?$/,
@@ -28,8 +27,8 @@ export function passkeySignInFlow() {
   return m ? { flow: m[1], to: m[2] || "" } : null;
 }
 
-/** passwordSignInFlow is the sign-in /auth/login started against an LDAP
- *  directory, such as for `keera login`, as { provider, flow, to }, or null. */
+/** passwordSignInFlow is the LDAP sign-in /auth/login started, as
+ *  { provider, flow, to }, or null. */
 export function passwordSignInFlow() {
   const m = location.hash.match(
     /^#password-sign-in=([a-z0-9][a-z0-9-]*)\.([A-Za-z0-9_-]+)(?:\.(cli|chat))?$/,
@@ -37,8 +36,8 @@ export function passwordSignInFlow() {
   return m ? { provider: m[1], flow: m[2], to: m[3] || "" } : null;
 }
 
-/** handOver is what to say above and below a form that finishes a sign-in
- *  started elsewhere. to is where the gateway said it goes next. */
+/** handOver is the text around a form that finishes a sign-in started
+ *  elsewhere. to is where it goes next. */
 function handOver(to) {
   if (to === "cli") {
     return [
@@ -55,8 +54,8 @@ function handOver(to) {
   return ["Sign in to Keera Gateway.", ""];
 }
 
-// takeSignInError is why the last sign-in failed, read once. The gateway puts
-// it in a cookie rather than the address, which anyone can write into a link.
+// takeSignInError is why the last sign-in failed, read once. It is in a
+// cookie, not the address, which anyone can write into a link.
 function takeSignInError() {
   const name = "keera_sign_in_error=";
   const found = document.cookie.split("; ").find((c) => c.startsWith(name));
@@ -74,12 +73,11 @@ export async function signIn(root, onSignedIn) {
   try {
     config = await api.authConfig();
   } catch {
-    // Fall back to the operator key, which works when nothing else does.
+    // Fall back to the operator key.
   }
 
   const params = new URLSearchParams(location.search);
   const ssoError = params.has("sign_in_error") ? takeSignInError() : null;
-  // Where the person was going.
   const next = params.get("next");
 
   const message = h("div");
@@ -146,15 +144,14 @@ export async function signIn(root, onSignedIn) {
     message,
   );
 
-  // Set when the key field is shown, so the cursor lands in it once the card
-  // is in the document.
+  // So the cursor lands in the key field once the card is shown.
   let focusKey = false;
 
   const passkeyFlow = passkeySignInFlow();
   const cliFlow = passkeyFlow ? passkeyFlow.flow : "";
   const cliPassword = passwordSignInFlow();
 
-  // A sign-in started elsewhere, such as by `keera login`, goes back there.
+  // A sign-in started elsewhere goes back there.
   const finish = async (res, flow) => {
     if (flow) {
       location.href = res.redirect;
@@ -212,7 +209,7 @@ export async function signIn(root, onSignedIn) {
             await finish(res, flow);
           } catch (err) {
             showError(message, err.message || "Sign-in failed.");
-            // The password is never kept, not even in the field.
+            // Never kept, not even in the field.
             pass.value = "";
             b.disabled = false;
             b.textContent = label;
@@ -236,7 +233,6 @@ export async function signIn(root, onSignedIn) {
           )
         : null,
     );
-    // Focused once the form is in the document.
     queueMicrotask(() => user.focus());
     return form;
   };
@@ -284,8 +280,7 @@ export async function signIn(root, onSignedIn) {
   };
 
   if (cliPassword) {
-    // /auth/login sent the browser here, such as for `keera login --provider
-    // <name>`.
+    // /auth/login sent the browser here, such as for `keera login`.
     const p = (config.providers || []).find(
       (p) => p.name === cliPassword.provider,
     ) || { name: cliPassword.provider };
@@ -305,18 +300,18 @@ export async function signIn(root, onSignedIn) {
       ...(note ? [h("div", { class: "signin-note" }, note)] : []),
     );
   } else if (config.sso) {
-    // Once single sign-on works, the operator key is only for setup and the odd
-    // operator task, so it is offered only at ?operator_key=1.
+    // Once single sign-on works, the operator key is offered only at
+    // ?operator_key=1.
     const operatorKey = params.get("operator_key") === "1";
     focusKey = operatorKey;
 
-    // Each directory is named: someone with both a Google and a Microsoft
-    // account cannot answer "single sign-on".
+    // Each directory is named: someone with Google and Microsoft accounts
+    // cannot answer "single sign-on".
     const providers = config.providers || [];
     const signUpWith = providers.find((p) => p.signup);
 
-    // A directory that asks for a password opens its form in place of the
-    // buttons. With nothing else to choose from, it is open from the start.
+    // A password directory opens its form in place of the buttons. If it is
+    // the only choice, it is open from the start.
     const box = h("div", { class: "signin-providers" });
     const showButtons = () => {
       replace(message);
@@ -361,7 +356,7 @@ export async function signIn(root, onSignedIn) {
       h(
         "div",
         { class: "signin-note" },
-        // Not "ask to be put in the right group": where roles are assigned in
+        // Not "ask to be put in the right group": where roles are set in
         // Keera, or on Google Workspace, there is no such group.
         (config.passkeys
           ? "Sign in with your identity provider or a passkey. "

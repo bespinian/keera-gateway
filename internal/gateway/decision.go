@@ -10,21 +10,19 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// A decision model is a classifier, such as Laya behind laya-serve. It reads a
-// text and a typed question and answers with a probability for each answer.
-// It writes no text, so it can only decide for a route step or a gate.
+// A decision model is a classifier, such as Laya behind laya-serve. Given a
+// text and a typed question, it returns a probability for each answer and
+// writes no text, so it only serves route steps and gates.
 //
-// It is asked on /systemone, the endpoint laya-serve and TypeSafe Jev share.
-// Its answer is turned into the chat completion a chat model would have given,
-// with the probabilities as the first token's logprobs, so a decision reads
-// the same whatever kind of model made it.
+// It is called on /systemone, shared by laya-serve and TypeSafe Jev. Its answer
+// is turned into a chat completion with the probabilities as first-token
+// logprobs, so it reads like any other model's decision.
 
 const decisionPath = "/systemone"
 
-// decisionID names the one question a request asks, and its answer.
+// decisionID names the one question a request asks.
 const decisionID = "decision"
 
-// decisionQuestion is one typed question, in the shape /systemone takes.
 type decisionQuestion struct {
 	// Type is "noul" for yes or no, and "choice" for one of several labels.
 	Type         string            `json:"type"`
@@ -32,7 +30,7 @@ type decisionQuestion struct {
 	Criteria     map[string]string `json:"criteria,omitempty"`
 }
 
-// text is all the question's words, to measure what a decision model is sent.
+// text is all the question's words, to measure what the model is sent.
 func (q decisionQuestion) text() string {
 	parts := []string{q.Instructions}
 	for _, c := range q.Criteria {
@@ -41,9 +39,9 @@ func (q decisionQuestion) text() string {
 	return strings.Join(parts, "\n")
 }
 
-// gateDecision is a gate's instruction as a yes-or-no question, where yes
-// refuses. Lines starting 'yes:' and 'no:' say what each answer means; a
-// classifier is surer with them, and the rest is the question.
+// gateDecision turns a gate's instruction into a yes-or-no question, where yes
+// refuses. Lines starting 'yes:' and 'no:' describe each answer, which makes a
+// classifier surer; the rest is the question.
 func gateDecision(prompt string) decisionQuestion {
 	q := decisionQuestion{Type: "noul"}
 	var question []string
@@ -63,10 +61,9 @@ func gateDecision(prompt string) decisionQuestion {
 	return q
 }
 
-// routeQuestion is a route step's instruction as a choice between the offered
-// destinations, each under its letter and described by its model's
-// description. The alias is left out when there is a description: measured on
-// Laya, it only adds words that say nothing about the request.
+// routeQuestion turns a route step's instruction into a choice between
+// lettered destinations, each described by its model's description. The alias
+// is left out when there is one: on Laya it only added noise.
 func (s *Server) routeQuestion(orgID, prompt string, offered []string) decisionQuestion {
 	q := decisionQuestion{
 		Type: "choice", Instructions: strings.TrimSpace(prompt),
@@ -82,12 +79,11 @@ func (s *Server) routeQuestion(orgID, prompt string, offered []string) decisionQ
 	return q
 }
 
-// decisionRequest is the /systemone request for one question about input.
 func decisionRequest(m policy.Model, q decisionQuestion, input []byte) ([]byte, error) {
 	return json.Marshal(decisionBody(m, q, json.RawMessage(input)))
 }
 
-// decisionBody is decisionRequest before it is encoded, for a model check.
+// decisionBody is decisionRequest unencoded, for a model check.
 func decisionBody(m policy.Model, q decisionQuestion, state any) map[string]any {
 	body := map[string]any{
 		"state":     state,
@@ -96,10 +92,8 @@ func decisionBody(m policy.Model, q decisionQuestion, state any) map[string]any 
 	if m.BackendModel != "" {
 		body["model"] = m.BackendModel
 	}
-	// max_len is the model's context, so the classifier reads exactly what the
-	// gateway measured. Left to the server, it would cut a longer request short
-	// and decide on part of it, which a gate must never do. Half is room for the
-	// question.
+	// Without max_len, the server would cut a long request short and decide on
+	// part of it, which a gate must never do. Half is room for the question.
 	if m.MaxContext > 0 {
 		body["max_len"] = m.MaxContext
 		body["head_max_len"] = m.MaxContext / 2
@@ -107,7 +101,6 @@ func decisionBody(m policy.Model, q decisionQuestion, state any) map[string]any 
 	return body
 }
 
-// decisionReply is the part of a /systemone answer that is read.
 type decisionReply struct {
 	Model   string `json:"model"`
 	Answers map[string]struct {
@@ -123,12 +116,9 @@ type decisionReply struct {
 	} `json:"usage"`
 }
 
-// chatFromDecision turns a /systemone answer into the chat completion a route step
-// or a gate reads: the answer as content, and every answer's probability as
-// the first token's logprobs.
-//
-// A gate refuses when yes is more likely than no, which is what reading the
-// same distribution as logprobs decides too.
+// chatFromDecision turns a /systemone answer into a chat completion: the answer
+// as content and the probabilities as first-token logprobs. A gate refuses
+// when yes is more likely than no, matching what the logprobs decide.
 func chatFromDecision(raw []byte, q decisionQuestion) ([]byte, error) {
 	var r decisionReply
 	if err := json.Unmarshal(raw, &r); err != nil {

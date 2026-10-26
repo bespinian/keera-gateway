@@ -3,9 +3,8 @@ GO ?= go
 # Everything a build writes goes here, so `make clean` removes one directory.
 BUILD_DIR ?= build
 
-# test-integration starts throwaway Postgres and Redis containers and removes
-# them again, unless KEERA_TEST_DATABASE_URL and KEERA_TEST_REDIS_URL point at
-# services of your own.
+# test-integration starts throwaway Postgres and Redis containers, unless
+# KEERA_TEST_DATABASE_URL and KEERA_TEST_REDIS_URL point at your own.
 PODMAN ?= podman
 COMPOSE ?= podman compose
 # Pinned to the major versions CI runs.
@@ -14,8 +13,7 @@ PG_CONTAINER ?= keera-test-pg
 PG_PORT ?= 55432
 PG_DSN ?= postgres://keera:keera@127.0.0.1:$(PG_PORT)/keera_test?sslmode=disable
 
-# A real Redis, because what is tested is the Lua the server runs, which no
-# fake covers.
+# A real Redis, to test the server's Lua scripts.
 REDIS_IMAGE ?= docker.io/library/redis:8
 REDIS_CONTAINER ?= keera-test-redis
 REDIS_PORT ?= 56379
@@ -33,10 +31,8 @@ check: test vet fmt-check
 	@if command -v node >/dev/null 2>&1; then $(MAKE) --no-print-directory check-js; \
 	else echo "node is not on PATH, so the panel's JavaScript was not checked. CI checks it."; fi
 
-# The panel has no build step, so nothing reads its JavaScript before a
-# browser does. This checks the syntax of every module and runs the unit tests
-# of its pure helpers. Which names each module imports is checked by `make
-# test`, which needs no node.
+# The panel has no build step, so this checks the syntax of every module and
+# runs the unit tests of its pure helpers. `make test` checks the imports.
 .PHONY: check-js
 check-js:
 	@command -v node >/dev/null 2>&1 || { \
@@ -49,12 +45,9 @@ check-js:
 test:
 	@$(GO) test -race -cover ./...
 
-# The tests that skip without Postgres or Redis: the store's schema, queries
-# and migrations, the control plane's live request log, and the rate limiter's
-# shared buckets.
-#
-# One package at a time, because they share one database and the migration
-# test drops its schema. CI uses this list too.
+# The tests that skip without Postgres or Redis. One package at a time,
+# because they share one database and the migration test drops its schema.
+# CI uses this list too.
 INTEGRATION_PKGS := ./internal/store/... ./internal/control/... ./internal/ratelimit/...
 INTEGRATION_TEST := $(GO) test -race -count=1 -p 1 $(INTEGRATION_PKGS)
 
@@ -75,7 +68,7 @@ check-all: check test-integration
 
 # wait-for polls a probe once a second until it succeeds. $(1) is what it
 # waits for, $(2) the timeout in seconds, $(3) the probe, and $(4) prints the
-# logs when it gives up.
+# logs on failure.
 define wait-for
 printf 'waiting for $(1)'; \
 for i in $$(seq 1 $(2)); do \
@@ -121,8 +114,8 @@ redis-down:
 vet:
 	@$(GO) vet ./...
 
-# golangci-lint is not vendored or needed to build or test, so lint is not part
-# of `check` and asks for it instead of installing it.
+# golangci-lint is not vendored, so lint is not part of `check` and asks for
+# it instead of installing it.
 GOLANGCI_LINT ?= golangci-lint
 
 .PHONY: lint
@@ -146,26 +139,22 @@ clean:
 
 GATEWAY_IMAGE ?= localhost/keera-gateway:latest
 
-# The version the image's binary and `make dist` report. .git is not in the
-# build context, so the toolchain cannot stamp it. Both match what `make build`
-# gets: the tag when HEAD is one, "devel" otherwise, and the commit, marked
-# dirty when the tree has changes. The release workflow passes the tag.
+# The version the image's binary and `make dist` report, as .git is not in the
+# build context. It matches `make build`: the tag or "devel", and the commit,
+# marked dirty when the tree has changes. The release workflow passes the tag.
 VERSION ?= $(shell git describe --tags --exact-match --match 'v[0-9]*' HEAD 2>/dev/null)
 REVISION ?= $(shell git rev-parse HEAD 2>/dev/null)$(if $(shell git status --porcelain 2>/dev/null),-dirty)
 
-# What is inside the image, for auditors and vulnerability scanners. The image
-# is FROM scratch, so this is the Go binary and its modules, which syft reads
-# from the build info.
-#
-# The image is rebuilt first, since an SBOM of whatever was tagged last is
-# worse than none. The rebuild is cached.
+# What is inside the image, for auditors and vulnerability scanners: the Go
+# binary and its modules, which syft reads from the build info. The image is
+# rebuilt first (cached), so the SBOM matches the source.
 SYFT ?= syft
-# Pinned like everything else a release is built with, so two builds of one
-# commit describe it the same way. Dependabot does not read this file.
+# Pinned, so two builds of one commit describe it the same way. Dependabot does
+# not read this file.
 SYFT_IMAGE ?= docker.io/anchore/syft:v1.54.1
 SBOM_DIR ?= $(BUILD_DIR)/sbom
-# CycloneDX is what the downstream scanners take. For another syft format, such
-# as spdx-json, change SBOM_FILE too.
+# CycloneDX is what scanners take. For another syft format, such as spdx-json,
+# change SBOM_FILE too.
 SBOM_FORMAT ?= cyclonedx-json
 SBOM_FILE ?= $(SBOM_DIR)/keera-gateway.cdx.json
 
@@ -176,11 +165,9 @@ image:
 		-t $(GATEWAY_IMAGE) .
 
 # syft runs from its own image unless it is on PATH. It reads an OCI archive,
-# not the image store, so it needs no container socket and works the same
-# under podman and docker. In the container it reads /scan and writes /out.
-#
-# Without --source-name and --source-version, syft would name the SBOM's
-# subject after a path under /tmp.
+# so it needs no container socket and works under podman and docker. In the
+# container it reads /scan and writes /out. --source-name and --source-version
+# keep it from naming the subject after a path under /tmp.
 .PHONY: sbom
 sbom: image
 	@mkdir -p $(dir $(SBOM_FILE))
@@ -199,9 +186,9 @@ sbom: image
 		-o "$(SBOM_FORMAT)=$$dest/$(notdir $(SBOM_FILE))" && \
 	echo "wrote $(SBOM_FILE) for $(GATEWAY_IMAGE) ($$(echo "$$id" | cut -c1-12))"
 
-# The licences of everything compiled into the binaries. MIT, BSD and Apache-2.0
-# require them to ship with a binary, so the image and every release archive
-# carry this file. The image writes its own copy with the same script.
+# The licences of everything compiled into the binaries, which MIT, BSD and
+# Apache-2.0 require to ship with them. The image writes its own copy with the
+# same script.
 NOTICES_FILE ?= $(BUILD_DIR)/THIRD_PARTY_NOTICES
 
 .PHONY: notices
@@ -213,8 +200,7 @@ notices:
 # The keera command as a release attaches it: one archive per platform, with the
 # licence and the notices next to the binary, and SHA256SUMS over them.
 #
-# tar.gz for Windows too: Windows 10 and later ship tar, and one format is
-# simpler.
+# tar.gz for Windows too: Windows 10 and later ship tar.
 DIST_DIR ?= $(BUILD_DIR)/dist
 CLI_PLATFORMS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 VERSION_PKG := github.com/bespinian/keera-gateway/internal/version
@@ -239,9 +225,8 @@ dist: notices
 	@echo "wrote $$(ls $(DIST_DIR)/*.tar.gz | wc -l) archives and SHA256SUMS to $(DIST_DIR)"
 
 # The development loop. The server runs on the host under air, so a save
-# rebuilds and restarts it in about a second, while Postgres, the inference
-# backend and Keera Decider run in containers. ^C stops the gateway and leaves
-# those up, so later starts are instant; `make dev-down` stops them.
+# restarts it in about a second; Postgres, the inference backend and Keera
+# Decider run in containers. ^C leaves those up; `make dev-down` stops them.
 AIR ?= air
 DEV_ENV := compose/.env
 
@@ -253,10 +238,9 @@ DEV_COMPOSE := -f compose/compose.yaml \
 	$(if $(filter gpu,$(TIER)),-f compose/compose.gpu.yaml) -f compose/compose.dev.yaml
 
 # The development catalogue is compose/models.yaml with the backends on
-# loopback: keera-engine and keera-decider resolve only inside the compose
-# network, and here the gateway runs on the host. `make dev` and `podman
-# compose up` share one database, so an organisation keeps the address it was
-# created with.
+# loopback, as the gateway runs on the host. `make dev` and `podman compose up`
+# share one database, so an organisation keeps the address it was created
+# with.
 DEV_MODELS := $(BUILD_DIR)/models.dev.yaml
 
 $(DEV_MODELS): compose/models.yaml
@@ -281,11 +265,10 @@ dev: dev-env dev-backends $(DEV_MODELS)
 	@echo
 	@echo "^C stops the gateway and leaves the containers up."
 	@echo
-	@# The catalogue files are defaults, so .env can name others. The sandbox
-	@# class file is set even without a driver, so the first organisation has
-	@# classes once one is switched on; the sandbox address only with a driver.
-	@# The backends are on loopback, so the deny list is the default without
-	@# loopback. A test in internal/gateway holds it to DefaultUpstreamDeny.
+	@# .env may name other catalogue files. The sandbox class file is set even
+	@# without a driver, so organisations have classes once one is on. The
+	@# backends are on loopback, so the deny list is the default without it; a
+	@# test in internal/gateway holds it to DefaultUpstreamDeny.
 	@set -a; . ./$(DEV_ENV); set +a; \
 		KEERA_DATABASE_URL='postgres://keera:keera@127.0.0.1:5432/keera?sslmode=disable' \
 		KEERA_MODELS_FILE="$${KEERA_MODELS_FILE:-$(DEV_MODELS)}" \
@@ -297,13 +280,11 @@ dev: dev-env dev-backends $(DEV_MODELS)
 
 # The sandbox image the development catalogue names.
 #
-# Not a dependency of `dev`, because building it pulls a base image and
-# installs a toolchain, which takes a minute.
+# Not a dependency of `dev`, because it takes a minute to build.
 #
 # sandbox/Containerfile is a base: it owns what the gateway depends on (the
-# fixed uid, sshd on 2222, the entrypoint), and a real deployment builds its
-# own on top. Its build context is sandbox/ alone, so the rest of the
-# repository is not sent to the builder.
+# fixed uid, sshd on 2222, the entrypoint), and a deployment builds its own on
+# top. Its build context is sandbox/ alone.
 SANDBOX_IMAGE ?= localhost/keera-sandbox:dev
 
 .PHONY: sandbox-image
@@ -313,13 +294,9 @@ sandbox-image:
 	@echo "built $(SANDBOX_IMAGE), which compose/sandboxes.yaml names."
 	@echo "Add KEERA_SANDBOX_DRIVER=podman to $(DEV_ENV) and restart 'make dev'."
 
-# The gateway will not start without an operator key, and compose will not
-# render its file while either credential is unset, so the first run generates
-# them. An existing .env is left alone.
-#
-# The keys come from /dev/urandom, so no openssl is needed. The file is written
-# to a temporary file and moved into place, because a half-written .env with
-# empty keys would pass for a valid one on the next run.
+# The gateway and compose need both keys, so the first run generates them from
+# /dev/urandom. An existing .env is left alone. It is written to a temporary
+# file first, so a half-written .env cannot pass for a valid one.
 .PHONY: dev-env
 dev-env:
 	@if [ ! -f $(DEV_ENV) ]; then \
@@ -339,16 +316,13 @@ dev-env:
 .PHONY: dev-backends
 dev-backends:
 	@$(COMPOSE) $(DEV_COMPOSE) up -d keera-db keera-engine keera-decider
-	@# A gateway container from an earlier `podman compose up` would still hold
-	@# :8080, which air needs.
+	@# A gateway container from `podman compose up` would hold :8080.
 	@$(COMPOSE) $(DEV_COMPOSE) stop keera-gateway >/dev/null 2>&1 || true
-	@# store.Open fails fast instead of retrying, so without this air's first
-	@# build would exit at once and wait for the next save.
+	@# store.Open fails fast, so wait for the database before air starts.
 	@$(call wait-for,postgres,60,$(COMPOSE) $(DEV_COMPOSE) exec -T keera-db pg_isready -U keera,$(COMPOSE) $(DEV_COMPOSE) logs keera-db)
 
-# Takes the containers down but keeps the volumes, so the model weights and the
-# database survive. podman-compose prints a harmless "no container ...
-# keera_keera-gateway_1", because this loop never starts that service.
+# Takes the containers down but keeps the volumes. podman-compose prints a
+# harmless "no container ... keera_keera-gateway_1": this loop never starts it.
 .PHONY: dev-down
 dev-down:
 	@$(COMPOSE) $(DEV_COMPOSE) down

@@ -13,57 +13,44 @@ import (
 )
 
 // GitMinter issues the credential a sandbox checks out with. internal/forge
-// has one for GitHub and one for GitLab.
-//
-// The rules are fixed: one repository, as short-lived as the forge allows, and
-// never the developer's own credential. Forwarding an ssh agent into a machine
-// that runs a model's output is exactly what sandboxes exist to avoid.
+// has one for GitHub and one for GitLab. A credential covers one repository,
+// is as short-lived as the forge allows, and is never the developer's own.
 type GitMinter interface {
-	// Mint returns a credential for one repository. It goes into the
-	// sandbox's environment and nowhere else. A repository this minter cannot
-	// serve is an *ErrRefused that says why.
+	// Mint returns a credential that goes only into the sandbox's
+	// environment. A repository it cannot serve is an *ErrRefused.
 	Mint(ctx context.Context, req GitRequest) (GitCredential, error)
 }
 
-// GitRevoker is a minter whose credentials can be taken back before they
-// expire. The manager revokes a sandbox's credential when the sandbox ends.
+// GitRevoker is a minter that can revoke credentials before they expire.
 type GitRevoker interface {
 	Revoke(ctx context.Context, repo, id string) error
 }
 
-// GitRequest is what a credential is for.
 type GitRequest struct {
 	Repo string
-	// Until is when the sandbox ends. The credential should not outlive it by
-	// more than the forge forces.
+	// Until is when the sandbox ends. The credential should not outlive it.
 	Until time.Time
-	// Sandbox names the sandbox, so the forge's list of tokens says what each
-	// one is for.
+	// Sandbox names the token on the forge.
 	Sandbox string
-	// Allow checks the repository's path on the forge against the caller's
-	// guardrail, and says why not. Only the forge can read the path, so it
-	// calls this. Nil allows nothing.
+	// Allow checks the repository's forge path against the guardrail. Only
+	// the forge knows the path, so it calls this. Nil allows nothing.
 	Allow func(path string) error
 }
 
-// GitCredential is what a sandbox checks out with.
 type GitCredential struct {
-	// Repo is the address to clone. It can differ from the one asked for: a
-	// token only works over HTTPS, so an ssh address is rewritten.
-	Repo string
-	// Username and Token make an HTTPS credential.
+	// Repo is the address to clone. A token only works over HTTPS, so an ssh
+	// address is rewritten.
+	Repo     string
 	Username string
 	Token    string
-	// ID is the forge's id for the credential, for a minter that can revoke
-	// it. It is stored; the credential is not.
+	// ID is the forge's id, for revoking. It is stored; the credential is not.
 	ID string
-	// Expires is when the forge stops accepting it. Zero means never, or
-	// unknown.
+	// Expires zero means never, or unknown.
 	Expires time.Time
 }
 
-// mintGit asks the minter for a credential. A refusal is passed on as it is,
-// so the developer reads the forge's reason and not a wrapper around it.
+// mintGit passes a refusal on as it is, so the developer reads the forge's
+// reason.
 func (m *Manager) mintGit(ctx context.Context, req GitRequest) (GitCredential, error) {
 	cred, err := m.opts.Git.Mint(ctx, req)
 	var refused *ErrRefused
@@ -76,8 +63,7 @@ func (m *Manager) mintGit(ctx context.Context, req GitRequest) (GitCredential, e
 	return cred, nil
 }
 
-// checkOut mints the credential for the repository a starting sandbox checks
-// out, and tells the sandbox what to check out and how.
+// checkOut mints the credential and tells the sandbox what to check out.
 func (m *Manager) checkOut(ctx context.Context, env map[string]string, req CreateRequest,
 	until time.Time,
 ) (GitCredential, error) {
@@ -97,19 +83,17 @@ func (m *Manager) checkOut(ctx context.Context, env map[string]string, req Creat
 	if !cred.Expires.IsZero() {
 		env["KEERA_GIT_TOKEN_EXPIRES"] = strconv.FormatInt(cred.Expires.Unix(), 10)
 	}
-	// Where the sandbox gets a fresh token when this one runs out. A GitHub
-	// token lasts an hour and an engineer's sandbox a working day.
+	// Where to get a fresh token: a GitHub token lasts an hour, an engineer's
+	// sandbox a day.
 	if base := m.opts.PublicURL; base != "" {
 		env["KEERA_GIT_CREDENTIAL_URL"] = base + httpx.SandboxPrefix + GitCredentialPath
 	}
 	return cred, nil
 }
 
-// GitCredentialPath is where a sandbox asks for a fresh repository credential,
-// under httpx.SandboxPrefix.
+// GitCredentialPath is under httpx.SandboxPrefix.
 const GitCredentialPath = "/v1/git-credential"
 
-// allowRepo checks a repository against a scope's allowed_repos.
 func allowRepo(limits policy.ResolvedSandbox) func(string) error {
 	return func(path string) error {
 		if err := limits.AdmitsRepo(path); err != nil {
@@ -119,11 +103,9 @@ func allowRepo(limits policy.ResolvedSandbox) func(string) error {
 	}
 }
 
-// RefreshGit mints a fresh repository credential for a live sandbox and
-// revokes the one it replaces. The sandbox asks for it with its own key.
-//
-// limits is the sandbox's guardrail as it is now, not as it was at creation,
-// so taking a repository off the list stops the next refresh.
+// RefreshGit mints a fresh repository credential and revokes the old one. It
+// checks the current limits, so taking a repository off the list stops the
+// next refresh.
 func (m *Manager) RefreshGit(ctx context.Context, sb store.Sandbox,
 	limits policy.ResolvedSandbox,
 ) (GitCredential, error) {
@@ -147,7 +129,7 @@ func (m *Manager) RefreshGit(ctx context.Context, sb store.Sandbox,
 		return GitCredential{}, err
 	}
 	if err := m.st.SetSandboxGitCredential(ctx, sb.ID, cred.ID); err != nil {
-		// Not recorded means never revoked, so it goes now.
+		// Not recorded would mean never revoked.
 		m.revokeCredential(context.WithoutCancel(ctx), cred.Repo, cred.ID)
 		return GitCredential{}, err
 	}
@@ -157,7 +139,6 @@ func (m *Manager) RefreshGit(ctx context.Context, sb store.Sandbox,
 	return cred, nil
 }
 
-// revokeGit takes back a sandbox's repository credential, if the forge can.
 func (m *Manager) revokeGit(ctx context.Context, sb store.Sandbox) {
 	if sb.GitCredentialID == "" {
 		return
@@ -170,8 +151,7 @@ func (m *Manager) revokeGit(ctx context.Context, sb store.Sandbox) {
 	}
 }
 
-// revokeCredential revokes one credential. A failure only logs: the
-// credential still expires by itself.
+// revokeCredential only logs a failure: the credential expires by itself.
 func (m *Manager) revokeCredential(ctx context.Context, repo, id string) {
 	revoker, ok := m.opts.Git.(GitRevoker)
 	if id == "" || !ok {

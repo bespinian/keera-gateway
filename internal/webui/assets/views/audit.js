@@ -1,5 +1,5 @@
 // The audit log: who changed what. It answers compliance questions, so it
-// filters, pages past its first screenful, and downloads as a file.
+// filters, pages, and downloads as a file.
 
 import { api } from "../api.js";
 import {
@@ -28,8 +28,7 @@ const TONES = {
   "key.rotate": "warn",
   "guardrail.put": "warn",
   "filter.put": "warn",
-  // Removing a filter is the entry a compliance reader is looking for: from
-  // here on, requests that were being redacted are not.
+  // From here on, requests that were redacted are not.
   "filter.delete": "bad",
   "filter.check": "",
   "model.delete": "bad",
@@ -38,8 +37,8 @@ const TONES = {
   "auth.directory_check": "warn",
 };
 
-// The wire keeps `noun.verb`, which filters and exports are written against.
-// An action missing here, say from a newer gateway, shows its wire id.
+// The wire keeps `noun.verb`, which filters and exports use. An action
+// missing here shows its wire id.
 const LABELS = {
   "auth.sign_in": "Signed in",
   "auth.cli_token": "Signed in from the command line",
@@ -102,7 +101,7 @@ function label(action) {
 }
 
 // Kept apart from the shared range: the audit log is searched over a chosen
-// period, not whatever the dashboard last showed.
+// period.
 const RANGES = [
   ...SHARED_RANGES,
   { label: "All", since: "", long: "Everything" },
@@ -111,8 +110,7 @@ const RANGES = [
 const PAGE = 100;
 
 export async function auditView(ctx) {
-  // Kept in the session rather than the URL, so it survives a visit to
-  // another screen.
+  // In the session, so it survives a visit to another screen.
   const filter = {
     action: remembered("keera.audit.action") || "",
     actor: remembered("keera.audit.actor") || "",
@@ -240,8 +238,7 @@ export async function auditView(ctx) {
   return wrap;
 }
 
-// A filter with fewer than two values is left out, unless one is set and
-// needs clearing.
+// A filter with fewer than two values is left out, unless one is set.
 function choose(aria, all, values, selected, name, onPick) {
   if (!selected && values.length < 2) return null;
   const options =
@@ -287,7 +284,7 @@ function auditTable(entries) {
       },
       {
         label: "Who",
-        // The operator key has no identity. Sent as a header it is logged as
+        // The operator key has no identity. As a header it is logged as
         // "operator key"; in the panel it signs in as operator@localhost.
         cell: (e) =>
           e.actor === "operator key" || e.actor === "operator@localhost"

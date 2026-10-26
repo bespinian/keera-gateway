@@ -17,40 +17,31 @@ import (
 	"time"
 )
 
-// A small Kubernetes client instead of client-go (see the package comment).
-// The driver polls instead of watching and sends merge patches instead of
-// applying.
+// A small Kubernetes client instead of client-go. It polls instead of watching
+// and sends merge patches instead of applying.
 
-// serviceAccountDir is where the kubelet mounts a pod's identity.
 const serviceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 
-// tokenRefresh is how often the service account token is re-read. The kubelet
-// rotates the file, so a token read only once starts failing after about an
-// hour.
+// tokenRefresh is how often the token is re-read. The kubelet rotates it, so
+// a token read once fails after about an hour.
 const tokenRefresh = 5 * time.Minute
 
 type kubeClient struct {
 	base string
 	http *http.Client
 
-	// tokenPath is re-read on a timer. Empty for a test's static token.
+	// tokenPath is empty for a test's static token.
 	tokenPath string
 	mu        sync.RWMutex
 	token     string
 	tokenRead time.Time
 }
 
-// KubeConfig points the client at an API server. Every field overrides an
-// in-cluster default. Only tests set them: the gateway always runs in the
-// cluster, because it reaches a sandbox by its pod IP.
+// KubeConfig overrides in-cluster defaults. Only tests set it: the gateway
+// always runs in the cluster, because it dials a sandbox's pod IP.
 type KubeConfig struct {
-	// Server is the API server's base URL. Empty means in-cluster, from
-	// KUBERNETES_SERVICE_HOST and KUBERNETES_SERVICE_PORT.
-	Server string
-	// Token is the credential. Empty means the service account's, which is
-	// read again as it rotates.
-	Token string
-	// Insecure skips certificate checks, for a test server.
+	Server   string
+	Token    string
 	Insecure bool
 }
 
@@ -108,8 +99,7 @@ func kubeTLS(cfg KubeConfig) (*tls.Config, error) {
 	return tlsCfg, nil
 }
 
-// inClusterNamespace is the namespace this pod runs in, or "default" outside a
-// cluster. It is only a fallback for an unset namespace setting.
+// inClusterNamespace is this pod's namespace, or "default" outside a cluster.
 func inClusterNamespace() string {
 	if raw, err := os.ReadFile(serviceAccountDir + "/namespace"); err == nil {
 		if ns := strings.TrimSpace(string(raw)); ns != "" {
@@ -130,9 +120,8 @@ func (c *kubeClient) readToken() error {
 	return nil
 }
 
-// bearer returns the current token, re-reading a rotated one. If the re-read
-// fails it keeps the old token: that one is still valid for a while, and the
-// kubelet may be halfway through replacing the file.
+// bearer re-reads a rotated token. If that fails it keeps the old one, which
+// is still valid for a while.
 func (c *kubeClient) bearer() string {
 	c.mu.RLock()
 	tok, read := c.token, c.tokenRead
@@ -148,7 +137,6 @@ func (c *kubeClient) bearer() string {
 	return c.token
 }
 
-// kubeError is a refusal from the API server.
 type kubeError struct {
 	Status int
 	Msg    string
@@ -162,7 +150,7 @@ func (e *kubeError) Error() string {
 	return fmt.Sprintf("kubernetes: %s returned %d", e.Path, e.Status)
 }
 
-// isNotFound and isConflict are the two refusals the driver acts on.
+// isNotFound and isConflict are the refusals the driver acts on.
 func isNotFound(err error) bool { return hasKubeStatus(err, http.StatusNotFound) }
 func isConflict(err error) bool { return hasKubeStatus(err, http.StatusConflict) }
 
@@ -171,7 +159,7 @@ func hasKubeStatus(err error, status int) bool {
 	return errors.As(err, &ke) && ke.Status == status
 }
 
-// kubeNotFound turns a 404 into ErrNotFound and passes anything else through.
+// kubeNotFound maps a 404 to ErrNotFound.
 func kubeNotFound(err error) error {
 	if isNotFound(err) {
 		return ErrNotFound
@@ -179,8 +167,7 @@ func kubeNotFound(err error) error {
 	return err
 }
 
-// maxKubeBody bounds what is read back from the API server, so a misrouted
-// request cannot fill memory.
+// maxKubeBody keeps a misrouted request from filling memory.
 const maxKubeBody = 8 << 20
 
 func (c *kubeClient) do(ctx context.Context, method, path, contentType string, in, out any) error {
@@ -238,15 +225,14 @@ func (c *kubeClient) post(ctx context.Context, path string, in, out any) error {
 	return c.do(ctx, http.MethodPost, path, "", in, out)
 }
 
-// patch sends a JSON merge patch, which needs no schema and no field manager.
-// A merge patch replaces lists rather than merging them, so a list in a patch
-// must be given whole.
+// patch sends a JSON merge patch, which needs no schema. It replaces lists, so
+// a list must be given whole.
 func (c *kubeClient) patch(ctx context.Context, path string, in any) error {
 	return c.do(ctx, http.MethodPatch, path, "application/merge-patch+json", in, nil)
 }
 
-// delete uses foreground propagation, so a sandbox reported as terminated
-// already has its pod on the way out.
+// delete uses foreground propagation, so a terminated sandbox's pod is already
+// going.
 func (c *kubeClient) delete(ctx context.Context, path string) error {
 	return c.do(ctx, http.MethodDelete, path, "",
 		map[string]any{

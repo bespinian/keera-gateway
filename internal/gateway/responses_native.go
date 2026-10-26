@@ -27,7 +27,7 @@ func addFileText(d *treeDoc, part map[string]any) {
 }
 
 // responsesDialect implements dialect for `/v1/responses`, forwarded to
-// OpenAI as it is.
+// OpenAI as is.
 type responsesDialect struct{}
 
 func (responsesDialect) provider() string { return "openai" }
@@ -51,9 +51,8 @@ func (responsesDialect) opening(b *body) (json.RawMessage, bool) {
 	})
 }
 
-// text is the instructions, and the text of every message and tool output in
-// the input. Function call arguments and a custom tool's input are not text,
-// as on the chat surface.
+// text is the instructions and the text of every message and tool output.
+// Call arguments and custom tool input are not text, as on the chat surface.
 func (responsesDialect) text(b *body) (textDoc, error) {
 	d := newTreeDoc()
 	instructions, err := d.root(b, "instructions")
@@ -111,8 +110,8 @@ func (responsesDialect) addSystem(b *body, prompt string) error {
 	return nil
 }
 
-// needsNative names the fields that continue a conversation OpenAI stored.
-// The gateway stores none, so no other model can read it.
+// needsNative names the field that continues a conversation stored at OpenAI,
+// which no other model can read.
 func (responsesDialect) needsNative(b *body) string {
 	if field := storedConversation(b); field != "" {
 		return "the '" + field + "' field continues a conversation OpenAI stored, and only " +
@@ -132,10 +131,10 @@ func storedConversation(b *body) string {
 	return ""
 }
 
-// onKey keeps a request on the deployment's key to one answer, given now.
+// onKey keeps a request on the deployment's key to one immediate answer.
 // Every organisation shares that OpenAI account, so nothing is stored there
-// for another to read by its id. A background answer is generated after the
-// request ends, where the gateway cannot see or bill it.
+// for another to read by id. A background answer comes after the request
+// ends, where the gateway cannot see or bill it.
 func (responsesDialect) onKey(b *body) string {
 	if on, _ := b.boolean("background"); on {
 		return "the 'background' field is not available on this deployment's OpenAI key: " +
@@ -158,9 +157,9 @@ func (responsesDialect) stream(alias string) nativeStream {
 	return &responsesNativeStream{alias: alias}
 }
 
-// responsesNativeStream reads a Responses stream on its way through. The
-// events that carry the whole response - created, completed and the like -
-// carry the model name and, at the end, the usage record.
+// responsesNativeStream reads a Responses stream on its way through. Events
+// carrying the whole response, such as created and completed, hold the model
+// name and, at the end, the usage record.
 type responsesNativeStream struct {
 	alias  string
 	usage  *tokenUsage

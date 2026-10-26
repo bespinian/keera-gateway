@@ -1,5 +1,5 @@
 // Package httpx holds the HTTP plumbing shared by the inference and control
-// planes, which are served from one listener and told apart by path.
+// planes.
 package httpx
 
 import (
@@ -16,22 +16,21 @@ import (
 	"github.com/bespinian/keera-gateway/internal/id"
 )
 
-// The one listener is split by path: the panel at the root, each API under its
-// prefix. They live here so the routes, the panel and the CLI agree on them.
+// One listener is split by path: the panel at the root, each API under its
+// prefix. They live here so the routes, the panel and the CLI agree.
 //
-// InferencePrefix has no version because clients append /v1/... themselves:
-// an OpenAI SDK at <origin>/api/v1 and an Anthropic one at <origin>/api both
-// work unedited. SandboxPrefix tunnels to a port in a sandbox over an HTTP
-// upgrade, so attaching needs no second port or certificate.
+// InferencePrefix has no version because clients append /v1/... themselves.
+// SandboxPrefix tunnels to a port in a sandbox over an HTTP upgrade, so it
+// needs no second port or certificate.
 const (
 	InferencePrefix = "/api"
 	ControlPrefix   = "/control"
 	SandboxPrefix   = "/sandbox"
 )
 
-// SessionHeader lets a client name its own session, which groups its requests
-// exactly where a derived session is only a guess. It lives here because the
-// sandboxes set it for their agents. The value is stored hashed.
+// SessionHeader lets a client name its own session, which is exact where a
+// derived session is a guess. Sandboxes set it for their agents. The value is
+// stored hashed.
 const SessionHeader = "X-Keera-Session"
 
 type ctxKey int
@@ -70,16 +69,14 @@ func LogIDs(ctx context.Context) slog.Attr {
 	return rid
 }
 
-// APIError is the error envelope. It matches the OpenAI shape, because that is
-// what the clients parse; anything else reaches a developer as a blank failure.
+// APIError is the error envelope, in the OpenAI shape that clients parse.
 type APIError struct {
 	Message string `json:"message"`
 	Type    string `json:"type"`
 	Code    string `json:"code,omitempty"`
 }
 
-// MediaType is a Content-Type without its parameters, in lower case, since
-// media types compare without regard to case.
+// MediaType is a Content-Type without its parameters, in lower case.
 func MediaType(ct string) string {
 	if i := strings.IndexByte(ct, ';'); i >= 0 {
 		ct = ct[:i]
@@ -103,9 +100,8 @@ func ErrorBody(typ, code, msg string) []byte {
 	return body
 }
 
-// WriteNotFound answers a route or model that is not there, for a path both
-// OpenAI and Anthropic clients call. It is in both shapes at once: both read
-// error.message, and Anthropic ones the type beside it.
+// WriteNotFound answers a route or model that is not there, in a shape both
+// OpenAI and Anthropic clients read.
 func WriteNotFound(w http.ResponseWriter, code, msg string) {
 	WriteJSON(w, http.StatusNotFound, map[string]any{
 		"type":  "error",
@@ -121,8 +117,8 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
-// SetRetryAfter says when to try again, in whole seconds. It is never zero,
-// which a client would read as "now" and retry at once.
+// SetRetryAfter says when to try again, in whole seconds. Never zero, which a
+// client would read as "now".
 func SetRetryAfter(w http.ResponseWriter, d time.Duration) {
 	w.Header().Set("Retry-After", strconv.Itoa(max(int(d.Seconds()), 1)))
 }
@@ -131,8 +127,8 @@ func SetRetryAfter(w http.ResponseWriter, d time.Duration) {
 // *http.MaxBytesError, which the caller answers with 413.
 const MaxJSONBody = 1 << 20
 
-// ReadJSON decodes a request body, rejecting unknown fields so a typo in a
-// control-plane call is an error rather than a silently ignored setting.
+// ReadJSON decodes a request body. Unknown fields are refused, so a typo is not
+// silently ignored.
 func ReadJSON(r *http.Request, v any) error {
 	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, MaxJSONBody))
 	dec.DisallowUnknownFields()
@@ -168,9 +164,8 @@ func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter 
 // a W3C trace id, short enough to repeat safely.
 const maxRequestIDLen = 64
 
-// requestID accepts a client's own request id, or returns "". The id is
-// echoed and logged, so it must look like an id, with nothing a log or header
-// has to escape. Anything else is replaced, not repaired.
+// requestID accepts a client's own request id, or returns "". The id is echoed
+// and logged, so it must need no escaping. Anything else is replaced.
 func requestID(presented string) string {
 	if presented == "" || len(presented) > maxRequestIDLen {
 		return ""
@@ -190,11 +185,8 @@ func requestID(presented string) string {
 const maxClientRequestIDLen = 512
 
 // clientRequestID accepts a client's X-Client-Request-Id, or returns "".
-//
-// OpenAI takes any ASCII up to 512 characters and refuses anything else. Here
-// an invalid one is dropped instead, as most models behind the gateway never
-// read it. Control characters are dropped too, since the id is logged and
-// sent on as a header.
+// OpenAI refuses an invalid one; here it is dropped, as most models never read
+// it. Control characters are dropped too, since it is logged and sent on.
 func clientRequestID(presented string) string {
 	if len(presented) > maxClientRequestIDLen {
 		return ""
@@ -216,9 +208,8 @@ func Middleware(log *slog.Logger, next http.Handler) http.Handler {
 			rid = id.New("req")
 		}
 		w.Header().Set("X-Request-Id", rid)
-		// The panel and the APIs share one origin, so a body a browser sniffs
-		// as HTML would run where the session cookie lives. Every route states
-		// its own media type.
+		// The panel and the APIs share one origin, so a body sniffed as HTML
+		// would run next to the session cookie.
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		ctx := context.WithValue(r.Context(), requestIDKey, rid)
 		if cid := clientRequestID(r.Header.Get(ClientRequestIDHeader)); cid != "" {

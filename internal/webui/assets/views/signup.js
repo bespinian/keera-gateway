@@ -1,7 +1,6 @@
-// The sign-up screen. A sign-in that matched no organisation lands here, and
-// the person creates one, or joins the one that added their address. Nothing
-// is joined without asking: anyone who runs an organisation can add any
-// address to it.
+// The sign-up screen, after a sign-in that matched no organisation. The
+// person creates one, or joins one that added their address. Nothing is
+// joined without asking: anyone who runs an organisation can add any address.
 
 import { api, ApiError } from "../api.js";
 import { h, replace, brandMark, showError, field, banner } from "../ui.js";

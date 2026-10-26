@@ -15,16 +15,11 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// Claude Code on a Keera key, or signed in to a Claude plan.
-//
 // `keera connect claude-code` gives this machine its own key and writes it
-// into Claude Code's settings, with the gateway's address and the models the
-// key may use, so nobody copies a key. Running it again replaces the
-// machine's key. --print only shows the settings, for another machine. With
-// --subscription, the key is a subscription key and Claude Code keeps its
-// Claude sign-in; see docs/subscriptions.md.
+// into Claude Code's settings, so nobody copies a key. Running it again
+// replaces the key. With --subscription, Claude Code keeps its Claude sign-in;
+// see docs/subscriptions.md.
 
-// claudeSetup is what one `connect claude-code` was asked for.
 type claudeSetup struct {
 	org, project, model string
 	gatewayURL          string
@@ -32,7 +27,6 @@ type claudeSetup struct {
 	subscription        bool
 }
 
-// connectClaude sets Claude Code on this machine up.
 func connectClaude(ctx context.Context, c *client, in claudeSetup) error {
 	me, err := whoami(ctx, c)
 	if err != nil {
@@ -59,8 +53,7 @@ func connectClaude(ctx context.Context, c *client, in claudeSetup) error {
 		return err
 	}
 
-	// The models are checked before a key is issued, so a mistyped name leaves
-	// no key behind.
+	// Checked before a key is issued, so a mistyped name leaves no key behind.
 	var (
 		models []policy.Model
 		env    map[string]string
@@ -93,13 +86,13 @@ func connectClaude(ctx context.Context, c *client, in claudeSetup) error {
 	if err != nil {
 		return err
 	}
-	// Claude Code stops fetching the organisation's settings from Anthropic when
-	// the user's own settings name an address. So when managed settings set it
-	// already, it is left to them, and an earlier copy is taken out.
+	// Claude Code stops fetching the organisation's settings when the user's
+	// own settings name an address. So when managed settings set it, an
+	// earlier copy is removed.
 	managed := managedBaseURL(filepath.Join(dir, "remote-settings.json"), managedSettingsDir())
 
-	// The settings are read before a key is issued, so a file that cannot be
-	// changed leaves no key behind that nothing holds.
+	// Read before a key is issued, so a file that cannot be changed leaves no
+	// key behind.
 	path := filepath.Join(dir, "settings.json")
 	settings, err := readSettings(path)
 	if err != nil {
@@ -112,9 +105,8 @@ func connectClaude(ctx context.Context, c *client, in claudeSetup) error {
 	}
 	replaced := step.replaces
 	if !in.subscription && replaced != nil {
-		// Replacing a key revokes it at once, and activating one shows its
-		// secret only once, so what it may use is checked before. The key
-		// keeps its guardrails either way.
+		// Replacing a key revokes it at once and its secret is shown only
+		// once, so what it may use is checked first.
 		if models, env, alias, err = keyEnv(ctx, c, orgID, replaced.ID, models, in.model); err != nil {
 			return err
 		}
@@ -145,11 +137,11 @@ func connectClaude(ctx context.Context, c *client, in claudeSetup) error {
 			}
 		}
 		env["ANTHROPIC_AUTH_TOKEN"] = key.Key
-		// Claude Code's telemetry holds no prompts, but it should not leave
-		// through anything but the gateway.
+		// Telemetry holds no prompts, but nothing should leave except through
+		// the gateway.
 		env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
-		// Removes what --subscription sets: a Keera key may reach models that
-		// are not Anthropic's, which have no tool search.
+		// Undoes --subscription: models that are not Anthropic's have no tool
+		// search.
 		env["ENABLE_TOOL_SEARCH"] = ""
 	}
 	env["ANTHROPIC_BASE_URL"] = in.gatewayURL
@@ -200,13 +192,13 @@ func connectClaude(ctx context.Context, c *client, in claudeSetup) error {
 	return nil
 }
 
-// keyEnv narrows models to those the key may use, and points Claude Code at
-// them: the one named, or else the first.
+// keyEnv narrows models to those the key may use and points Claude Code at
+// the one named, or else the first.
 func keyEnv(ctx context.Context, c *client, orgID, keyID string, models []policy.Model,
 	named string,
 ) ([]policy.Model, map[string]string, string, error) {
-	// Not connectKey, which takes only active keys: this machine's key may
-	// have expired, and that is usually why people run this again.
+	// Not connectKey, which takes only active keys: an expired key is usually
+	// why people run this again.
 	keys, err := ownKeys(ctx, c, orgID)
 	if err != nil {
 		return nil, nil, "", err

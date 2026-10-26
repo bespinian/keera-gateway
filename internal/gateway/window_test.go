@@ -53,8 +53,7 @@ func TestARequestTooLongForTheModelIsRefusedBeforeItIsSent(t *testing.T) {
 	}
 }
 
-// decodedBody is the code and the message of an error answer, in either
-// shape, as a client reads them.
+// decodedBody is the code and message of an error answer, in either shape.
 func decodedBody(t *testing.T, resp *http.Response) string {
 	t.Helper()
 	raw, _ := io.ReadAll(resp.Body)
@@ -72,7 +71,7 @@ func decodedBody(t *testing.T, resp *http.Response) string {
 
 func TestARequestThatMayFitIsForwarded(t *testing.T) {
 	h := windowHarness(t)
-	// 4,000 bytes can be up to 1,333 tokens, but need not be more than 800: the
+	// 4,000 bytes may be up to 1,333 tokens but may be only 800, so the
 	// backend decides.
 	resp := h.post(t, "/v1/chat/completions",
 		`{"model":"keera-code","messages":[{"role":"user","content":"`+strings.Repeat("a", 4000)+`"}]}`)

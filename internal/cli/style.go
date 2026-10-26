@@ -1,12 +1,9 @@
 package cli
 
-// Colour, and when this command line uses it.
-//
-// Colour only decorates words that already say the same thing, so output to
-// anything but a terminal (a pipe, a file, a CI log) gets no escapes at all.
-//
-// stdout and stderr are decided apart: `keera connect opencode > file` sends
-// the configuration to a file and the steps around it to the terminal.
+// Colour only decorates words that already say the same thing, so output to a
+// pipe, a file or a CI log gets no escapes. stdout and stderr are decided
+// apart: `keera connect opencode > file` sends the configuration to a file and
+// the steps to the terminal.
 
 import (
 	"fmt"
@@ -15,7 +12,7 @@ import (
 	"strings"
 )
 
-// The escapes. Only the basic colours, which every terminal theme supports.
+// Only the basic colours, which every terminal theme supports.
 const (
 	ansiReset  = "\x1b[0m"
 	ansiBold   = "\x1b[1m"
@@ -26,15 +23,13 @@ const (
 	ansiCyan   = "\x1b[36m"
 )
 
-// painter paints a string, or hands it back untouched. The zero value is the
-// safe one: no escapes at all.
+// painter's zero value writes no escapes.
 type painter bool
 
 // style and styleErr paint stdout and stderr. Run sets them, so a test that
 // calls a printer directly gets plain text.
 var style, styleErr painter
 
-// colorMode is the global --color flag: auto, always or never.
 var colorMode = "auto"
 
 func (p painter) paint(code, s string) string {
@@ -44,29 +39,23 @@ func (p painter) paint(code, s string) string {
 	return code + s + ansiReset
 }
 
-// head is a column heading or a section title.
 func (p painter) head(s string) string { return p.paint(ansiBold, s) }
 
-// cmd is something to type: a command, a flag, an address.
+// cmd is for something to type: a command, a flag, an address.
 func (p painter) cmd(s string) string { return p.paint(ansiCyan, s) }
 
-// ok, warn and bad are the three verdicts anything in here can have - a
-// check's, a sandbox's state, a key's.
+// ok, warn and bad are for verdicts and states.
 func (p painter) ok(s string) string   { return p.paint(ansiGreen, s) }
 func (p painter) warn(s string) string { return p.paint(ansiYellow, s) }
 func (p painter) bad(s string) string  { return p.paint(ansiRed, s) }
 
-// muted is for asides and placeholders.
 func (p painter) muted(s string) string { return p.paint(ansiDim, s) }
 
-// resolveStyle decides, once, what each stream gets.
 func resolveStyle() {
 	style = painter(wantsColor(colorMode, os.Stdout))
 	styleErr = painter(wantsColor(colorMode, os.Stderr))
 }
 
-// wantsColor answers for one stream, honouring the usual environment
-// variables.
 func wantsColor(mode string, f *os.File) bool {
 	switch mode {
 	case "never":
@@ -74,7 +63,7 @@ func wantsColor(mode string, f *os.File) bool {
 	case "always":
 		return true
 	}
-	// https://no-color.org: set to anything, and colour is off.
+	// https://no-color.org
 	if os.Getenv("NO_COLOR") != "" {
 		return false
 	}
@@ -88,14 +77,13 @@ func wantsColor(mode string, f *os.File) bool {
 	return isTerminal(f)
 }
 
-// isTerminal treats a character device as a terminal, and a pipe, a file or
-// a socket as not. That is enough for deciding on colour.
+// isTerminal treats any character device as a terminal, which is enough for
+// deciding on colour.
 func isTerminal(f *os.File) bool {
 	info, err := f.Stat()
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
-// takeColorMode reads --color, and --no-color, off the arguments.
 func takeColorMode(args []string) ([]string, error) {
 	args = slices.Clone(args)
 	for i, arg := range args {
@@ -116,13 +104,11 @@ func takeColorMode(args []string) ([]string, error) {
 	})
 }
 
-// badColor is what --color says to a word it does not have.
 func badColor(given string) error {
 	return fmt.Errorf("--color takes auto, always or never, not %q", given)
 }
 
-// statusWord paints a state word by what it means. Unknown words are left
-// plain.
+// statusWord leaves unknown words plain.
 func statusWord(word string) string {
 	switch word {
 	case "ready", "active", "running", "enabled", "true", "yes", "ok":
@@ -137,7 +123,7 @@ func statusWord(word string) string {
 	return word
 }
 
-// padTo pads s to width, measuring only what it shows, not its escapes.
+// padTo measures only what s shows, not its escapes.
 func padTo(s string, width int) string {
 	if n := width - len([]rune(stripANSI(s))); n > 0 {
 		return s + strings.Repeat(" ", n)
@@ -145,8 +131,7 @@ func padTo(s string, width int) string {
 	return s
 }
 
-// stripANSI removes the escapes this package writes, so widths can be
-// measured on what is shown.
+// stripANSI removes the escapes this package writes.
 func stripANSI(s string) string {
 	if !strings.Contains(s, "\x1b") {
 		return s
@@ -155,8 +140,8 @@ func stripANSI(s string) string {
 	b.Grow(len(s))
 	for i := 0; i < len(s); {
 		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
-			// A CSI sequence: digits and semicolons, then a final letter.
-			// Anything else is not ours and is kept.
+			// A CSI sequence: digits and semicolons, then a letter. Anything
+			// else is not ours and is kept.
 			j := i + 2
 			for j < len(s) && (s[j] == ';' || (s[j] >= '0' && s[j] <= '9')) {
 				j++

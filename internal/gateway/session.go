@@ -10,44 +10,33 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// Which task a request belongs to.
-//
-// One instruction to a coding agent becomes thirty or forty calls, and what
-// people want to know (what a task cost, why it took so long) is about all of
-// them together. So each row carries a session key.
-//
-// The key is a hash. It cannot be read back or searched, and says only that
-// two requests belong together.
+// Which task a request belongs to. One instruction to a coding agent becomes
+// dozens of calls, and people want to know what the whole task cost, so each
+// row carries a session key. It is a hash, which only says that two requests
+// belong together.
 
 // sessionHeaders is every header read as a session, in precedence order.
-//
-// There is no standard: neither the OpenAI nor the Anthropic API has a field
-// for the conversation, and grouping by user would merge all of a developer's
-// tasks. So the headers used in practice are read as one: ours, the generic
-// X-Session-Id, Helicone-Session-Id, and Claude Code's own. Claude Code sends
-// its session id on every call, its subagents' calls included, and keeps it
-// when it compacts the conversation.
+// There is no standard, so the ones in use are read as one: ours, the generic
+// X-Session-Id, Helicone-Session-Id, and Claude Code's own, which it sends on
+// every call, subagents included, and keeps across compaction.
 var sessionHeaders = []string{
 	httpx.SessionHeader, "X-Session-Id", "Helicone-Session-Id",
 	"X-Claude-Code-Session-Id",
 }
 
-// sessionKey derives the session key for one request, or empty for one that
-// is not part of a conversation. Only chat gets one: labelling completions and
-// embeddings would fill reports with one-request tasks.
-//
-// The API key's id is hashed in, so two developers who start with the same
-// sentence are two sessions. Rewriting the opening prompt mid-task starts a
-// new session, and two tasks opened with the same sentence within the idle gap
-// merge; httpx.SessionHeader exists for both.
+// sessionKey derives the session key for one request, or empty outside a
+// conversation. Only chat gets one, or reports would fill with one-request
+// tasks. The API key's id is hashed in, so two developers who start with the
+// same sentence are two sessions. A rewritten opening prompt starts a new
+// session, and two tasks opened with the same sentence within the idle gap
+// merge; httpx.SessionHeader fixes both.
 func sessionKey(r *http.Request, keyID string, kind policy.Kind,
 	opening func() (json.RawMessage, bool),
 ) string {
 	if kind != policy.KindChat {
 		return ""
 	}
-	// The header's name is not hashed, so switching headers mid-task does not
-	// split it.
+	// The header's name is not hashed, so switching headers keeps the task.
 	if stated := statedSession(r); stated != "" {
 		return store.StatedSessionKeyFor(keyID, stated)
 	}

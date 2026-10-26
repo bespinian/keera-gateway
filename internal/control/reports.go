@@ -85,8 +85,8 @@ func pageLimit(w http.ResponseWriter, q url.Values) (int, bool) {
 // entityScope resolves the one project, key or person a report is narrowed to,
 // and answers 404 for one in another organisation, so another tenant's key id
 // cannot reveal their spend. A model alias is not checked: the rows are only
-// this organisation's, so it reveals nothing. Across every organisation, which
-// only an operator sees, it sums every model of that alias.
+// this organisation's. Across every organisation, which only an operator sees,
+// it sums every model of that alias.
 func (s *Server) entityScope(w http.ResponseWriter, r *http.Request,
 	orgID string,
 ) (store.ReportScope, bool) {
@@ -135,11 +135,11 @@ func (s *Server) inOrg(w http.ResponseWriter, orgID, owner string, err error) bo
 }
 
 // overview is the dashboard in one round trip. Narrowed by the query, it is
-// also one project's, key's or model's own screen, which keeps that screen
-// equal to its bar on the dashboard.
+// also one project's, key's or model's own screen, so that screen matches its
+// bar on the dashboard.
 //
 // A member sees the whole organisation's figures here, as in the usage report.
-// Only the request log and the sessions are narrowed to their own.
+// Only the request log and sessions are narrowed to their own.
 func (s *Server) overview(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	orgID, from, to, ok := s.reportScope(w, r, p)
 	if !ok {
@@ -312,12 +312,11 @@ func (s *Server) requestQuery(w http.ResponseWriter, r *http.Request, p *authn.P
 }
 
 // trafficHolder is whose requests p may read one by one: empty for an
-// administrator, who reads everyone's in the organisation, and the member
-// themselves for a member, who reads those made with their own keys.
+// administrator, who reads the whole organisation's, and the member themselves
+// for a member.
 //
-// A member who names someone else is refused rather than shown their own, so
-// a request never does something other than what it says. It comes before
-// any read, so a member cannot probe who exists.
+// A member who names someone else is refused, not shown their own. This comes
+// before any read, so a member cannot probe who exists.
 func (s *Server) trafficHolder(w http.ResponseWriter, p *authn.Principal,
 	named string,
 ) (string, bool) {
@@ -429,10 +428,9 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request, p *authn.Principa
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// groupLabels maps the ids a report groups by to the names people use. All
-// of them are sent every time: they are small, and readers switch groupings
-// often. A user is labelled by address, which every user has; userNames holds
-// the names of those who have one, for the panel to show beside it.
+// groupLabels maps the ids a report groups by to the names people use. All are
+// sent every time: they are small, and readers switch groupings often. A user
+// is labelled by address; userNames holds the names of those who have one.
 type groupLabels struct {
 	projects, keys, users, userNames map[string]string
 }

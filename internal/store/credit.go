@@ -59,8 +59,7 @@ func scanCredit(r row) (CreditAccount, error) {
 	return a, err
 }
 
-// CreditAccount reads an organisation's credit. One that never had any has
-// a zero balance.
+// CreditAccount reads an organisation's credit, zero if it never had any.
 func (s *Store) CreditAccount(ctx context.Context, orgID string) (CreditAccount, error) {
 	a, err := scanCredit(s.pool.QueryRow(ctx,
 		`SELECT `+creditColumns+` FROM credit_accounts WHERE org_id = $1`, orgID))
@@ -113,9 +112,9 @@ func (s *Store) UpdateCredit(ctx context.Context, orgID string, c CreditSettings
 		orgID, c.TopUpBelowMicros, c.TopUpMicros, c.Invoiced, topUp))
 }
 
-// ForgetCard removes the saved card, and returns its token so PostFinance can
-// forget it too. Zero when there was none. The automatic top-up goes with it,
-// so saving the next card does not start it again unasked.
+// ForgetCard removes the saved card and returns its token, zero for none, so
+// PostFinance can forget it too. It also turns off the automatic top-up, so
+// the next saved card does not restart it unasked.
 func (s *Store) ForgetCard(ctx context.Context, orgID string) (int64, error) {
 	return forgetCard(ctx, s.pool, orgID)
 }
@@ -215,8 +214,8 @@ func scanPayment(r row) (Payment, error) {
 	return p, err
 }
 
-// ErrTopUpUnderway is returned for an automatic top-up while another for the
-// same organisation is still pending.
+// ErrTopUpUnderway means another automatic top-up for the organisation is
+// still pending.
 var ErrTopUpUnderway = errors.New("store: an automatic top-up is under way")
 
 // CreatePayment records a payment that has not been paid yet.
@@ -236,8 +235,7 @@ func (s *Store) SetTransaction(ctx context.Context, paymentID string, transactio
 		WHERE id = $1 AND state = 'pending'`, paymentID, transactionID)
 }
 
-// Grant adds credit without a payment, or takes some away. It is paid at
-// once.
+// Grant adds or removes credit without a payment. It is paid at once.
 func (s *Store) Grant(ctx context.Context, p Payment) (out Payment, err error) {
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		out, err = scanPayment(tx.QueryRow(ctx, `INSERT INTO payments (id, org_id, kind, micros,
@@ -272,8 +270,8 @@ type Settlement struct {
 	Card *SavedCard
 	// Token is PostFinance's token for Card.
 	Token int64
-	// Retry says a failed automatic top-up failed for a reason of Keera's or
-	// the network's, not the card's, so the next one is still tried.
+	// Retry says a failed automatic top-up was not the card's fault, so the
+	// next one is still tried.
 	Retry bool
 }
 
@@ -281,7 +279,7 @@ type Settlement struct {
 type Settled struct {
 	Payment Payment
 	// Ended is false when the payment had ended already, so a webhook and a
-	// poll arriving together credit it once.
+	// poll together credit it once.
 	Ended bool
 	// OldToken is the card a newly saved one replaced, for PostFinance to
 	// forget.
@@ -290,10 +288,9 @@ type Settled struct {
 	Lifted bool
 }
 
-// Settle ends a pending payment. A paid one adds its credit, saves its card
-// if it brought one, clears a failed top-up and lifts the organisation's
-// limit; a failed automatic top-up stops the next. A failed payment that is
-// paid after all, such as an automatic top-up given up on after a day, is
+// Settle ends a pending payment. A paid one adds its credit, saves its card,
+// clears a failed top-up and lifts the organisation's limit; a failed
+// automatic top-up stops the next. A failed payment that is paid after all is
 // credited too.
 func (s *Store) Settle(ctx context.Context, paymentID string, how Settlement) (Settled, error) {
 	state := PaymentFailed
@@ -318,8 +315,8 @@ func (s *Store) Settle(ctx context.Context, paymentID string, how Settlement) (S
 			if err := addCredit(ctx, tx, p.OrgID, p.AmountMicros); err != nil {
 				return err
 			}
-			// Paying once lifts the limit a signed-up organisation starts with.
-			// A grant does not: it is not money from the organisation.
+			// Paying once lifts the limit. A grant does not: it is not the
+			// organisation's money.
 			tag, err := tx.Exec(ctx, "UPDATE orgs SET limited = false WHERE id = $1 AND limited",
 				p.OrgID)
 			if err != nil {

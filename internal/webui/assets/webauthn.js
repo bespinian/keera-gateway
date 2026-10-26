@@ -1,9 +1,9 @@
 // The browser half of a passkey ceremony.
 //
-// The control plane sends the options with every binary value as base64url,
-// and navigator.credentials wants ArrayBuffers, so this converts both ways.
-// The public key is read with getPublicKey(), which hands it over in a form
-// the gateway reads without parsing CBOR.
+// The control plane sends binary values as base64url, and
+// navigator.credentials wants ArrayBuffers, so this converts both ways.
+// getPublicKey() gives the key in a form the gateway reads without parsing
+// CBOR.
 
 export function passkeysSupported() {
   return Boolean(window.PublicKeyCredential && navigator.credentials);
@@ -99,7 +99,7 @@ async function ceremony(run) {
   }
 }
 
-/** deviceName guesses a name for a new passkey, which the person can change. */
+/** deviceName guesses a name for a new passkey. */
 export function deviceName() {
   const ua = navigator.userAgent || "";
   for (const [needle, name] of [

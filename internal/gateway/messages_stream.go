@@ -9,21 +9,16 @@ import (
 	"github.com/bespinian/keera-gateway/internal/id"
 )
 
-// The streaming half of the Messages surface, where the two APIs differ most.
-//
-// A chat completion stream is deltas against one implicit message. A Messages
-// stream is explicit events: the message opens, content blocks open and close
-// by index, and the message closes with a stop reason and token counts. So
-// the translation is a state machine that tracks which block is open.
+// The streaming half of the Messages surface. A chat completion stream is
+// deltas to one implicit message; a Messages stream has explicit events where
+// the message and its blocks open and close. So the translation tracks which
+// block is open.
 
 // anthropicPingInterval is how often a ping is sent while the upstream is
-// silent. Clients abort a quiet stream, and the long quiet is before the first
-// token, while a big prompt is read. The Messages API fills it with pings.
-//
-// A variable so a test need not wait twenty seconds.
+// silent, since clients abort a quiet stream, as before the first token of a
+// big prompt. It is a variable for tests.
 var anthropicPingInterval = 20 * time.Second
 
-// pipe forwards a chat completion stream as a Messages stream.
 func (anthropicShape) pipe(dst io.Writer, flush func(), src io.Reader, alias string,
 	_ bool, limit int64,
 ) (streamStats, error) {
@@ -33,15 +28,13 @@ func (anthropicShape) pipe(dst io.Writer, flush func(), src io.Reader, alias str
 		})
 }
 
-// messagesStream is the state a chat completion stream has to be read against
-// to be re-emitted as a Messages stream.
+// messagesStream re-emits a chat completion stream as a Messages stream.
 type messagesStream struct {
 	alias string
 	msgID string
 	// send writes one event. It must not keep the slice, which is reused.
 	send func([]byte) error
-	// buf is reused for every token's event.
-	buf []byte
+	buf  []byte
 	// args holds the open tool call's arguments until its block closes.
 	args []byte
 
@@ -55,7 +48,6 @@ func (s *messagesStream) chunk(payload []byte) error {
 	return s.fold(payload, s.text, s.toolCall)
 }
 
-// text emits a fragment of text, opening a text block first if needed.
 func (s *messagesStream) text(text string) error {
 	if err := s.start(); err != nil {
 		return err
@@ -66,7 +58,6 @@ func (s *messagesStream) text(text string) error {
 	return s.delta("text_delta", "text", text)
 }
 
-// toolCall emits a fragment of a tool call, opening its block first if needed.
 func (s *messagesStream) toolCall(index int, tc oaiToolCallDelta) error {
 	if err := s.start(); err != nil {
 		return err
@@ -76,23 +67,18 @@ func (s *messagesStream) toolCall(index int, tc oaiToolCallDelta) error {
 	}); err != nil {
 		return err
 	}
-	// The arguments are held until the call is whole and sent as one
-	// fragment, checked as a buffered answer's are. A fragment cannot be taken
-	// back, and an Anthropic SDK fails the whole answer on arguments that are
-	// not JSON. The pings keep the client waiting meanwhile.
+	// The arguments are held until the call is whole and checked, since an
+	// Anthropic SDK fails the whole answer on arguments that are not JSON.
 	s.args = append(s.args, tc.Function.Arguments...)
 	return nil
 }
 
-// start opens the message, once.
 func (s *messagesStream) start() error {
 	if s.started {
 		return nil
 	}
 	s.started = true
-	// The input token count is not known yet: usage comes in the last chunk.
-	// It is zero here and sent for real in message_delta, which is where
-	// clients read it.
+	// Usage comes in the last chunk, so the counts are sent in message_delta.
 	return s.emit("message_start", map[string]any{
 		"type": "message_start",
 		"message": map[string]any{
@@ -119,8 +105,7 @@ func (s *messagesStream) openToolUse(upstreamIndex int, callID, name string) err
 		"type": "content_block_start", "index": s.open,
 		"content_block": map[string]any{
 			"type": "tool_use", "id": toolUseID(callID), "name": name,
-			// The arguments are held back and follow at closeBlock as one
-			// input_json_delta, or not at all when they are {}.
+			// The arguments follow at closeBlock, unless they are {}.
 			"input": map[string]any{},
 		},
 	})
@@ -147,19 +132,16 @@ func (s *messagesStream) closeBlock() error {
 }
 
 // finish closes the message, or ends the stream with an error if the upstream
-// failed. A failure closed as a message would read as a finished turn, with
-// any tool call in it cut short.
+// failed, so a failure does not read as a finished turn.
 func (s *messagesStream) finish(cut error) error {
 	if cut != nil {
-		// overloaded_error, because the request was fine and trying it again
-		// is the remedy.
+		// overloaded_error, since retrying is the remedy.
 		return s.emit("error", map[string]any{
 			"type":  "error",
 			"error": map[string]string{"type": "overloaded_error", "message": cutMessage(cut)},
 		})
 	}
-	// Even an empty stream must be a whole message, starting with
-	// message_start.
+	// Even an empty stream must be a whole message.
 	if err := s.start(); err != nil {
 		return err
 	}
@@ -185,8 +167,8 @@ func (s *messagesStream) finish(cut error) error {
 	return s.emit("message_stop", map[string]any{"type": "message_stop"})
 }
 
-// delta sends a content_block_delta event to the open block. It runs once per
-// token, so it is written into a reused buffer rather than marshalled.
+// delta sends a content_block_delta to the open block. It runs once per token,
+// so it writes into a reused buffer instead of marshalling.
 func (s *messagesStream) delta(deltaType, key, value string) error {
 	b := append(s.buf[:0], "event: content_block_delta\ndata: "+
 		`{"type":"content_block_delta","index":`...)

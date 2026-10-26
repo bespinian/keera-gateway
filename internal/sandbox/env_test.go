@@ -8,7 +8,6 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// piFile is what the tests read of a rendered models.json.
 type piFile struct {
 	Providers map[string]struct {
 		BaseURL string            `json:"baseUrl"`
@@ -34,8 +33,7 @@ func readPi(t *testing.T, raw string) piFile {
 	return got
 }
 
-// A sandbox's Pi configuration is the one `keera connect pi` prints for a
-// laptop, so Pi is identified and its models named the same way.
+// A sandbox's Pi configuration matches what `keera connect pi` prints.
 func TestPiConfigListsEveryReachableModel(t *testing.T) {
 	models := []connect.Model{
 		{Alias: "keera-speed", Name: "Keera Speed 2", MaxContext: 16384},
@@ -46,8 +44,7 @@ func TestPiConfigListsEveryReachableModel(t *testing.T) {
 	if p.BaseURL != "http://keera-gateway:8080/api/v1" {
 		t.Errorf("baseUrl = %q", p.BaseURL)
 	}
-	// A reference, never the key itself, which an edited copy would keep after
-	// a resume gave the sandbox a new one.
+	// A reference, never the key, which a resume replaces.
 	if p.APIKey != "${KEERA_API_KEY}" {
 		t.Errorf("apiKey = %q, want the environment reference", p.APIKey)
 	}
@@ -92,8 +89,7 @@ func TestPiConfigSendsTheAgentSession(t *testing.T) {
 	}
 }
 
-// A sandbox key is a standard key. Its agent must not be offered a
-// subscription model, which the gateway refuses that key.
+// A sandbox key is a standard key, which cannot use subscription models.
 func TestASandboxIsNotOfferedASubscriptionModel(t *testing.T) {
 	resolved := policy.Resolve(policy.Key{OrgID: "org_1", Kind: policy.KeyStandard}, nil, nil, nil)
 	catalogue := []policy.Model{
@@ -108,8 +104,7 @@ func TestASandboxIsNotOfferedASubscriptionModel(t *testing.T) {
 	}
 }
 
-// A router is a model to a client, so the agent is offered the ones the
-// guardrails allow, after the models.
+// The agent is offered the routers the guardrails allow, after the models.
 func TestASandboxIsOfferedItsRouters(t *testing.T) {
 	resolved := policy.Resolve(policy.Key{OrgID: "org_1", Kind: policy.KeyStandard},
 		&policy.Limits{AllowedModels: []string{"keera-code", "safe"}}, nil, nil)

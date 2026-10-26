@@ -14,8 +14,7 @@ func TestIdentifyReadsTheAgentOffTheWire(t *testing.T) {
 	}{
 		{
 			name: "a client that names itself is taken at its word",
-			// This is the whole point of the header: what arrives at the
-			// gateway from the panel's playground is a browser.
+			// The playground's User-Agent is a browser.
 			stated: "keera-playground",
 			ua:     "Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/128.0",
 			want:   "keera-playground",
@@ -46,8 +45,7 @@ func TestIdentifyReadsTheAgentOffTheWire(t *testing.T) {
 			want: "openai-sdk",
 		},
 		{
-			// The fallback is what keeps this table from having to know about
-			// an editor released next month.
+			// So the table need not know every new editor.
 			name: "an unrecognised agent keeps its own name",
 			ua:   "SomeNewEditor/2.0 (linux)",
 			want: "someneweditor",
@@ -58,8 +56,7 @@ func TestIdentifyReadsTheAgentOffTheWire(t *testing.T) {
 			want: "",
 		},
 		{
-			// A product token is matched whole. Anything else would file every
-			// OpenAPI-generated client under Pi.
+			// A product token is matched whole, or "openapi" would be Pi.
 			name: "a name that merely contains a known one is not that one",
 			ua:   "openapi-generator/7.1.0",
 			want: "openapi-generator",
@@ -98,8 +95,7 @@ func TestAStatedNameCannotGrowWithoutBound(t *testing.T) {
 }
 
 func TestClientLabelAgreesWithTheCatalogue(t *testing.T) {
-	// The catalogue configures these and the map names them. Two labels for one
-	// client would read as two clients.
+	// Two labels for one client would read as two clients.
 	for _, c := range Clients() {
 		if got := ClientLabel(c.ID); got != c.Label {
 			t.Errorf("ClientLabel(%q) = %q, but the catalogue calls it %q", c.ID, got, c.Label)
@@ -111,8 +107,7 @@ func TestClientLabelAgreesWithTheCatalogue(t *testing.T) {
 	if got := ClientLabel("aider"); got != "Aider" {
 		t.Errorf("ClientLabel(aider) = %q, want its own label", got)
 	}
-	// An unrecognised client is shown under the name it gave, which is more
-	// use than "other".
+	// An unrecognised client is shown under the name it gave.
 	if got := ClientLabel("someneweditor"); got != "someneweditor" {
 		t.Errorf("ClientLabel of an unknown client = %q, want the key itself", got)
 	}
@@ -122,8 +117,7 @@ func TestClientLabelAgreesWithTheCatalogue(t *testing.T) {
 }
 
 func TestEveryAgentIsReachableByItsOwnKey(t *testing.T) {
-	// A key Identify cannot produce is a row nothing is ever filed under. The
-	// stated header is written by hand, so keys must be names people would type.
+	// Every key must be one Identify can produce, and one people would type.
 	for _, a := range agents {
 		if got := Identify(a.key, ""); got != a.key {
 			t.Errorf("a client stating %q is filed as %q", a.key, got)
@@ -132,8 +126,7 @@ func TestEveryAgentIsReachableByItsOwnKey(t *testing.T) {
 }
 
 func TestEveryCatalogueClientIsFiledUnderOneName(t *testing.T) {
-	// A client the catalogue configures is reported under the catalogue's key,
-	// so the panel's "My clients" and the reports use one name for it.
+	// A catalogue client is reported under the catalogue's key.
 	for _, c := range Clients() {
 		if got := Identify(c.ID, ""); got != c.ID {
 			t.Errorf("a client stating %q is filed as %q", c.ID, got)

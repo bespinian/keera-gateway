@@ -32,14 +32,13 @@ func TestWriteEventsRollsUpSpendPerScope(t *testing.T) {
 			Alias: "keera-code", InputTokens: 500, OutputTokens: 100, CostMicros: 900,
 			Status: 200, Latency: time.Second, Scopes: scopes,
 		},
-		// A refusal: recorded, because it is the event a developer asks about,
-		// and charged nothing.
+		// A refusal: recorded, and charged nothing.
 		{
 			TS: now.Add(2 * time.Minute), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 402, Latency: time.Millisecond, Scopes: scopes,
 		},
-		// A refusal by a filter, which paid for the filter's own call. The
-		// budget charges it, so the report must show it too.
+		// A refusal by a filter, which paid for the filter's call. The budget
+		// charges it, so the report shows it.
 		{
 			TS: now.Add(3 * time.Minute), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", InputTokens: 50, OutputTokens: 5, CostMicros: 300,
@@ -87,7 +86,7 @@ func TestWriteEventsRollsUpSpendPerScope(t *testing.T) {
 		t.Errorf("Usage bucket = %+v, want two served requests and every row's cost", b)
 	}
 
-	// The refusals can still be read: that is why they are written.
+	// The refusals can still be read.
 	refusals, err := st.Refusals(ctx, f.orgID, []string{f.keyID}, now.Add(-time.Hour), 10)
 	if err != nil {
 		t.Fatalf("Refusals: %v", err)
@@ -97,10 +96,9 @@ func TestWriteEventsRollsUpSpendPerScope(t *testing.T) {
 	}
 }
 
-// One batch can hold events from either side of midnight, since the recorder
-// flushes on a timer. A daily budget has a window on each side, so the roll-up
-// must sum by window, not just by scope. Otherwise a budget would refuse
-// traffic against yesterday's spend.
+// One batch can hold events from both sides of midnight, so the roll-up sums
+// by window, not just by scope. Otherwise a daily budget would count
+// yesterday's spend.
 func TestWriteEventsKeepsSpendWindowsApartWithinOneBatch(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -125,8 +123,7 @@ func TestWriteEventsKeepsSpendWindowsApartWithinOneBatch(t *testing.T) {
 		t.Fatalf("WriteEvents: %v", err)
 	}
 
-	// Read as of the morning: the day window is the new one, and holds only
-	// what was spent inside it.
+	// As of the morning, the day window holds only what was spent in it.
 	rows, err := st.LoadSpend(ctx, thisMorning)
 	if err != nil {
 		t.Fatalf("LoadSpend: %v", err)
@@ -139,7 +136,7 @@ func TestWriteEventsKeepsSpendWindowsApartWithinOneBatch(t *testing.T) {
 			rows[0].Micros)
 	}
 
-	// And the night before is still its own row, with its own total.
+	// The night before is its own row.
 	rows, err = st.LoadSpend(ctx, lastNight)
 	if err != nil {
 		t.Fatalf("LoadSpend: %v", err)
@@ -198,8 +195,7 @@ func TestUsageGroupsByEveryDimensionThePanelOffers(t *testing.T) {
 			TS: day.AddDate(0, 0, 1), OrgID: f.orgID, ProjectID: f.projectID, UserID: user.ID,
 			KeyID: f.keyID, Alias: "keera-speed", CostMicros: 50, Status: 200,
 		},
-		// A mistyped model: refused before anything ran, so it is no model's
-		// usage, though it is still the project's and the key's request.
+		// A mistyped model: no model's usage, but still the project's and key's.
 		{
 			TS: day, OrgID: f.orgID, ProjectID: f.projectID, UserID: user.ID, KeyID: f.keyID,
 			Alias: "keera-cdoe", Status: 404,
@@ -264,7 +260,6 @@ func TestUsageGroupsByEveryDimensionThePanelOffers(t *testing.T) {
 	}
 
 	// Across every organisation, the two "keera-code" models are two rows.
-	// Added up, an operator would read one model's traffic as twice what it is.
 	buckets, err = st.Usage(ctx, UsageQuery{From: from, To: to, GroupBy: "model"})
 	if err != nil {
 		t.Fatalf("Usage: %v", err)
@@ -292,7 +287,7 @@ func TestUsageChartDrawsTheBusiestGroupsAndTheRest(t *testing.T) {
 	day := time.Date(2026, 9, 7, 10, 0, 0, 0, time.UTC)
 
 	// Seven models: model-7 serves seven requests, model-1 one. The two
-	// quietest have no line of their own.
+	// quietest share a line.
 	var events []Event
 	for m := 1; m <= 7; m++ {
 		for i := range m {
@@ -342,7 +337,7 @@ func TestUsageChartDrawsTheBusiestGroupsAndTheRest(t *testing.T) {
 		}
 	}
 
-	// By day, a line per day would be one point each, so it is one line.
+	// By day, it is one line.
 	c, err = st.UsageChart(ctx, UsageQuery{
 		OrgID: f.orgID, From: from, To: to,
 		GroupBy: "day",
@@ -400,8 +395,7 @@ func TestOverviewPlotsEveryBucketInTheWindow(t *testing.T) {
 	if o.TTFTMedianMS < 100 || o.TTFTMedianMS > 300 {
 		t.Errorf("TTFTMedianMS = %d, want between the two samples", o.TTFTMedianMS)
 	}
-	// A quiet hour is a zero in the chart, not a gap: plotting only the hours
-	// with rows turns a quiet week into a flat line across the whole window.
+	// A quiet hour is a zero in the chart, not a gap.
 	if len(o.Series) < 6 {
 		t.Errorf("%d points for a six-hour window, want one per hour: %+v",
 			len(o.Series), o.Series)
@@ -469,8 +463,7 @@ func TestKeySummariesReportsLastUseAndWhatWasServed(t *testing.T) {
 			TS: now.Add(-2 * time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
 			CostMicros: 700, Status: 200,
 		},
-		// A refusal is the most recent use of the key, and "when was this last
-		// used" is a question about being presented at all.
+		// A refusal counts as the key's most recent use.
 		{
 			TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
 			Status: 429,
@@ -515,8 +508,8 @@ func TestProjectSummariesReadsTheOpenBudgetWindow(t *testing.T) {
 	f := newFixture(t, st, ctx)
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
 
-	// Of a budget per day and one per month, the summary shows the one
-	// nearer its end: the day's, at 0.8% against the month's 0.16%.
+	// Of a daily and a monthly budget, the summary shows the one nearer its
+	// end: the day's, at 0.8% against the month's 0.16%.
 	if err := st.PutGuardrail(ctx, policy.ScopeProject, f.projectID, policy.Limits{
 		Budgets: []policy.Budget{
 			{BudgetMicros: 5_000_000_000, Period: policy.PeriodMonth},
@@ -525,7 +518,7 @@ func TestProjectSummariesReadsTheOpenBudgetWindow(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("PutGuardrail: %v", err)
 	}
-	// Today's spend, and yesterday's, which the day must not count.
+	// Today's spend, and yesterday's, which the day does not count.
 	for _, ts := range []time.Time{now, now.AddDate(0, 0, -1)} {
 		if err := st.WriteEvents(ctx, []Event{{
 			TS: ts, OrgID: f.orgID, ProjectID: f.projectID,
@@ -590,9 +583,7 @@ func TestProjectSummariesReadsTheOpenBudgetWindow(t *testing.T) {
 	}
 }
 
-// A summary carries the scope's system prompt, because both screens that read
-// one show it. Leaving it out of the query made every scope look as though it
-// said nothing.
+// A summary carries the scope's system prompt.
 func TestSummariesCarryTheSystemPrompt(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -633,8 +624,7 @@ func TestSummariesCarryTheSystemPrompt(t *testing.T) {
 		t.Errorf("key SystemPrompt = %v, want %q", got, keyPrompt)
 	}
 
-	// A scope that sets no prompt must come back as one that says nothing, not
-	// as an empty string a screen would render as a blank instruction.
+	// A scope with no prompt comes back as nil, not an empty string.
 	if err := st.PutGuardrail(ctx, policy.ScopeProject, f.projectID, policy.Limits{}); err != nil {
 		t.Fatalf("PutGuardrail(project, cleared): %v", err)
 	}
@@ -648,8 +638,7 @@ func TestSummariesCarryTheSystemPrompt(t *testing.T) {
 	}
 }
 
-// The map's four readings of one window must add up: the boxes, the arrows and
-// the total.
+// The map's four readings of one window add up: nodes, edges and total.
 func TestFlowsCountsOneWindowFourWays(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -667,8 +656,7 @@ func TestFlowsCountsOneWindowFourWays(t *testing.T) {
 		ev("claude-code", "keera-code", 200, 100, 400*time.Millisecond),
 		ev("claude-code", "keera-frontier", 200, 900, time.Second),
 		ev("opencode", "keera-code", 200, 100, 300*time.Millisecond),
-		// A refusal and a failure, which the map draws differently from each
-		// other and from everything that worked.
+		// A refusal and a failure, which the map draws apart.
 		ev("opencode", "keera-code", 429, 0, 0),
 		ev("", "keera-code", 502, 0, 0),
 	}); err != nil {
@@ -690,7 +678,7 @@ func TestFlowsCountsOneWindowFourWays(t *testing.T) {
 		t.Errorf("cost = %d, want 1200", rep.Total.CostMicros)
 	}
 
-	// A client that named itself in no way at all is a client, not a total.
+	// A client that did not name itself is a client, not a total.
 	if got := rep.Clients[""].Requests; got != 1 {
 		t.Errorf("the unnamed client made %d requests, want 1", got)
 	}
@@ -717,10 +705,8 @@ func TestFlowsCountsOneWindowFourWays(t *testing.T) {
 		t.Errorf("edges = %v, want the pairs the traffic actually ran between", edges)
 	}
 
-	// A median cannot be added up from its parts, so the database computes it
-	// at every level. keera-code's timed requests are 0, 200, 300 and 400ms.
-	// The zero is a request that never streamed, so the median of the rest is
-	// 300.
+	// keera-code's timed requests are 0, 200, 300 and 400ms. The zero never
+	// streamed, so the median of the rest is 300.
 	if got := rep.Models["keera-code"].TTFTMedianMS; got != 300 {
 		t.Errorf("keera-code's median first token = %dms, want 300", got)
 	}
@@ -743,8 +729,7 @@ func TestFlowsOverAnEmptyWindow(t *testing.T) {
 	}
 }
 
-// The map's live rate starts from the last minute. A request counts in the
-// second it finished, because that is when the live stream shows it.
+// A request counts in the second it finished, as in the live stream.
 func TestLastMinuteCountsRequestsWhenTheyFinished(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -789,8 +774,7 @@ func TestLastMinuteCountsRequestsWhenTheyFinished(t *testing.T) {
 	}
 }
 
-// A developer's clients are what called with their own keys: someone else's
-// traffic in the same organisation is not theirs.
+// A developer's clients are those that called with their own keys.
 func TestClientUsesReadsOnePersonsClientsAndKeys(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -851,8 +835,7 @@ func TestASubscriptionKeyKeepsItsKindAndItsPlanUsage(t *testing.T) {
 	plan := func(used float64, at time.Time) *policy.PlanUsage {
 		return &policy.PlanUsage{FiveHour: &used, Status: "allowed", UpdatedAt: at}
 	}
-	// The newer reading arrives first, as it can from another replica, and the
-	// older one must not replace it.
+	// The newer reading arrives first, as it can from another replica.
 	for _, batch := range [][]Event{
 		{{
 			TS: now, OrgID: f.orgID, KeyID: "key_sub", Alias: "claude", Status: 200,
@@ -895,7 +878,7 @@ func TestASubscriptionKeyKeepsItsKindAndItsPlanUsage(t *testing.T) {
 		t.Errorf("overview spend %d, on plans %d; want 0 and 400", o.CostMicros, o.SubscriptionMicros)
 	}
 
-	// A rotated key is still one a copied settings file cannot spend money with.
+	// A rotated subscription key stays one, so it still cannot spend money.
 	next, err := st.RotateKey(ctx, AnyOrg, "key_sub", KeyInfo{ID: "key_sub2", Prefix: "keera_sk_pl2"},
 		[]byte("hash-of-keera_sk_pl2-32-bytes!!!!"))
 	if err != nil || next.Kind != policy.KeySubscription {
@@ -916,9 +899,8 @@ func summaryOf(t *testing.T, projects []ProjectSummary, id string) ProjectSummar
 	return ProjectSummary{}
 }
 
-// A batch is one transaction. Text Postgres cannot store is cleaned, and an
-// event it refuses all the same loses only its own usage row: every other
-// event, and its own bills, are still written.
+// Text Postgres cannot store is cleaned, and an event it still refuses loses
+// only its own usage row: other events, and its bills, are written.
 func TestOneEventPostgresRefusesDoesNotLoseTheBatch(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -933,7 +915,7 @@ func TestOneEventPostgresRefusesDoesNotLoseTheBatch(t *testing.T) {
 		{TS: now, OrgID: f.orgID, Alias: "keera-code", Status: 200, Bills: bill},
 		// What a client put in its 'model' field.
 		{TS: now, OrgID: f.orgID, Alias: "a\x00b\xff", Error: "bad\x00", Status: 404},
-		// Refused by a check constraint, whatever its text.
+		// Refused by a check constraint.
 		{
 			TS: now, OrgID: f.orgID, Alias: "keera-code", Status: 200, Bills: bill,
 			FilterRuns: []FilterRun{{

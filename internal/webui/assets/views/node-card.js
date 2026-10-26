@@ -1,12 +1,11 @@
-// The cards a router's steps and a guardrail's blocks are drawn as, so the
-// two editors look and behave alike.
+// The cards for a router's steps and a guardrail's blocks, so the two editors
+// look and behave alike.
 
 import { h, icon, icons } from "../ui.js";
 
 /** nodeCard is one step or block. glyph is an icon's path, or an element
  *  such as a provider's mark. With onOpen the card opens on a click or Enter.
- *  It is a div acting as a button, so the buttons in its head can be real
- *  ones. */
+ *  It is a div acting as a button, so the buttons in its head can be real. */
 export function nodeCard({
   kind,
   glyph,
@@ -53,7 +52,7 @@ export function nodeCard({
   );
 }
 
-/** headButton is a button in a card's head. It does not open the card. */
+/** headButton does not open the card. */
 export function headButton(glyph, title, onClick, cls) {
   return h(
     "button",
@@ -71,13 +70,12 @@ export function headButton(glyph, title, onClick, cls) {
   );
 }
 
-/** removeButton is the head button that takes the step or block out. */
 export function removeButton(title, onClick) {
   return headButton(icon(icons.close), title, onClick, "pl-node-remove");
 }
 
-/** emptyCard is where a step or block can still be added. Without onClick
- *  it only shows that the place is empty. */
+/** emptyCard is where a step or block can be added. Without onClick it only
+ *  shows the place is empty. */
 export function emptyCard({ label, name, note, problem, title, onClick }) {
   return h(
     onClick ? "button" : "div",
@@ -99,7 +97,6 @@ export function emptyCard({ label, name, note, problem, title, onClick }) {
   );
 }
 
-/** addButton is the + on a line between steps. */
 export function addButton(title, onClick) {
   return h(
     "button",

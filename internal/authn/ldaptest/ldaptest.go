@@ -1,10 +1,8 @@
-// Package ldaptest is a directory that answers the LDAP requests Keera makes,
-// for tests of password sign-in and of asking the directory again. It runs in
-// memory, behind authn.NewLDAPWith, rather than on a socket.
+// Package ldaptest is an in-memory directory that answers the LDAP requests
+// Keera makes, behind authn.NewLDAPWith.
 //
-// A filter matches an entry when it names one of the entry's values exactly,
-// escaped as a filter needs. So a username that was not escaped matches
-// nothing, and the test sees it.
+// A filter matches only when it names an entry's value exactly, escaped as a
+// filter needs, so an unescaped username matches nothing.
 package ldaptest
 
 import (
@@ -27,14 +25,14 @@ const (
 )
 
 // Directory holds the people. Set its fields before the first request, and
-// through Change after.
+// use Change after.
 type Directory struct {
 	// AD makes it answer as Active Directory.
 	AD      bool
 	Entries []*ldap.Entry
 	// Passwords maps a DN to the password that binds as it.
 	Passwords map[string]string
-	// Down refuses every connection, like a directory that is unreachable.
+	// Down refuses every connection.
 	Down bool
 
 	mu      sync.Mutex

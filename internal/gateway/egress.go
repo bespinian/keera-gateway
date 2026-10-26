@@ -12,24 +12,22 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// The addresses the gateway will not connect to. Administrators set where
-// their models and MCP servers are. Without a guard, the gateway would reach
-// whatever its host can, such as the cloud's metadata service, which hands out
-// the host's credentials.
+// Administrators choose where their models and MCP servers are. Without a
+// guard, the gateway would reach anything its host can, such as the cloud
+// metadata service, which hands out the host's credentials.
 //
 // The check runs on the dialled address, after DNS, so a name that resolves
-// to a blocked address is blocked too. Through a proxy, the address dialled is
-// the proxy's, and the proxy has to do its own filtering.
+// to a blocked address is blocked too. Behind a proxy, the proxy must filter.
 
-// DefaultUpstreamDeny is loopback, link-local, where the clouds serve their
-// metadata, the unspecified address, AWS's IPv6 metadata address, Alibaba's
-// metadata address and Azure's WireServer. Private ranges are allowed: that is
-// where a self-hosted inference plane is. KEERA_UPSTREAM_PRIVATE narrows them.
+// DefaultUpstreamDeny is loopback, link-local, the unspecified address and the
+// cloud metadata addresses (AWS IPv6, Alibaba, Azure WireServer). Private
+// ranges are allowed, since self-hosted models live there;
+// KEERA_UPSTREAM_PRIVATE narrows them.
 const DefaultUpstreamDeny = "127.0.0.0/8,::1/128,169.254.0.0/16,fe80::/10,0.0.0.0/8,::/128," +
 	"fd00:ec2::254/128,100.100.100.200/32,168.63.129.16/32"
 
-// ParsePrefixes reads a comma-separated list of addresses and prefixes, as
-// KEERA_UPSTREAM_DENY and KEERA_TRUSTED_PROXIES take. "none" is no list.
+// ParsePrefixes reads a comma-separated list of addresses and prefixes, as in
+// KEERA_UPSTREAM_DENY and KEERA_TRUSTED_PROXIES. "none" is an empty list.
 func ParsePrefixes(s string) ([]netip.Prefix, error) {
 	if strings.EqualFold(strings.TrimSpace(s), "none") {
 		return nil, nil
@@ -57,9 +55,8 @@ func ParsePrefixes(s string) ([]netip.Prefix, error) {
 	return out, nil
 }
 
-// ParsePrivateHosts reads KEERA_UPSTREAM_PRIVATE: the host names inside the
-// network that organisations may reach. "all" lets them reach every private
-// address, and "none" none at all.
+// ParsePrivateHosts reads KEERA_UPSTREAM_PRIVATE: the private host names
+// organisations may reach, or "all" or "none".
 func ParsePrivateHosts(s string) (limit bool, hosts []string, err error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "all":
@@ -81,14 +78,13 @@ func ParsePrivateHosts(s string) (limit bool, hosts []string, err error) {
 	return true, hosts, nil
 }
 
-// privateDial dials the hosts named in hosts with open, which applies deny,
-// and every other host with policy.InsideNetwork denied too. That includes
-// loopback and link-local, which an operator may have taken off the deny list
-// for a backend on the same host.
+// privateDial dials the named hosts with open, which applies deny, and every
+// other host with policy.InsideNetwork denied too. That also covers loopback
+// and link-local, in case an operator removed them from deny for a local
+// backend.
 //
-// The name is checked before DNS, and the address after it. A name an
-// organisation controls cannot be one of these, so it cannot resolve into
-// the network.
+// The name is checked before DNS, so a name an organisation controls cannot
+// resolve into the network.
 func privateDial(open *net.Dialer, deny []netip.Prefix, hosts []string,
 ) func(context.Context, string, string) (net.Conn, error) {
 	why := "organisations may not reach addresses inside this network"
@@ -106,8 +102,7 @@ func privateDial(open *net.Dialer, deny []netip.Prefix, hosts []string,
 	}
 }
 
-// denyDial is a net.Dialer Control that refuses an address in deny, saying
-// why.
+// denyDial is a net.Dialer Control that refuses an address in deny.
 func denyDial(deny []netip.Prefix, why string) func(network, address string, _ syscall.RawConn) error {
 	if len(deny) == 0 {
 		return nil
@@ -117,8 +112,7 @@ func denyDial(deny []netip.Prefix, why string) func(network, address string, _ s
 		if err != nil {
 			return err
 		}
-		// A prefix never contains an address with a zone, or an IPv4 address
-		// written as IPv6, so both are taken off first.
+		// A prefix never matches a zoned or IPv4-mapped address, so strip both.
 		ip := ap.Addr().WithZone("").Unmap()
 		for _, p := range deny {
 			if p.Contains(ip) {

@@ -40,9 +40,9 @@ func (s *Server) writeHookList(w http.ResponseWriter, r *http.Request, data any,
 }
 
 // hookReport reads one filter's or router's own screen: its report over the
-// window and, under kind, the filter or router itself. A deleted one keeps its
-// traffic, so the report is served either way and kind is left out rather than
-// answering 404. It returns false once it has answered with an error.
+// window and, under kind, the thing itself. A deleted one keeps its traffic, so
+// the report is still served, without kind, rather than a 404. It returns false
+// once it has answered with an error.
 func hookReport[R, H any](s *Server, w http.ResponseWriter, r *http.Request, p *authn.Principal, kind string,
 	report func(ctx context.Context, orgID, alias string, from, to time.Time) (R, error),
 	hook func(ctx context.Context, orgID, alias string) (H, error),

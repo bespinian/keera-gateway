@@ -1,5 +1,5 @@
 // What a status meant, in the words of whoever has to act on it. Shared so
-// every screen that reads the event log calls the same thing by the same name.
+// every screen uses the same names.
 
 const STATUS = {
   400: ["Bad request", "The request could not be read."],
@@ -7,8 +7,8 @@ const STATUS = {
     "Budget spent",
     "A budget that covers the key is used up for this period.",
   ],
-  // Not only filters answer 403: a model a new organisation cannot use yet
-  // does too, and the row keeps only the message, not the code.
+  // Not only filters answer 403: so does a model a new organisation cannot
+  // use yet.
   403: [
     "Refused",
     "A filter refused the request, or the key may not use this model yet.",
@@ -37,9 +37,8 @@ export function statusMeaning(status) {
   return ["Interrupted", "The answer started but did not finish."];
 }
 
-/** statusLabel names a status with no row beside it, as a filter must. Unlike
- *  statusMeaning, which reads a log of only unhappy requests, it calls a 200 a
- *  success. */
+/** statusLabel names a status with no row beside it. Unlike statusMeaning,
+ *  it calls a 200 a success. */
 export function statusLabel(status) {
   return status < 400 ? "Success" : statusMeaning(status)[0];
 }
@@ -50,7 +49,7 @@ function statusTone(status) {
   return "";
 }
 
-/** outcomeOf is what happened to one row, as the request log groups them. */
+/** outcomeOf groups a row as the request log does. */
 export function outcomeOf(q) {
   if (q.status >= 500) return "failed";
   if (q.status >= 400) return "refused";
@@ -59,8 +58,7 @@ export function outcomeOf(q) {
 }
 
 /** outcomeMeaning returns [label, tone, why] for one row. It reads the row,
- *  not just the status: an answered request and one whose stream stopped
- *  halfway both carry 200. */
+ *  not just the status: a stream that stopped halfway still carries 200. */
 export function outcomeMeaning(q) {
   switch (outcomeOf(q)) {
     case "ok":
@@ -74,8 +72,8 @@ export function outcomeMeaning(q) {
   }
 }
 
-/** oneLine folds a message onto one table row. Backends answer with stack
- *  traces and echoed requests, and a forty-line cell makes a table unreadable. */
+/** oneLine folds a message onto one table row: backends answer with stack
+ *  traces, and a forty-line cell makes a table unreadable. */
 export function oneLine(text, max) {
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length > max ? flat.slice(0, max - 1) + "…" : flat;

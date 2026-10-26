@@ -1,8 +1,8 @@
 // Package forge mints the short-lived repository credentials sandboxes check
 // out with: a GitHub App installation token, or a GitLab project access token.
 //
-// Each needs a credential of the deployment's own, which never leaves the
-// gateway. What a sandbox gets is scoped to one repository and runs out.
+// The deployment's own forge credential never leaves the gateway. A sandbox
+// gets one scoped to one repository that expires.
 package forge
 
 import (
@@ -21,13 +21,13 @@ import (
 	"github.com/bespinian/keera-gateway/internal/sandbox"
 )
 
-// requestTimeout bounds one call to a forge, body included. Minting runs
-// while somebody waits for their sandbox.
+// requestTimeout bounds one call to a forge, body included: someone is
+// waiting for their sandbox.
 const requestTimeout = 20 * time.Second
 
-// httpClient follows no redirect. A redirect to another host would carry the
-// deployment's token there: Go drops Authorization on the way, but not
-// GitLab's Private-Token. The forge APIs do not redirect a call that is right.
+// httpClient follows no redirect, which could carry the deployment's token to
+// another host: Go drops Authorization, but not GitLab's Private-Token. A
+// correct call to a forge API is never redirected.
 var httpClient = &http.Client{
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
@@ -97,10 +97,9 @@ func badRepo(raw string) error {
 		"https or ssh address the forge shows for cloning", raw)
 }
 
-// repoOn reads a repository address and checks it is on the forge this
-// deployment mints for, at web. It returns the path on that forge: a forge
-// served under a path, such as https://example.ch/gitlab, has that path taken
-// off.
+// repoOn reads a repository address and checks it is on the forge at web. It
+// returns the path on that forge, without the forge's own base path, such as
+// /gitlab in https://example.ch/gitlab.
 func repoOn(raw string, web *url.URL) (repo, error) {
 	r, err := parseRepo(raw)
 	if err != nil {
@@ -117,8 +116,7 @@ func repoOn(raw string, web *url.URL) (repo, error) {
 }
 
 // target reads the repository a request is for, as a path on this forge, and
-// checks the caller's guardrail allows it. Both forges start here, so neither
-// can mint for a repository the guardrail has not allowed.
+// checks the caller's guardrail allows it. Both forges start here.
 func target(req sandbox.GitRequest, web *url.URL) (repo, error) {
 	r, err := repoOn(req.Repo, web)
 	if err != nil {
@@ -208,8 +206,8 @@ func (e *apiError) Error() string {
 	return fmt.Sprintf("the forge answered %d: %s", e.Status, e.Message)
 }
 
-// message is the readable part of an error body. GitHub puts it in "message";
-// GitLab in "message" or "error", sometimes as an object.
+// message is the readable part of an error body: "message" on GitHub;
+// "message" or "error", sometimes an object, on GitLab.
 func message(raw []byte) string {
 	var body struct {
 		Message any    `json:"message"`

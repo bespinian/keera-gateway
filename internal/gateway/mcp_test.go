@@ -20,7 +20,7 @@ import (
 )
 
 // fakeMCP is a stand-in MCP server with two tools. It answers over SSE when
-// sse is set, and records what it was sent.
+// sse is set.
 type fakeMCP struct {
 	mu      sync.Mutex
 	bodies  []string
@@ -28,7 +28,7 @@ type fakeMCP struct {
 	headers []http.Header
 	sse     bool
 	status  int
-	// result, when set, is the result of every request it answers.
+	// result, when set, answers every request.
 	result string
 }
 
@@ -96,7 +96,6 @@ func mcpHarness(t *testing.T, res *policy.Resolved) (*harness, *fakeMCP) {
 	return mcpHarnessFor(t, res, upstream.URL+"/mcp", Options{}), fake
 }
 
-// mcpHarnessFor is mcpHarness with the server at url and the gateway's options.
 func mcpHarnessFor(t *testing.T, res *policy.Resolved, url string, opts Options) *harness {
 	t.Helper()
 	if res == nil {
@@ -116,7 +115,7 @@ func mcpHarnessFor(t *testing.T, res *policy.Resolved, url string, opts Options)
 	return h
 }
 
-// rpc posts one JSON-RPC message to the github server through the gateway.
+// rpc posts one JSON-RPC message to the github server.
 func (h *harness) rpc(t *testing.T, body string, header ...string) (*http.Response, string) {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodPost, h.url("/mcp/github"), strings.NewReader(body))
@@ -135,13 +134,11 @@ func (h *harness) rpc(t *testing.T, body string, header ...string) (*http.Respon
 	return resp, string(raw)
 }
 
-// allowing is a key allowed exactly these tool entries.
 func allowing(entries ...string) *policy.Resolved {
 	return policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
 		&policy.Limits{AllowedTools: entries}, nil, nil)
 }
 
-// lastToolCall is the most recent tool-call row.
 func lastToolCall(t *testing.T, h *harness) store.Event {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -269,9 +266,8 @@ func TestMCPCallToAToolTheKeyMayNotCallIsNotForwarded(t *testing.T) {
 }
 
 func TestMCPCallIsCheckedAsTheServerWillReadIt(t *testing.T) {
-	// A repeated key is read as its last value here. A server that took the
-	// first would run a tool nobody checked, so what it is sent is the call
-	// as the gateway read it.
+	// A server that took the first of two repeated keys would run an
+	// unchecked tool, so it gets the call as the gateway read it.
 	h, fake := mcpHarness(t, allowing("github/search_code"))
 
 	h.rpc(t, `{"jsonrpc":"2.0","id":5,"method":"tools/call",`+
@@ -283,8 +279,8 @@ func TestMCPCallIsCheckedAsTheServerWillReadIt(t *testing.T) {
 }
 
 func TestMCPCallWithAKeySpelledInOtherCaseIsNotForwarded(t *testing.T) {
-	// A server that decodes with encoding/json reads "Name" as name, and the
-	// last of the two wins: it would run a tool nobody checked.
+	// encoding/json reads "Name" as name, so a server could run an unchecked
+	// tool.
 	h, fake := mcpHarness(t, allowing("github/search_code"))
 
 	_, body := h.rpc(t, `{"jsonrpc":"2.0","id":6,"method":"tools/call",`+
@@ -340,8 +336,7 @@ func TestAServerRefusingTheGatewaysCredentialIsNotTheClientsFault(t *testing.T) 
 	fake.status = http.StatusUnauthorized
 
 	resp, _ := h.rpc(t, `{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"search_code"}}`)
-	// A 401 would read as a bad Keera key, and send the client off to sign in
-	// to the server itself.
+	// A 401 would read as a bad Keera key.
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Errorf("status = %d, want 502", resp.StatusCode)
 	}
@@ -369,8 +364,7 @@ func TestAServerTheKeyMayNotUseDoesNotExist(t *testing.T) {
 }
 
 func TestAToolCallWithoutAnIDIsNotForwarded(t *testing.T) {
-	// Sent as a notification, a call would get no answer to trim or record,
-	// and a lenient server would run it unchecked.
+	// A call sent as a notification would get no answer to record.
 	h, fake := mcpHarness(t, allowing("github/search_code"))
 	for _, body := range []string{
 		`{"jsonrpc":"2.0","method":"tools/call","params":{"name":"create_issue"}}`,
@@ -387,8 +381,7 @@ func TestAToolCallWithoutAnIDIsNotForwarded(t *testing.T) {
 }
 
 func TestAResumedStreamStillHidesToolsTheKeyMayNotCall(t *testing.T) {
-	// An answer can arrive on a stream the client resumed, where the request
-	// it answers was made on another connection.
+	// On a resumed stream, the request was made on another connection.
 	h, _ := mcpHarness(t, allowing("github/search_code"))
 	x := &mcpExchange{
 		s: h.srv, res: h.src.resolved[testKey],
@@ -429,8 +422,7 @@ func TestMCPHeadersOfTheNewVersionReachTheServer(t *testing.T) {
 }
 
 func TestMCPHeadersThatDisagreeWithTheBodyAreRefused(t *testing.T) {
-	// A load balancer behind the gateway may route on the header while the
-	// server runs what the body says.
+	// A load balancer may route on the header while the server runs the body.
 	h, fake := mcpHarness(t, allowing("github/search_code"))
 	call := `{"jsonrpc":"2.0","id":11,"method":"tools/call",` +
 		`"params":{"name":"create_issue","arguments":{}}}`
@@ -513,8 +505,7 @@ func TestAToolAskingForInputIsNotRecordedAsAnswered(t *testing.T) {
 }
 
 func TestAToolListThroughTheGatewayIsNotPublic(t *testing.T) {
-	// The list depends on the key, so a shared cache must not serve it to
-	// another.
+	// The list depends on the key, so a shared cache must not serve it.
 	h, fake := mcpHarness(t, nil)
 	fake.result = `{"tools":[{"name":"search_code"}],"ttlMs":60000,"cacheScope":"public"}`
 
@@ -565,8 +556,8 @@ func TestABudgetStopsAToolCallOnlyWhenFiltersRun(t *testing.T) {
 	}
 }
 
-// A tool call's filters on the deployment's key hold credit as a request's do,
-// until the call is recorded, so calls made together cannot all spend it.
+// A tool call's filters on the deployment's key hold credit until the call is
+// recorded, so parallel calls cannot all spend it.
 func TestAToolCallsFiltersOnTheDeploymentsKeyHoldCredit(t *testing.T) {
 	res := allowing("github")
 	res.Filters = []string{"redact"}

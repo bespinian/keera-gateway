@@ -7,9 +7,9 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// PlatformKey is the deployment's own account at a provider, from the
-// environment. Every organisation's models of that provider use it, and are
-// billed for it at list price. See docs/billing.md.
+// PlatformKey is the deployment's own account at a provider. Every
+// organisation's models of that provider use it, billed at list price. See
+// docs/billing.md.
 type PlatformKey struct {
 	APIKey string
 	// ProductID completes the endpoint of a provider that needs one, such as
@@ -31,10 +31,9 @@ func (p Platform) Covers(m policy.Model) bool {
 	return p.Has(m.Provider) && !m.Subscription
 }
 
-// Lock sets what a model on the deployment's key may not choose for itself:
-// the provider's own endpoint, so the key goes nowhere else, and its list
-// prices, which the organisation is billed at. It does nothing to a model the
-// key does not cover.
+// Lock fixes what a model on the deployment's key may not choose: the
+// provider's own endpoint, so the key goes nowhere else, and its list prices.
+// It does nothing to a model the key does not cover.
 func (p Platform) Lock(m *policy.Model) error {
 	if !p.Covers(*m) {
 		return nil

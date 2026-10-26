@@ -73,8 +73,7 @@ func TestARegistrationIsRefused(t *testing.T) {
 		{"for another challenge", func(a *passkeytest.Authenticator, r *authn.Registration) {
 			*r = a.Register("another")
 		}, "challenge"},
-		// A phishing site cannot relay a ceremony: the browser writes its own
-		// origin into the client data.
+		// The browser writes its own origin into the client data.
 		{"from another origin", func(a *passkeytest.Authenticator, r *authn.Registration) {
 			a.Origin = "https://keera-example.ch"
 			*r = a.Register("c")

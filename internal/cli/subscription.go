@@ -25,12 +25,9 @@ import (
 // Claude Code signed in to a Claude plan, for `keera connect claude-code
 // --subscription`. See docs/subscriptions.md.
 
-// errSubscriptionsOff is what --subscription says on a deployment that does
-// not take Claude subscriptions.
 var errSubscriptionsOff = errors.New("this deployment does not take Claude subscriptions; " +
 	"run 'keera connect claude-code' without --subscription to use a Keera key instead")
 
-// saidKey says what was done to get this machine its key.
 func saidKey(key createdKey, replaced *store.KeySummary) {
 	switch {
 	case replaced != nil && replaced.Pending:
@@ -46,8 +43,8 @@ func saidKey(key createdKey, replaced *store.KeySummary) {
 	}
 }
 
-// subscriptionEnv picks the subscription models Claude Code is pointed at,
-// and returns them as settings, with the main one's alias.
+// subscriptionEnv returns settings for the subscription models, with the main
+// one's alias.
 func subscriptionEnv(models []policy.Model, named string) (map[string]string, string, error) {
 	subs := subscriptionModels(models)
 	if len(subs) == 0 {
@@ -61,16 +58,14 @@ func subscriptionEnv(models []policy.Model, named string) (map[string]string, st
 			"has: %s", named, strings.Join(aliasesOf(subs), ", "))
 	}
 	// Claude Code turns tool search off for any address that is not
-	// Anthropic's, and then sends every tool of every MCP server with each
-	// request. The gateway forwards a subscription request as it is, so tool
-	// search works through it.
+	// Anthropic's. The gateway forwards a subscription request unchanged, so
+	// tool search works through it.
 	env["ENABLE_TOOL_SEARCH"] = "true"
 	return env, alias, nil
 }
 
-// claudeModelEnv points Claude Code at models: the one named, or else the
-// first, and returns them as settings with the main one's alias. It reports
-// false when no model is named so. See connect.ClaudeEnv.
+// claudeModelEnv points Claude Code at the model named, or else the first. It
+// reports false when no model has that name. See connect.ClaudeEnv.
 func claudeModelEnv(models []policy.Model, named string) (map[string]string, string, bool) {
 	main := models[0]
 	if named != "" {
@@ -84,7 +79,6 @@ func claudeModelEnv(models []policy.Model, named string) (map[string]string, str
 		main.Alias, true
 }
 
-// subscriptionModels is the models a subscription key can reach.
 func subscriptionModels(models []policy.Model) []policy.Model {
 	var subs []policy.Model
 	for _, m := range models {
@@ -95,8 +89,7 @@ func subscriptionModels(models []policy.Model) []policy.Model {
 	return subs
 }
 
-// setModelOverrides writes the overrides into the 'modelOverrides' setting,
-// keeping the entries for other models.
+// setModelOverrides keeps the entries for other models.
 func setModelOverrides(settings map[string]any, overrides map[string]string) {
 	block, _ := settings["modelOverrides"].(map[string]any)
 	if block == nil {
@@ -110,22 +103,17 @@ func setModelOverrides(settings map[string]any, overrides map[string]string) {
 	}
 }
 
-// keyStep is how this machine gets its key: the key it replaces or activates,
-// if any, and the call that does it. It is planned before it is taken, because
-// replacing a key revokes the old one at once.
+// keyStep is planned before it is taken, because replacing a key revokes the
+// old one at once.
 type keyStep struct {
 	replaces *store.KeySummary
 	issue    func(ctx context.Context, c *client) (createdKey, error)
 }
 
-// planMachineKey decides how this machine gets its Claude Code key of the
-// given kind, without doing it yet.
-//
-// In order: this machine's own key is rotated; a pending key of the caller's
-// is activated and named after the machine; a member takes over a
-// subscription key an administrator issued them that no machine holds yet;
-// an administrator gets a new key. Only an administrator issues keys, so a
-// member with none of these is sent to one.
+// planMachineKey tries, in order: rotate this machine's key; activate a
+// pending key of the caller's; take over a subscription key issued to a member
+// that no machine holds yet; issue a new key as an administrator. A member
+// with none of these is sent to an administrator.
 func planMachineKey(ctx context.Context, c *client, orgID string, me identity, project string,
 	kind policy.KeyKind,
 ) (keyStep, error) {
@@ -172,8 +160,7 @@ func planMachineKey(ctx context.Context, c *client, orgID string, me identity, p
 		inOther := project != "" && inProject != k.ProjectID
 		switch {
 		case k.Name == name && inOther:
-			// A rotation keeps the key's project, so a different --project would be
-			// ignored without a word.
+			// A rotation keeps the project, so --project would be silently ignored.
 			return keyStep{}, fmt.Errorf("this machine already has the key %s, in "+
 				"another project, and replacing it keeps that project; to move it, revoke it "+
 				"first with: keera key revoke %s, then run this again", k.ID, k.ID)
@@ -213,25 +200,21 @@ func planMachineKey(ctx context.Context, c *client, orgID string, me identity, p
 	}}, nil
 }
 
-// machineKeyName is the name of a machine's Claude Code key, with or without
-// a subscription. The id tells apart machines that share a hostname, such as
-// copies of one VM image, so one never replaces another's key.
+// machineKeyName includes the id to tell apart machines that share a
+// hostname, such as copies of one VM image.
 func machineKeyName(host, machine string) string {
 	return "claude-code on " + host + " (" + machine + ")"
 }
 
-// machineKeyNameRE matches what machineKeyName makes.
 var machineKeyNameRE = regexp.MustCompile(`^claude-code on .+ \([0-9a-f]{8}\)$`)
 
-// isMachineKeyName reports whether a key is some machine's already, so taking
-// it over would break that machine.
+// isMachineKeyName reports whether a key already belongs to a machine, which
+// taking it over would break.
 func isMachineKeyName(name string) bool {
 	return machineKeyNameRE.MatchString(name)
 }
 
-// machineID names this machine for its Claude Code key. It is random, made
-// on first use, and kept next to the sign-in in keera's configuration
-// directory.
+// machineID is random, made on first use, and kept next to the sign-in.
 func machineID() (string, error) {
 	creds, err := credentialsPath()
 	if err != nil {
@@ -257,8 +240,7 @@ func machineID() (string, error) {
 	return id, nil
 }
 
-// claudeConfigDir is Claude Code's configuration directory. CLAUDE_CONFIG_DIR
-// moves it, as it does for Claude Code itself.
+// claudeConfigDir honours CLAUDE_CONFIG_DIR, as Claude Code does.
 func claudeConfigDir() (string, error) {
 	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
 		return dir, nil
@@ -270,7 +252,6 @@ func claudeConfigDir() (string, error) {
 	return filepath.Join(home, ".claude"), nil
 }
 
-// managedSettingsDir is where Claude Code reads managed settings files from.
 func managedSettingsDir() string {
 	switch runtime.GOOS {
 	case "darwin":
@@ -282,11 +263,10 @@ func managedSettingsDir() string {
 	}
 }
 
-// managedBaseURL is the address Claude Code's managed settings send it to, or
-// "" when they set none. serverCache is Claude Code's copy of the settings
-// from the claude.ai admin console, which win. Then come the files in
-// systemDir, where a later drop-in wins over an earlier one. Settings from MDM
-// profiles and the Windows registry are not read.
+// managedBaseURL is the address Claude Code's managed settings set, or "".
+// serverCache, the copy from the claude.ai admin console, wins; then the files
+// in systemDir, a later drop-in over an earlier one. MDM profiles and the
+// Windows registry are not read.
 func managedBaseURL(serverCache, systemDir string) string {
 	if u := settingsBaseURL(serverCache); u != "" {
 		return u
@@ -306,7 +286,6 @@ func managedBaseURL(serverCache, systemDir string) string {
 }
 
 // settingsBaseURL reads ANTHROPIC_BASE_URL from a settings file's 'env' block.
-// A file that is missing or cannot be read sets nothing.
 func settingsBaseURL(path string) string {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -322,7 +301,7 @@ func settingsBaseURL(path string) string {
 	return strings.TrimSpace(u)
 }
 
-// readSettings reads a settings file, or an empty one when there is none yet.
+// readSettings returns an empty map when there is no file yet.
 func readSettings(path string) (map[string]any, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -349,11 +328,10 @@ func readSettings(path string) (map[string]any, error) {
 	return settings, nil
 }
 
-// setClaudeEnv writes the gateway's settings into the 'env' block, and says
-// what else in the file would stop them working. An empty value removes the
-// setting. A subscription key goes in ANTHROPIC_CUSTOM_HEADERS, next to the
-// headers there. Without one, an earlier one is taken out, because the gateway
-// reads that header first.
+// setClaudeEnv writes the 'env' block and warns about what else in the file
+// would stop it working. An empty value removes a setting. A subscription key
+// goes in ANTHROPIC_CUSTOM_HEADERS; without one, an earlier one is removed,
+// because the gateway reads that header first.
 func setClaudeEnv(settings map[string]any, env map[string]string, subscriptionKey string) []string {
 	block, _ := settings["env"].(map[string]any)
 	if block == nil {

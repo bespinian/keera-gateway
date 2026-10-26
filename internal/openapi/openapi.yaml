@@ -2470,6 +2470,14 @@ paths:
                     $ref: "#/components/schemas/RouterReport"
                   router:
                     $ref: "#/components/schemas/Router"
+                  limits:
+                    type: array
+                    description: |
+                      How much of each budget and each rate limit per day or
+                      month is used now, in the order of the steps. Left out with
+                      `router`.
+                    items:
+                      $ref: "#/components/schemas/RouterLimit"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -8205,6 +8213,20 @@ components:
           properties:
             alias: { type: string }
         - $ref: "#/components/schemas/UsageCell"
+    RouterLimit:
+      type: object
+      description: |
+        One limit step of a router and what it used in its open window,
+        whatever window the report covers. A step has `budget` or `rate`.
+      required: [step]
+      properties:
+        step:
+          type: string
+          description: The step's id.
+        budget:
+          $ref: "#/components/schemas/AccessBudget"
+        rate:
+          $ref: "#/components/schemas/AccessRate"
     RouterReport:
       type: object
       description: One router's own screen.

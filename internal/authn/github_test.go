@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-// fakeGitHub answers as github.com and api.github.com both do, on one server.
+// fakeGitHub answers as github.com and api.github.com, on one server.
 type fakeGitHub struct {
 	*httptest.Server
 	user     map[string]any
@@ -89,8 +89,7 @@ func (f *fakeGitHub) connect(cfg OIDCConfig) *OIDC {
 }
 
 func TestGitHubNeedsNoDiscovery(t *testing.T) {
-	// github.com publishes no discovery document, so asking for one would
-	// stop the start.
+	// github.com publishes no discovery document.
 	o, err := NewOIDC(context.Background(), OIDCConfig{
 		Name: "github", IssuerURL: "https://github.com/", ClientID: "keera",
 		ClientSecret: "secret", RedirectURL: "https://keera.example.ch/control/auth/callback",

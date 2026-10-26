@@ -10,16 +10,11 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// A size step places a request by how long it is. How much model a request
-// needs usually follows its length: a variable rename is a paragraph, a
-// migration plan is a conversation plus files.
-//
-// It costs nothing, answers the same way every time (so its check shows what
-// production does), and a prompt cannot talk it into the large model.
-//
-// It cannot tell a hard request from an easy one of the same length, and it
-// does not read the text. Keeping client data inside the cluster is a job for
-// an instruction step or a filter.
+// A size step places a request by its length, since how much model a request
+// needs usually follows it. It costs nothing, always answers the same, and a
+// prompt cannot talk it into the large model. It cannot tell hard from easy
+// at the same length and does not read the text, so keeping data in the
+// cluster is a job for an instruction step or a filter.
 
 // sizeTier is how well one destination suits a request, best first.
 type sizeTier int
@@ -27,23 +22,19 @@ type sizeTier int
 const (
 	// sizeFits is a destination meant for this size that can hold it.
 	sizeFits sizeTier = iota
-	// sizeOverCeiling can hold the request but was meant for smaller ones. It
-	// is used when everything meant for this size is down.
+	// sizeOverCeiling can hold the request but is meant for smaller ones. It
+	// is used when the right size is down.
 	sizeOverCeiling
-	// sizeTooLarge cannot hold the request in its context, so it is ranked
-	// last whatever the ceilings say.
+	// sizeTooLarge cannot fit the request in its context, so it is last.
 	sizeTooLarge
 )
 
-// sized places a request by how much text is in it.
-//
-// The chain is every serveable destination in preference order, not just the
-// winner: if the preferred one is down, the larger model behind it is better
-// than a refusal. Nothing is generated or spent.
+// sized places a request by how much text is in it. The chain is every
+// serveable destination in preference order, so a larger model can answer
+// when the preferred one is down.
 func (s *Server) sized(rt policy.Route, b *body, kind policy.Kind) (routeDecision, *refusal) {
 	d := routeDecision{outcome: store.RouterChose}
 
-	// The same extraction the filters and instruction steps use.
 	doc, err := extractText(b, kind)
 	if err != nil {
 		return d, unreadableBody(stepSubject(rt)+" chooses the model by how much text is "+
@@ -91,9 +82,8 @@ func (s *Server) sized(rt policy.Route, b *body, kind policy.Kind) (routeDecisio
 	return d, nil
 }
 
-// byCeiling puts the smallest ceiling (the cheaper model) first. No ceiling
-// sorts after every bounded one: it takes what nothing else would. A stable
-// sort leaves a tie in the written order.
+// byCeiling puts the smallest ceiling (the cheaper model) first, and no
+// ceiling last. A stable sort keeps ties in the written order.
 func byCeiling(a, b int) int {
 	if a == 0 {
 		a = math.MaxInt
@@ -104,23 +94,21 @@ func byCeiling(a, b int) int {
 	return cmp.Compare(a, b)
 }
 
-// sizeBand is one destination's share of the size range, for the check. A size
-// step depends on one number, so the bands describe it completely.
+// sizeBand is one destination's share of the size range, for the check. The
+// bands describe a size step completely.
 type sizeBand struct {
 	alias string
 	// from and to are the request sizes, in estimated tokens, this destination
 	// is first choice for. A to of zero is unbounded.
 	from, to int
-	// dead says this destination is never first choice, because its ceiling
-	// is no larger than the one before it.
+	// dead says this destination is never first choice: its ceiling is no
+	// larger than the one before.
 	dead bool
 }
 
-// sizeBands works out which sizes each destination is first choice for.
-//
-// The order is the one sized uses when every destination is up and can hold the
-// request: smallest ceiling first, unbounded last, the written order breaking a
-// tie. Each then takes everything above the previous one's ceiling.
+// sizeBands works out which sizes each destination is first choice for, in
+// sized's order when all are up: smallest ceiling first, unbounded last. Each
+// takes everything above the previous one's ceiling.
 func sizeBands(rt policy.Route, aliases []string) []sizeBand {
 	type entry struct {
 		alias   string
@@ -137,8 +125,8 @@ func sizeBands(rt policy.Route, aliases []string) []sizeBand {
 	floor := 0
 	for _, e := range order {
 		band := sizeBand{alias: e.alias, from: floor, to: e.ceiling}
-		// A ceiling at or below the floor is never first choice, but it still
-		// takes traffic when the ones before are down, so it is kept.
+		// Never first choice, but kept: it takes traffic when earlier ones
+		// are down.
 		if e.ceiling > 0 && e.ceiling <= floor {
 			band.dead = true
 		} else if e.ceiling > 0 {
@@ -149,8 +137,7 @@ func sizeBands(rt policy.Route, aliases []string) []sizeBand {
 	return out
 }
 
-// describeBand says what sizes a destination is first choice for, in the words
-// somebody reads on a check.
+// describeBand says in words what sizes a destination is first choice for.
 func describeBand(b sizeBand) string {
 	switch {
 	case b.dead:
@@ -167,9 +154,8 @@ func describeBand(b sizeBand) string {
 	}
 }
 
-// sizeWarnings says what is wrong with a size step's configuration but not
-// wrong enough to refuse when it is written. The most important: a route step
-// that sends everything to one destination is just an alias.
+// sizeWarnings lists problems in a size step's configuration that are not
+// worth refusing it for, such as sending everything to one destination.
 func sizeWarnings(rt policy.Route, bands []sizeBand, models map[string]policy.Model) []string {
 	var warnings []string
 	live := 0
@@ -182,8 +168,7 @@ func sizeWarnings(rt policy.Route, bands []sizeBand, models map[string]policy.Mo
 		} else {
 			live++
 		}
-		// A ceiling above the model's context. Nothing breaks, but the number
-		// set is not the one in effect.
+		// A ceiling above the model's context has no effect.
 		m, ok := models[b.alias]
 		if ceiling, bounded := rt.Ceiling(b.alias); ok && bounded &&
 			m.MaxContext > 0 && ceiling > m.MaxContext {

@@ -114,8 +114,7 @@ func TestOperationsAreWellFormed(t *testing.T) {
 	}
 }
 
-// The JSON is walked out of the YAML by hand, to keep its key order, so it is
-// checked against what a decoder makes of the YAML.
+// The JSON is built from the YAML by hand, so check it against a decoder.
 func TestJSONSaysWhatTheYAMLSays(t *testing.T) {
 	get := func(h http.Handler) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()

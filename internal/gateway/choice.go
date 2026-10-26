@@ -6,36 +6,29 @@ import (
 	"strings"
 )
 
-// Route steps and gates ask a model to choose: a route step picks one
-// destination, a gate answers ALLOW or REFUSED. Rather than parse the written
-// answer, which models fence, explain or misspell, this reads the distribution
-// over the first token and weighs only the tokens that are answers. The
-// winner's share says how sure the model was.
+// Route steps pick a destination and gates answer ALLOW or REFUSED. Instead of
+// parsing the written answer, which models fence, explain or misspell, this
+// weighs the answer tokens in the first token's distribution. The winner's
+// share says how sure the model was.
 //
-// This needs logprobs, which vLLM and llama.cpp return and most hosted
-// providers do not, so the written answer is still read where there are none.
-// See decide, runFilter and parseGateReply.
+// This needs logprobs, which vLLM and llama.cpp return but most hosted
+// providers do not. Without them the written answer is read instead.
 
 const (
-	// choiceLetters are the letters destinations are offered under. A letter
-	// is one token in any vocabulary, while two aliases starting with 'keera-'
-	// share their first token and could not be told apart.
+	// choiceLetters label the destinations. A letter is one token in any
+	// vocabulary, while aliases like 'keera-a' and 'keera-b' share their first
+	// token.
 	choiceLetters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	// topLogprobs is how much of the first token's distribution to ask
-	// for, leaving room for a model that puts something before the letter.
-	// 20 is vLLM's default maximum, and asking for more is an error.
+	// topLogprobs is vLLM's default maximum; asking for more is an error.
 	topLogprobs = 20
 )
 
-// labelled reports whether these destinations can be offered under letters. A
-// router with more destinations than letters is asked for a name instead;
-// nobody has one that large.
+// labelled reports whether these destinations fit under letters. Otherwise
+// the model is asked for a name.
 func labelled(offered []string) bool {
 	return len(offered) > 0 && len(offered) <= len(choiceLetters)
 }
 
-// logprobsEnvelope is the part of a completion this file reads: the
-// distribution over the first token the model would have written.
 type logprobsEnvelope struct {
 	Choices []struct {
 		Logprobs struct {
@@ -51,8 +44,8 @@ type logprobsEnvelope struct {
 	} `json:"choices"`
 }
 
-// firstToken reads the distribution over a completion's first token, as token
-// to log-probability. It reports false when the backend served none.
+// firstToken maps each candidate first token to its log-probability. It
+// reports false when the backend sent none.
 func firstToken(raw []byte) (map[string]float64, bool) {
 	var envelope logprobsEnvelope
 	if err := json.Unmarshal(raw, &envelope); err != nil {
@@ -63,8 +56,8 @@ func firstToken(raw []byte) (map[string]float64, bool) {
 	}
 	first := envelope.Choices[0].Logprobs.Content[0]
 
-	// Servers differ on whether the sampled token is repeated in its own
-	// top_logprobs, so it is added here and duplicates are collapsed.
+	// Servers differ on whether top_logprobs repeats the sampled token, so it
+	// is added here and duplicates are collapsed.
 	seen := make(map[string]float64, len(first.TopLogprobs)+1)
 	keep := func(token string, logprob float64) {
 		if was, ok := seen[token]; !ok || logprob > was {
@@ -78,15 +71,10 @@ func firstToken(raw []byte) (map[string]float64, bool) {
 	return seen, true
 }
 
-// pick weighs the tokens that mean one of n answers against each other, and
-// returns the answer with the most probability and its share.
-//
-// classify maps a token to its answer, or -1 for tokens that are none of
-// them. Those take no part: what else the model might have written says
-// nothing about this question.
+// pick returns the most likely of n answers and its share of the probability
+// among answer tokens. classify maps a token to its answer, or -1 to ignore it.
 func pick(seen map[string]float64, n int, classify func(string) int) (int, float64, bool) {
-	// Log-sum-exp, so very negative logprobs still normalise instead of
-	// becoming zero over zero.
+	// Subtract the highest logprob, so very negative ones don't become 0/0.
 	high := math.Inf(-1)
 	for token, logprob := range seen {
 		if classify(token) >= 0 && logprob > high {
@@ -108,8 +96,7 @@ func pick(seen map[string]float64, n int, classify func(string) int) (int, float
 		total += w
 	}
 
-	// The lowest index wins a tie, so the same input always decides the same
-	// way.
+	// The lowest index wins a tie, so the result is stable.
 	best := 0
 	for i, w := range weights {
 		if w > weights[best] {
@@ -122,10 +109,9 @@ func pick(seen map[string]float64, n int, classify func(string) int) (int, float
 	return best, weights[best] / total, true
 }
 
-// readChoice picks one of n destinations out of a completion's first token,
-// and reports what share of the probability among the letters it took. Only
-// letters count, so a model that opens with '<think>' still chooses. It
-// reports false when there is no distribution, or no letter in it.
+// readChoice picks one of n destinations from the first token, with its share
+// among the letters. Only letters count, so a model that opens with '<think>'
+// still chooses.
 func readChoice(raw []byte, n int) (index int, share float64, ok bool) {
 	seen, got := firstToken(raw)
 	if !got {
@@ -139,9 +125,8 @@ const (
 	verdictRefuse
 )
 
-// readVerdict reads a gate's verdict out of its first token, and reports the
-// share of probability it took against the other verdict. ALLOW and REFUSED
-// start with different letters, so no special protocol is needed.
+// readVerdict reads a gate's verdict from the first token, with its share
+// against the other verdict. ALLOW and REFUSED start with different letters.
 func readVerdict(raw []byte) (allow bool, share float64, ok bool) {
 	seen, got := firstToken(raw)
 	if !got {
@@ -151,12 +136,9 @@ func readVerdict(raw []byte) (allow bool, share float64, ok bool) {
 	return i == verdictAllow, share, ok
 }
 
-// verdictIndex reads a token as the start of one of a gate's two answers, and
-// returns -1 if it is neither.
-//
-// A tokeniser may return a prefix of the word ('A', 'AL') or more than it
-// ('ALLOWED'), so either one starting the other counts. 'Absolutely' does
-// not: a guardrail must not decide by spelling.
+// verdictIndex maps a token to a gate answer, or -1. A token may be a prefix
+// ('AL') or longer ('ALLOWED'), so either one starting the other counts.
+// 'Absolutely' does not.
 func verdictIndex(token string) int {
 	t := strings.ToUpper(strings.TrimSpace(token))
 	if t == "" {
@@ -171,16 +153,12 @@ func verdictIndex(token string) int {
 	return -1
 }
 
-// begins reports whether either of these words starts the other.
 func begins(a, b string) bool {
 	return strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
 }
 
-// labelIndex reads a token as one of the first n letters, and returns -1 if it
-// is not one of them.
-//
-// A leading space and lower case are fine. Anything longer than one letter is
-// not: 'Absolutely' is prose, not a vote for A.
+// labelIndex maps a token to one of the first n letters, or -1. Spaces and
+// lower case are fine, but 'Absolutely' is not a vote for A.
 func labelIndex(token string, n int) int {
 	t := strings.TrimSpace(token)
 	if len(t) != 1 {

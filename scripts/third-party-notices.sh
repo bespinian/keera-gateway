@@ -1,10 +1,9 @@
 #!/bin/sh
 # Writes the licences of everything compiled into the Keera binaries to stdout.
 #
-# MIT, BSD and Apache-2.0 require their notice to ship with a binary, and a
-# FROM scratch image or a release archive has no other place for it. The list
+# MIT, BSD and Apache-2.0 require their notice to ship with a binary. The list
 # comes from the build graph, not go.mod, so test-only modules are left out and
-# a new dependency cannot be forgotten.
+# no new dependency is forgotten.
 #
 # Run from the repository root, after `go mod vendor`.
 set -eu
@@ -20,9 +19,9 @@ The Keera binaries include the software below. Each part keeps its own licence,
 which is reproduced here. The Keera Community Licence does not cover it.
 EOF
 
-# The Go standard library and runtime are linked into every Go binary. Some
-# toolchains, Nix's among them, do not install Go's LICENSE. The golang.org/x
-# modules carry the same text, byte for byte.
+# The Go standard library is linked into every binary. Some toolchains, such
+# as Nix's, do not install Go's LICENSE, but the golang.org/x modules carry the
+# same text.
 golicence=
 for f in "$($GO env GOROOT)/LICENSE" vendor/golang.org/x/*/LICENSE; do
   if [ -f "$f" ]; then golicence=$f; break; fi
@@ -46,8 +45,7 @@ $GO list -mod=vendor -deps \
     done
   done
 
-# The control panel embeds this font. It is not a Go module, so the build graph
-# above does not see it.
+# The control panel embeds this font, which is not a Go module.
 printf '\n%s\nSpace Grotesk, the control panel'\''s display font\n\n' "$rule"
 cat internal/webui/fonts/OFL.txt
 

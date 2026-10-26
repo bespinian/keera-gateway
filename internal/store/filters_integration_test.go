@@ -25,8 +25,8 @@ func TestFilterRoundTripAndTheGuardrailsThatNameOne(t *testing.T) {
 	if saved.CreatedAt.IsZero() || saved.UpdatedAt.IsZero() {
 		t.Error("the write did not return its timestamps")
 	}
-	// A filter written without a mode is a rewrite filter, as every filter was
-	// before gates existed. Read back as a gate, it would only ever say no.
+	// A filter written without a mode is a rewrite filter, as before gates
+	// existed.
 	if saved.Mode != policy.FilterModeRewrite {
 		t.Errorf("mode = %q, want %q", saved.Mode, policy.FilterModeRewrite)
 	}
@@ -75,8 +75,8 @@ func TestFilterRoundTripAndTheGuardrailsThatNameOne(t *testing.T) {
 		t.Fatalf("FilterUsers = %+v, %v, want none", users, err)
 	}
 
-	// A guardrail on the project, and one in the other organisation that happens
-	// to use the same alias.
+	// A guardrail on the project, and one in the other organisation with the
+	// same alias.
 	if err := st.PutGuardrail(ctx, policy.ScopeProject, f.projectID,
 		policy.Limits{Filters: []string{redact.Alias}}); err != nil {
 		t.Fatalf("PutGuardrail: %v", err)
@@ -98,7 +98,7 @@ func TestFilterRoundTripAndTheGuardrailsThatNameOne(t *testing.T) {
 			users[0])
 	}
 
-	// The key inherits the project's filter through the one join the gateway makes.
+	// The key inherits the project's filter.
 	resolved, err := st.LookupKey(ctx, f.hash)
 	if err != nil {
 		t.Fatalf("LookupKey: %v", err)
@@ -130,8 +130,7 @@ func TestDeletingAnOrgTakesItsFiltersWithIt(t *testing.T) {
 	if _, err := st.DeleteOrg(ctx, f.orgID); err != nil {
 		t.Fatalf("DeleteOrg: %v", err)
 	}
-	// A filter is one organisation's wording about its own data. Unlike the
-	// usage log, there is nobody left who could have a use for it.
+	// Unlike the usage log, filters go with their organisation.
 	if all, err := st.LoadFilters(ctx); err != nil || len(all) != 0 {
 		t.Fatalf("LoadFilters = %+v, %v, want none left", all, err)
 	}
@@ -166,7 +165,7 @@ func filterTraffic(t *testing.T, st *Store, ctx context.Context, f fixture,
 		event(0, f.projectID, 200, 1800, run(FilterPass, 100, 300, 0)),
 		event(time.Minute, f.projectID, 200, 1800, run(FilterRewrite, 200, 300, 2)),
 		event(2*time.Minute, f.projectID, 200, 1800, run(FilterRewrite, 300, 300, 1)),
-		// The refusals, all in one project, which the breakdown is for.
+		// The refusals, all in one project.
 		event(3*time.Minute, "project_2", 403, 300, run(FilterRefuse, 400, 300, 0)),
 		event(4*time.Minute, "project_2", 403, 300, run(FilterRefuse, 900, 300, 0)),
 		// One that could not run at all, and one request nothing filtered.
@@ -202,13 +201,11 @@ func TestFilterRunsAreRecordedWithTheRequestsTheyFiltered(t *testing.T) {
 	case st1.CostMicros != 1500:
 		t.Errorf("cost = %d, want the five runs that spent anything", st1.CostMicros)
 	case st1.Segments != 24 || st1.Changed != 3:
-		// The per-segment reading, which is what says whether an instruction is
-		// too eager: three segments of twenty-four is a filter doing its job.
+		// The per-segment reading shows whether an instruction is too eager.
 		t.Errorf("segments = %d, changed = %d; want 24 shown and 3 edited",
 			st1.Segments, st1.Changed)
 	case st1.LatencyMedianMS != 250 || st1.LatencyP95MS < 700:
-		// 0, 100, 200, 300, 400, 900: the median is what it usually costs and
-		// the p95 is the one somebody complains about.
+		// 0, 100, 200, 300, 400, 900.
 		t.Errorf("latency = %dms median, %dms p95; want 250 and the tail",
 			st1.LatencyMedianMS, st1.LatencyP95MS)
 	case st1.LastRunAt == nil || st1.FirstRunAt == nil:
@@ -223,8 +220,7 @@ func TestFilterRunsAreRecordedWithTheRequestsTheyFiltered(t *testing.T) {
 		t.Errorf("the filter's own screen (%+v) and its row (%+v) disagree",
 			rep.FilterStat, st1)
 	}
-	// What the two numbers on the screen are a share of: the filter ran on six
-	// of the organisation's seven requests, and its spend is part of their bill.
+	// The filter ran on six of the organisation's seven requests.
 	if rep.Requests != 7 {
 		t.Errorf("requests = %d, want all seven of the organisation's", rep.Requests)
 	}
@@ -242,8 +238,7 @@ func TestFilterRunsAreRecordedWithTheRequestsTheyFiltered(t *testing.T) {
 	if got := byProject[f.projectID]; got.Runs != 3 || got.Refused != 0 || got.Rewrote != 2 {
 		t.Errorf("%s = %+v, want three runs and no refusal", f.projectID, got)
 	}
-	// Ordered by refusals, because the project living with them is what this
-	// breakdown is opened for.
+	// Ordered by refusals.
 	if len(rep.Projects) != 2 || rep.Projects[0].ProjectID != "project_2" {
 		t.Errorf("projects = %+v, want the most refused first", rep.Projects)
 	}
@@ -255,8 +250,7 @@ func TestAFilterReportPlotsEveryBucketInTheWindow(t *testing.T) {
 	now := time.Date(2026, 9, 7, 13, 0, 0, 0, time.UTC)
 	filterTraffic(t, st, ctx, f, now)
 
-	// Six hours, one of them with traffic. A chart drawn only from buckets
-	// with rows would hide a filter that stopped running.
+	// Six hours, one of them with traffic. Empty buckets must still show.
 	rep, err := st.FilterReportFor(ctx, f.orgID, "redact",
 		now.Add(-5*time.Hour), now.Add(time.Hour))
 	if err != nil {
@@ -288,8 +282,7 @@ func TestAFiltersHistoryOutlivesTheFilter(t *testing.T) {
 	now := time.Date(2026, 9, 7, 13, 0, 0, 0, time.UTC)
 	filterTraffic(t, st, ctx, f, now)
 
-	// "What did it do before we removed it?" is asked after the removal, so the
-	// log has no foreign key into the filters table.
+	// The log has no foreign key into filters, so it outlives a removed filter.
 	if _, err := st.UpsertFilter(ctx, policy.Filter{
 		OrgID: f.orgID, Alias: "redact", Model: "keera-guard", Prompt: "Redact.",
 	}); err != nil {
@@ -317,9 +310,7 @@ func TestFilterRunsStayInsideOneTenant(t *testing.T) {
 	if _, err := st.CreateOrg(ctx, Org{ID: "org_2", Name: "Another Bank"}, OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
-	// Two organisations may both have a filter called redact, and they are
-	// different filters. One tenant's traffic must not appear on the other's
-	// screen.
+	// Two organisations' filters called redact are different filters.
 	if err := st.WriteEvents(ctx, []Event{{
 		TS: now, OrgID: "org_2", Alias: "keera-code", Status: 200, CostMicros: 10,
 		FilterRuns: []FilterRun{{
@@ -344,8 +335,8 @@ func TestAFilterRemembersWhetherItEnforces(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 
-	// A filter written without saying enforces, as every filter did before
-	// shadow existed. The default must not quietly stop guarding.
+	// A filter written without a shadow flag enforces, as before shadow
+	// existed.
 	saved, err := st.UpsertFilter(ctx, policy.Filter{
 		OrgID: f.orgID, Alias: "redact", Model: "keera-guard", Prompt: "Redact.",
 	})
@@ -368,8 +359,7 @@ func TestAFilterRemembersWhetherItEnforces(t *testing.T) {
 	if !read.Shadow {
 		t.Error("a filter put into shadow read back as enforcing")
 	}
-	// And out again, which is the whole rollout: the instruction and the mode
-	// are untouched, so what was measured is what goes live.
+	// And out again, with the instruction and mode untouched.
 	read.Shadow = false
 	if _, err := st.UpsertFilter(ctx, read); err != nil {
 		t.Fatalf("UpsertFilter out of shadow: %v", err)
@@ -402,8 +392,7 @@ func TestRetentionTakesTheFilterLogWithIt(t *testing.T) {
 		t.Fatalf("WriteEvents: %v", err)
 	}
 
-	// Filter runs go with their requests. Kept longer, the larger table would
-	// answer questions about requests that are gone.
+	// Filter runs are purged with their requests.
 	if _, err := st.PurgeUsage(ctx, time.Now().Add(-30*24*time.Hour)); err != nil {
 		t.Fatalf("PurgeUsage: %v", err)
 	}

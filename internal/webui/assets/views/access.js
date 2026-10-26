@@ -1,7 +1,6 @@
-// My access: the developer's own keys, budgets, refusals and models, so they
-// need not ask an administrator. It shows only the reader's own keys, even for
-// an administrator. Revoking is the one write, so a leaked key can be stopped
-// at once.
+// My access: the developer's own keys, budgets, refusals and models. It shows
+// only the reader's own keys, even for an admin. Revoking is the one write,
+// so a leaked key can be stopped at once.
 
 import { api } from "../api.js";
 import {
@@ -45,7 +44,7 @@ export async function accessView(ctx) {
   const a = await api.access();
 
   // anonymous is the operator key sent as a header. In the panel it signs in
-  // as a stand-in user instead, which the server marks as operator_key.
+  // as a stand-in user, marked operator_key.
   if (a.anonymous) return noKey(ctx, a);
 
   const keys = a.keys || [];
@@ -72,12 +71,10 @@ export async function accessView(ctx) {
     );
   }
 
-  // The same card as on My clients and in the playground, so the operator key
-  // and a missing key read the same on all three.
+  // The same card as on My clients and in the playground.
   if (!keys.length) wrap.append(noKey(ctx, a));
 
-  // Revoked keys are hidden by default: people come here to see which keys
-  // work. The box resets on each visit, since it was ticked to check one thing.
+  // Revoked keys are hidden by default. The box resets on each visit.
   const cards = h("div", {});
   let showRevoked = false;
   function drawCards() {
@@ -100,7 +97,7 @@ export async function accessView(ctx) {
     );
   }
 
-  // The keys are cards, not table rows, so this draws table()'s toolbar itself.
+  // The keys are cards, so this draws table()'s toolbar itself.
   if (keys.some((k) => k.state === "revoked")) {
     wrap.append(
       h(
@@ -269,8 +266,8 @@ function keyCard(k, ctx) {
   );
 }
 
-// The prompts are quoted in full, in the order sent, because a developer
-// cannot see them in their own traffic.
+// Quoted in full, in the order sent: a developer cannot see them in their own
+// traffic.
 function promptsSection(prompts) {
   return h(
     "div",
@@ -301,8 +298,7 @@ function promptsSection(prompts) {
   );
 }
 
-// Filters can change or stop a request unseen, so they are named here. The
-// details are on the Filters screen, which every member can read.
+// Filters can change or stop a request unseen, so they are named here.
 function filtersSection(scopes) {
   return h(
     "div",
@@ -369,8 +365,8 @@ function scopeRow(sc) {
   return row;
 }
 
-// A daily or monthly limit only starts again with the period, so what is used
-// of it is shown too.
+// A daily or monthly limit resets only with the period, so its use is shown
+// too.
 function rateChips(rates) {
   const chips = [];
   for (const r of rates) {
@@ -386,8 +382,7 @@ function rateChips(rates) {
   return h("span", { class: "muted nowrap small" }, chips.join(" · "));
 }
 
-// Refusals are recorded like any request, so this is the same log the
-// dashboard counts from.
+// The same log the dashboard counts from.
 function refusalsCard(refusals, keys) {
   const keyName = Object.fromEntries(keys.map((k) => [k.id, k.name]));
 
@@ -411,8 +406,7 @@ function refusalsCard(refusals, keys) {
         label: "Reason",
         cell: (f) => {
           const [label, why] = statusMeaning(f.status);
-          // The gateway's own message first, because it names the limit and
-          // its number. The standing explanation is the fallback.
+          // The gateway's message first, as it names the limit and its number.
           return h(
             "div",
             { class: "stack" },

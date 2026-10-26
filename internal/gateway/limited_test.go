@@ -10,9 +10,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// An organisation that signed itself up and has not paid gets nothing that
-// runs on the deployment's own machines. The registry decides which models
-// those are; the gateway has to hold to it on every path.
+// A self-signed-up organisation that has not paid gets nothing that runs on
+// the deployment's own machines, on every path.
 
 func TestALockedModelIsRefusedAndNotOffered(t *testing.T) {
 	models := map[string]policy.Model{
@@ -36,8 +35,7 @@ func TestALockedModelIsRefusedAndNotOffered(t *testing.T) {
 		t.Errorf("the refusal does not say why or what lifts it: %s", raw)
 	}
 
-	// Counting and routing answer as sending would, so neither looks like a
-	// way in or something to retry.
+	// Counting and routing answer as sending would.
 	counted := h.post(t, "/v1/messages/count_tokens", `{"model":"engine","messages":[]}`)
 	if counted.StatusCode != http.StatusForbidden {
 		t.Errorf("count_tokens: status = %d, want 403", counted.StatusCode)
@@ -61,9 +59,8 @@ func TestALockedModelIsRefusedAndNotOffered(t *testing.T) {
 	default:
 	}
 
-	// The test backend is on the loopback, which a limited organisation may
-	// not reach. This test is about what it is offered, so it dials as an
-	// organisation that is not limited.
+	// The test backend is on loopback, which a limited organisation may not
+	// reach, so dial as an unlimited one.
 	h.srv.publicClient = h.srv.client
 	if resp := h.post(t, "/v1/chat/completions", `{"model":"own-key","messages":[]}`); resp.StatusCode != http.StatusOK {
 		t.Errorf("an open model of a limited organisation: status = %d, want 200", resp.StatusCode)
@@ -90,8 +87,8 @@ func TestALockedModelIsRefusedAndNotOffered(t *testing.T) {
 }
 
 func TestALimitedOrganisationCannotDialAPrivateAddress(t *testing.T) {
-	// A public name can resolve to a private address, so the check is on
-	// the address dialled. Nothing listens there; the dial is refused first.
+	// A public name can resolve to a private address, so the dialled address
+	// is checked. Nothing listens there.
 	models := map[string]policy.Model{
 		"rebound": {
 			Alias: "rebound", Kind: policy.KindChat, BackendModel: "a", Enabled: true,
@@ -103,15 +100,14 @@ func TestALimitedOrganisationCannotDialAPrivateAddress(t *testing.T) {
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502", resp.StatusCode)
 	}
-	// The client is told only that the plane could not be reached; the
-	// reason is the dialler's.
+	// The client is told the plane could not be reached, and why.
 	for _, u := range []string{"http://10.255.255.1:9/", "http://127.0.0.1:1/"} {
 		_, err := h.srv.clientFor(true).Get(u)
 		if err == nil || !strings.Contains(err.Error(), "public addresses") {
 			t.Errorf("dialling %s: %v, want it refused", u, err)
 		}
 	}
-	// Everyone else keeps reaching a self-hosted plane on a private address.
+	// Everyone else can still reach private addresses.
 	if h.srv.clientFor(false) == h.srv.clientFor(true) {
 		t.Error("an organisation that is not limited dials through the limited client")
 	}

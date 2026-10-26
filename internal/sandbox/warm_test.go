@@ -45,8 +45,7 @@ func TestEnsurePoolWritesTemplateAndPool(t *testing.T) {
 		t.Fatalf("expected both objects; template=%q pool=%q", tmpl, pool)
 	}
 
-	// Without the two Overrides policies, the key, session and volume that
-	// arrive on the claim would not be applied.
+	// Without these, what arrives on the claim would not be applied.
 	for _, want := range []string{
 		`"envVarsInjectionPolicy":"Overrides"`,
 		`"volumeClaimTemplatesPolicy":"Overrides"`,
@@ -155,8 +154,7 @@ func TestClaimedStatusReady(t *testing.T) {
 }
 
 func TestClaimedStatusFollowsTheBoundSandbox(t *testing.T) {
-	// The claim stays Ready when its pod dies; only the bound Sandbox says so,
-	// and a sandbox that stays pending is never finished or reported.
+	// The claim stays Ready when its pod dies; only the bound Sandbox says so.
 	cases := []struct {
 		name, sandbox string
 		want          policy.SandboxState
@@ -234,9 +232,8 @@ func TestTerminatingAClaimDeletesTheClaim(t *testing.T) {
 }
 
 func TestPrunePoolsRemovesThePoolsOfDeletedClasses(t *testing.T) {
-	// EnsurePool never visits a deleted class, so without this its warm
-	// sandboxes would hold their CPU and memory for ever. Two organisations
-	// can each have a "standard".
+	// A deleted class's warm sandboxes would otherwise run for ever. Two
+	// organisations can each have a "standard".
 	f := newFakeAPI(t)
 	k := f.driver(t, KubernetesOptions{Warm: true})
 	const warm = "/apis/extensions.agents.x-k8s.io/v1beta1/namespaces/sandboxes/"

@@ -35,9 +35,52 @@ func (s *Server) listRouters(w http.ResponseWriter, r *http.Request, p *authn.Pr
 // models answered, and how its route steps decided. Route step failures are
 // quiet, because every request still gets an answer.
 func (s *Server) routerReport(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if out, _, ok := hookReport(s, w, r, p, "router", s.st.RouterReportFor, s.st.Router); ok {
-		httpx.WriteJSON(w, http.StatusOK, out)
+	out, _, ok := hookReport(s, w, r, p, "router", s.st.RouterReportFor, s.st.Router)
+	if !ok {
+		return
 	}
+	if rtr, ok := out["router"].(policy.Router); ok {
+		out["limits"] = s.limitUse(rtr, time.Now())
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// RouterLimit is one limit step of a router, and how much of it is used in
+// its open window, whatever window the report covers.
+type RouterLimit struct {
+	Step   string        `json:"step"`
+	Budget *AccessBudget `json:"budget,omitempty"`
+	Rate   *AccessRate   `json:"rate,omitempty"`
+}
+
+// limitUse reads the gateway's own counts, which the limits are checked
+// against. A rate limit per minute is left out: it refills as it goes, so
+// what it used says little.
+func (s *Server) limitUse(rtr policy.Router, now time.Time) []RouterLimit {
+	out := []RouterLimit{}
+	for step := range rtr.Steps() {
+		switch {
+		case step.Kind == policy.StepBudget:
+			sc := rtr.Scopes(step)[0]
+			out = append(out, RouterLimit{Step: step.ID, Budget: &AccessBudget{
+				BudgetMicros: sc.BudgetMicros, Period: sc.Period,
+				SpendMicros: s.reg.Budgets().Spent(sc.Type, sc.ID, sc.Period, now),
+				ResetsAt:    sc.Period.Next(now),
+			}})
+		case step.Kind == policy.StepRateLimit && !step.RateLimit().PerMinute():
+			rate := &AccessRate{Period: step.RateLimit().Per()}
+			for _, sc := range rtr.Scopes(step) {
+				used := s.reg.Budgets().Spent(sc.Type, sc.ID, sc.Period, now)
+				if sc.Meter == policy.MeterRequests {
+					rate.Requests, rate.RequestsUsed = sc.Quota, used
+				} else {
+					rate.Tokens, rate.TokensUsed = sc.Quota, used
+				}
+			}
+			out = append(out, RouterLimit{Step: step.ID, Rate: rate})
+		}
+	}
+	return out
 }
 
 type routerInput struct {

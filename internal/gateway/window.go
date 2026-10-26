@@ -6,19 +6,16 @@ import (
 )
 
 // The context window check refuses a request too long for every model it may
-// go to, before the key's filters run, in words clients recognise. A router's
-// filter steps run before it.
+// go to, before the key's filters run (a router's filter steps run before
+// it). It counts the fewest tokens the text can be, so it never refuses a
+// request that fits but may let through some the backend refuses.
 //
-// Without each model's tokeniser, it counts the least a request can be: its
-// text at a generous number of bytes per token. So it never refuses a request
-// that fits, and lets some through that the backend then refuses.
-//
-// The words matter: Claude Code compacts its conversation when it reads
-// "prompt is too long", and OpenAI clients act on context_length_exceeded. A
-// backend's own refusal says neither, and the agent stops.
+// The wording matters: Claude Code compacts when it reads "prompt is too
+// long", and OpenAI clients act on context_length_exceeded. A backend's own
+// refusal says neither, and the agent stops.
 
 // fits refuses a request that cannot fit in the context of any model it may
-// go to. A model whose context is not declared can hold anything.
+// go to. A model with no declared context can hold anything.
 func (s *Server) fits(c *call, b *body) bool {
 	window, largest := 0, c.alias
 	for _, m := range c.chain {
@@ -29,14 +26,13 @@ func (s *Server) fits(c *call, b *body) bool {
 			window, largest = m.MaxContext, m.Alias
 		}
 	}
-	// Without a translation, every destination is sent the client's own API,
-	// so that is what is measured.
+	// Without a translation, every destination gets the client's own body.
 	sent, extract := b, func(b *body) (textDoc, error) { return extractText(b, c.surf.kind) }
 	if b == nil {
 		sent, extract = c.native, c.surf.dialect.text
 	}
-	// The whole body is more than its text, so a body that fits needs no
-	// closer look. That is nearly every request, and it costs nothing.
+	// The whole body is more than its text, so if it fits, the text does.
+	// That covers nearly every request at no cost.
 	if sent.size()/bytesPerTokenAtMost <= window {
 		return true
 	}

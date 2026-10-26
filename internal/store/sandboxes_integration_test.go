@@ -9,9 +9,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// The sandbox tables against a real Postgres. What is covered here is the half
-// no fake can be: the partial unique index that makes a name reusable, the
-// accumulating clock, and the cascades a deleted tenant leaves behind.
+// The sandbox tables against a real Postgres: the partial unique index on
+// names, the running clock, and the cascades of a deleted tenant.
 
 func newSandboxClass(t *testing.T, st *Store, ctx context.Context, orgID, name string) policy.SandboxClass {
 	t.Helper()
@@ -62,8 +61,7 @@ func TestSandboxClassRoundTrip(t *testing.T) {
 		got.Isolation != want.Isolation || len(got.Purposes) != 1 {
 		t.Errorf("read back %+v, want %+v", got, want)
 	}
-	// The two durations cross the driver as seconds and have to come back the
-	// same duration, which is the one thing a column of integers can get wrong.
+	// The durations are stored as seconds and must come back the same.
 	if got.DefaultTTL() != 4*time.Hour || got.MaxTTL() != 24*time.Hour {
 		t.Errorf("lifetimes = %s / %s", got.DefaultTTL(), got.MaxTTL())
 	}
@@ -84,8 +82,7 @@ func TestSandboxClassRoundTrip(t *testing.T) {
 	}
 }
 
-// A warm pool holds the deployment's machines, so an organisation that signed
-// itself up gets none until it pays.
+// A self-signed-up organisation gets no warm pool until it pays.
 func TestWarmSandboxClassesLeaveOutUnpaidOrganisations(t *testing.T) {
 	st, ctx := db(t)
 	anOrg(t, st, ctx, "org_1")
@@ -141,13 +138,12 @@ func TestSandboxNameIsUniqueOnlyWhileLive(t *testing.T) {
 		return err
 	}
 
-	// A second live one of the same person with the same name is refused:
-	// `keera sandbox ssh fix-login` has to mean something.
+	// A second live one of the same person with the same name is refused.
 	if err := named("sbx_second", first.Owner); !errors.Is(err, ErrSandboxNameTaken) {
 		t.Fatalf("err = %v, want ErrSandboxNameTaken", err)
 	}
-	// A colleague may use the name. Refusing it would tell them what the
-	// first person called theirs.
+	// A colleague may use the name, or the refusal would reveal another's
+	// sandbox name.
 	if err := named("sbx_colleague", "other@example.ch"); err != nil {
 		t.Fatalf("a colleague using the same name: %v", err)
 	}
@@ -211,9 +207,7 @@ func TestObserveSandboxTimestamps(t *testing.T) {
 		t.Error("suspended_at should be set while suspended")
 	}
 
-	// ready_at is when the machine became usable and a resume is not that, so
-	// it never moves again. suspended_at does move, because it is "since when
-	// has this been idle".
+	// ready_at never moves again after the first ready; suspended_at does.
 	again := mustObserve(policy.SandboxReady, "")
 	if again.ReadyAt == nil || !again.ReadyAt.Equal(firstReady) {
 		t.Errorf("ready_at moved on resume: %v, want %v", again.ReadyAt, firstReady)
@@ -241,8 +235,7 @@ func TestObserveSandboxTimestamps(t *testing.T) {
 	if terminated.TerminatedAt == nil {
 		t.Error("terminated_at should be set")
 	}
-	// Nothing happens to a terminated sandbox afterwards: the sweep observing one
-	// that somebody removed in between must not resurrect it.
+	// A sweep observing a sandbox terminated meanwhile must not revive it.
 	back := mustObserve(policy.SandboxReady, "")
 	if back.State != policy.SandboxTerminated {
 		t.Errorf("state = %s; a terminated sandbox should stay terminated", back.State)
@@ -258,9 +251,8 @@ func TestAccountSandboxesAccumulates(t *testing.T) {
 	if err := st.ObserveSandbox(ctx, sb.ID, SandboxObservation{State: policy.SandboxReady}); err != nil {
 		t.Fatalf("ObserveSandbox: %v", err)
 	}
-	// Wind the clock back rather than waiting: what is being tested is that the
-	// interval comes from the column, which is also what makes this correct
-	// across replicas and across a gateway that was down.
+	// Wind the clock back rather than waiting: the interval comes from the
+	// column.
 	if _, err := st.pool.Exec(ctx,
 		"UPDATE sandboxes SET accounted_at = now() - interval '90 seconds' WHERE id = $1",
 		sb.ID); err != nil {
@@ -277,14 +269,13 @@ func TestAccountSandboxesAccumulates(t *testing.T) {
 	if got.RunningSeconds < 85 || got.RunningSeconds > 95 {
 		t.Errorf("running_seconds = %d, want about 90", got.RunningSeconds)
 	}
-	// A chargeback weights running time by machine size: two minutes of
-	// thirty-two cores is not two minutes of two.
+	// Core seconds weight running time by machine size.
 	if got.CoreSeconds() != got.RunningSeconds*4 {
 		t.Errorf("core_seconds = %d for a four-core sandbox", got.CoreSeconds())
 	}
 
-	// A second pass a moment later adds only that moment, not another ninety
-	// seconds: two gateways running the sweep must not double-charge.
+	// A second pass adds only the time since, so two gateways do not
+	// double-charge.
 	before := got.RunningSeconds
 	if _, err := st.AccountSandboxes(ctx, time.Now()); err != nil {
 		t.Fatalf("AccountSandboxes: %v", err)
@@ -332,9 +323,7 @@ func TestAccountSandboxesAccumulates(t *testing.T) {
 	}
 }
 
-// On Kubernetes the controller stops a sandbox at its expiry. Time after it
-// is not charged, even when no sweep ran to end it, such as while the gateway
-// was down.
+// Time after expiry is not charged, even when no sweep ended the sandbox.
 func TestAccountSandboxesStopsAtExpiry(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -380,8 +369,7 @@ func TestCountLiveSandboxes(t *testing.T) {
 		}
 	}
 
-	// A suspended sandbox still counts: it holds its volume, and a quota that
-	// ignored it would be a quota somebody could get round by suspending.
+	// A suspended sandbox still counts: it holds its volume.
 	if err := st.ObserveSandbox(ctx, a.ID, SandboxObservation{
 		State: policy.SandboxSuspended,
 	}); err != nil {
@@ -474,8 +462,7 @@ func TestSandboxPolicyLimitsRoundTrip(t *testing.T) {
 		t.Errorf("sandbox_classes = %v", got.SandboxClasses)
 	}
 
-	// They have to reach the hot path, the only place they are enforced:
-	// LookupKey is what a sandbox request resolves through.
+	// They must reach LookupKey, the only place they are enforced.
 	resolved, err := st.LookupKey(ctx, f.hash)
 	if err != nil {
 		t.Fatalf("LookupKey: %v", err)
@@ -521,9 +508,8 @@ func TestSandboxUsageBy(t *testing.T) {
 		t.Errorf("live = %d", r.Live)
 	}
 
-	// Grouping by person reads the address that was copied onto the row rather
-	// than joining, so that "whose was this" keeps an answer after somebody is
-	// deleted from the directory.
+	// Grouping by person reads the address copied onto the row, which survives
+	// the person being deleted.
 	byUser, err := st.SandboxUsageBy(ctx, f.orgID, "user", time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatalf("SandboxUsageBy(user): %v", err)
@@ -532,8 +518,8 @@ func TestSandboxUsageBy(t *testing.T) {
 		t.Errorf("by user = %+v", byUser)
 	}
 
-	// Across every organisation a class is named with its organisation, since
-	// two of them can each have a "standard".
+	// Across every organisation a class carries its organisation, since two can
+	// each have a "standard".
 	all, err := st.SandboxUsageBy(ctx, "", "class", time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatalf("SandboxUsageBy(all orgs): %v", err)
@@ -549,8 +535,7 @@ func TestDeletingAnOrgDeletesItsSandboxes(t *testing.T) {
 	newSandboxClass(t, st, ctx, f.orgID, "standard")
 	sb := newSandbox(t, st, ctx, f, "gone")
 
-	// A live sandbox holds a machine, which nothing would stop once its row
-	// was gone.
+	// A live sandbox holds a machine that nothing would stop without its row.
 	gone, err := st.DeleteOrg(ctx, f.orgID)
 	if !errors.Is(err, ErrOrgHasSandboxes) || gone.LiveSandboxes != 1 {
 		t.Fatalf("DeleteOrg with a live sandbox = %+v, %v; want it refused", gone, err)
@@ -561,9 +546,7 @@ func TestDeletingAnOrgDeletesItsSandboxes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Sandboxes cascade with their organisation, unlike the usage log. Finance
-	// invoices from the usage log, so it outlives the tenant; a sandbox row
-	// describes a machine that went away with it.
+	// Sandboxes cascade with their organisation, unlike the usage log.
 	if _, err := st.DeleteOrg(ctx, f.orgID); err != nil {
 		t.Fatalf("DeleteOrg: %v", err)
 	}
@@ -576,9 +559,8 @@ func TestDeletingAnOrgDeletesItsSandboxes(t *testing.T) {
 	}
 }
 
-// An expired sandbox's key is revoked, so the key check alone would let its
-// project go. It can still be resumed, and its project decides its budget,
-// quota and models then.
+// An expired sandbox's key is revoked, but it can still be resumed, so it
+// still blocks deleting its project.
 func TestDeleteProjectIsRefusedWhileASandboxIsLive(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)

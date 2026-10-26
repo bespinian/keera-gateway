@@ -77,8 +77,8 @@ func TestOnlyTheNamedHostsReachThePrivateNetwork(t *testing.T) {
 		}
 		return err != nil && strings.Contains(err.Error(), "KEERA_UPSTREAM_PRIVATE")
 	}
-	// Loopback and link-local are inside the network too, even when the deny
-	// list leaves them open for a backend on the same host.
+	// Loopback and link-local are inside the network, even when the deny list
+	// leaves them open.
 	for _, addr := range []string{
 		"10.0.0.7:8000", "192.168.1.2:443", "100.64.0.1:80", "[fd12::1]:80",
 		"127.0.0.1:5432", "[::1]:8080", "169.254.169.254:80",
@@ -106,9 +106,8 @@ func TestPrivateHostsAreNamesOrAllOrNone(t *testing.T) {
 	}
 }
 
-// The default is written out in install.md, and without loopback in the
-// Makefile's dev target, whose backends are on loopback. Both must say what
-// the gateway does.
+// install.md and the Makefile's dev target (without loopback) must match the
+// default.
 func TestTheDefaultDenyListIsTheOneTheDocsAndMakeDevGive(t *testing.T) {
 	doc, err := os.ReadFile("../../docs/install.md")
 	if err != nil {

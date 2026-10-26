@@ -5,29 +5,22 @@ import (
 	"strings"
 )
 
-// MCPServer is one MCP server the gateway stands in front of. It belongs to one
-// organisation: clients name its alias, and the gateway holds its address and
-// its credential.
+// MCPServer is an MCP server the gateway stands in front of. Clients name its
+// alias, and the gateway holds its address and credential.
 type MCPServer struct {
-	// OrgID is the organisation the server belongs to. Only its keys reach it.
 	OrgID string `json:"org_id"`
 	Alias string `json:"alias"`
 	// URL is the server's Streamable HTTP endpoint.
 	URL         string `json:"url"`
 	Description string `json:"description,omitempty"`
-	// AuthHeader is the header the credential is sent in. Empty is
-	// Authorization, as a bearer token; any other header gets the credential
-	// as it is.
+	// AuthHeader carries the credential. Empty is Authorization, as a bearer
+	// token; any other header gets the credential as it is.
 	AuthHeader string `json:"auth_header,omitempty"`
-	// APIKeyCiphertext, APIKey and HasAPIKey hold the credential as a Model's
-	// do: sealed at rest, decrypted only in memory, and only flagged to the
-	// control panel.
+	// The credential fields work as a Model's do.
 	APIKeyCiphertext []byte `json:"-"`
 	APIKey           string `json:"-"`
 	HasAPIKey        bool   `json:"has_api_key,omitempty"`
-	// Limited and Locked are a model's, for an MCP server: the organisation
-	// has not paid yet, and the server is inside the deployment's network.
-	// OrgName is set with them, so a refusal can name the organisation.
+	// Limited, Locked and OrgName work as a Model's do.
 	Limited bool   `json:"-"`
 	Locked  bool   `json:"-"`
 	OrgName string `json:"-"`
@@ -37,8 +30,7 @@ type MCPServer struct {
 // maxToolNameLen is the longest tool name MCP allows.
 const maxToolNameLen = 128
 
-// ValidToolEntry reports whether s can stand in a tool allow-list: a server's
-// alias, which allows all of its tools, or 'alias/tool' for one of them.
+// ValidToolEntry reports whether s is a server alias or 'alias/tool'.
 func ValidToolEntry(s string) bool {
 	server, tool, one := strings.Cut(s, "/")
 	if !ValidAlias(server) {
@@ -47,16 +39,14 @@ func ValidToolEntry(s string) bool {
 	return !one || (tool != "" && len(tool) <= maxToolNameLen && !strings.ContainsAny(tool, " \t\n"))
 }
 
-// AllowsTool reports whether a key may call one tool of one server. A nil list
-// allows every tool of every server of the organisation.
+// AllowsTool reports whether a key may call a tool. A nil list allows all.
 func (r *Resolved) AllowsTool(server, tool string) bool {
 	return r.AllowedTools == nil ||
 		slices.Contains(r.AllowedTools, server) ||
 		slices.Contains(r.AllowedTools, server+"/"+tool)
 }
 
-// AllowsWholeServer reports whether a key may call every tool of a server,
-// rather than only some of them.
+// AllowsWholeServer reports whether a key may call every tool of a server.
 func (r *Resolved) AllowsWholeServer(server string) bool {
 	return r.AllowedTools == nil || slices.Contains(r.AllowedTools, server)
 }
@@ -74,8 +64,8 @@ func (r *Resolved) AllowsServer(server string) bool {
 	return false
 }
 
-// intersectTools narrows a tool allow-list. An entry is a whole server or one
-// of its tools, so a server and one of its tools meet in the tool.
+// intersectTools narrows a tool allow-list. A server and one of its tools meet
+// in the tool.
 func intersectTools(cur, next []string) []string {
 	return narrowAllowList(cur, next, func(a, b string) bool {
 		return a == b || (!strings.Contains(a, "/") && strings.HasPrefix(b, a+"/"))

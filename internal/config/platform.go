@@ -45,8 +45,7 @@ func platformKeys() (catalog.Platform, error) {
 		}
 		out[p.Name] = catalog.PlatformKey{APIKey: key, ProductID: productID}
 	}
-	// A misspelt provider name would otherwise leave every model of it
-	// waiting for a key nobody can enter.
+	// A misspelt provider would leave its models waiting for a key forever.
 	for _, kv := range os.Environ() {
 		name, value, _ := strings.Cut(kv, "=")
 		if strings.HasPrefix(name, "KEERA_PROVIDER_") && strings.TrimSpace(value) != "" &&

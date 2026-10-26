@@ -1,8 +1,7 @@
 // Package webui serves the Keera Gateway control panel.
 //
-// The panel is plain ES modules and CSS with no build step, embedded in the
-// binary, so `go build` is the whole build and an air-gapped install needs no
-// npm.
+// The panel is plain ES modules and CSS with no build step, so `go build` is
+// the whole build and an air-gapped install needs no npm.
 package webui
 
 import (
@@ -23,15 +22,14 @@ import (
 //go:embed assets
 var assets embed.FS
 
-// file is one embedded asset. The assets never change, so they are gzipped
-// once at startup rather than per request.
+// file is one embedded asset, gzipped once at startup rather than per request.
 type file struct {
 	body        []byte
 	contentType string
 	etag        string
-	// gz is the gzipped body, or nil when compressing did not make it smaller.
+	// gz is nil when compressing did not make the body smaller.
 	gz []byte
-	// gzEtag must differ from etag, or a cache could hand the gzipped body to
+	// gzEtag must differ from etag, or a cache could serve the gzipped body to
 	// a client that cannot read it.
 	gzEtag string
 }
@@ -68,8 +66,8 @@ func init() {
 }
 
 func newFile(p string, body []byte) file {
-	// With no build step there are no content-hashed filenames. An ETag gives
-	// the same result: a changed file is refetched, an unchanged one is a 304.
+	// With no build step there are no hashed filenames, so an ETag does the
+	// job: a changed file is refetched, an unchanged one is a 304.
 	sum := sha256.Sum256(body)
 	tag := `"` + base64.RawURLEncoding.EncodeToString(sum[:12]) + `"`
 	f := file{body: body, contentType: contentTypeFor(p), etag: tag}
@@ -79,8 +77,8 @@ func newFile(p string, body []byte) file {
 	return f
 }
 
-// squeeze gzips one asset at the highest setting, which is cheap once at
-// startup. It returns nil when the result is not smaller, as for a tiny SVG.
+// squeeze returns nil when gzip does not make the body smaller, as for a tiny
+// SVG.
 func squeeze(body []byte) []byte {
 	var buf bytes.Buffer
 	zw, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
@@ -116,9 +114,9 @@ func contentTypeFor(p string) string {
 	}
 }
 
-// contentSecurityPolicy keeps scripts, styles and connections same-origin and
-// forbids framing. The panel sets styles from data through each element's
-// style object, which a style-src without 'unsafe-inline' still allows.
+// contentSecurityPolicy keeps everything same-origin and forbids framing. The
+// panel sets styles through each element's style object, which a style-src
+// without 'unsafe-inline' still allows.
 const contentSecurityPolicy = "default-src 'self'; " +
 	"script-src 'self'; " +
 	"style-src 'self'; " +
@@ -130,9 +128,8 @@ const contentSecurityPolicy = "default-src 'self'; " +
 	"base-uri 'none'; " +
 	"object-src 'none'"
 
-// Handler serves the panel, falling back to the application shell for any path
-// that is not a file: the panel routes on the URL, so /projects loads the same
-// document as /.
+// Handler serves the panel. Any path that is not a file gets the shell, since
+// the panel routes on the URL: /projects loads the same document as /.
 func Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -144,8 +141,8 @@ func Handler() http.Handler {
 		name := path.Clean(r.URL.Path)
 		f, ok := files[name]
 		if !ok {
-			// A missing asset is a 404. The shell would give the browser HTML
-			// where it expected JavaScript, which fails later and less clearly.
+			// The shell would give the browser HTML where it expects
+			// JavaScript, which fails later and less clearly.
 			if strings.HasPrefix(name, "/assets/") {
 				http.NotFound(w, r)
 				return
@@ -167,7 +164,7 @@ func Handler() http.Handler {
 func setHeaders(header http.Header, contentType, etag string, zipped bool) {
 	header.Set("Content-Type", contentType)
 	header.Set("ETag", etag)
-	// Both bodies live at this URL, so caches must know what tells them apart.
+	// Both bodies live at this URL.
 	header.Set("Vary", "Accept-Encoding")
 	if zipped {
 		header.Set("Content-Encoding", "gzip")

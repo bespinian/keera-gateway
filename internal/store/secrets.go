@@ -26,8 +26,8 @@ type SealedValue struct {
 }
 
 // sealedColumns is every column that holds a sealed value. Each query selects
-// two text columns that name the row, then the value; each update takes the
-// same two and the new value.
+// two text columns naming the row, then the value; each update takes the same
+// two and the new value.
 var sealedColumns = []struct {
 	kind          SealedKind
 	query, update string
@@ -55,9 +55,8 @@ var sealedColumns = []struct {
 	},
 }
 
-// ResealSecrets passes every sealed value to reseal, and stores what it
-// returns in its place. Nil leaves the value as it is. It returns how many
-// values it replaced. It is one transaction, so a value is never half moved.
+// ResealSecrets passes every sealed value to reseal and stores what it returns,
+// unless nil. It returns how many values it replaced, in one transaction.
 func (s *Store) ResealSecrets(ctx context.Context, reseal func(SealedValue) []byte) (int, error) {
 	n := 0
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {

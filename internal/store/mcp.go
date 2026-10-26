@@ -57,7 +57,7 @@ func (s *Store) DeleteMCPServer(ctx context.Context, orgID, alias string) error 
 // ToolOutcome is what came of one tool call.
 type ToolOutcome string
 
-// The outcomes a tool call can have. See the tool_calls table.
+// The outcomes a tool call can have.
 const (
 	ToolOK ToolOutcome = "ok"
 	// ToolFailed is a result the tool itself marked as a failure.
@@ -67,13 +67,12 @@ const (
 	ToolDenied   ToolOutcome = "denied"
 	ToolRefused  ToolOutcome = "refused"
 	// ToolInputRequired is a server asking for the user's input before it
-	// answers. The client sends the call again with it.
+	// answers. The client then sends the call again.
 	ToolInputRequired ToolOutcome = "input_required"
 )
 
 // ToolCall is the part of an event that makes it a tool call rather than an
-// inference request. Such an event goes to tool_calls, with its filter runs,
-// and its cost to the same budgets.
+// inference request. Its cost goes to the same budgets.
 type ToolCall struct {
 	Server      string
 	Tool        string
@@ -82,7 +81,6 @@ type ToolCall struct {
 	ResultBytes int
 }
 
-// queueToolCall adds one tool call's row and its filter runs to the batch.
 func queueToolCall(batch *pgx.Batch, e Event) {
 	t := e.Tool
 	batch.Queue(`INSERT INTO tool_calls (ts, org_id, project_id, user_id, key_id, server, tool,
@@ -114,8 +112,8 @@ type ToolCallRow struct {
 	Client      string      `json:"client,omitempty"`
 }
 
-// ToolCallQuery narrows a list of tool calls. OrgID is required; the other
-// empty fields narrow nothing.
+// ToolCallQuery narrows a list of tool calls. OrgID is required; the rest are
+// optional.
 type ToolCallQuery struct {
 	OrgID     string
 	ProjectID string
@@ -131,7 +129,7 @@ type ToolCallQuery struct {
 }
 
 // toolWhere is the condition every tool-call query shares, on $1 to $8. The
-// organisation is always named: the log is read one organisation at a time.
+// log is always read one organisation at a time.
 const toolWhere = ` WHERE org_id = $1 AND ts >= $2 AND ts < $3
 	AND ($4 = '' OR project_id = $4) AND ($5 = '' OR key_id = $5)
 	AND ($6 = '' OR user_id = $6) AND ($7 = '' OR server = $7) AND ($8 = '' OR tool = $8)`
@@ -147,7 +145,6 @@ func (s *Store) ListToolCalls(ctx context.Context, q ToolCallQuery) ([]ToolCallR
 		append(q.args(), q.Before, pageLimit(q.Limit, 100, 5000))...)
 }
 
-// toolCallColumns reads what scanToolCall scans.
 const toolCallColumns = `SELECT id, ts, COALESCE(project_id, ''), COALESCE(user_id, ''),
 	COALESCE(key_id, ''), server, tool, outcome, latency_ms, arg_bytes, result_bytes,
 	cost_micros, COALESCE(error, ''), COALESCE(session_key, ''), COALESCE(client, '')
@@ -161,11 +158,9 @@ func scanToolCall(r row) (ToolCallRow, error) {
 	return t, err
 }
 
-// SessionToolCalls reads the tool calls of one session, oldest first: those
-// between its first request and its last. A session the client named has its
-// calls named too. Any other is matched by key, which on a key running two
-// tasks at once includes both tasks' calls. The time bound applies to both: a
-// client that reuses its session id after the idle gap starts a new session.
+// SessionToolCalls reads the tool calls between a session's first and last
+// request, oldest first. A session the client named matches its calls by that
+// name; any other matches by key, which may include a parallel task's calls.
 func (s *Store) SessionToolCalls(ctx context.Context, orgID string, a AgentSession) ([]ToolCallRow, error) {
 	return queryAll(ctx, s.pool, scanToolCall, toolCallColumns+`
 		WHERE ($1 = '' OR org_id = $1)

@@ -15,8 +15,7 @@ import (
 
 const aliceUUID = "5B0F4C2E-1D3A-4F6B-9C8D-7E6F5A4B3C2D"
 
-// adGUID is an objectGUID as AD stores it, and guidText the same as Windows
-// shows it.
+// adGUID is an objectGUID as AD stores it, and guidText as Windows shows it.
 var adGUID = []byte{
 	0x78, 0x56, 0x34, 0x12, 0xbc, 0x9a, 0xf0, 0xde,
 	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Run one coding agent on one task, then push what it did.
 #
-# This is an agent sandbox's whole life. Only a branch leaves this machine,
-# which keeps the network policy tight and gives a reviewer a diff to read.
+# Only a branch leaves this machine, which keeps the network policy tight and
+# gives a reviewer a diff to read.
 set -euo pipefail
 
 WORKDIR="${1:-$HOME/work}"
@@ -13,8 +13,7 @@ die() { log "$*"; exit 1; }
 
 [ -n "${KEERA_TASK:-}" ] || die "KEERA_TASK is empty; there is nothing to do"
 
-# Named after the sandbox, because its id ties the branch to its cost, model
-# and task on the gateway.
+# Named after the sandbox, whose id ties the branch to its cost on the gateway.
 BRANCH="keera/${KEERA_SANDBOX_NAME:-agent}-${KEERA_SANDBOX_ID##*_}"
 
 if [ -d .git ]; then
@@ -26,20 +25,17 @@ fi
 
 # ------------------------------------------------------------------- run it
 #
-# Whichever agent is installed, in its non-interactive mode: there is nobody
-# at a terminal.
+# Whichever agent is installed, in its non-interactive mode.
 #
-# Pi's configuration and Claude Code's ANTHROPIC_CUSTOM_HEADERS, both written
-# by the gateway, carry the session header, so this task is one session in
-# `keera session list` (see docs/sessions.md). An image that adds OpenCode
-# brings its own configuration, which decides whether it sends KEERA_SESSION.
+# Pi's configuration and Claude Code's ANTHROPIC_CUSTOM_HEADERS carry the
+# session header, so this task is one session (see docs/sessions.md). An image
+# that adds OpenCode decides itself whether it sends KEERA_SESSION.
 run_agent() {
-  # Pi first, because this image installs it. An image built on this base
-  # that adds another agent still gets it.
+  # Pi first, because this image installs it.
   if command -v pi >/dev/null 2>&1; then
     log "running pi on the task"
     # -p is Pi's headless mode. -a trusts the project's files, which is safe
-    # here: the machine exists for this one task and is deleted after it.
+    # on a machine deleted after the task.
     pi -p -a ${KEERA_MODEL:+--model "$KEERA_MODEL"} -- "$KEERA_TASK"
     return
   fi
@@ -63,9 +59,8 @@ log "the agent finished with status $STATUS"
 
 # ------------------------------------------------------------------ push it
 #
-# Only if something changed, and only as a branch, never to a default branch:
-# what comes out of a machine that ran a model's output is a proposal for a
-# human to review.
+# Only if something changed, and only as a branch: the output is a proposal
+# for a human to review.
 if [ ! -d .git ]; then
   log "nothing to push: this sandbox has no repository"
   exit "$STATUS"
@@ -77,11 +72,10 @@ if git diff --cached --quiet; then
   exit "$STATUS"
 fi
 
-# The commit message records the task and what carried it out. This is the one
-# place the task is kept: in the developer's repository, not on the gateway,
-# which promises not to keep it. So the subject is only its start, and the
-# body holds all of it when the subject does not. The cut counts characters,
-# not bytes, so it never splits a letter.
+# The commit message records the task and what carried it out. It is the only
+# place the task is kept, as the gateway does not keep it. The subject is its
+# start, and the body holds all of it when needed. The cut counts characters,
+# so it never splits a letter.
 LC_ALL=C.UTF-8
 subject=${KEERA_TASK//$'\n'/ }
 subject=${subject:0:72}

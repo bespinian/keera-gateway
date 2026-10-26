@@ -7,15 +7,13 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// ProjectSummary is a project with what the panel shows next to it: its
-// guardrails, its spend against them, and how many keys are active.
+// ProjectSummary is a project with its guardrails, spend and active key count.
 type ProjectSummary struct {
 	Project
 	Limits     policy.Limits `json:"limits"`
 	ActiveKeys int           `json:"active_keys"`
-	// BudgetMicros, Period and SpendMicros are the budget nearest its end,
-	// when the project has a budget per day and one per month: the one that
-	// will stop its keys first.
+	// BudgetMicros, Period and SpendMicros are the budget nearest its end, when
+	// the project has both a daily and a monthly one.
 	SpendMicros  int64         `json:"spend_micros"`
 	BudgetMicros int64         `json:"budget_micros"`
 	Period       policy.Period `json:"period"`
@@ -86,8 +84,8 @@ type SeriesPoint struct {
 	Failed     int64     `json:"failed"`
 }
 
-// Overview is everything the dashboard needs, in one round trip. A project's,
-// key's or model's own screen uses it too, so the screens never disagree.
+// Overview is everything the dashboard needs, in one round trip. Entity
+// screens use it too, so the screens never disagree.
 type Overview struct {
 	From         time.Time `json:"from"`
 	To           time.Time `json:"to"`
@@ -106,8 +104,7 @@ type Overview struct {
 	Series             []SeriesPoint `json:"series"`
 	TopProjects        []UsageBucket `json:"top_projects"`
 	TopModels          []UsageBucket `json:"top_models"`
-	// TopKeys is only filled in for a scoped overview, where "which key is
-	// doing this" is the next question.
+	// TopKeys is only filled in for a scoped overview.
 	TopKeys []UsageBucket `json:"top_keys,omitempty"`
 }
 
@@ -120,12 +117,12 @@ func chartBucket(from, to time.Time) string {
 	return "day"
 }
 
-// Overview aggregates the usage log for the dashboard, or for one entity's own
-// screen when sc narrows it.
+// Overview aggregates the usage log for the dashboard, or for one entity when
+// sc narrows it.
 //
-// Over more than two days the totals come from usage_daily, and From and To
-// are widened to whole days. The first-token times always come from the
-// request log, which retention may have cut shorter.
+// Over more than two days the totals come from usage_daily, widened to whole
+// days. First-token times always come from the request log, which retention
+// may have cut shorter.
 func (s *Store) Overview(ctx context.Context, orgID string, from, to time.Time,
 	sc ReportScope,
 ) (Overview, error) {
@@ -168,8 +165,7 @@ func (s *Store) Overview(ctx context.Context, orgID string, from, to time.Time,
 	if o.TopModels, err = s.topUsage(ctx, q, "model"); err != nil {
 		return o, err
 	}
-	// Across a whole organisation the key list is long and says little. Inside
-	// one project or model it names who is responsible.
+	// Across a whole organisation the key list is long and says little.
 	if !sc.Empty() {
 		if o.TopKeys, err = s.topUsage(ctx, q, "key"); err != nil {
 			return o, err
@@ -178,8 +174,8 @@ func (s *Store) Overview(ctx context.Context, orgID string, from, to time.Time,
 	return o, nil
 }
 
-// series is the dashboard's chart. Every bucket in the window is generated, not
-// only those with traffic, so a quiet stretch shows as a dip, not a flat line.
+// series is the dashboard's chart. Every bucket in the window is generated, so
+// a quiet stretch shows as a dip.
 func (s *Store) series(ctx context.Context, src usageSource, orgID string, from, to time.Time,
 	bucket string, sc ReportScope,
 ) ([]SeriesPoint, error) {
@@ -227,8 +223,8 @@ func (s *Store) topUsage(ctx context.Context, q UsageQuery, groupBy string) ([]U
 	return b[:min(len(b), 6)], nil
 }
 
-// ProjectOrg returns which organisation a project belongs to, so a request
-// naming a project can be checked against the caller's own tenant first.
+// ProjectOrg returns a project's organisation, to check it against the
+// caller's own.
 func (s *Store) ProjectOrg(ctx context.Context, projectID string) (string, error) {
 	var orgID string
 	err := s.pool.QueryRow(ctx, "SELECT org_id FROM projects WHERE id = $1", projectID).Scan(&orgID)
@@ -245,9 +241,8 @@ type KeyOwner struct {
 	Kind                     policy.KeyKind
 }
 
-// KeyOwnerOf reads where a key sits. Members may revoke only their own keys,
-// so all of it is read in one row: a second query could see a key that was
-// reassigned in between.
+// KeyOwnerOf reads where a key sits, in one row, so a key reassigned between
+// two queries cannot slip past a member's own-keys check.
 func (s *Store) KeyOwnerOf(ctx context.Context, keyID string) (KeyOwner, error) {
 	var o KeyOwner
 	err := s.pool.QueryRow(ctx,
@@ -309,32 +304,26 @@ func (s *Store) UserEmails(ctx context.Context, orgID string) (emails, names map
 	return emails, names, nil
 }
 
-// names runs an (id, name) query and returns it as a map.
 func (s *Store) names(ctx context.Context, sql string, args ...any) (map[string]string, error) {
 	return queryMap(ctx, s.pool, func(name *string) []any { return []any{name} }, sql, args...)
 }
 
-// KeySummary is an issued key with what the keys screen shows next to it: its
-// own guardrails, when it was last used, and what it has spent.
-//
-// Requests counts only what was served, so it explains the cost. Last use
-// counts every attempt, because any use at all matters when deciding whether
-// a key can be revoked.
+// KeySummary is an issued key with its guardrails, last use and spend.
+// Requests counts only what was served. Last use counts every attempt, since
+// any use matters when deciding whether to revoke a key.
 type KeySummary struct {
 	KeyInfo
 	Limits      policy.Limits `json:"limits"`
 	LastUsedAt  *time.Time    `json:"last_used_at,omitempty"`
 	Requests    int64         `json:"requests"`
 	SpendMicros int64         `json:"spend_micros"`
-	// SubscriptionMicros and Plan are for a subscription key: what its
-	// holder's Claude plan paid for, at API prices, and how much of the plan
-	// is used.
+	// SubscriptionMicros and Plan are for a subscription key: what the Claude
+	// plan paid for, at API prices, and how much of it is used.
 	SubscriptionMicros int64             `json:"subscription_micros"`
 	Plan               *policy.PlanUsage `json:"plan,omitempty"`
 }
 
 // KeyQuery narrows a key listing. OrgID is required; the rest are optional.
-// UserID is set by a developer's own screen, to see only their keys.
 type KeyQuery struct {
 	OrgID     string
 	ProjectID string
@@ -342,9 +331,9 @@ type KeyQuery struct {
 	Since     time.Time
 }
 
-// KeySummaries lists an organisation's keys with their guardrails and their
-// traffic since q.Since, in one query to avoid N+1. Since more than two days
-// ago, the traffic comes from usage_daily, from the midnight before q.Since.
+// KeySummaries lists an organisation's keys with their guardrails and traffic
+// since q.Since, in one query. Beyond two days, traffic comes from usage_daily,
+// from the midnight before q.Since.
 func (s *Store) KeySummaries(ctx context.Context, q KeyQuery) ([]KeySummary, error) {
 	traffic := `LEFT JOIN LATERAL (
 		    SELECT max(e.ts) AS last_used_at,
@@ -400,21 +389,20 @@ func scanKeySummary(r row) (KeySummary, error) {
 	return k, nil
 }
 
-// Setup counts what a deployment has, so the panel can tell a new operator
-// which step they are on.
+// Setup counts what a deployment has, so the panel can show a new operator
+// their next step.
 type Setup struct {
 	Orgs     int64 `json:"orgs"`
 	Keys     int64 `json:"keys"`
 	Models   int64 `json:"models"`
 	Requests int64 `json:"requests"`
-	// Filters, Routers, Sandboxes and MCP servers are optional.
-	// The panel hides their screens until there is at least one.
+	// Filters, Routers, Sandboxes and MCP servers are optional. The panel hides
+	// their screens until there is at least one.
 	Filters    int64 `json:"filters"`
 	Routers    int64 `json:"routers"`
 	Sandboxes  int64 `json:"sandboxes"`
 	MCPServers int64 `json:"mcp_servers"`
-	// Credits counts the money ever put into credit, paid or granted. The
-	// first run stays until there is some.
+	// Credits counts the money ever put into credit, paid or granted.
 	Credits int64 `json:"credits"`
 	// Invoiced says the organisation is billed by invoice, so it needs no
 	// credit. Always false across every organisation.
@@ -447,8 +435,8 @@ func (s *Store) SetupState(ctx context.Context, orgID string) (Setup, error) {
 	return st, err
 }
 
-// AnyUsed reports whether any of keyIDs has ever made a request. It reads the
-// daily totals, which outlive the request log.
+// AnyUsed reports whether any of keyIDs has ever made a request, from the daily
+// totals, which outlive the request log.
 func (s *Store) AnyUsed(ctx context.Context, orgID string, keyIDs []string) (bool, error) {
 	if len(keyIDs) == 0 {
 		return false, nil
@@ -466,14 +454,12 @@ type Refusal struct {
 	Alias     string    `json:"alias,omitempty"`
 	Status    int       `json:"status"`
 	KeyID     string    `json:"key_id,omitempty"`
-	// Error is what the client was told: the guardrail's wording for a
-	// refusal, the inference plane's for a failure.
+	// Error is what the client was told.
 	Error string `json:"error,omitempty"`
 }
 
 // Refusals lists the most recent refused or failed requests made with one of
-// keyIDs, newest first. An empty keyIDs returns nothing, not everything: the
-// caller is asking about their own keys.
+// keyIDs, newest first. An empty keyIDs returns nothing, not everything.
 func (s *Store) Refusals(ctx context.Context, orgID string, keyIDs []string,
 	since time.Time, limit int,
 ) ([]Refusal, error) {

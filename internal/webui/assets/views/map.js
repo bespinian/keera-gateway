@@ -1,11 +1,9 @@
 // The live map: what is connected to this gateway, and how much traffic
 // leaves the network. Hosted models sit below a line, and every request to
-// one is drawn crossing it.
+// one is drawn crossing it. Each packet is a real row of the request log.
 //
 // A canvas rather than SVG: hundreds of packets a minute as DOM nodes
 // stutter. It draws only when something moved.
-//
-// Each packet is a real row of the request log, not an animated average.
 
 import { api } from "../api.js";
 import { orgNameOf } from "./orgs.js";
@@ -46,21 +44,20 @@ const BOX = {
   gapX: 40,
 };
 
-// Below this the card scrolls sideways rather than overlap the boxes.
+// Below this the card scrolls sideways rather than overlap boxes.
 const MIN_WIDTH =
   BOX.pad * 2 + BOX.clientW + BOX.gatewayW + BOX.modelW + BOX.gapX * 2;
 
-// Boxes per column before the quietest fold into one. The tables below the
-// canvas still list every one.
+// Boxes per column before the quietest fold into one. The tables below list
+// every one.
 const MAX_CLIENTS = 7;
 const MAX_MODELS = 6;
 
-// Packet speed in pixels per millisecond. The pause at the gateway shows the
-// request going through it, not just past it.
+// Pixels per millisecond. The pause at the gateway shows the request going
+// through it.
 const SPEED = 0.55;
 const HOLD_MS = 110;
-// Most packets drawn per stream batch, so a batch of 200 rows is not a wall.
-// The rest are counted but not drawn.
+// Most packets drawn per batch. The rest are counted but not drawn.
 const MAX_SPAWN = 48;
 const MAX_PACKETS = 400;
 
@@ -129,7 +126,7 @@ export async function mapView(ctx) {
 
 /** sceneFrom turns the report into boxes and lines. Models come from the
  *  catalogue, not the traffic: a quiet hosted model is still a way out of
- *  the network. Clients are whatever has called. */
+ *  the network. */
 function sceneFrom(data) {
   const clients = fold(
     (data.clients || []).map((c) => ({
@@ -188,7 +185,7 @@ function sceneFrom(data) {
     })),
     from: data.from,
     to: data.to,
-    // Live request batches as { at, n }, oldest first, for the gateway's rate.
+    // Live batches as { at, n }, oldest first, for the gateway's rate.
     beats: beatsFrom(data.last_minute),
     height: 0,
   };
@@ -197,7 +194,7 @@ function sceneFrom(data) {
 }
 
 /** beatsFrom seeds the last minute from the report (per second, newest
- *  first). Without it the rate would take a minute to be right. */
+ *  first), so the rate is right from the start. */
 function beatsFrom(counts) {
   const now = Date.now();
   const beats = [];
@@ -219,7 +216,6 @@ function cellOf(c) {
   };
 }
 
-/** fold keeps the busiest and adds up the rest into one box. */
 function fold(list, max, kind) {
   if (list.length <= max) return list;
   const kept = list.slice(0, max - 1);
@@ -287,7 +283,7 @@ function describe(scene) {
   );
 }
 
-/** tokenShare is the percentage of tokens that went outside the network. */
+/** tokenShare is the share of tokens that left the network. */
 function tokenShare(scene) {
   let outside = 0;
   for (const m of scene.outside)
@@ -297,9 +293,8 @@ function tokenShare(scene) {
   return Math.round((outside / total) * 100);
 }
 
-/** layout places every box and returns the canvas height. The customer's
- *  network is above, hosted providers below, and the boundary spans the full
- *  width so every line to a hosted model crosses it. */
+/** layout places every box and returns the canvas height. The boundary
+ *  spans the full width so every line to a hosted model crosses it. */
 function layout(scene, width) {
   const P = BOX.pad;
   const insideH = Math.max(
@@ -321,7 +316,7 @@ function layout(scene, width) {
     outsideTop: lineY + 40,
     clientX: P,
     modelX: width - P - BOX.modelW,
-    // Centred, but on a narrow card never into the room the lines need.
+    // Centred, but never into the room the lines need.
     gatewayX: Math.min(
       Math.max(
         Math.round((width - BOX.gatewayW) / 2),
@@ -362,12 +357,10 @@ function layout(scene, width) {
   return scene.height;
 }
 
-/** stack is the height of one column of boxes. */
 function stack(list, hh) {
   return list.length ? list.length * (hh + BOX.gapY) - BOX.gapY : 0;
 }
 
-/** place stacks one column, centred in its band. */
 function place(list, x, w, hh, top, bandH) {
   let y = Math.round(top + (bandH - stack(list, hh)) / 2);
   for (const n of list) {
@@ -379,8 +372,8 @@ function place(list, x, w, hh, top, bandH) {
   }
 }
 
-/** legOne and legTwo are the two halves of a request's path. Computed each
- *  time, not stored, so a relayout cannot send a packet to an old position. */
+/** legOne and legTwo are the halves of a request's path, computed each time
+ *  so a relayout cannot send a packet to an old position. */
 function legOne(node, gateway) {
   return curve(
     node.x + node.w,
@@ -416,8 +409,8 @@ function at(c, t) {
   };
 }
 
-// Straight-line distance is close enough for a curve this shallow; it only
-// sets how long a packet takes.
+// Straight-line distance is close enough for a shallow curve; it only sets
+// how long a packet takes.
 function span(c) {
   return Math.hypot(c.x2 - c.x1, c.y2 - c.y1);
 }
@@ -439,8 +432,7 @@ function paint(ctx, canvas, tip, scene) {
     const width = Math.max(MIN_WIDTH, Math.floor(holder.clientWidth) - 2);
     const height = layout(scene, width);
     // Screen density times the panel's `html { zoom }`, which stretches a
-    // canvas without telling it and blurs its labels. Measured over reported
-    // width is that zoom.
+    // canvas and blurs its labels. Measured over reported width is that zoom.
     const stretch = holder.clientWidth
       ? holder.getBoundingClientRect().width / holder.clientWidth
       : 1;
@@ -463,7 +455,7 @@ function paint(ctx, canvas, tip, scene) {
     canvas.width = Math.round(width * scale);
     canvas.height = Math.round(height * scale);
     g2.setTransform(scale, 0, 0, scale, 0, 0);
-    // The first resize is the first moment the stylesheet can be read.
+    // The stylesheet can first be read here.
     colors = palette();
     dirty = true;
   }
@@ -472,7 +464,7 @@ function paint(ctx, canvas, tip, scene) {
   observer.observe(canvas.parentElement);
 
   // A canvas cannot use CSS custom properties, so reread the colours when
-  // the theme changes, in the topbar or the operating system.
+  // the theme changes.
   const themeWatch = new MutationObserver(() => {
     colors = palette();
     dirty = true;
@@ -498,8 +490,8 @@ function paint(ctx, canvas, tip, scene) {
     }
   }
 
-  /** advance moves packets and fades pulses, and reports whether anything
-   *  changed, so an idle map does not repaint. */
+  /** advance reports whether anything changed, so an idle map does not
+   *  repaint. */
   function advance(dt) {
     let moved = false;
     for (const n of boxes(scene)) {
@@ -543,8 +535,8 @@ function paint(ctx, canvas, tip, scene) {
         if (p.wait <= 0) p.phase = "out2";
         return false;
       case "burst":
-        // A refusal never leaves the gateway, nor does a packet to a model
-        // the map does not draw.
+        // A refusal stops at the gateway, as does a packet to a model the map
+        // does not draw.
         p.wait -= dt * 2.2;
         return p.wait <= -260;
       case "out2": {
@@ -558,8 +550,8 @@ function paint(ctx, canvas, tip, scene) {
         return false;
       }
       case "back": {
-        // The answer, drawn thinner. Without it, a model that answers and one
-        // that has gone quiet look the same.
+        // The answer, drawn thinner, so a model that answers differs from one
+        // that has gone quiet.
         const c =
           p.leg === 1
             ? legTwo(scene.gateway, p.model)
@@ -603,11 +595,10 @@ function paint(ctx, canvas, tip, scene) {
     });
   }
 
-  /* A click opens a box's screen; hovering shows the numbers that do not
-     fit on the box. */
+  /* A click opens a box's screen; hovering shows more numbers. */
   function locate(e) {
-    // The pointer and the canvas's rectangle come in zoomed pixels, the
-    // boxes in the canvas's own, so undo the panel's `html { zoom }`.
+    // The pointer comes in zoomed pixels, the boxes in the canvas's own, so
+    // undo the panel's `html { zoom }`.
     const r = canvas.getBoundingClientRect();
     const zoom = r.width / canvas.clientWidth || 1;
     const x = (e.clientX - r.left) / zoom,
@@ -648,8 +639,7 @@ function paint(ctx, canvas, tip, scene) {
     touch: () => {
       dirty = true;
     },
-    // Packets in flight point at the replaced boxes, so drop them; the new
-    // report already counts them.
+    // Packets in flight point at replaced boxes; the new report counts them.
     reset() {
       packets.length = 0;
       dirty = true;
@@ -679,9 +669,8 @@ function boxes(scene) {
   return [...scene.clients, scene.gateway, ...scene.inside, ...scene.outside];
 }
 
-/** palette reads the root, not the canvas: the view is built before it is on
- *  the page, and a detached element resolves every property to "", which
- *  leaves black on black. The fallbacks give a wrong shade rather than that. */
+/** palette reads the root, not the canvas: a detached element resolves every
+ *  property to "", which leaves black on black. The fallbacks avoid that. */
 function palette() {
   const cs = getComputedStyle(document.documentElement);
   const v = (name, fallback) => cs.getPropertyValue(name).trim() || fallback;
@@ -720,7 +709,6 @@ function render(g, scene, c, packets, hover) {
     box(g, n, c, hover, modelFace(n, c));
 }
 
-/** bands draws the two bands and the boundary between them. */
 function bands(g, scene, c) {
   const geo = scene.geometry;
 
@@ -757,7 +745,7 @@ function bands(g, scene, c) {
 }
 
 /** lines draws one link per client and per model, weighted by traffic. One
- *  per pair would be truer but unreadable. */
+ *  per pair would be unreadable. */
 function lines(g, scene, c, hover) {
   const max = Math.max(
     1,
@@ -816,8 +804,8 @@ function related(node, hover, scene) {
 }
 
 function box(g, n, c, hover, face) {
-  // A model of unknown hosting sits above the line but is marked like an
-  // outside one: this screen must never wrongly promise that traffic stays.
+  // A model of unknown hosting is marked like an outside one: this screen must
+  // never wrongly promise that traffic stays.
   const unsure = n.kind === "model" && n.hosting !== "internal";
   const dim = hover && hover !== n ? 0.55 : 1;
   g.save();
@@ -870,8 +858,8 @@ function box(g, n, c, hover, face) {
 const TEXT = { title: 13, value: 17, bigValue: 22, note: 11 };
 
 /** rows is where a box's three lines of text sit, kept together so they
- *  cannot overlap on the short box. Measured up from the bottom edge, so a
- *  change in height keeps them in place. */
+ *  cannot overlap. Measured from the bottom edge, so a change in height keeps
+ *  them in place. */
 function rows(n) {
   const big = n.kind === "gateway";
   return {
@@ -938,8 +926,8 @@ function modelFace(n, c) {
   };
 }
 
-/** drawPacket draws one request in flight, coloured by its outcome: each row
- *  is already a finished request. */
+/** drawPacket colours a request by its outcome: each row is already a
+ *  finished request. */
 function drawPacket(g, scene, p, c) {
   if (p.delay > 0) return;
   const colour =
@@ -1001,7 +989,6 @@ function roundRect(g, x, y, w, h, r) {
   g.closePath();
 }
 
-/** fit shortens text with an ellipsis until it fits the width. */
 function fit(g, text, max) {
   const s = String(text == null ? "" : text);
   if (max <= 0) return "";
@@ -1063,8 +1050,8 @@ function showTip(tip, canvas, n) {
   tip.style.top = Math.max(8, Math.min(n.y, canvas.clientHeight - 200)) + "px";
 }
 
-/** watch turns the live request log into packets. It is the stream the
- *  Requests screen reads, so a packet here is a row there. */
+/** watch turns the live request log into packets: a packet here is a row on
+ *  the Requests screen. */
 function watch(ctx, { since, scene, painter, live }) {
   const listen = { org_id: ctx.orgID, since, after: 0 };
   followRequests(ctx, live, () => api.requestStream(listen), {
@@ -1077,8 +1064,7 @@ function watch(ctx, { since, scene, painter, live }) {
   function arrived(rows) {
     // Every row counts towards the rate, drawn or not.
     if (rows.length) scene.beats.push({ at: Date.now(), n: rows.length });
-    // Oldest first and staggered, so a batch looks like many requests, not a
-    // wall.
+    // Oldest first and staggered, so a batch looks like many requests.
     const drawn = rows.slice(0, MAX_SPAWN).reverse();
     drawn.forEach((row, i) => {
       const client = clientNode(scene, row.client || "");
@@ -1101,13 +1087,12 @@ function watch(ctx, { since, scene, painter, live }) {
   }
 }
 
-// A refusal is any 4xx and a failure any 5xx, as on the dashboard and in the
-// request log.
+// A refusal is any 4xx and a failure any 5xx, as in the request log.
 function refused(row) {
   return row.status >= 400 && row.status < 500;
 }
 
-/** count adds one live row to the boxes, so totals move with the packets
+/** count adds a live row to the boxes, so totals move with the packets
  *  instead of jumping at each refresh. Medians come with the refresh. */
 function count(scene, client, model, row) {
   const cells = [client.cell, scene.total];
@@ -1123,9 +1108,8 @@ function count(scene, client, model, row) {
 }
 
 /** clientNode finds the box for a live row, or makes one: a new client's
- *  first request is what people watch this screen for. Models are not made
- *  up this way: an unknown alias is a typo or a deleted model, and a new
- *  model arrives with the next refresh. */
+ *  first request is what people watch for. Models are not made this way: an
+ *  unknown alias is a typo or a deleted model. */
 function clientNode(scene, key) {
   const found = scene.byClient.get(key);
   if (found) return found;
@@ -1164,7 +1148,7 @@ function refresh(ctx, { since, scene, painter }) {
       index(scene);
       painter.reset();
     } catch {
-      // Stale numbers are fine; the stream shows if the control plane is gone.
+      // Stale numbers are fine; the stream shows if the control plane is down.
     }
   }, 30000);
   ctx.onTeardown(() => clearInterval(timer));

@@ -13,18 +13,16 @@ import (
 	"github.com/bespinian/keera-gateway/internal/id"
 )
 
-// This file is the OpenAI Responses surface: `POST /v1/responses` in, the chat
-// shape the inference plane speaks out, and back again. Codex and the newer
-// OpenAI SDKs speak it. A request to one of OpenAI's own models is forwarded
-// as it is instead; see native.go.
+// This file is the OpenAI Responses surface, used by Codex and newer OpenAI
+// SDKs: `POST /v1/responses` in, translated to the chat shape and back. A
+// request to an OpenAI model is forwarded as is; see native.go.
 //
-// As on the Messages surface, fields with no place in the chat shape are
-// dropped on the way in: reasoning items, built-in tools such as web search,
-// and settings that only OpenAI's servers act on.
+// Fields with no place in the chat shape are dropped: reasoning items,
+// built-in tools such as web search, and settings only OpenAI acts on.
 
-// responsesShape implements shape for `/v1/responses`. tools is what the
-// request declared under another name or kind than the chat shape knows it
-// by, so the answer names each call the way the client declared it.
+// responsesShape implements shape for `/v1/responses`. tools holds the tools
+// declared under another name or kind than the chat shape's, so the answer
+// names each call as the client declared it.
 type responsesShape struct {
 	openAIErrors
 	tools toolNames
@@ -67,12 +65,12 @@ type responsesTool struct {
 		Syntax     string `json:"syntax"`
 		Definition string `json:"definition"`
 	} `json:"format"`
-	// Tools are a namespace's own: functions and custom tools.
+	// Tools are a namespace's functions and custom tools.
 	Tools []responsesTool `json:"tools"`
 }
 
-// responsesItem is one item of the input. Items are told apart by `type`, and
-// a message may leave it out.
+// responsesItem is one item of the input, told apart by `type`. A message may
+// leave it out.
 type responsesItem struct {
 	Type    string          `json:"type"`
 	Role    string          `json:"role"`
@@ -104,7 +102,7 @@ type responsesPart struct {
 }
 
 // decodeBody turns a Responses request into a chat completion request, and
-// returns the shape that answers it in the terms of the tools it declared.
+// returns the shape that answers it with the tools as declared.
 func (responsesShape) decodeBody(raw []byte) (*body, shape, error) {
 	var in responsesRequest
 	if err := decodeRequest(raw, &in, "Responses"); err != nil {
@@ -157,15 +155,14 @@ func responsesMessages(in responsesRequest) ([]chatMessage, error) {
 	if err := json.Unmarshal(in.Input, &items); err != nil {
 		return nil, errors.New("the 'input' field must be a string or an array of items")
 	}
-	// The chat shape's tool role carries only text, so images a tool returned
-	// wait for the end of the tool results and follow them as a user turn.
-	// Put between two results, they would part the second from its call.
+	// The chat tool role carries only text, so images a tool returned follow
+	// the tool results as a user turn. Between two results, they would split
+	// the second from its call.
 	var images []chatPart
 	for i, raw := range items {
 		var it responsesItem
 		if err := json.Unmarshal(raw, &it); err != nil {
-			// An item the translation does not use is dropped, even when its
-			// fields do not fit the ones it reads.
+			// An unused item is dropped, even when its fields do not fit.
 			if !translatedItem(typeOf(raw)) {
 				continue
 			}
@@ -225,8 +222,8 @@ func addItem(msgs []chatMessage, it responsesItem) ([]chatMessage, []chatPart, e
 		}
 		return addCall(msgs, it, string(args)), nil, nil
 	case "local_shell_call":
-		// The tool itself runs only at OpenAI, but the command and its output
-		// stay in the conversation, so the model knows what already ran.
+		// The tool runs only at OpenAI, but the command and output stay, so
+		// the model knows what already ran.
 		it.Name = "local_shell"
 		args := "{}"
 		if len(it.Action) > 0 && it.Action[0] == '{' {
@@ -243,8 +240,8 @@ func addItem(msgs []chatMessage, it responsesItem) ([]chatMessage, []chatPart, e
 		}
 		return append(msgs, chatMessage{role: "tool", toolCallID: it.CallID, content: text}), images, nil
 	}
-	// Reasoning items, item references and the calls of built-in tools have no
-	// counterpart, and the model answers without them.
+	// Reasoning items, item references and built-in tool calls have no chat
+	// equivalent.
 	return msgs, nil, nil
 }
 
@@ -255,8 +252,8 @@ func addCall(msgs []chatMessage, it responsesItem, args string) []chatMessage {
 		ID: it.CallID, Type: "function",
 		Function: oaiFunction{Name: chatToolName(it.Namespace, it.Name), Arguments: args},
 	}
-	// Calls made in one turn arrive as separate items. The chat shape wants
-	// them on one assistant message, with whatever text came before them.
+	// Calls of one turn arrive as separate items, but the chat shape wants
+	// them on one assistant message, with any text before them.
 	if n := len(msgs); n > 0 && msgs[n-1].role == "assistant" {
 		msgs[n-1].toolCalls = append(msgs[n-1].toolCalls, call)
 		if msgs[n-1].content.isEmpty() {
@@ -267,9 +264,8 @@ func addCall(msgs []chatMessage, it responsesItem, args string) []chatMessage {
 	return append(msgs, chatMessage{role: "assistant", toolCalls: []oaiToolCall{call}})
 }
 
-// addMessageItem appends a message. The developer role is the system role
-// under the name OpenAI now uses for it; self-hosted chat templates know only
-// the old one.
+// addMessageItem appends a message. The developer role is OpenAI's new name
+// for system; self-hosted chat templates know only the old one.
 func addMessageItem(msgs []chatMessage, it responsesItem) ([]chatMessage, error) {
 	role := it.Role
 	switch role {
@@ -281,7 +277,7 @@ func addMessageItem(msgs []chatMessage, it responsesItem) ([]chatMessage, error)
 	}
 	text, parts := responsesContent(it.Content)
 	msg := chatMessage{role: role, content: text}
-	// Only a user can send an image; everyone else's content is text.
+	// Only a user can send an image.
 	if role == "user" && len(parts) > 0 {
 		msg.parts = parts
 	}
@@ -289,8 +285,7 @@ func addMessageItem(msgs []chatMessage, it responsesItem) ([]chatMessage, error)
 }
 
 // responsesContent reads content that is a string or an array of parts. It
-// returns the text joined, and the parts in the chat shape when any of them
-// is an image.
+// returns the joined text, plus the parts in chat shape when one is an image.
 func responsesContent(raw json.RawMessage) (jsonText, []chatPart) {
 	if len(raw) == 0 {
 		return emptyText, nil
@@ -321,8 +316,8 @@ func responsesContent(raw json.RawMessage) (jsonText, []chatPart) {
 				out = append(out, chatPart{text: text})
 			}
 		case "input_image":
-			// An image named by file id lives on OpenAI's servers, and no
-			// other model can fetch it.
+			// An image named by file id lives at OpenAI; no other model can
+			// fetch it.
 			if !p.ImageURL.isEmpty() {
 				out = append(out, chatPart{imageURL: p.ImageURL})
 				picture = true
@@ -345,10 +340,9 @@ func fileText(p responsesPart) jsonText {
 	return joinTexts([]jsonText{quoteText(p.Filename), quoteText(content)})
 }
 
-// inlineText splits a data URL that holds a text file into its header, up to
-// and including the comma, and its contents. ok is false for any other kind
-// of file. The translation and the filters both read files through it, so a
-// filter sees every file a model is given.
+// inlineText splits a data URL holding a text file into its header (through
+// the comma) and its contents. ok is false for other files. The translation
+// and the filters both use it, so a filter sees every file a model gets.
 func inlineText(fileData string) (header, content string, ok bool) {
 	rest, isData := strings.CutPrefix(fileData, "data:")
 	media, data, found := strings.Cut(rest, ",")
@@ -379,9 +373,9 @@ func orEmpty(t jsonText) jsonText {
 	return t
 }
 
-// declaredTool is how the client declared a tool that the chat shape knows by
-// another name or as another kind: inside a namespace, or as a custom tool,
-// which takes text instead of JSON arguments.
+// declaredTool is how the client declared a tool the chat shape knows
+// differently: inside a namespace, or as a custom tool, which takes text
+// instead of JSON arguments.
 type declaredTool struct {
 	namespace, name string
 	custom          bool
@@ -392,15 +386,15 @@ type declaredTool struct {
 type toolNames map[string]declaredTool
 
 // responsesTools declares the client's tools in the chat shape, which has
-// neither namespaces nor custom tools. A namespace's tools get names that carry
-// the namespace, and a custom tool becomes a function of its text. Codex uses
-// namespaces for MCP servers and subagents, and declares apply_patch as custom.
-// Built-in tools run only on OpenAI's servers, so they are dropped.
+// neither namespaces nor custom tools. A namespace's tools get its name as a
+// prefix, and a custom tool becomes a function of its text. Codex uses
+// namespaces for MCP servers and subagents, and declares apply_patch as
+// custom. Built-in tools run only at OpenAI, so they are dropped.
 func responsesTools(in []responsesTool) ([]oaiTool, toolNames) {
 	tools := make([]oaiTool, 0, len(in))
 	names := toolNames{}
-	// A name declared twice would be refused by some backends, and its calls
-	// could not be told apart. The first one keeps it.
+	// Some backends refuse a duplicate name, and its calls could not be told
+	// apart. The first one keeps it.
 	taken := map[string]bool{}
 	add := func(namespace string, t responsesTool) {
 		name := chatToolName(namespace, t.Name)
@@ -446,9 +440,9 @@ func chatToolName(namespace, name string) string {
 var customSchema = json.RawMessage(`{"type":"object","properties":{"input":{"type":"string"}},` +
 	`"required":["input"],"additionalProperties":false}`)
 
-// customTool declares a custom tool as a function of its text. A grammar the
-// text has to match goes in the description, since the chat shape has no
-// place for one and the model writes better input for seeing it.
+// customTool declares a custom tool as a function of its text. A grammar goes
+// in the description, since the chat shape has no place for one and the model
+// writes better input when it sees it.
 func customTool(name string, t responsesTool) oaiTool {
 	description := t.Description
 	if f := t.Format; f != nil && f.Type == "grammar" && f.Definition != "" {
@@ -550,8 +544,7 @@ func callItem(itemID, status, callID, name, args string) map[string]any {
 }
 
 // call is the output item for a call the model made, named as the client
-// declared its tool: in its namespace, and as a custom tool call with its
-// text if it is one.
+// declared the tool: in its namespace, or as a custom tool call with its text.
 func (n toolNames) call(status, callID, name, args string) map[string]any {
 	d, ok := n[name]
 	if !ok {
@@ -572,9 +565,8 @@ func (n toolNames) call(status, callID, name, args string) map[string]any {
 	return item
 }
 
-// customInput is the text a custom tool was called with, which the chat shape
-// carries as the call's one argument. A model that wrote the text bare is
-// taken at its word.
+// customInput is the text a custom tool was called with, carried as the
+// call's one argument in the chat shape. Bare text is taken as is.
 func customInput(args string) string {
 	var a struct {
 		Input *string `json:"input"`

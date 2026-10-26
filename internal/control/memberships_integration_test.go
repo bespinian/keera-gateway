@@ -77,9 +77,8 @@ func membershipServer(t *testing.T, adminGroups bool) orgsSetup {
 }
 
 // signIn goes through provider as subject and email, in groups, sending the
-// cookies given along. It returns where the callback sent the browser, with
-// the reason after it when it was refused, and the session cookie, which is
-// nil when the sign-in was refused.
+// given cookies. It returns where the callback sent the browser, with the
+// reason when refused, and the session cookie, nil when refused.
 func (s orgsSetup) signIn(t *testing.T, provider, subject, email string, groups []string,
 	cookies ...*http.Cookie,
 ) (string, *http.Cookie) {

@@ -9,16 +9,13 @@ import (
 	"github.com/bespinian/keera-gateway/internal/connect"
 )
 
-// catalogueOf is the /v1/connect answer, built from the package the control
-// plane serves it from, so tests check what the CLI prints against the real
-// templates.
+// catalogueOf uses the control plane's own package, so tests check against
+// the real templates.
 func catalogueOf(gateway string) map[string]any {
 	return map[string]any{"data": connect.Clients(), "gateway_url": gateway}
 }
 
-// autoRouter is the simplest router, as /v1/routers answers with it. A client
-// names a router where it names a model, so `keera connect` must be able to
-// write one into an editor's configuration.
+// autoRouter is the simplest router, as /v1/routers returns it.
 var autoRouter = map[string]any{
 	"alias": "auto", "start": map[string]any{"id": "router", "kind": "router", "ref": "auto"},
 }
@@ -35,7 +32,7 @@ var chatAlias = map[string]any{"data": []map[string]any{
 // operator key the tests sign in with.
 var noKeys = map[string]any{"anonymous": true, "keys": []any{}}
 
-// connectRoutes is what `keera connect` reads, with extra replacing any of it.
+// connectRoutes is what `keera connect` reads; extra replaces any of it.
 func connectRoutes(gateway string, extra map[string]any) map[string]any {
 	routes := map[string]any{
 		"GET /v1/connect": catalogueOf(gateway),
@@ -47,8 +44,7 @@ func connectRoutes(gateway string, extra map[string]any) map[string]any {
 	return routes
 }
 
-// A router is named where a model is, so it goes in the configuration after
-// the models, by its name for people when it has one.
+// A router goes after the models, by its display name when it has one.
 func TestConnectOffersRouters(t *testing.T) {
 	newFakeControl(t, connectRoutes("https://keera.example.ch/api", map[string]any{
 		"GET /v1/routers": map[string]any{"data": []map[string]any{
@@ -68,8 +64,7 @@ func TestConnectOffersRouters(t *testing.T) {
 	}
 }
 
-// The block on stdout is the whole point: it is what gets redirected into the
-// file the command names, so nothing else may be on that stream.
+// The block on stdout is redirected into a file, so nothing else may be there.
 func TestConnectPutsOnlyTheBlockOnStdout(t *testing.T) {
 	newFakeControl(t, connectRoutes("https://keera.example.ch/api", nil))
 
@@ -82,8 +77,7 @@ func TestConnectPutsOnlyTheBlockOnStdout(t *testing.T) {
 	}
 }
 
-// Only chat models that are actually served go in: an embedding model or a
-// disabled one would configure an editor that is refused on first use.
+// An embedding model or a disabled one would be refused on first use.
 func TestConnectConfiguresOnlyEnabledChatModels(t *testing.T) {
 	newFakeControl(t, connectRoutes("https://keera.example.ch/api", nil))
 
@@ -119,8 +113,8 @@ var twoKeys = map[string]any{"keys": []map[string]any{
 	},
 }}
 
-// The config lists what the key may call, so the editor offers nothing that
-// answers 404. Without --key it is the caller's first active key.
+// The config lists only what the key may call. Without --key it is the
+// caller's first active key.
 func TestConnectConfiguresTheKeysModels(t *testing.T) {
 	newFakeControl(t, connectRoutes("https://keera.example.ch/api",
 		map[string]any{"GET /v1/access": twoKeys}))
@@ -152,7 +146,6 @@ func TestConnectRefusesAKeyThatIsNotTheCallers(t *testing.T) {
 		if err == nil {
 			t.Fatalf("connect configured the key %s", name)
 		}
-		// The names that would work are the useful half.
 		if !strings.Contains(err.Error(), "laptop, ci") {
 			t.Errorf("the error does not name the caller's keys: %v", err)
 		}
@@ -197,8 +190,8 @@ func TestConnectRefusesAClientItDoesNotKnow(t *testing.T) {
 	}
 }
 
-// A client is pointed at the gateway that answered, and nothing passed to the
-// command can change that: the wrong address fails as if the key were bad.
+// A client is pointed at the gateway that answered: the wrong address fails as
+// if the key were bad.
 func TestConnectUsesTheGatewayThatAnswered(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, connectRoutes("https://keera.example.ch/api/", nil))
@@ -210,8 +203,6 @@ func TestConnectUsesTheGatewayThatAnswered(t *testing.T) {
 }
 
 func TestConnectWithNoClientListsThem(t *testing.T) {
-	// The listing reads the organisation's routers too: a client names one
-	// where it names a model, so this is where a developer discovers it.
 	newFakeControl(t, connectRoutes("https://keera.example.ch/api", nil))
 
 	got := capture(t, "connect")
@@ -220,8 +211,6 @@ func TestConnectWithNoClientListsThem(t *testing.T) {
 			t.Errorf("the listing does not mention %s:\n%s", want, got)
 		}
 	}
-	// A listing that offered a disabled alias would send somebody to configure
-	// an editor that cannot work.
 	if strings.Contains(got, "keera-off") {
 		t.Errorf("the listing offers a disabled alias:\n%s", got)
 	}
@@ -250,8 +239,7 @@ func TestWrapBreaksProseAndIndentsWhatItCarries(t *testing.T) {
 	}
 }
 
-// The server lists the keys of the organisation a call names, so KEERA_ORG
-// reaches it too, not only the one 'keera org switch' chose.
+// KEERA_ORG reaches the server too, not only the one 'keera org switch' chose.
 func TestConnectAsksForTheChosenOrgsKeys(t *testing.T) {
 	f := newFakeControl(t, connectRoutes("https://keera.example.ch/api",
 		map[string]any{"GET /v1/access": twoKeys}))

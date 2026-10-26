@@ -1,8 +1,6 @@
 // Package catalog reads the template files, and knows the hosted providers a
-// model can name.
-//
-// The model file is a template: every new organisation starts with a copy of
-// each model it declares, which it may then change or remove like its own.
+// model can name. Every new organisation starts with a copy of each declared
+// model, which it may then change or remove.
 package catalog
 
 import (
@@ -25,51 +23,43 @@ type file struct {
 
 // Model is one declared model.
 //
-// The fields a provider can fill in are pointers, so a stated zero differs from
-// no value: an input or output price of 0 means unbilled, not "use the
-// provider's price". A cached or cache-write price of 0 means the input price.
+// Fields a provider can fill in are pointers, so a stated zero differs from no
+// value: an input or output price of 0 means unbilled. A cached or cache-write
+// price of 0 means the input price.
 type Model struct {
 	Alias string `yaml:"alias"`
 	Kind  string `yaml:"kind"`
 	// DisplayName is the model's name for people, such as Claude Haiku 5.5.
-	// Clients name the alias; this is only shown.
 	DisplayName string `yaml:"display_name"`
-	// Provider names a hosted endpoint Keera Gateway knows (see `keera model
-	// catalogue`). It fills in the backend, context window, prices, display
-	// name, description, release date and location. The entry may override
-	// any of them.
+	// Provider names a known hosted endpoint (see `keera model catalogue`). It
+	// fills in the backend, context window, prices, display name,
+	// description, release date and location, which the entry may override.
 	Provider string   `yaml:"provider"`
 	Backends []string `yaml:"backends"`
-	// ProductID fills the hole in a per-customer endpoint, such as the product
-	// id of an Infomaniak AI Service. An entry that writes its own backends
-	// needs none.
+	// ProductID completes a per-customer endpoint, such as an Infomaniak AI
+	// Service. An entry with its own backends needs none.
 	ProductID    string `yaml:"product_id"`
 	BackendModel string `yaml:"backend_model"`
 	// Description says what the model is for. Clients see it on /v1/models,
-	// and routers choose between models by it. A provider fills in its own
-	// when the entry states none.
+	// and routers choose by it. A provider fills in its own if unset.
 	Description         string `yaml:"description"`
 	InputMicrosPerMTok  *int64 `yaml:"input_micros_per_mtok"`
 	OutputMicrosPerMTok *int64 `yaml:"output_micros_per_mtok"`
-	// CachedInputMicrosPerMTok prices an input token served from the
-	// provider's prompt cache. Without it, and without a provider rate, cached
-	// tokens cost the full input price.
+	// CachedInputMicrosPerMTok prices an input token served from the prompt
+	// cache. Without it or a provider rate, it costs the input price.
 	CachedInputMicrosPerMTok *int64 `yaml:"cached_input_micros_per_mtok"`
-	// CacheWriteMicrosPerMTok prices an input token the provider wrote to its
-	// prompt cache. Without it, and without a provider rate, a write costs
-	// the input price.
+	// CacheWriteMicrosPerMTok prices an input token written to the prompt
+	// cache. Without it or a provider rate, it costs the input price.
 	CacheWriteMicrosPerMTok *int64 `yaml:"cache_write_micros_per_mtok"`
-	// LongPrompt is what a request costs instead when its prompt is longer
-	// than above_tokens. A provider fills it in for a model priced by prompt
-	// length.
+	// LongPrompt is the price when the prompt is longer than above_tokens. A
+	// provider fills it in for a model priced by prompt length.
 	LongPrompt *policy.PriceTier `yaml:"long_prompt"`
 	MaxContext *int              `yaml:"max_context_tokens"`
-	// ReleaseDate is the day the model came out, as YYYY-MM-DD. A provider
-	// fills it in for the models it knows.
+	// ReleaseDate is the day the model came out, as YYYY-MM-DD.
 	ReleaseDate string `yaml:"release_date"`
 	// Location is where the model runs: a country, such as ch or usa, or
-	// onprem. A provider fills in its own. Without one, a backend inside the
-	// network is onprem, and one outside it must state its location.
+	// onprem. Without one, a backend inside the network is onprem, and one
+	// outside must state it.
 	Location string `yaml:"location"`
 	// Subscription says each caller's own Claude subscription pays, and the
 	// gateway forwards their sign-in. See docs/subscriptions.md.
@@ -106,9 +96,8 @@ func parseModelFile(raw []byte) ([]policy.Model, error) {
 	return parseEntries(f.Models, "models", "alias", func(m Model) string { return m.Alias }, ParseModel)
 }
 
-// decodeStrict reads a template file and refuses a field it does not know. A
-// misspelt field would otherwise be dropped without a word, and whoever set it
-// would think it took effect.
+// decodeStrict reads a template file and refuses unknown fields, so a misspelt
+// field is not silently dropped.
 func decodeStrict(raw []byte, out any) error {
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	dec.KnownFields(true)
@@ -145,11 +134,8 @@ func parseEntries[E, T any](entries []E, list, field string, name func(E) string
 }
 
 // ParseModel validates and expands a single declared model, applying its
-// provider's defaults. `keera model add` and `keera model set` use it, so an
-// entry on the command line means what the same entry in a file means.
-//
-// The provider is applied before the checks, because it fills in the fields
-// they check.
+// provider's defaults first. `keera model add` and `keera model set` use it
+// too, so the command line and a file agree.
 func ParseModel(m Model) (policy.Model, error) {
 	switch {
 	case m.Alias == "":
@@ -159,8 +145,7 @@ func ParseModel(m Model) (policy.Model, error) {
 			"interior hyphens and slashes: it is rendered into the client configurations `keera connect` "+
 			"prints, which quote none of it", m.Alias)
 	}
-	// Trimmed first, so a blank description or name gets the provider's
-	// default.
+	// Trimmed first, so a blank one gets the provider's default.
 	m.Description = strings.TrimSpace(m.Description)
 	m.DisplayName = strings.TrimSpace(m.DisplayName)
 	m.ProductID = strings.TrimSpace(m.ProductID)
@@ -203,11 +188,9 @@ func ParseModel(m Model) (policy.Model, error) {
 }
 
 // CheckModel fills in what a model may leave out and says what is wrong with
-// it. Template files, the command line and the control API all run it, so
-// none accepts what another refuses. priced says both prices were stated.
-//
-// A provider's other defaults are not applied here: the control API is sent
-// every value, and the caller may have changed any of them.
+// it. Files, the command line and the control API all run it, so they agree.
+// priced says both prices were stated. Other provider defaults are not
+// applied: the control API is sent every value.
 func CheckModel(m *policy.Model, priced bool) error {
 	if err := m.CheckBackend(); err != nil {
 		return err
@@ -218,8 +201,8 @@ func CheckModel(m *policy.Model, priced bool) error {
 	if !m.Kind.Valid() {
 		return fmt.Errorf("kind %q must be chat, completion, embedding or decision", m.Kind)
 	}
-	// The gateway reads the provider to choose how to talk to the backend,
-	// so it must be one this build knows.
+	// The gateway picks how to talk to the backend by provider, so it must
+	// be a known one.
 	prov, known := provider(m.Provider)
 	switch {
 	case m.Provider != "" && !known:
@@ -264,8 +247,8 @@ func CheckModel(m *policy.Model, priced bool) error {
 // checkSubscription says what is wrong with a subscription model, or nil when
 // nothing is, or when m is not one.
 //
-// Each caller's Claude sign-in is sent to the model's backend. So the backend
-// must be Anthropic's own API: any other address would collect those sign-ins.
+// Each caller's Claude sign-in is sent to the backend, so it must be
+// Anthropic's own API: any other address would collect those sign-ins.
 func checkSubscription(m policy.Model) error {
 	if !m.Subscription {
 		return nil
@@ -285,8 +268,8 @@ func checkSubscription(m policy.Model) error {
 	return nil
 }
 
-// checkBackend makes the checks of an entry that only a template file or the
-// command line can fail, before CheckModel makes the rest.
+// checkBackend makes the checks only a file or the command line can fail,
+// before CheckModel makes the rest.
 func checkBackend(m Model) error {
 	switch {
 	case m.ProductID != "" && m.Provider == "":

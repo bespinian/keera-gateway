@@ -1,8 +1,7 @@
 // Routers: filters, route steps, limits and models chained behind one alias.
 // Each router's screen is its editor, drawn as the tree the gateway walks.
-//
 // The tree is sent whole on Save, so a half-drawn router never answers a
-// request. See policy.Router for what each step does.
+// request. See policy.Router.
 
 import { api } from "../api.js";
 import {
@@ -46,7 +45,14 @@ import { oneLine } from "../status.js";
 import { orgNameOf } from "./orgs.js";
 import { modePills, newFilter } from "./filters.js";
 import { nodeCard, removeButton, emptyCard, addButton } from "./node-card.js";
-import { rateShort, budgetShort, rateFields, budgetFields } from "./limits.js";
+import {
+  rateShort,
+  budgetShort,
+  rateFields,
+  budgetFields,
+  budgetUse,
+  rateUse,
+} from "./limits.js";
 import {
   routeFields,
   modeOf,
@@ -70,7 +76,6 @@ import {
   clean,
 } from "./router-tree.js";
 
-// In the order a router usually reads.
 const KIND_TILES = [
   {
     value: "filter",
@@ -106,7 +111,6 @@ const KIND_TILES = [
 
 const KIND_ICONS = Object.fromEntries(KIND_TILES.map((t) => [t.value, t.icon]));
 
-// The list and the editor both delete a router, and warn alike.
 const DELETE_WARNING =
   "Deleting it takes it off the organisation's allow-list. It cannot be " +
   "deleted while a project's or key's allow-list names it. Clients still " +
@@ -246,8 +250,8 @@ function trafficCell(st) {
   );
 }
 
-// createRouter asks only for the alias. The steps are drawn in the editor,
-// and nothing is saved until they make a router.
+// createRouter asks only for the alias. Nothing is saved until the editor
+// has steps.
 async function createRouter(ctx, routers) {
   const alias = h("input", {
     class: "input mono",
@@ -276,7 +280,7 @@ async function createRouter(ctx, routers) {
         alias.focus();
         throw new Error(problem);
       }
-      // A client names both in the same field, so neither may share it.
+      // A client names both in the same field, so they may not share it.
       const models = await api.models(ctx.orgID).then((r) => r.data || []);
       const taken = [
         [routers, "router"],
@@ -451,8 +455,8 @@ export async function routerDetailView(ctx) {
           total.cost_micros || 0,
           "filters and decisions included",
         ),
-        // What deciding added: a generation when a step reads the request,
-        // or the destinations that failed when it tries them.
+        // A generation when a step reads the request, or the destinations
+        // that failed when it tries them.
         placed
           ? stat(
               "Decided",
@@ -499,20 +503,22 @@ export async function routerDetailView(ctx) {
     ),
   );
 
-  if (!fresh && (rep.destinations || []).length) {
+  // They share a row like a key's models and facts. Either alone takes it all.
+  const panels = fresh
+    ? []
+    : [
+        (rep.destinations || []).length ? answeredCard(rep.destinations) : null,
+        (res.limits || []).length ? limitsCard(res.limits, savedSteps) : null,
+      ].filter(Boolean);
+  if (panels.length) {
     wrap.append(
       h(
         "div",
-        { class: "card", style: { marginTop: "16px" } },
-        h("div", { class: "card-head" }, h("h2", {}, "Answered by")),
-        h(
-          "div",
-          { class: "card-body" },
-          barList(rep.destinations, {
-            label: (d) => d.alias || "refused before a model",
-            value: (d) => d.requests,
-          }),
-        ),
+        {
+          class: panels.length === 2 ? "grid grid-2" : "grid",
+          style: { marginTop: "16px" },
+        },
+        ...panels,
       ),
     );
   }
@@ -521,8 +527,7 @@ export async function routerDetailView(ctx) {
   return wrap;
 }
 
-// settingsCard holds what a person reads about the router. Clients see the
-// display name and description on /v1/models.
+// settingsCard: clients see the display name and description on /v1/models.
 function settingsCard(env) {
   const displayName = h("input", {
     class: "input",
@@ -580,7 +585,7 @@ async function save(env) {
   ctx.reload();
 }
 
-// A slot is a place in the tree a step can be: the start, a step's next or
+// A slot is a place in the tree for a step: the start, a step's next or
 // exceeded, or a route step's branch. Editing goes through slots, so a step
 // never needs to know its parent.
 
@@ -606,8 +611,8 @@ function branchSlot(step, dest) {
   };
 }
 
-/** entry is where requests come in. Its + is the only way to add a step in
- *  front of the first one, and the only + while the router is one model. */
+/** entry is where requests come in. Its + is the only way to add a step
+ *  before the first, and the only + while the router is one model. */
 function entry(env) {
   const slot = rootSlot(env);
   return h(
@@ -629,7 +634,7 @@ function entry(env) {
 
 /** renderSlot draws a slot's step and all after it, or how an empty branch
  *  ends. end says what an empty slot means: required, refuse, or a
- *  destination sent to as is. */
+ *  destination. */
 function renderSlot(env, slot, end) {
   const step = slot.get();
   if (step) return renderChain(env, step, slot);
@@ -642,7 +647,7 @@ function renderSlot(env, slot, end) {
       "Refused",
     );
   }
-  // An empty required slot: the router cannot be saved until it is filled.
+  // The router cannot be saved until this is filled.
   return emptyCard({
     label: "Next step",
     name: env.canEdit ? "Choose a model or another step" : "Nothing here yet",
@@ -652,13 +657,12 @@ function renderSlot(env, slot, end) {
   });
 }
 
-// modelGlyph is a model's provider's mark, or the plain model icon for a
-// self-hosted model or a provider this build has no mark for.
+// modelGlyph is the provider's mark, or the plain model icon.
 function modelGlyph(m) {
   return (m && m.provider && providerMark(m.provider)) || icon(icons.models);
 }
 
-// endChip is a route step's destination with no steps of its own.
+// endChip is a destination with no steps of its own.
 function endChip(env, dest) {
   const m = env.models.find((x) => x.alias === dest);
   return h(
@@ -683,8 +687,7 @@ function renderChain(env, step, slot) {
   );
 }
 
-/** outgoing is the branches leaving a step, each labelled with when it is
- *  taken. */
+/** outgoing is a step's branches, each labelled with when it is taken. */
 function outgoing(env, step) {
   const branches = [];
   if (passes(step.kind) && !limits(step.kind)) {
@@ -734,8 +737,8 @@ function branch(env, label, slot, end) {
             label,
           )
         : null,
-      // Inserting before a filled slot only offers steps that pass the
-      // request on; an empty one may take any.
+      // Before a filled slot, only steps that pass the request on; an empty
+      // one may take any.
       env.canEdit && (filled || end.dest || end.refuse)
         ? addButton(
             filled ? "Insert a step here" : "Add steps to this branch",
@@ -785,7 +788,6 @@ function nodeName(step) {
         : `${n} ${plural(n, "destination")}`;
     }
     case "system_prompt": {
-      // Just the start; the dialog has the whole text.
       const text = oneLine(step.prompt || "", 60);
       if (!text) return h("span", { class: "faint" }, "Not written");
       return h("span", { class: "pl-prompt", title: step.prompt }, text);
@@ -796,7 +798,7 @@ function nodeName(step) {
     : h("span", { class: "faint" }, "Not chosen");
 }
 
-// nodeMeta is the one setting that decides what a step does.
+// nodeMeta is the setting that decides what a step does.
 function nodeMeta(env, step) {
   let bits = [];
   if (step.kind === "filter") {
@@ -826,9 +828,8 @@ function nodeMeta(env, step) {
 
 /** addStep puts a new step in a slot. A step that passes the request on goes
  *  in front of what is there. A route step moves it onto the branch of the
- *  destination it ends at, or else of its first destination. In an empty
- *  branch the destination becomes a model step, so the branch still ends
- *  where it did. */
+ *  destination it ends at, or else its first. In an empty branch the
+ *  destination becomes a model step, so the branch still ends where it did. */
 function addStep(env, slot, end) {
   const existing = slot.get();
   // An unchosen model, as a new router starts with, holds nothing to keep.
@@ -885,7 +886,7 @@ function editStep(env, step, slot) {
 }
 
 /** removeStep takes a step out. A filter or a limit hands its place to the
- *  step after it; a route step or a model takes what follows it along. */
+ *  next step; a route step or a model takes what follows with it. */
 function removeStep(env, step, slot) {
   const gone =
     steps(step).length - 1 - (passes(step.kind) ? steps(step.next).length : 0);
@@ -905,8 +906,8 @@ function removeStep(env, step, slot) {
   });
 }
 
-/** stepDialog asks what a step should be. A new step starts with its kind;
- *  an existing one keeps it, since what follows it depends on the kind. */
+/** stepDialog edits a step. An existing step keeps its kind, since what
+ *  follows depends on it. */
 function stepDialog(env, { step, kinds, title, preset = {}, onDone }) {
   let kind = step ? step.kind : "";
   const fieldsHost = h("div", {});
@@ -916,7 +917,7 @@ function stepDialog(env, { step, kinds, title, preset = {}, onDone }) {
     kind = value;
     const built = fieldsFor(env, kind, step || {}, preset);
     fieldsHost.replaceChildren(built.el);
-    // A new step's fields would otherwise sit right under the kind it chose.
+    // Space between a new step's kind and its fields.
     fieldsHost.style.marginTop = step ? "" : "14px";
     read = built.read;
   };
@@ -952,8 +953,8 @@ function stepDialog(env, { step, kinds, title, preset = {}, onDone }) {
   if (picker) picker.tiles.firstChild.focus();
 }
 
-/** fieldsFor builds the fields for one kind of step, and read returns their
- *  values or throws what is missing. */
+/** fieldsFor builds a step's fields; read returns their values or throws
+ *  what is missing. */
 function fieldsFor(env, kind, step, preset) {
   if (kind === "route") return routeFields(env.models, step);
   if (kind === "rate_limit") {
@@ -971,7 +972,6 @@ function fieldsFor(env, kind, step, preset) {
       rows: 6,
       placeholder: "Answer in German. Never name a customer.",
     });
-    // A textarea's text is its content, not a value attribute.
     prompt.value = step.prompt || "";
     return {
       el: field(
@@ -1029,7 +1029,7 @@ function fieldsFor(env, kind, step, preset) {
       },
     };
   }
-  // A filter: one of the organisation's, or a new one made here.
+  // One of the organisation's filters, or a new one made here.
   const select = h("select", { class: "select" });
   const fill = (chosen) => {
     select.replaceChildren(
@@ -1071,6 +1071,48 @@ function fieldsFor(env, kind, step, preset) {
       return { ref: select.value };
     },
   };
+}
+
+function answeredCard(destinations) {
+  return h(
+    "div",
+    { class: "card" },
+    h("div", { class: "card-head" }, h("h2", {}, "Answered by")),
+    h(
+      "div",
+      { class: "card-body" },
+      barList(destinations, {
+        label: (d) => d.alias || "refused before a model",
+        value: (d) => d.requests,
+      }),
+    ),
+  );
+}
+
+// limitsCard shows how much of each budget, and each rate limit per day or
+// month, is used. Each counts in its own window, not the period picked above.
+// A limit is named by its kind alone, since step ids are never shown and the
+// line below it already says how much it allows.
+function limitsCard(limits, saved) {
+  const rows = limits.map((l) => {
+    const step = saved.find((s) => s.id === l.step);
+    const kind = l.budget ? "budget" : "rate_limit";
+    const full = step?.exceeded
+      ? "used up, so requests take its exceeded branch until it resets"
+      : "used up, so requests are refused until it resets";
+    return h(
+      "div",
+      { class: "stack", style: { gap: "6px" } },
+      h("strong", {}, KINDS[kind]),
+      l.budget ? budgetUse(l.budget, full) : rateUse(l.rate, full),
+    );
+  });
+  return h(
+    "div",
+    { class: "card" },
+    h("div", { class: "card-head" }, h("h2", {}, "Limits")),
+    h("div", { class: "card-body stack", style: { gap: "16px" } }, ...rows),
+  );
 }
 
 // decisionBanners come before the numbers, since each changes how they read.

@@ -13,7 +13,6 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// filterRun is one 'keera filter' invocation.
 type filterRun struct {
 	*aliasRun
 
@@ -35,9 +34,7 @@ func filterCmd(ctx context.Context, args []string) error {
 	fs.StringVar(&r.mode, "mode", "",
 		"rewrite (a model edits the request and lets it go), gate (a model judges only "+
 			"whether it may go), or pattern (a list of rules is applied, with no model)")
-	// Two flags rather than one bool: an absent bool cannot be told from false,
-	// and on 'set' that is the difference between leaving shadow alone and
-	// switching it off.
+	// Two flags: on 'set', one bool could not tell "leave it" from "off".
 	fs.BoolVar(&r.shadow, "shadow", false,
 		"run the filter and enforce nothing; what it would have done is recorded")
 	fs.BoolVar(&r.noShadow, "no-shadow", false, "act on what the filter answers")
@@ -90,9 +87,8 @@ func (r *filterRun) delete(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// The control plane already refuses to delete one a guardrail or router
-	// uses, so this is about a filter nothing uses today, whose wording is
-	// kept nowhere else.
+	// The control plane refuses to delete a filter in use, so this warns that
+	// the wording is kept nowhere else.
 	what := "its instruction is"
 	if !f.UsesModel() {
 		what = "its rules are"
@@ -102,9 +98,7 @@ func (r *filterRun) delete(ctx context.Context) error {
 
 func (r *filterRun) put(ctx context.Context) error {
 	alias := r.fs.Arg(0)
-	// 'set' starts from the stored filter, so what is not given is kept. 'add'
-	// starts from nothing, and the control plane refuses what is missing. A
-	// new filter enforces, as in the panel and the control API.
+	// A new filter enforces, as in the panel and the control API.
 	f, err := startPut(ctx, r.aliasRun, alias, policy.Filter{Alias: alias}, filterAlias)
 	if err != nil {
 		return err
@@ -128,8 +122,8 @@ func (r *filterRun) apply(f *policy.Filter) error {
 	if r.shadow || r.noShadow {
 		f.Shadow = r.shadow
 	}
-	// A filter that changes kind keeps nothing of the other kind: the endpoint
-	// refuses a pattern filter that carries a model, and the other way round.
+	// A filter that changes kind keeps nothing of the other kind, or the
+	// endpoint refuses it.
 	if f.UsesModel() {
 		f.Rules = nil
 	} else {
@@ -179,8 +173,7 @@ func printFilters(w *table, filters []policy.Filter) {
 	}
 }
 
-// filterWhat is one line saying what a filter does: its instruction, or for a
-// pattern filter how many rules it holds.
+// filterWhat is the instruction, or for a pattern filter its rule count.
 func filterWhat(f policy.Filter) string {
 	if f.UsesModel() {
 		return firstLine(f.Prompt)
@@ -188,8 +181,8 @@ func filterWhat(f policy.Filter) string {
 	return plural(len(f.Rules), "rule")
 }
 
-// filterModeLabel is the mode, and whether the filter is enforced at all: a
-// "gate" in shadow enforces nothing.
+// filterModeLabel says whether the filter enforces: a "gate" in shadow does
+// not.
 func filterModeLabel(f policy.Filter) string {
 	if f.Shadow {
 		return string(f.Mode) + " (shadow)"
@@ -197,7 +190,7 @@ func filterModeLabel(f policy.Filter) string {
 	return string(f.Mode)
 }
 
-// filterMode is a filter's mode. One not given yet will be rewrite.
+// filterMode defaults to rewrite.
 func filterMode(f policy.Filter) policy.FilterMode {
 	if f.Mode == "" {
 		return policy.FilterModeRewrite
@@ -217,8 +210,7 @@ func printFilter(w *table, f policy.Filter) {
 		show(w, "enforcing", "no - it runs, and the request goes on as it was sent")
 	}
 	showIfSet(w, "description", f.Description)
-	// The instruction or the rules are the filter, so they are printed whole,
-	// the rules in the form --rules reads.
+	// Printed whole, the rules in the form --rules reads.
 	if !f.UsesModel() {
 		printBlock(w, "rules", formatRules(f.Rules))
 		return
@@ -226,7 +218,6 @@ func printFilter(w *table, f policy.Filter) {
 	printBlock(w, "instruction", strings.Split(f.Prompt, "\n"))
 }
 
-// printBlock writes a heading row and indented lines under it.
 func printBlock(w *table, name string, lines []string) {
 	_, _ = fmt.Fprintln(w, name+"\t")
 	for _, line := range lines {
@@ -247,13 +238,13 @@ func printFilterProbe(w *table, p gateway.FilterProbe) {
 	}
 	switch {
 	case p.Free:
-		// Said, so a zero cost does not read as one that was not measured.
+		// So a zero cost does not read as one that was not measured.
 		show(w, "cost of one run", "nothing - no model runs, so there is nothing to charge "+
 			"and nothing added to the wait")
 	case p.CostMicros > 0:
 		show(w, "cost of one run", policy.FormatMoney(p.CostMicros))
 	}
-	// Which rules fired, so a pattern filter doing the wrong thing names the line.
+	// Which rules fired, so a wrong one can be found.
 	for _, hit := range p.Hits {
 		what := "matched once"
 		if hit.Matches != 1 {
@@ -265,7 +256,7 @@ func printFilterProbe(w *table, p gateway.FilterProbe) {
 		_, _ = fmt.Fprintf(w, "rule\t%s (%s)\n", hit.Rule, what)
 	}
 	showIfSet(w, "error", p.Error)
-	// A refusal is an answer, not a fault, and nothing was rewritten under it.
+	// A refusal is an answer, not a fault.
 	if p.Refused {
 		reason := p.Refusal
 		if reason == "" {
@@ -281,7 +272,7 @@ func printFilterProbe(w *table, p gateway.FilterProbe) {
 		_, _ = fmt.Fprintf(w, "  sent\t%s\n", firstLine(seg.Before))
 		_, _ = fmt.Fprintf(w, "  came back\t%s\n", firstLine(seg.After))
 	}
-	// A gate answers once per sample: one built to be stopped and one not.
+	// A gate answers once per sample: one meant to be stopped and one not.
 	for _, v := range p.Verdicts {
 		printVerdict(w, v)
 	}
@@ -328,16 +319,14 @@ func changedLabel(changed bool) string {
 	return "unchanged"
 }
 
-// filterReportResponse is what /v1/filters/{alias}/report answers with.
 type filterReportResponse struct {
 	Filter       *policy.Filter     `json:"filter"`
 	Report       store.FilterReport `json:"report"`
 	ProjectNames map[string]string  `json:"project_names"`
 }
 
-// printFilterReport is what a filter has been doing, in the order people ask:
-// is it firing, what does it do, what does it add to the wait and the bill,
-// and which project is living with its refusals.
+// printFilterReport answers in the order people ask: is it firing, what does
+// it do, what does it cost in time and money, and who gets its refusals.
 func printFilterReport(w *table, name string, since time.Duration,
 	res filterReportResponse,
 ) {
@@ -353,7 +342,7 @@ func printFilterReport(w *table, name string, since time.Duration,
 
 	show(w, "runs", fmt.Sprintf("%d of the organisation's %d requests (%s)",
 		rep.Runs, rep.Requests, share(rep.Runs, rep.Requests)))
-	// Counts say what happened; rates are what an instruction is tuned against.
+	// Rates are what an instruction is tuned against.
 	show(w, "passed", fmt.Sprintf("%d (%s)", rep.Passed, share(rep.Passed, rep.Runs)))
 	if rep.Rewrote > 0 || (res.Filter != nil && res.Filter.Mode.Rewrites()) {
 		show(w, "rewrote", fmt.Sprintf("%d (%s), touching %d of %d segments",
@@ -393,7 +382,6 @@ func printFilterReport(w *table, name string, since time.Duration,
 	}
 }
 
-// filterState is the head line of a filter's report.
 func filterState(f *policy.Filter) string {
 	switch {
 	case f == nil:
@@ -408,8 +396,7 @@ func filterState(f *policy.Filter) string {
 	}
 }
 
-// noRunsReason says why a filter saw no traffic: nothing attached it, or it
-// had a quiet week.
+// noRunsReason tells unattached apart from merely quiet.
 func noRunsReason(res filterReportResponse) string {
 	if res.Filter == nil {
 		return "No filter of this alias exists in this organisation."
@@ -418,8 +405,8 @@ func noRunsReason(res filterReportResponse) string {
 		"'keera guardrail show' on a scope says which filters it applies."
 }
 
-// errorConsequence says what a filter that could not run did to the request:
-// an enforcing one refused it, a shadow one measured nothing.
+// errorConsequence says that an enforcing filter that could not run refused
+// the request, and a shadow one measured nothing.
 func errorConsequence(res filterReportResponse) string {
 	if res.Filter != nil && res.Filter.Shadow {
 		return "in shadow, each of those requests was forwarded and measured nothing"

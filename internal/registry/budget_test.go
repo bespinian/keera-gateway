@@ -70,8 +70,8 @@ func TestChargesLandInTheRightPeriodWindow(t *testing.T) {
 }
 
 func TestReconcileReplacesLocalSpendWithTheDatabase(t *testing.T) {
-	// Another replica has been spending too. Reconciling adopts the shared
-	// figure and forgets the local delta, which the recorder has written.
+	// Another replica spent too. Reconciling adopts the shared figure and
+	// forgets the local delta.
 	b := newBudgets(false)
 	now := time.Now()
 	b.Charge(scopes(), 500_000, now)
@@ -87,8 +87,7 @@ func TestReconcileReplacesLocalSpendWithTheDatabase(t *testing.T) {
 	if got := b.Spent(policy.ScopeProject, "project_1", policy.PeriodDay, now); got != 900_000 {
 		t.Errorf("spend after reconcile = %d, want the database's 900000", got)
 	}
-	// The org row was not in the database, so its window is gone rather than
-	// stale.
+	// The org row is gone from the database, so its window is too.
 	if got := b.Spent(policy.ScopeOrg, "org_1", policy.PeriodMonth, now); got != 0 {
 		t.Errorf("org spend = %d, want 0", got)
 	}
@@ -148,8 +147,7 @@ func TestWithoutPaymentsCreditIsNotChecked(t *testing.T) {
 }
 
 // Requests started together each hold what they may cost, so they cannot all
-// spend the same credit. A reconcile does not drop the holds: those requests
-// have not been charged yet.
+// spend the same credit. A reconcile keeps the holds.
 func TestRunningRequestsHoldTheCredit(t *testing.T) {
 	b := newBudgets(true)
 	b.reconcileCredit([]store.CreditRow{{OrgID: "org_a", BalanceMicros: 5_000_000}})
@@ -193,8 +191,8 @@ func TestAnInvoicedOrganisationHoldsNothing(t *testing.T) {
 	}
 }
 
-// A router's daily limit counts requests or tokens, not money, so a charge
-// of money leaves it alone and a tally of requests leaves the budgets alone.
+// A router's daily limit counts requests or tokens, not money, and budgets
+// count money only.
 func TestTallyCountsOnlyItsOwnMeter(t *testing.T) {
 	b := newBudgets(false)
 	now := time.Now()
@@ -217,9 +215,8 @@ func TestTallyCountsOnlyItsOwnMeter(t *testing.T) {
 	}
 }
 
-// The database counts a request only once its row is written, so a reconcile
-// while a request runs must not forget it, or long streams would let a daily
-// limit be passed again every refresh.
+// A reconcile must not forget a running request, which has no row yet, or
+// long streams could pass a daily limit again every refresh.
 func TestReconcileKeepsRequestsStillRunning(t *testing.T) {
 	b := newBudgets(false)
 	now := time.Now()

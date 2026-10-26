@@ -1,13 +1,9 @@
-// The store's tests run against a real Postgres, because no fake can cover the
-// schema, the queries, and what Postgres itself does: the advisory lock, the
-// cascades, the upserts, LISTEN/NOTIFY.
+// The store's tests run against a real Postgres. Set KEERA_TEST_DATABASE_URL
+// to a database they may create, truncate and drop tables in; without it they
+// skip. `make test-integration` starts one in a container.
 //
-// Set KEERA_TEST_DATABASE_URL to a database these may create, truncate and drop
-// tables in. Without it every test here skips, so `go test ./...` works
-// anywhere; `make test-integration` starts one in a container.
-//
-// There is no build tag on purpose: tagged files are skipped by `go vet
-// ./...`, so they can stop compiling unnoticed.
+// There is no build tag on purpose: `go vet ./...` skips tagged files, so they
+// could stop compiling unnoticed.
 package store
 
 import (
@@ -34,7 +30,6 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// openTestStore connects to KEERA_TEST_DATABASE_URL and migrates it.
 func openTestStore() *Store {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -48,8 +43,8 @@ func openTestStore() *Store {
 	return st
 }
 
-// db returns the store on an empty database. Every test starts from nothing,
-// so no test can be made to pass by another one's leftovers.
+// db returns the store on an empty database, so no test depends on another's
+// leftovers.
 func db(t *testing.T) (*Store, context.Context) {
 	t.Helper()
 	if testStore == nil {
@@ -67,8 +62,7 @@ func db(t *testing.T) (*Store, context.Context) {
 	return testStore, ctx
 }
 
-// fixture is the tenancy every policy test needs: one org, one project in it, and
-// one key bound to both.
+// fixture is one org, one project in it, and one key bound to both.
 type fixture struct {
 	orgID, projectID, keyID string
 	key                     string
@@ -123,8 +117,8 @@ func TestMigrateIsIdempotentAndSafeInParallel(t *testing.T) {
 		t.Errorf("the second Migrate applied %v, want nothing", again)
 	}
 
-	// Several replicas starting at once is the ordinary case. The advisory
-	// lock keeps two of them from running the same CREATE TABLE.
+	// Several replicas start at once. The advisory lock keeps two from running
+	// the same CREATE TABLE.
 	if _, err := st.pool.Exec(ctx, "DROP SCHEMA public CASCADE; CREATE SCHEMA public"); err != nil {
 		t.Fatalf("dropping the schema: %v", err)
 	}
@@ -155,16 +149,14 @@ func TestMigrateIsIdempotentAndSafeInParallel(t *testing.T) {
 }
 
 func TestNotifyReachesAListener(t *testing.T) {
-	// This is what makes a revoked key stop working within a round trip rather
-	// than a cache lifetime, so test that a notification actually arrives.
+	// A revoked key stops working at once only if the notification arrives.
 	st, ctx := db(t)
 
 	pooled, err := st.pool.Acquire(ctx)
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
-	// Closed rather than released, so the LISTEN does not follow the
-	// connection into later tests.
+	// Closed rather than released, so the LISTEN does not leak into later tests.
 	conn := pooled.Hijack()
 	defer conn.Close(context.Background())
 	if _, err := conn.Exec(ctx, "LISTEN "+NotifyChannel); err != nil {
@@ -189,9 +181,8 @@ func TestNotifyReachesAListener(t *testing.T) {
 }
 
 func TestListenOutlivesIdleSessionTimeout(t *testing.T) {
-	// Managed Postgres often sets idle_session_timeout, and a listener sends
-	// nothing while it waits. Without its own override it is cut off every time
-	// the timeout runs out.
+	// Managed Postgres often sets idle_session_timeout, which would cut off an
+	// idle listener.
 	base, ctx := db(t)
 	sep := "?"
 	if strings.Contains(testDSN, "?") {

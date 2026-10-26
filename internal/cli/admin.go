@@ -18,19 +18,17 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// Flag descriptions that several commands share word for word.
+// Flag descriptions several commands share.
 const (
 	orgUsage  = "organisation, by name or id"
 	jsonUsage = "print raw JSON"
 	yesUsage  = "do not ask for confirmation"
 
-	// The flags of the reports.
 	sinceUsage = "how far back to look"
 	limitUsage = "how many to print"
 	modelUsage = "restrict to one model"
 )
 
-// out renders v as a table via render, or as JSON when --json was given.
 func out(asJSON bool, v any, render func(*table)) error {
 	if asJSON {
 		enc := json.NewEncoder(os.Stdout)
@@ -42,8 +40,6 @@ func out(asJSON bool, v any, render func(*table)) error {
 	return w.Flush()
 }
 
-// doOut sends a request and prints what came back with show, or as it came
-// with --json.
 func doOut[T any](ctx context.Context, c *client, method, path string, body any, asJSON bool,
 	show func(*table, T),
 ) error {
@@ -54,9 +50,8 @@ func doOut[T any](ctx context.Context, c *client, method, path string, body any,
 	return out(asJSON, res, func(w *table) { show(w, res) })
 }
 
-// split takes the verb off a command's arguments. A leading flag means the
-// verb was left out, so the verb is empty and parseVerb reads it as the
-// listing, where the command has one.
+// split returns an empty verb when a flag comes first, which parseVerb reads
+// as the listing.
 func split(args []string) (sub string, rest []string) {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return "", args
@@ -64,7 +59,7 @@ func split(args []string) (sub string, rest []string) {
 	return args[0], args[1:]
 }
 
-// list reads one of the control API's {"data": [...]} listings.
+// list reads a {"data": [...]} listing.
 func list[T any](ctx context.Context, c *client, path string) ([]T, error) {
 	var res struct {
 		Data []T `json:"data"`
@@ -77,21 +72,16 @@ func inOrg(path, orgID string) string {
 	return path + "?org_id=" + url.QueryEscape(orgID)
 }
 
-// sinceParam is the start of a report window, as the control API reads it.
 func sinceParam(d time.Duration) string {
 	return time.Now().Add(-d).UTC().Format(time.RFC3339)
 }
 
-// reportWindow is how far back a report looks unless told otherwise.
 const reportWindow = 7 * 24 * time.Hour
 
-// reportLimit is how many rows a report prints unless told otherwise.
 const reportLimit = 50
 
-// reportQuery starts a report's query: its window, its organisation if one
-// was given, the project, key or person it is narrowed to, and extra. Empty
-// values are left out. w may be nil, for a report that takes no --project,
-// --key or --user.
+// reportQuery leaves out empty values. w may be nil, for a report that takes
+// no --project, --key or --user.
 func reportQuery(ctx context.Context, c *client, org string, w *who, since time.Duration,
 	extra map[string]string,
 ) (url.Values, error) {
@@ -121,18 +111,16 @@ func setIfGiven(q url.Values, params map[string]string) {
 	}
 }
 
-// errNotFound is what a lookup by name returns when nothing matches, so a
-// caller can tell "not there" from "the control API is down".
+// errNotFound tells "not there" apart from "the control API is down".
 var errNotFound = errors.New("not found")
 
-// notFoundError is a lookup that matched nothing, worded for the person.
 type notFoundError string
 
 func (e notFoundError) Error() string      { return string(e) }
 func (notFoundError) Is(target error) bool { return target == errNotFound }
 
-// notFound is how every command says a name matched nothing: what was looked
-// for, where, and the command that lists what there is.
+// notFound says what was looked for, where, and the command that lists what
+// there is.
 func notFound(noun, name, orgID, cmd string) error {
 	where := ""
 	if orgID != "" {
@@ -141,7 +129,7 @@ func notFound(noun, name, orgID, cmd string) error {
 	return notFoundError(fmt.Sprintf("no %s %q%s (see: keera %s list)", noun, name, where, cmd))
 }
 
-// findIn picks the entry given names: by id, or else by name, ignoring case.
+// findIn matches by id, or else by name, ignoring case.
 func findIn[T any](entries []T, given string, idName func(T) (string, string)) (T, bool) {
 	given = strings.TrimSpace(given)
 	for _, byName := range []bool{false, true} {
@@ -156,9 +144,8 @@ func findIn[T any](entries []T, given string, idName func(T) (string, string)) (
 	return zero, false
 }
 
-// findNamed lists path in one organisation and picks the entry given names, as
-// findIn does. noun and cmd word the error when there is none. org is resolved
-// as resolveOrg does.
+// findNamed lists path and picks an entry as findIn does. noun and cmd word
+// the error when there is none.
 func findNamed[T any](ctx context.Context, c *client, org, given, path, noun, cmd string,
 	idName func(T) (string, string),
 ) (T, error) {
@@ -177,9 +164,8 @@ func findNamed[T any](ctx context.Context, c *client, org, given, path, noun, cm
 	return zero, notFound(noun, given, orgID, cmd)
 }
 
-// keepRaw sends a request and decodes the answer into v. It returns the
-// answer as it came, so --json prints everything the control API said rather
-// than only the fields a table shows.
+// keepRaw also returns the raw answer, so --json prints everything, not only
+// the fields a table shows.
 func keepRaw(ctx context.Context, c *client, method, path string, body, v any) (json.RawMessage, error) {
 	var raw json.RawMessage
 	if err := c.do(ctx, method, path, body, &raw); err != nil {
@@ -188,8 +174,8 @@ func keepRaw(ctx context.Context, c *client, method, path string, body, v any) (
 	return raw, json.Unmarshal(raw, v)
 }
 
-// printNone says a listing is empty, so a bare heading is not taken for a
-// broken command. add, when given, is the command that makes one.
+// printNone avoids a bare heading that looks like a broken command. add is the
+// command that makes one.
 func printNone(w io.Writer, what, add string) {
 	if add == "" {
 		_, _ = fmt.Fprintf(w, "No %s.\n", what)
@@ -198,19 +184,17 @@ func printNone(w io.Writer, what, add string) {
 	_, _ = fmt.Fprintf(w, "No %s. Add one with: %s\n", what, add)
 }
 
-// handOver prints a new key: the secret alone on stdout, so
-// 'KEY=$(keera key create …)' captures it, and what happened on stderr.
+// handOver prints the secret alone on stdout, so 'KEY=$(keera key create …)'
+// captures it.
 func handOver(secret, said string) {
 	fmt.Println(secret)
 	fmt.Fprintf(os.Stderr, "\n%s %s\n", said, styleErr.warn("This is the only time it is shown."))
 }
 
-// resolveOrg turns the organisation given, by name or id, into its id. When
-// none was given and there is only one, it is that one, which is the case in
-// every dedicated and on-premises deployment.
+// resolveOrg turns a name or id into an id. With none given, it is the only
+// organisation, as in every dedicated and on-premises deployment.
 func resolveOrg(ctx context.Context, c *client, given string) (string, error) {
-	// Anything shaped like an id is passed on unchanged, so the common case
-	// needs no lookup.
+	// An id needs no lookup.
 	if strings.HasPrefix(given, "org_") {
 		return given, nil
 	}
@@ -227,8 +211,8 @@ func resolveOrg(ctx context.Context, c *client, given string) (string, error) {
 	return "", notFound("organisation", given, "", "org")
 }
 
-// orgIfGiven is resolveOrg for a report, which spans every organisation the
-// caller may see when none was given, so only a given one is looked up.
+// orgIfGiven is resolveOrg for a report, which spans every organisation when
+// none is given.
 func orgIfGiven(ctx context.Context, c *client, given string) (string, error) {
 	if given == "" {
 		return "", nil
@@ -236,9 +220,8 @@ func orgIfGiven(ctx context.Context, c *client, given string) (string, error) {
 	return resolveOrg(ctx, c, given)
 }
 
-// who narrows a report to one project, key or person, each given the way the
-// other commands take it: a project by name, a key by name, a person by email,
-// or any of them by id.
+// who narrows a report to one project or key by name, a person by email, or
+// any of them by id.
 type who struct{ project, key, user string }
 
 func registerWho(fs *flag.FlagSet) *who {
@@ -249,9 +232,8 @@ func registerWho(fs *flag.FlagSet) *who {
 	return w
 }
 
-// params resolves the given flags to the ids the control API filters by. A
-// report may span every organisation, so one is only resolved when a name
-// needs looking up.
+// params resolves names to ids. The organisation is only resolved when a name
+// needs looking up, since a report may span every one.
 func (w *who) params(ctx context.Context, c *client, org string) (map[string]string, error) {
 	p := map[string]string{}
 	orgID := org
@@ -279,8 +261,7 @@ func (w *who) params(ctx context.Context, c *client, org string) (map[string]str
 	return p, nil
 }
 
-// projectID, keyID and userID resolve what a flag was given to an id. An id is
-// passed on unchanged, so it needs no lookup and no organisation.
+// projectID, keyID and userID pass an id on unchanged, with no lookup.
 func projectID(ctx context.Context, c *client, org, given string) (string, error) {
 	if given == "" || id.HasPrefix(given, "project") {
 		return given, nil
@@ -305,8 +286,8 @@ func userID(ctx context.Context, c *client, org, given string) (string, error) {
 	return u.ID, err
 }
 
-// theOnlyOrg is the organisation a command means when it was not told one.
-// howToSay tells the caller how to name one instead.
+// theOnlyOrg is used when a command was not told one. howToSay tells the
+// caller how to name one instead.
 func theOnlyOrg(ctx context.Context, c *client, howToSay string) (string, error) {
 	orgs, err := list[store.Org](ctx, c, "/v1/orgs")
 	if err != nil {
@@ -322,9 +303,8 @@ func theOnlyOrg(ctx context.Context, c *client, howToSay string) (string, error)
 	}
 }
 
-// textOrFile resolves a flag value that may name a file instead of carrying
-// the text. Long text such as a system prompt loses its newlines when quoted
-// through a shell.
+// textOrFile reads @path as a file, because long text loses its newlines when
+// quoted through a shell.
 func textOrFile(v string) (string, error) {
 	if !strings.HasPrefix(v, "@") {
 		return v, nil
@@ -344,7 +324,7 @@ func textOrFile(v string) (string, error) {
 	return strings.TrimSpace(string(b)), nil
 }
 
-// setInt applies a flag that uses -1 for "not given" and 0 to clear the field.
+// setInt treats -1 as "not given" and 0 as clear.
 func setInt(dst **int, v int) {
 	switch {
 	case v < 0:
@@ -357,8 +337,8 @@ func setInt(dst **int, v int) {
 	}
 }
 
-// stringList is a flag that may be repeated and also takes comma-separated
-// values, because people type both.
+// stringList may be repeated and takes comma-separated values, because people
+// type both.
 type stringList []string
 
 func (l *stringList) String() string { return strings.Join(*l, ",") }
@@ -368,8 +348,7 @@ func (l *stringList) Set(v string) error {
 	return nil
 }
 
-// splitList splits a comma-separated value, dropping spaces and empty items,
-// so "a, b" means the same as "a,b".
+// splitList drops spaces and empty items, so "a, b" means "a,b".
 func splitList(v string) []string {
 	var items []string
 	for s := range strings.SplitSeq(v, ",") {
@@ -380,8 +359,7 @@ func splitList(v string) []string {
 	return items
 }
 
-// show writes one "name<tab>value" row, for the printers that describe one
-// thing rather than list many.
+// show writes one "name<tab>value" row.
 func show(w *table, name string, v any) {
 	_, _ = fmt.Fprintf(w, "%s\t%v\n", name, v)
 }
@@ -392,7 +370,6 @@ func showIfSet(w *table, name, v string) {
 	}
 }
 
-// firstLine renders a multi-line value as the one line a table has room for.
 func firstLine(s string) string {
 	line, rest, cut := strings.Cut(s, "\n")
 	if r := []rune(line); len(r) > 60 {
@@ -404,11 +381,11 @@ func firstLine(s string) string {
 	return line
 }
 
-// oneLine keeps a backend's message on its row. Some answer with a stack
-// trace, and a table that reflows is not a table.
+// oneLine keeps a backend's message on its row, since some send a stack
+// trace.
 func oneLine(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
-	// Cut by character, not byte, so a multi-byte one is never split.
+	// By character, so a multi-byte one is never split.
 	if r := []rune(s); len(r) > 100 {
 		return string(r[:99]) + "…"
 	}
@@ -417,7 +394,6 @@ func oneLine(s string) string {
 
 func dash(s string) string { return cmp.Or(s, "-") }
 
-// yesNo is how every table says yes or no, painted like a state.
 func yesNo(b bool) string {
 	if b {
 		return statusWord("yes")
@@ -425,9 +401,7 @@ func yesNo(b bool) string {
 	return statusWord("no")
 }
 
-// plural renders a count with its noun, so a single one is not "1 rules".
-// A noun that does not just take an "s" passes its plural too:
-// plural(n, "sandbox", "sandboxes").
+// plural takes an irregular plural too: plural(n, "sandbox", "sandboxes").
 func plural(n int, noun string, many ...string) string {
 	if n == 1 {
 		return "1 " + noun
@@ -438,8 +412,8 @@ func plural(n int, noun string, many ...string) string {
 	return strconv.Itoa(n) + " " + noun + "s"
 }
 
-// share renders one count as a percentage of another, which compares at a
-// glance where "173 of 4,219" does not.
+// share renders a percentage, which compares at a glance where "173 of 4,219"
+// does not.
 func share(part, whole int64) string {
 	if whole <= 0 {
 		return "-"
@@ -454,8 +428,7 @@ func derefInt(p *int) int {
 	return *p
 }
 
-// shortDuration is a length of time in the units a person would say.
-// time.Duration's own string is "11m30.000000001s", or "168h0m0s" for a week.
+// shortDuration avoids time.Duration's "11m30.000000001s" and "168h0m0s".
 func shortDuration(d time.Duration) string {
 	const day = 24 * time.Hour
 	switch {

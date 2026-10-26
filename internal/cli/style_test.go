@@ -8,11 +8,10 @@ import (
 	"testing"
 )
 
-// The promise this whole file checks: what a pipe, a file or a CI log gets is
-// what it got before there was any colour at all.
+// What this file checks: a pipe, a file or a CI log gets no colour at all.
 
 func TestColourOnlyWhereItCanBeRead(t *testing.T) {
-	// A pipe, which is what a redirect and a CI job both are.
+	// A redirect and a CI job both write to a pipe.
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +106,7 @@ func TestStripANSIKeepsEverythingElse(t *testing.T) {
 	}
 }
 
-// The one that matters: colour may change nothing but the colour.
+// Colour may change nothing but the colour.
 func TestPaintedTableHasThePlainTableSColumns(t *testing.T) {
 	t.Cleanup(func() { style = false })
 	rows := func(w *table) {
@@ -143,8 +142,7 @@ func TestPaintedTableHasThePlainTableSColumns(t *testing.T) {
 	}
 }
 
-// A cell whose own text starts or ends with spaces is where putting the
-// escapes back is easiest to get wrong.
+// Cells with spaces around their text are the easiest to get wrong.
 func TestPaintedCellsWithSpacesAroundThem(t *testing.T) {
 	t.Cleanup(func() { style = false })
 	rows := func(w *table) {

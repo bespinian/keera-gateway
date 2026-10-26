@@ -12,9 +12,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// sizeRouter places between the two destinations the router harness serves,
-// with the small one bounded at 100 tokens and the large one taking whatever is
-// above it.
+// sizeRouter sends up to 100 tokens to the small model and the rest to the
+// large one.
 func sizeRouter() policy.Route {
 	return policy.Route{
 		OrgID: "org_1", Router: "bysize", Mode: policy.RouteModeSize,
@@ -23,8 +22,7 @@ func sizeRouter() policy.Route {
 	}
 }
 
-// ofTokens is a chat request whose text is about n estimated tokens, by the
-// same reckoning the gateway uses.
+// ofTokens is a chat request of about n estimated tokens.
 func ofTokens(t *testing.T, n int) string {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{
@@ -49,8 +47,7 @@ func TestSizeStepPlacesASmallRequestOnTheSmallModel(t *testing.T) {
 	if got := resp.Header.Get("X-Keera-Router"); got != "bysize -> keera-small" {
 		t.Errorf("X-Keera-Router = %q, want the small model", got)
 	}
-	// Nothing was generated to arrive at that, which is the whole point of the
-	// mode: the first body upstream is the client's own request.
+	// Nothing was generated: the first body upstream is the client's request.
 	forwarded := string(<-h.upstreamBodies)
 	if !strings.Contains(forwarded, "small-served") {
 		t.Errorf("the request did not go to the small model: %s", forwarded)
@@ -78,8 +75,7 @@ func TestSizeStepPlacesALargeRequestAboveTheCeiling(t *testing.T) {
 }
 
 func TestSizeStepCannotBeTalkedIntoADestination(t *testing.T) {
-	// Unlike with an instruction step, a prompt naming the model it wants is
-	// just a few words longer.
+	// A prompt naming the model it wants is just a few words longer.
 	h := routeHarness(t, picks(""), sizeRouter(), nil)
 
 	resp := h.post(t, "/v1/chat/completions",
@@ -94,8 +90,7 @@ func TestSizeStepCannotBeTalkedIntoADestination(t *testing.T) {
 }
 
 func TestSizeStepFallsThroughToTheNextDestinationUp(t *testing.T) {
-	// The preferred destination being down must not refuse the request: more
-	// model than needed beats no answer.
+	// With the preferred destination down, a larger model answers.
 	h := routeHarness(t, picks(""), sizeRouter(), nil)
 	m := h.src.models["keera-small"]
 	m.Enabled = false
@@ -111,13 +106,12 @@ func TestSizeStepFallsThroughToTheNextDestinationUp(t *testing.T) {
 }
 
 func TestSizeStepRanksADestinationThatCannotHoldItLast(t *testing.T) {
-	// A ceiling is a preference and a context window is arithmetic, so a
-	// destination that cannot hold the request goes behind every one that can.
+	// A ceiling is a preference, a context window a hard limit, so a
+	// destination that cannot fit the request goes last.
 	h := routeHarness(t, picks(""), policy.Route{
 		OrgID: "org_1", Router: "bysize", Mode: policy.RouteModeSize,
 		Destinations: []string{"keera-small", "keera-large"},
-		// The ceiling says the small model should take this, and its context
-		// says it cannot.
+		// The ceiling picks the small model, but its context is too small.
 		Ceilings: map[string]int{"keera-small": 100_000},
 	}, nil)
 	m := h.src.models["keera-small"]
@@ -152,8 +146,7 @@ func TestSizeStepRefusesWhenNoDestinationCanBeServed(t *testing.T) {
 }
 
 func TestSizeStepAllowsItsDestinationsLikeAnyOther(t *testing.T) {
-	// Granting a router grants where it sends, and a size step is no
-	// different: a key narrowed to it has nothing else in its allow-list.
+	// Granting a router grants its destinations, size steps included.
 	res := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"},
 		&policy.Limits{AllowedModels: []string{"bysize"}}, nil, nil)
 	h := routeHarness(t, picks(""), sizeRouter(), res)
@@ -191,9 +184,8 @@ func TestSizeBandsDivideTheRangeSmallestFirst(t *testing.T) {
 }
 
 func TestSizeBandsCallOutADestinationNothingReaches(t *testing.T) {
-	// A ceiling no higher than the one before it leaves no size for this
-	// destination to be first choice for. That mistake shows up only as
-	// successful requests, so the check has to say so.
+	// A ceiling no higher than the one before leaves this destination no
+	// sizes. Requests still succeed, so only the check can say so.
 	rt := policy.Route{
 		Destinations: []string{"a", "b", "big"},
 		Ceilings:     map[string]int{"a": 1000, "b": 1000},

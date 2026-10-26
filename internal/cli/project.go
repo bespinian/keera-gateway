@@ -10,7 +10,6 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// projectRun is one 'keera project' invocation.
 type projectRun struct {
 	*cmdRun
 	name        string
@@ -114,32 +113,27 @@ func (r *projectRun) delete(ctx context.Context) error {
 	})
 }
 
-// find resolves the project named by the first argument.
 func (r *projectRun) find(ctx context.Context) (store.Project, error) {
 	return findProject(ctx, r.c, r.org, r.fs.Arg(0))
 }
 
-// deletedProject is what DELETE /v1/projects/{id} reports it removed, as far
-// as the table shows it.
+// deletedProject is the part of the DELETE /v1/projects/{id} reply the table
+// shows.
 type deletedProject struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
 	DetachedKeys int    `json:"detached_keys"`
 }
 
-// findProject takes an id or a name and returns the project. The id is tried
-// first, so a project named like an id still resolves to itself. org is
-// resolved as resolveOrg does.
+// findProject takes an id or a name. The id is tried first, so a project
+// named like an id still resolves to itself.
 func findProject(ctx context.Context, c *client, org, given string) (store.Project, error) {
 	return findNamed(ctx, c, org, given, "/v1/projects", "project", "project",
 		func(p store.Project) (string, string) { return p.ID, p.Name })
 }
 
-// confirmProjectDelete says what the deletion takes with it and makes the
-// administrator type the project's name back.
-//
-// Live keys are counted here because they block the deletion, while revoked
-// ones stay behind as history.
+// confirmProjectDelete says what the deletion removes and asks for the
+// project's name. Live keys are counted because they block the deletion.
 func confirmProjectDelete(ctx context.Context, c *client, project store.Project) error {
 	keys, err := list[store.KeyInfo](ctx, c, inOrg("/v1/keys", project.OrgID)+
 		"&project_id="+url.QueryEscape(project.ID))

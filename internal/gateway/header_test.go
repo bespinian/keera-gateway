@@ -24,8 +24,7 @@ func headerRoute() policy.Route {
 
 const byAppPrompt = `{"model":"byapp","messages":[{"role":"user","content":"hello"}]}`
 
-// postSaying posts a chat request with the headers given, as name and value
-// pairs. The same name twice sends it twice.
+// postSaying posts a chat request with the given header name and value pairs.
 func (h *harness) postSaying(t *testing.T, body string, header ...string) *http.Response {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, h.url("/v1/chat/completions"), strings.NewReader(body))
@@ -55,7 +54,7 @@ func TestHeaderStepSendsTheRequestWhereItsValueSays(t *testing.T) {
 	if got := resp.Header.Get("X-Keera-Router"); got != "byapp -> keera-large" {
 		t.Errorf("X-Keera-Router = %q, want the large model", got)
 	}
-	// Nothing was asked to decide: the first body upstream is the client's.
+	// No model decided, so the first body upstream is the client's.
 	if sent := string(<-h.upstreamBodies); !strings.Contains(sent, "large-served") {
 		t.Errorf("the request did not go to the large model: %s", sent)
 	}
@@ -75,7 +74,7 @@ func TestHeaderStepReadsTheValueInAnyCase(t *testing.T) {
 }
 
 func TestHeaderStepCannotBeTalkedIntoADestination(t *testing.T) {
-	// The prompt is not what decides; only the header is.
+	// Only the header decides.
 	h := routeHarness(t, picks(""), headerRoute(), nil)
 
 	resp := h.postSaying(t, `{"model":"byapp","messages":[{"role":"user","content":`+
@@ -137,7 +136,7 @@ func TestHeaderStepFallsBackWhenItsDestinationCannotAnswer(t *testing.T) {
 }
 
 func TestHeaderStepWithoutAFallbackTellsTheClientWhatToSend(t *testing.T) {
-	// The client left the header out, so it is the client's to fix.
+	// The client left the header out.
 	rt := headerRoute()
 	rt.Fallback = ""
 	h := routeHarness(t, picks(""), rt, nil)

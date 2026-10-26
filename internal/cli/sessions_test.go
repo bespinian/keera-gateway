@@ -11,8 +11,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// What `keera session list` and `keera failures` print in their first column
-// is what `keera session show` takes, so a row can be pasted straight into it.
+// The first column of `session list` and `failures` can be pasted into
+// `session show`.
 func TestSessionAndFailureRowsNameWhatKeeraSessionTakes(t *testing.T) {
 	var buf bytes.Buffer
 	w := newTable(&buf)
@@ -85,8 +85,7 @@ func TestSessionTakesAnIdWithoutShow(t *testing.T) {
 	f.request("GET", "/v1/sessions/4711")
 }
 
-// KEERA_ORG may name an organisation, as --org may, so a report sends the id
-// it belongs to rather than the name.
+// KEERA_ORG may be a name, like --org, so a report sends the matching id.
 func TestReportsTakeAnOrganisationByName(t *testing.T) {
 	quiet(t)
 	for _, c := range []struct {

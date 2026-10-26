@@ -19,34 +19,30 @@ import (
 	"github.com/go-ldap/ldap/v3"
 )
 
-// An LDAP provider signs people in with the password their directory holds:
-// Active Directory or OpenLDAP. There is no redirect, so the panel asks for
-// the password and the gateway binds as the person. See docs/sso.md.
+// An LDAP provider signs people in with their directory password, from Active
+// Directory or OpenLDAP. The panel asks for the password and the gateway binds
+// as the person. See docs/sso.md.
 
-// LDAPConfig is what an LDAP provider needs on top of the common settings.
+// LDAPConfig is what an LDAP provider adds to the common settings.
 type LDAPConfig struct {
-	// BindDN and BindPassword are the service account that finds people and
-	// reads them again later. A person's own bind only checks the password.
+	// BindDN and BindPassword are the service account that finds people. A
+	// person's own bind only checks the password.
 	BindDN       string
 	BindPassword string
 	BaseDN       string
-	// UserFilter narrows who may sign in. Empty is every person, as the
-	// directory's flavour defines one.
+	// UserFilter narrows who may sign in. Empty is every person.
 	UserFilter string
-	// LoginAttributes are what a person may type as their username. Empty is
-	// the flavour's.
+	// LoginAttributes are what a person may type as their username.
 	LoginAttributes []string
 	// CAFile is a PEM bundle to trust instead of the system's roots.
 	CAFile string
 }
 
-// IsLDAP reports whether this provider is a directory spoken to over LDAP,
-// which its issuer says by its scheme.
+// IsLDAP reports whether the issuer has an LDAP scheme.
 func (c OIDCConfig) IsLDAP() bool {
 	return strings.HasPrefix(c.IssuerURL, "ldap://") || strings.HasPrefix(c.IssuerURL, "ldaps://")
 }
 
-// validateLDAP checks an LDAP provider's issuer.
 func (c OIDCConfig) validateLDAP() error {
 	if u, err := url.Parse(c.IssuerURL); err != nil || u.Hostname() == "" {
 		return fmt.Errorf("the issuer for the %s identity provider must be an LDAP URL, "+
@@ -55,26 +51,21 @@ func (c OIDCConfig) validateLDAP() error {
 	return nil
 }
 
-// ErrBadCredentials is a password sign-in the directory refused. It is one
-// answer for an unknown name, a wrong password and a locked account, so the
-// answer does not tell anyone which accounts exist.
+// ErrBadCredentials is one answer for an unknown name, a wrong password and a
+// locked account, so it does not tell anyone which accounts exist.
 var ErrBadCredentials = errors.New("the username or password was not accepted")
 
-// ErrDirectoryUnreachable is a sign-in that failed because the directory did
-// not answer, which says nothing about the person.
+// ErrDirectoryUnreachable says nothing about the person.
 var ErrDirectoryUnreachable = errors.New("the directory could not be reached")
 
-// ErrUnusableEntry is a right password for an entry Keera cannot use, for a
-// reason only the directory's administrators can fix. The details name the
-// entry, so they go to the log and the person gets this message.
+// ErrUnusableEntry is a right password for an entry Keera cannot use. The
+// details name the entry, so they go to the log, not to the person.
 var ErrUnusableEntry = errors.New("this directory account cannot be used to sign in to Keera; " +
 	"ask your administrator")
 
-// ldapTimeout bounds every connection and request to the directory.
 const ldapTimeout = 10 * time.Second
 
-// The longest username and password a sign-in may send. Longer is not a
-// mistake anyone makes, and the directory need not see it.
+// The longest username and password a sign-in may send.
 const (
 	LDAPUsernameMax = 256
 	ldapPasswordMax = 1024
@@ -82,8 +73,8 @@ const (
 
 // ldapFlavour is what differs between Active Directory and other directories.
 type ldapFlavour struct {
-	// subject is the attribute that names an entry for good: a rename or a
-	// move to another OU changes the DN, not this.
+	// subject names an entry for good: a rename or move changes the DN, not
+	// this.
 	subject    string
 	userFilter string
 	login      []string
@@ -118,14 +109,13 @@ type LDAPConn interface {
 type ldapDir struct {
 	cfg     LDAPConfig
 	flavour ldapFlavour
-	// groups is the attribute that lists a person's groups, as DNs.
+	// groups lists a person's groups, as DNs.
 	groups string
 	dial   func() (LDAPConn, error)
 }
 
-// newLDAP connects once at start-up, as discovery does for OpenID Connect, so
-// a wrong address or service account stops the gateway instead of the first
-// sign-in. That connection also tells the flavour apart.
+// newLDAP connects once at start-up, so a wrong address or service account
+// stops the gateway instead of the first sign-in.
 func newLDAP(cfg OIDCConfig) (*OIDC, error) {
 	tlsConfig, err := ldapTLS(cfg)
 	if err != nil {
@@ -135,13 +125,11 @@ func newLDAP(cfg OIDCConfig) (*OIDC, error) {
 	return NewLDAPWith(cfg, dial)
 }
 
-// NewLDAPWith is NewOIDC for a directory reached through dial. Tests use it to
-// stand in for a server; see ldaptest.
+// NewLDAPWith is NewOIDC for a directory reached through dial, for tests.
 func NewLDAPWith(cfg OIDCConfig, dial func() (LDAPConn, error)) (*OIDC, error) {
 	d := &ldapDir{cfg: cfg.LDAP, groups: cmp.Or(cfg.GroupsClaim, "memberOf"), dial: dial}
-	// Checked against both flavours before the flavour is known. A filter that
-	// does not compile would otherwise fail every sign-in, and its error
-	// would quote what the person typed.
+	// Checked for both flavours. A bad filter would fail every sign-in, and
+	// its error would quote what the person typed.
 	for _, f := range []ldapFlavour{activeDirectory, openLDAP} {
 		d.flavour = f
 		if _, err := ldap.CompileFilter(d.loginFilter("x")); err != nil {
@@ -158,29 +146,26 @@ func NewLDAPWith(cfg OIDCConfig, dial func() (LDAPConn, error)) (*OIDC, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading the %s directory at %s: %w", cfg.Name, cfg.IssuerURL, err)
 	}
-	// Checked here because later a missing base looks like a directory error,
-	// and every sign-in fails with it.
+	// Later a missing base looks like a directory error on every sign-in.
 	if _, err := conn.Search(&ldap.SearchRequest{
 		BaseDN: cfg.LDAP.BaseDN, Scope: ldap.ScopeBaseObject, Filter: "(objectClass=*)",
 		Attributes: []string{"1.1"}, TimeLimit: int(ldapTimeout.Seconds()),
 	}); err != nil {
 		return nil, fmt.Errorf("reading the base DN %s of the %s directory: %w", cfg.LDAP.BaseDN, cfg.Name, err)
 	}
-	// Group DNs are compared in one spelling, so "CN=Admins, OU=Groups" in the
-	// configuration matches "cn=admins,ou=groups" from the directory.
+	// So "CN=Admins, OU=Groups" matches "cn=admins,ou=groups".
 	cfg.Mapping.AdminGroups = normalDNs(cfg.Mapping.AdminGroups)
 	cfg.Mapping.OperatorGroups = normalDNs(cfg.Mapping.OperatorGroups)
 	return &OIDC{cfg: cfg, ldap: d}, nil
 }
 
-// ldapTLS is the TLS every connection uses. Plaintext is never offered: the
-// connection carries passwords.
+// ldapTLS is never plaintext: the connection carries passwords.
 func ldapTLS(cfg OIDCConfig) (*tls.Config, error) {
 	u, err := url.Parse(cfg.IssuerURL)
 	if err != nil {
 		return nil, err
 	}
-	// Set for StartTLS too, which, unlike ldaps://, does not fill it in.
+	// StartTLS, unlike ldaps://, does not fill in ServerName.
 	c := &tls.Config{ServerName: u.Hostname(), MinVersion: tls.VersionTLS12}
 	if cfg.LDAP.CAFile != "" {
 		pem, err := os.ReadFile(cfg.LDAP.CAFile)
@@ -195,8 +180,7 @@ func ldapTLS(cfg OIDCConfig) (*tls.Config, error) {
 	return c, nil
 }
 
-// dialLDAP opens one connection: TLS from the start for ldaps://, StartTLS
-// before anything else for ldap://.
+// dialLDAP uses TLS for ldaps:// and StartTLS first for ldap://.
 func dialLDAP(addr string, tlsConfig *tls.Config) (LDAPConn, error) {
 	conn, err := ldap.DialURL(addr,
 		ldap.DialWithDialer(&net.Dialer{Timeout: ldapTimeout}),
@@ -214,7 +198,6 @@ func dialLDAP(addr string, tlsConfig *tls.Config) (LDAPConn, error) {
 	return conn, nil
 }
 
-// service is a connection bound as the service account.
 func (d *ldapDir) service() (LDAPConn, error) {
 	conn, err := d.dial()
 	if err != nil {
@@ -227,7 +210,7 @@ func (d *ldapDir) service() (LDAPConn, error) {
 	return conn, nil
 }
 
-// flavourOf reads the root DSE, which says whether this is Active Directory.
+// flavourOf reads the root DSE to tell Active Directory apart.
 func flavourOf(conn LDAPConn) (ldapFlavour, error) {
 	res, err := conn.Search(&ldap.SearchRequest{
 		Scope: ldap.ScopeBaseObject, Filter: "(objectClass=*)",
@@ -244,23 +227,22 @@ func flavourOf(conn LDAPConn) (ldapFlavour, error) {
 	return openLDAP, nil
 }
 
-// Password reports whether this provider signs people in with a password typed
-// into the panel, rather than by sending the browser to the directory.
+// Password reports whether people type a password into the panel, rather than
+// being sent to the directory.
 func (o *OIDC) Password() bool { return o.ldap != nil }
 
-// Authenticate checks a username and password against the directory and
-// returns who they belong to.
+// Authenticate checks a username and password against the directory.
 //
 // admit, if set, sees the entry's DN before the password is tried and may stop
-// the sign-in with its error. That is where attempts are counted per account:
-// one account can be typed as several usernames.
+// the sign-in. It counts attempts per account, since one account can be typed
+// as several usernames.
 func (o *OIDC) Authenticate(_ context.Context, username, password string,
 	admit func(dn string) error,
 ) (Identity, error) {
 	d := o.ldap
 	username = strings.TrimSpace(username)
 	// An empty password is an unauthenticated bind, which a directory accepts
-	// for any DN. It must never reach the bind.
+	// for any DN.
 	if username == "" || password == "" ||
 		len(username) > LDAPUsernameMax || len(password) > ldapPasswordMax {
 		return Identity{}, ErrBadCredentials
@@ -274,8 +256,7 @@ func (o *OIDC) Authenticate(_ context.Context, username, password string,
 			return Identity{}, err
 		}
 	}
-	// The person's bind gets a connection of its own: a bind changes who a
-	// connection acts as.
+	// Its own connection, since a bind changes who a connection acts as.
 	user, err := d.dial()
 	if err != nil {
 		return Identity{}, errors.Join(ErrDirectoryUnreachable, err)
@@ -286,17 +267,15 @@ func (o *OIDC) Authenticate(_ context.Context, username, password string,
 			ldap.IsErrorWithCode(err, ldap.ErrorNetwork) {
 			return Identity{}, errors.Join(ErrDirectoryUnreachable, err)
 		}
-		// The directory answered no. Active Directory says why in the
-		// message, such as "data 775" for a locked account. That goes to the
-		// log, not to the person.
+		// Active Directory says why, such as "data 775" for a locked account.
+		// That goes to the log, not to the person.
 		return Identity{}, errors.Join(ErrBadCredentials, err)
 	}
 	return o.ldapIdentity(entry)
 }
 
-// recheckLDAP reads a person again by their subject, which the sign-in kept as
-// the "refresh token". The user filter applies again, so someone taken out of a
-// group it requires is refused.
+// recheckLDAP reads a person again by the subject kept as the "refresh
+// token". The user filter applies again.
 func (o *OIDC) recheckLDAP(_ context.Context, subject string) (Identity, bool, error) {
 	d := o.ldap
 	filter, err := d.subjectFilter(subject)
@@ -317,10 +296,9 @@ func (o *OIDC) recheckLDAP(_ context.Context, subject string) (Identity, bool, e
 	return id, true, nil
 }
 
-// lookup finds the one entry a filter matches, as the service account. None,
-// or more than one, is ErrBadCredentials: for a username, both mean it names
-// nobody Keera can use. The errors leave out the filter, which holds what was
-// typed: a password typed as the username would otherwise reach the log.
+// lookup finds the one entry a filter matches. None, or more than one, is
+// ErrBadCredentials. Errors leave out the filter: a password typed as the
+// username would otherwise reach the log.
 func (d *ldapDir) lookup(filter string) (*ldap.Entry, error) {
 	conn, err := d.service()
 	if err != nil {
@@ -333,7 +311,7 @@ func (d *ldapDir) lookup(filter string) (*ldap.Entry, error) {
 	}
 	res, err := conn.Search(&ldap.SearchRequest{
 		BaseDN: d.cfg.BaseDN, Scope: ldap.ScopeWholeSubtree, DerefAliases: ldap.NeverDerefAliases,
-		// Two is enough to know a name is ambiguous.
+		// Two is enough to see a name is ambiguous.
 		SizeLimit: 2, TimeLimit: int(ldapTimeout.Seconds()),
 		Filter: filter, Attributes: attrs,
 	})
@@ -341,7 +319,7 @@ func (d *ldapDir) lookup(filter string) (*ldap.Entry, error) {
 	case ldap.IsErrorWithCode(err, ldap.LDAPResultSizeLimitExceeded):
 		return nil, errors.Join(ErrBadCredentials, errors.New("more than one directory entry matches"))
 	case ldap.IsErrorWithCode(err, ldap.ErrorFilterCompile):
-		// Its message quotes the filter. The start-up check makes this rare.
+		// Its message would quote the filter.
 		return nil, errors.Join(ErrDirectoryUnreachable, errors.New("the search filter does not compile"))
 	case err != nil:
 		return nil, errors.Join(ErrDirectoryUnreachable, err)
@@ -353,7 +331,6 @@ func (d *ldapDir) lookup(filter string) (*ldap.Entry, error) {
 	return res.Entries[0], nil
 }
 
-// loginFilter finds the person a username names.
 func (d *ldapDir) loginFilter(username string) string {
 	attrs := d.cfg.LoginAttributes
 	if len(attrs) == 0 {
@@ -368,7 +345,6 @@ func (d *ldapDir) loginFilter(username string) string {
 	return b.String()
 }
 
-// subjectFilter finds the person a stored subject names.
 func (d *ldapDir) subjectFilter(subject string) (string, error) {
 	value := ldap.EscapeFilter(subject)
 	if d.flavour.subject == activeDirectory.subject {
@@ -389,7 +365,7 @@ func (d *ldapDir) userFilter() string {
 	return f
 }
 
-// ldapIdentity reads and checks an entry the way identity does an id_token.
+// ldapIdentity checks an entry as identity does an id_token.
 func (o *OIDC) ldapIdentity(e *ldap.Entry) (Identity, error) {
 	d := o.ldap
 	subject := d.subjectOf(e)
@@ -403,8 +379,7 @@ func (o *OIDC) ldapIdentity(e *ldap.Entry) (Identity, error) {
 		Email:    strings.ToLower(strings.TrimSpace(e.GetEqualFoldAttributeValue("mail"))),
 		Name:     entryName(e),
 		Groups:   normalDNs(e.GetEqualFoldAttributeValues(d.groups)),
-		// Not a secret: what to look the person up by when the gateway asks
-		// again. It is kept where a refresh token would be.
+		// Not a secret: what to look the person up by later.
 		RefreshToken: subject,
 	}
 	if uac := e.GetEqualFoldAttributeValue("userAccountControl"); uac != "" {
@@ -419,7 +394,6 @@ func (o *OIDC) ldapIdentity(e *ldap.Entry) (Identity, error) {
 	return id, o.checkIdentity(id, nil, d.groups)
 }
 
-// subjectOf is the entry's lasting name, as text.
 func (d *ldapDir) subjectOf(e *ldap.Entry) string {
 	if d.flavour.subject == activeDirectory.subject {
 		return guidString(e.GetEqualFoldRawAttributeValue("objectGUID"))
@@ -427,8 +401,7 @@ func (d *ldapDir) subjectOf(e *ldap.Entry) string {
 	return strings.ToLower(e.GetEqualFoldAttributeValue(d.flavour.subject))
 }
 
-// entryName is the person's display name, else their given and family names,
-// else their common name.
+// entryName falls back to given and family names, then the common name.
 func entryName(e *ldap.Entry) string {
 	if n := strings.TrimSpace(e.GetEqualFoldAttributeValue("displayName")); n != "" {
 		return n
@@ -441,7 +414,7 @@ func entryName(e *ldap.Entry) string {
 }
 
 // normalDNs spells DNs one way, so they compare as text. A value that does not
-// parse is only lower-cased: it then matches nothing a directory sends.
+// parse is only lower-cased.
 func normalDNs(dns []string) []string {
 	out := make([]string, 0, len(dns))
 	for _, s := range dns {
@@ -461,8 +434,8 @@ func normalDN(s string) string {
 	return strings.ToLower(s)
 }
 
-// guidString writes an objectGUID the way Windows shows it. The first three
-// fields are stored little-endian.
+// guidString writes an objectGUID as Windows shows it. The first three fields
+// are little-endian.
 func guidString(b []byte) string {
 	if len(b) != 16 {
 		return ""
@@ -481,7 +454,6 @@ func guidBytes(s string) ([]byte, error) {
 	return append([]byte{h[3], h[2], h[1], h[0], h[5], h[4], h[7], h[6]}, h[8:]...), nil
 }
 
-// escapeBytes writes a binary value for a filter, every byte escaped.
 func escapeBytes(b []byte) string {
 	var s strings.Builder
 	for _, c := range b {

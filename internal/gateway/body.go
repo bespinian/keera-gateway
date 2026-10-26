@@ -12,20 +12,18 @@ import (
 	"unicode"
 )
 
-// body is a shallow view of a JSON request body. The gateway touches only a
-// few top-level fields, while the messages array can run to hundreds of
-// kilobytes, so only the top level is split, into spans of the original bytes.
+// body is a shallow view of a JSON request body. Only the top level is split,
+// into spans of the original bytes, since messages can be hundreds of kilobytes.
 type body struct {
 	fields map[string]json.RawMessage
-	// order preserves the order fields arrived in, so a request forwarded
-	// upstream reads the same as the one the client sent.
+	// order keeps the client's field order for the forwarded request.
 	order []string
 }
 
 var (
 	errNotObject = errors.New("request body must be a JSON object")
-	// errMalformed covers cases the walk below cannot reach in a document that
-	// passed json.Valid. It turns a bug in the walk into a refusal, not a panic.
+	// errMalformed should be unreachable after json.Valid. It turns a bug in
+	// the walk into a refusal, not a panic.
 	errMalformed = errors.New("request body is malformed")
 )
 
@@ -33,8 +31,7 @@ func parseBody(raw []byte) (*body, error) {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return nil, errors.New("request body is empty")
 	}
-	// Validated once, up front, so the walk below can trust the document and
-	// a bad body is refused with a message instead of forwarded.
+	// Validated up front, so the walk below can trust the document.
 	if !json.Valid(raw) {
 		return nil, syntaxError(raw)
 	}
@@ -48,8 +45,7 @@ func parseBody(raw []byte) (*body, error) {
 	return &body{fields: fields, order: order}, nil
 }
 
-// readNames are the keys the gateway reads in a request: at its top level, in
-// an MCP tool call, and in the messages, blocks and items that hold its text.
+// readNames are the keys the gateway reads anywhere in a request.
 var readNames = foldedNames(
 	"_meta", "action", "arguments", "call_id", "content", "data", "definition", "description",
 	"disable_parallel_tool_use", "file_data", "filename", "format", "id", "image_url", "input", "input_schema",
@@ -68,16 +64,15 @@ func foldedNames(names ...string) map[string]string {
 	return out
 }
 
-// foldKey folds case the way encoding/json does when it matches a key to a
-// field, so "Content", "CONTENT" and "ſystem" fold like "content" and "system".
+// foldKey folds case like encoding/json does when matching keys, so "CONTENT"
+// and "ſystem" fold like "content" and "system".
 func foldKey(k string) string {
 	return strings.Map(func(r rune) rune { return unicode.ToUpper(unicode.ToLower(r)) }, k)
 }
 
-// checkKeys refuses a key that is one the gateway reads, spelled with other
-// case. Filters look keys up as they are spelled, but encoding/json ignores
-// case, and so may an inference server: a model would read text under
-// "Content" that no filter saw.
+// checkKeys refuses a key the gateway reads when spelled with other case.
+// Filters match keys exactly, but encoding/json and maybe the inference server
+// do not, so a model could read text under "Content" that no filter saw.
 func checkKeys[V any](obj map[string]V) error {
 	for k := range obj {
 		if n, ok := readNames[foldKey(k)]; ok && n != k {
@@ -87,8 +82,8 @@ func checkKeys[V any](obj map[string]V) error {
 	return nil
 }
 
-// syntaxError re-reads an invalid body only to borrow encoding/json's message,
-// which names the offset where it went wrong. It runs only on refusal.
+// syntaxError re-reads an invalid body to borrow encoding/json's message,
+// which names the offset of the error.
 func syntaxError(raw []byte) error {
 	var probe json.RawMessage
 	if err := json.Unmarshal(raw, &probe); err != nil {
@@ -97,16 +92,13 @@ func syntaxError(raw []byte) error {
 	return errors.New("request body is not valid JSON")
 }
 
-// splitObject records where each top-level member's value begins and ends.
-// The values are sub-slices of raw, never edited in place: a rewritten field
-// is replaced. raw must have passed json.Valid, since this only counts
-// brackets and skips strings.
+// splitObject returns each top-level value as a sub-slice of raw. raw must
+// have passed json.Valid, since this only counts brackets and skips strings.
 func splitObject(raw []byte) (map[string]json.RawMessage, []string, error) {
 	i := skipSpace(raw, 0)
 	if i == len(raw) || raw[i] != '{' {
 		return nil, nil, errNotObject
 	}
-	// Enough for a chat request and the few fields a coding agent adds.
 	const typicalFields = 16
 	fields := make(map[string]json.RawMessage, typicalFields)
 	order := make([]string, 0, typicalFields)
@@ -140,8 +132,7 @@ func splitObject(raw []byte) (map[string]json.RawMessage, []string, error) {
 
 		i = skipSpace(raw, i+1)
 		valEnd := endOfValue(raw, i)
-		// A repeated key keeps its last value, as decoding into a map would,
-		// and is forwarded once.
+		// A repeated key keeps its last value, like decoding into a map.
 		if _, seen := fields[key]; !seen {
 			order = append(order, key)
 		}
@@ -162,9 +153,8 @@ func skipSpace(raw []byte, i int) int {
 	return i
 }
 
-// endOfString returns the index just past the string opening at i. A quote
-// after an odd number of backslashes is escaped. Prompts are mostly string
-// bytes, so this jumps from quote to quote instead of looking at every byte.
+// endOfString returns the index just past the string opening at i. It jumps
+// from quote to quote, since prompts are mostly string bytes.
 func endOfString(raw []byte, i int) int {
 	start := i + 1
 	for i = start; i < len(raw); i++ {
@@ -184,7 +174,6 @@ func endOfString(raw []byte, i int) int {
 	return len(raw)
 }
 
-// endOfValue returns the index just past the JSON value beginning at i.
 func endOfValue(raw []byte, i int) int {
 	switch {
 	case i == len(raw):
@@ -192,7 +181,6 @@ func endOfValue(raw []byte, i int) int {
 	case raw[i] == '"':
 		return endOfString(raw, i)
 	case raw[i] == '{', raw[i] == '[':
-		// Brackets inside strings must not count, so strings are skipped whole.
 		depth := 0
 		for i < len(raw) {
 			switch raw[i] {
@@ -211,7 +199,6 @@ func endOfValue(raw []byte, i int) int {
 		}
 		return i
 	default:
-		// A number, true, false or null ends where the next token can begin.
 		for ; i < len(raw); i++ {
 			switch raw[i] {
 			case ',', '}', ']', ' ', '\t', '\r', '\n':
@@ -222,8 +209,8 @@ func endOfValue(raw []byte, i int) int {
 	}
 }
 
-// nullLiteral is treated as absent. Decoding null into a Go value succeeds and
-// leaves zero, which would read as "the client sent 0".
+// nullLiteral is treated as absent, since decoding null leaves a zero value
+// that would read as "the client sent 0".
 var nullLiteral = []byte("null")
 
 func (b *body) value(key string) (json.RawMessage, bool) {
@@ -258,10 +245,9 @@ func (b *body) boolean(key string) (bool, bool) {
 	return v, true
 }
 
-// ceiling reads an output-token ceiling however the client spelled it: 4096,
-// 4096.0, 4e3 and "4096" are the same. It is a float64 because encoding/json
-// decodes an int only from an integer literal, and so that a value too large
-// for an int still compares against the limit.
+// ceiling reads an output-token ceiling however it is spelled: 4096, 4096.0,
+// 4e3 or "4096". It is a float64 so all of these decode, and so a value too
+// large for an int still compares against the limit.
 func (b *body) ceiling(key string) (float64, bool) {
 	raw, ok := b.value(key)
 	if !ok {
@@ -278,7 +264,6 @@ func (b *body) ceiling(key string) (float64, bool) {
 			return 0, false
 		}
 	}
-	// Only a string can carry these, and neither compares usefully.
 	if math.IsNaN(f) || math.IsInf(f, 0) {
 		return 0, false
 	}
@@ -292,7 +277,6 @@ func (b *body) set(key string, raw json.RawMessage) {
 	b.fields[key] = raw
 }
 
-// remove drops a field, and reports whether it was there.
 func (b *body) remove(key string) bool {
 	if _, exists := b.fields[key]; !exists {
 		return false
@@ -307,9 +291,9 @@ func (b *body) setString(key, val string) {
 	b.set(key, raw)
 }
 
-// prependSystem puts a system message at the head of a chat request's
-// messages array, and reports false if there is no array to put it in. It
-// splices bytes, so the messages are never decoded.
+// prependSystem puts a system message first in the messages array, splicing
+// bytes so the messages are never decoded. It reports false if there is no
+// array.
 func (b *body) prependSystem(content string) bool {
 	raw, ok := b.value("messages")
 	if !ok {
@@ -339,10 +323,9 @@ func (b *body) prependSystem(content string) bool {
 	return true
 }
 
-// firstUserMessage returns the raw content of the first "user" message in a
-// chat request. The opening prompt is the same on every call of a task, so it
-// works as the task's identity. Malformed elements are skipped, not refused:
-// this only labels a usage row.
+// firstUserMessage returns the raw content of the first user message. The
+// opening prompt is the same on every call of a task, so it identifies the
+// task. Malformed elements are skipped, since this only labels a usage row.
 func (b *body) firstUserMessage() (json.RawMessage, bool) {
 	raw, ok := b.value("messages")
 	if !ok {
@@ -358,8 +341,7 @@ func (b *body) firstUserMessage() (json.RawMessage, bool) {
 		if json.Unmarshal(fields["role"], &role) != nil || role != "user" {
 			return true
 		}
-		// A message without content uses the whole element: all that matters
-		// is that the same conversation hashes the same way.
+		// Without content, the whole element still hashes the same each time.
 		opening = elem
 		if content, ok := fields["content"]; ok {
 			opening = content
@@ -369,8 +351,8 @@ func (b *body) firstUserMessage() (json.RawMessage, bool) {
 	return opening, opening != nil
 }
 
-// eachElement calls fn with each value of a JSON array, in order, until fn
-// returns false. Values are stepped over, not decoded.
+// eachElement calls fn with each value of a JSON array until fn returns false.
+// Values are not decoded.
 func eachElement(raw json.RawMessage, fn func(elem []byte) bool) {
 	arr := bytes.TrimSpace(raw)
 	if len(arr) < 2 || arr[0] != '[' {
@@ -396,11 +378,10 @@ func eachElement(raw json.RawMessage, fn func(elem []byte) bool) {
 	}
 }
 
-// ensureUsageInStream makes the upstream report token counts on a stream:
-// vLLM and OpenAI only do when asked, and almost no client asks. It reports
-// whether the gateway added the flag, in which case the usage-only chunk is
-// removed on the way back, since a client may not cope with a chunk that has
-// no choices.
+// ensureUsageInStream asks the upstream for token counts on a stream, which
+// vLLM and OpenAI only send when asked. It reports whether the gateway added
+// the flag; if so, the usage-only chunk is removed on the way back, since a
+// client may not cope with a chunk without choices.
 func (b *body) ensureUsageInStream() (injected bool) {
 	var opts map[string]json.RawMessage
 	if raw, ok := b.value("stream_options"); !ok || json.Unmarshal(raw, &opts) != nil || opts == nil {
@@ -421,7 +402,6 @@ func (b *body) ensureUsageInStream() (injected bool) {
 	return true
 }
 
-// encode renders the body back to JSON, copying untouched values verbatim.
 func (b *body) encode() []byte {
 	var buf bytes.Buffer
 	buf.Grow(b.size() + 2)

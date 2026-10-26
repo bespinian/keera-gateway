@@ -1,6 +1,6 @@
 // One project, key, model or user: the dashboard narrowed to it, and the
 // requests or sessions behind the numbers. All four are one screen with a
-// different scope, so they read alike and their totals cannot drift apart.
+// different scope, so their totals cannot drift apart.
 
 import { api } from "../api.js";
 import {
@@ -70,7 +70,7 @@ import {
 export async function projectDetailView(ctx) {
   const projectsRes = await api.projects(ctx.orgID);
   const project = (projectsRes.data || []).find((t) => t.id === ctx.param);
-  // The project's own organisation, not the switcher's, which may be "All
+  // The project's own organisation; the switcher may show "All
   // organisations".
   const modelsRes = project
     ? await api.models(project.org_id).catch(() => ({ data: [] }))
@@ -168,8 +168,7 @@ export async function projectDetailView(ctx) {
 }
 
 export async function keyDetailView(ctx) {
-  // Read over the picker's period, so Last used covers the same span as the
-  // numbers below it.
+  // So Last used covers the same span as the numbers below it.
   const since = currentRange();
   const [keysRes, projectsRes, usersRes] = await Promise.all([
     api.keys(ctx.orgID, { since }),
@@ -205,7 +204,7 @@ export async function keyDetailView(ctx) {
     scope: { key_id: key.id },
     // A key is one person or pipeline, so its traffic reads best as tasks.
     sessions: true,
-    // A key belongs to one project, so both columns would repeat it.
+    // Both columns would repeat the key.
     hide: { key: true, project: true },
     meta: [
       statePill(state),
@@ -225,7 +224,7 @@ export async function keyDetailView(ctx) {
             project ? project.name : key.project_id,
           )
         : pill("Deleted project"),
-      // Only an administrator has the Users screen to open.
+      // Only an admin has the Users screen.
       person && isAdmin(ctx)
         ? h(
             "a",
@@ -379,8 +378,8 @@ export async function modelDetailView(ctx) {
             : null,
         ]
       : [pill("Deleted", "warn")],
-    // A removed model still has traffic, which is usually why somebody is
-    // here, so the screen still opens and says the model is gone.
+    // A removed model still has traffic, which is usually why someone is
+    // here, so the screen still opens.
     banner: model
       ? null
       : `This alias is no longer one of ${orgNameOf(ctx)}'s models. Requests for it are ` +
@@ -481,8 +480,8 @@ export async function modelDetailView(ctx) {
                   : h(
                       "span",
                       { class: "faint" },
-                      // Backends are for administrators, so an empty list
-                      // does not mean there are none.
+                      // Backends are for admins, so an empty list does not
+                      // mean there are none.
                       isAdmin(ctx) ? "none" : "not shown to your role",
                     ),
               ],
@@ -528,9 +527,8 @@ export async function userDetailView(ctx) {
   const keys = (keysRes.data || []).filter(
     (k) => k.user_id === user.id && stateOf(k) === "active",
   );
-  // The same rules as the row on the Users screen: nobody edits themselves,
-  // an operator's role comes from the configuration, and a role from the
-  // directory is changed there.
+  // Same rules as the Users screen: nobody edits themselves, an operator's
+  // role comes from the configuration, and a directory role is changed there.
   const editable = user.id !== ctx.state.me.user_id && user.role !== "operator";
   const canAssign = !ctx.state.me.roles_from_directory;
 
@@ -646,8 +644,7 @@ export async function userDetailView(ctx) {
   });
 }
 
-// Above the chart is what differs per entity; from the chart down is the same
-// report.
+// Above the chart differs per entity; from the chart down is the same report.
 async function screen(ctx, spec) {
   const since = currentRange();
   const res = await api.overview(ctx.orgID, since, spec.scope);
@@ -696,8 +693,7 @@ async function screen(ctx, spec) {
     ),
   );
 
-  // The chart's failure count narrows the log below in place, rather than
-  // sending the reader to another screen.
+  // The chart's failure count narrows the log below in place.
   wrap.append(
     h(
       "div",
@@ -749,8 +745,8 @@ async function screen(ctx, spec) {
     );
   }
 
-  // Only an administrator gets the log here. A member's log holds only their
-  // own keys' requests, which would not match the charts above.
+  // Only an admin gets the log here. A member's log holds only their own
+  // keys' requests, which would not match the charts.
   if (isAdmin(ctx)) {
     const log = spec.sessions ? sessionLog : requestLog;
     wrap.append(

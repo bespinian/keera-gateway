@@ -93,8 +93,7 @@ func (s *Server) putMCPServer(w http.ResponseWriter, r *http.Request, p *authn.P
 		s.auditCredential(r, p, orgID, "mcp_server", m.Alias, credential)
 	}
 	s.changed(r, orgID)
-	// Read back, so has_api_key says what is stored and not what this body
-	// happened to mention.
+	// Read back, so has_api_key says what is stored.
 	stored, err := s.st.MCPServer(r.Context(), orgID, m.Alias)
 	if err != nil {
 		s.fail(w, err)

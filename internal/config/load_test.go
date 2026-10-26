@@ -12,15 +12,11 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// Load is where a deployment's mistakes are caught, and most of what it does
-// is refuse. These tests pin each floor and the inferred secure-cookie flag,
-// whose flip to insecure no deployment would notice, so a later tidy-up
-// cannot quietly drop them.
+// Load catches a deployment's mistakes. These tests pin each floor and the
+// inferred secure-cookie flag, whose flip to insecure nobody would notice.
 
 // loadWith runs Load against exactly env. The caller's own KEERA_ variables
-// are cleared first, so a shell set up for `make dev` cannot change the
-// result. Setting them empty is the same as unsetting for env(), and t.Setenv
-// puts them back afterwards.
+// are cleared first, so a `make dev` shell cannot change the result.
 func loadWith(t *testing.T, env map[string]string) (Config, error) {
 	t.Helper()
 	for _, kv := range os.Environ() {
@@ -34,8 +30,7 @@ func loadWith(t *testing.T, env map[string]string) (Config, error) {
 	return Load()
 }
 
-// valid is the smallest environment Load accepts, for tests that are about one
-// setting and need the other required ones out of the way.
+// valid is the smallest environment Load accepts.
 func valid(extra map[string]string) map[string]string {
 	env := map[string]string{
 		"KEERA_DATABASE_URL": "postgres://keera@127.0.0.1/keera",
@@ -47,8 +42,8 @@ func valid(extra map[string]string) map[string]string {
 }
 
 func TestLoadDefaultsAreWhatTheDocumentationSays(t *testing.T) {
-	// The required variables alone give a working gateway. These are the
-	// defaults the install guide quotes, which deployments are planned on.
+	// The required variables alone give a working gateway, with the defaults
+	// the install guide quotes.
 	c, err := loadWith(t, valid(nil))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -68,13 +63,12 @@ func TestLoadDefaultsAreWhatTheDocumentationSays(t *testing.T) {
 		{"cache lifetime", c.CacheTTL, 30 * time.Second},
 		{"spend refresh", c.SpendRefresh, 10 * time.Second},
 		{"redis key prefix", c.RedisPrefix, "keera"},
-		// Retention off by default: a gateway must not start quietly deleting
-		// the billing history of a deployment that never asked it to.
+		// Retention is off by default, so billing history is never deleted
+		// unasked.
 		{"usage retention", c.UsageRetention, time.Duration(0)},
 		{"audit retention", c.AuditRetention, time.Duration(0)},
 		{"session gap", c.SessionGap, 30 * time.Minute},
-		// On unless switched off: the panel is why most deployments point a
-		// browser at this process at all.
+		// On unless switched off.
 		{"the panel", c.UI, true},
 	}
 	for _, tc := range tests {
@@ -82,15 +76,14 @@ func TestLoadDefaultsAreWhatTheDocumentationSays(t *testing.T) {
 			t.Errorf("%s = %v, want %v", tc.name, tc.got, tc.want)
 		}
 	}
-	// No Redis configured is the single-replica shape, and it is the default:
-	// requiring one would make a coordination layer a dependency of a demo.
+	// No Redis is the default: one replica does not need it.
 	if c.Redis != nil {
 		t.Errorf("Redis = %+v, want nil: Redis is opt-in", c.Redis)
 	}
 }
 
 func TestARedisURLIsParsedOnce(t *testing.T) {
-	// The limiter takes these options as they are, so Load is the only parse.
+	// Load is the only parse of these options.
 	c, err := loadWith(t, valid(map[string]string{"KEERA_REDIS_URL": "redis://cache:6380/2"}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -112,9 +105,8 @@ func TestACountOfZeroIsTheDefault(t *testing.T) {
 }
 
 func TestLoadNeedsTheTwoThingsItCannotInvent(t *testing.T) {
-	// A database, a control-plane credential and a key for stored
-	// credentials. None has a sensible default, and without the first two a
-	// gateway would serve nothing and let anybody administer it.
+	// A database, an operator key and a secret key. None has a sensible
+	// default.
 	tests := []struct {
 		name string
 		env  map[string]string
@@ -150,8 +142,7 @@ func TestLoadNeedsTheTwoThingsItCannotInvent(t *testing.T) {
 			want: "KEERA_SECRET_KEY is too short",
 		},
 		{
-			// Caught here, before the database is migrated, not when the
-			// limiter is built.
+			// Caught before the database is migrated.
 			name: "a Redis URL that is not one",
 			env:  valid(map[string]string{"KEERA_REDIS_URL": "localhost:6379"}),
 			want: "KEERA_REDIS_URL",
@@ -171,8 +162,8 @@ func TestLoadNeedsTheTwoThingsItCannotInvent(t *testing.T) {
 }
 
 func TestTheScrapeTokenCannotBeTheOperatorKey(t *testing.T) {
-	// A separate scrape token keeps the operator key out of a Prometheus
-	// configuration. The same value under two names would defeat that.
+	// The scrape token keeps the operator key out of Prometheus, so they must
+	// differ.
 	_, err := loadWith(t, valid(map[string]string{
 		"KEERA_METRICS_TOKEN": "an-operator-key-long-enough",
 	}))
@@ -185,8 +176,7 @@ func TestTheScrapeTokenCannotBeTheOperatorKey(t *testing.T) {
 }
 
 func TestAScrapeTokenIsHeldToTheSameLengthAsTheOperatorKey(t *testing.T) {
-	// It reads a route that is labelled by organisation, so it is a credential
-	// and not a formality.
+	// Its route is labelled by organisation, so it is a real credential.
 	_, err := loadWith(t, valid(map[string]string{"KEERA_METRICS_TOKEN": "short"}))
 	if err == nil || !strings.Contains(err.Error(), "too short to be a credential") {
 		t.Fatalf("error = %v, want a refusal naming the length", err)
@@ -204,9 +194,8 @@ func TestAScrapeTokenIsHeldToTheSameLengthAsTheOperatorKey(t *testing.T) {
 }
 
 func TestRetentionIsRefusedBelowADay(t *testing.T) {
-	// Retention deletes rows for good and real windows are months, so a stray
-	// "10m", a likely typo for "10mo", would silently discard the day's
-	// billing data.
+	// A stray "10m", likely meant as "10mo", would delete the day's billing
+	// data.
 	for _, name := range []string{"KEERA_USAGE_RETENTION", "KEERA_AUDIT_RETENTION"} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := loadWith(t, valid(map[string]string{name: "-1h"})); err == nil {
@@ -221,8 +210,7 @@ func TestRetentionIsRefusedBelowADay(t *testing.T) {
 				t.Errorf("error = %q, want it to name the shortest window it takes", err)
 			}
 
-			// The boundary itself is allowed, and zero stays "keep everything"
-			// rather than "keep nothing".
+			// The boundary is allowed, and zero means "keep everything".
 			for _, ok := range []string{"24h", "0"} {
 				c, err := loadWith(t, valid(map[string]string{name: ok}))
 				if err != nil {
@@ -252,8 +240,7 @@ func TestADatabasePoolTooSmallToServeIsRefused(t *testing.T) {
 }
 
 func TestASessionGapBelowAMinuteIsTheRequestLog(t *testing.T) {
-	// Sessions group requests into tasks. Under a minute every request is its
-	// own task, which is just the request log.
+	// Under a minute, every request would be its own task.
 	_, err := loadWith(t, valid(map[string]string{"KEERA_SESSION_GAP": "30s"}))
 	if err == nil {
 		t.Fatal("a thirty-second session gap was accepted")
@@ -272,8 +259,8 @@ func TestASessionGapBelowAMinuteIsTheRequestLog(t *testing.T) {
 	}
 }
 
-// KEERA_CHAT_URL decides where a sign-in may be handed, so anything but a
-// bare origin stops the start rather than making that address wrong.
+// KEERA_CHAT_URL decides where a sign-in may be handed, so it must be a bare
+// origin.
 func TestTheChatURLIsABareOrigin(t *testing.T) {
 	c, err := loadWith(t, valid(map[string]string{"KEERA_CHAT_URL": "https://chat.example.ch/"}))
 	if err != nil || c.ChatURL != "https://chat.example.ch" {
@@ -293,8 +280,8 @@ func TestTheChatURLIsABareOrigin(t *testing.T) {
 }
 
 func TestSandboxSettingsAreOnlyCheckedWhenSandboxesAreOn(t *testing.T) {
-	// Without a driver the setting does nothing, and refusing to start over it
-	// would turn a leftover line in an .env into an outage.
+	// Without a driver the setting does nothing, so a leftover line must not
+	// stop the start.
 	c, err := loadWith(t, valid(map[string]string{"KEERA_SANDBOX_IDLE_SUSPEND": "1s"}))
 	if err != nil {
 		t.Fatalf("a stray sandbox setting stopped a gateway with sandboxes off: %v", err)
@@ -303,9 +290,8 @@ func TestSandboxSettingsAreOnlyCheckedWhenSandboxesAreOn(t *testing.T) {
 		t.Error("sandboxes are enabled with no driver configured")
 	}
 
-	// With a driver it is checked, because now it decides something. A few
-	// seconds would suspend a sandbox whose user is reading a diff, which sends
-	// nothing over an attached ssh session.
+	// With a driver it is checked: a few seconds would suspend a sandbox
+	// whose user is reading a diff.
 	_, err = loadWith(t, valid(map[string]string{
 		"KEERA_SANDBOX_DRIVER":       "podman",
 		"KEERA_SANDBOX_IDLE_SUSPEND": "1s",
@@ -369,8 +355,7 @@ func TestLogSettingsAreReadWhateverTheirCaseAndUnknownOnesRefused(t *testing.T) 
 }
 
 func TestAnUnknownSandboxDriverIsRefused(t *testing.T) {
-	// The alternative is a gateway that starts, advertises sandboxes and fails
-	// every request to create one.
+	// Otherwise the gateway would advertise sandboxes it cannot create.
 	_, err := loadWith(t, valid(map[string]string{"KEERA_SANDBOX_DRIVER": "docker"}))
 	if err == nil {
 		t.Fatal("an unknown driver was accepted")
@@ -383,9 +368,8 @@ func TestAnUnknownSandboxDriverIsRefused(t *testing.T) {
 }
 
 func TestCookiesAreSecureWheneverTheBrowserWillBeOnHTTPS(t *testing.T) {
-	// A normal deployment never sets this: it is inferred from the public URL.
-	// Wrong in one direction breaks a local http deployment loudly; wrong in
-	// the other sends the session cookie over plaintext and nothing says so.
+	// Inferred from the public URL. Wrong one way breaks a local http
+	// deployment loudly; wrong the other sends the cookie in plaintext quietly.
 	tests := []struct {
 		name string
 		env  map[string]string
@@ -439,9 +423,8 @@ func TestCookiesAreSecureWheneverTheBrowserWillBeOnHTTPS(t *testing.T) {
 }
 
 func TestThePublicURLLosesItsTrailingSlash(t *testing.T) {
-	// It is concatenated with paths to build the redirect a browser is sent to,
-	// and "https://keera.example.ch//control/auth/callback" is not the URL that
-	// was registered with the identity provider.
+	// Otherwise the callback would be "https://keera.example.ch//control/...",
+	// which is not the URL registered with the identity provider.
 	c, err := loadWith(t, valid(map[string]string{
 		"KEERA_PUBLIC_URL": "https://keera.example.ch/",
 	}))
@@ -454,8 +437,8 @@ func TestThePublicURLLosesItsTrailingSlash(t *testing.T) {
 }
 
 func TestAProviderNamedTwiceIsRefused(t *testing.T) {
-	// The name is stored in the external id of every sign-in it writes, so two
-	// providers under one name would file two directories' people together.
+	// The name is part of every sign-in's external id, so two providers under
+	// one name would mix two directories' people.
 	_, err := loadWith(t, valid(map[string]string{
 		"KEERA_PUBLIC_URL":              "https://keera.example.ch",
 		"KEERA_OIDC_PROVIDERS":          "okta,okta",
@@ -472,10 +455,9 @@ func TestAProviderNamedTwiceIsRefused(t *testing.T) {
 }
 
 func TestADefaultRoleThatIsNotAdminOrMemberIsRefused(t *testing.T) {
-	// It decides what everybody who matches no group gets, so a typo here is a
-	// deployment where nobody can sign in - or one where the wrong people can.
-	// Operator spans organisations, so it comes only from settings that name
-	// who holds it: as a default it would make a whole directory operators.
+	// It decides what everyone who matches no group gets, so a typo could lock
+	// everyone out or let the wrong people in. Operator is not allowed: as a
+	// default it would make a whole directory operators.
 	for _, role := range []string{"administrator", "operator"} {
 		_, err := loadWith(t, valid(map[string]string{
 			"KEERA_PUBLIC_URL":              "https://keera.example.ch",
@@ -494,9 +476,8 @@ func TestADefaultRoleThatIsNotAdminOrMemberIsRefused(t *testing.T) {
 }
 
 func TestAMalformedNumberFallsBackRatherThanFailing(t *testing.T) {
-	// envInt and envDuration ignore what they cannot parse, so a typo in a
-	// tuning number keeps the default rather than stopping the start. The
-	// credentials and floors above are refused instead.
+	// A typo in a tuning number keeps the default rather than stop the start.
+	// The credentials and floors above are refused instead.
 	c, err := loadWith(t, valid(map[string]string{
 		"KEERA_MAX_DB_CONNS": "sixteen",
 		"KEERA_CACHE_TTL":    "half a minute",
@@ -513,8 +494,7 @@ func TestAMalformedNumberFallsBackRatherThanFailing(t *testing.T) {
 }
 
 func TestSandboxRuntimesAreReadPerIsolationTier(t *testing.T) {
-	// Each tier names the runtime class that provides it, because what gives
-	// you a microVM is called something different on every cluster.
+	// Each tier names its runtime class, as the name differs per cluster.
 	env := valid(map[string]string{"KEERA_SANDBOX_DRIVER": "kubernetes"})
 	for _, tier := range policy.Isolations {
 		env["KEERA_SANDBOX_RUNTIME_"+strings.ToUpper(string(tier))] = "runtime-" + string(tier)
@@ -530,8 +510,7 @@ func TestSandboxRuntimesAreReadPerIsolationTier(t *testing.T) {
 	}
 }
 
-// One provider is configured the same way as several. The callback is the
-// public address's, because one callback serves every provider.
+// One provider is configured the same way as several, with the shared callback.
 func TestOneProviderIsNamedLikeSeveral(t *testing.T) {
 	c, err := loadWith(t, valid(map[string]string{
 		"KEERA_PUBLIC_URL":              "https://keera.example.ch",
@@ -558,8 +537,7 @@ func TestOneProviderIsNamedLikeSeveral(t *testing.T) {
 	}
 }
 
-// A provider named in the list but not set up would only be missing from the
-// sign-in screen, so it stops the start, as a missing client secret does.
+// A provider named in the list but not set up stops the start.
 func TestAProviderListedButNotSetUpIsRefused(t *testing.T) {
 	_, err := loadWith(t, valid(map[string]string{
 		"KEERA_PUBLIC_URL":              "https://keera.example.ch",
@@ -572,7 +550,7 @@ func TestAProviderListedButNotSetUpIsRefused(t *testing.T) {
 	}
 }
 
-// A role is read in any case, as the other settings with fixed values are.
+// A role is read in any case.
 func TestTheDefaultRoleIsReadInAnyCase(t *testing.T) {
 	c, err := loadWith(t, valid(map[string]string{
 		"KEERA_PUBLIC_URL":              "https://keera.example.ch",
@@ -604,8 +582,7 @@ func TestSingleSignOnNeedsThePublicURL(t *testing.T) {
 }
 
 // With several directories, each customer's admin can give their users any
-// address - another customer's, or an operator's. So every provider has to
-// say which domains it may vouch for.
+// address, so every provider must name the domains it vouches for.
 func TestSeveralProvidersMustNameTheirDomains(t *testing.T) {
 	env := valid(map[string]string{
 		"KEERA_OIDC_PROVIDERS":            "google,entra",
@@ -636,9 +613,8 @@ func TestSeveralProvidersMustNameTheirDomains(t *testing.T) {
 	}
 }
 
-// Nothing is shared between providers. A customer's directory admin can
-// create a group of any name, so a shared operator group would let every
-// customer make operators.
+// Nothing is shared between providers: a shared operator group would let any
+// customer's directory admin make operators.
 func TestProvidersShareNothing(t *testing.T) {
 	t.Setenv("KEERA_OIDC_PROVIDERS", "google,entra")
 	t.Setenv("KEERA_OIDC_GOOGLE_ADMIN_GROUPS", "")
@@ -658,8 +634,7 @@ func TestProvidersShareNothing(t *testing.T) {
 	}
 }
 
-// A passkey belongs to a host name, and browsers run WebAuthn only on https
-// or on localhost.
+// Browsers run WebAuthn only on https or on localhost.
 func TestPasskeysNeedAPublicURLABrowserAccepts(t *testing.T) {
 	for url, ok := range map[string]bool{
 		"":                         false,
@@ -684,8 +659,8 @@ func TestPasskeysNeedAPublicURLABrowserAccepts(t *testing.T) {
 }
 
 func TestTheGatewayKeepsAwayFromItsHostByDefault(t *testing.T) {
-	// An administrator sets where models and MCP servers are. Loopback and the
-	// cloud metadata service are the gateway's host, not theirs.
+	// Loopback and the cloud metadata service are the gateway's host, not the
+	// administrator's.
 	c, err := loadWith(t, valid(nil))
 	if err != nil {
 		t.Fatalf("Load: %v", err)

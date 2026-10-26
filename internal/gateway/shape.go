@@ -9,14 +9,14 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// surface is one API the gateway serves: the kind of model it reaches, the
-// upstream path it forwards to, and the format it speaks to the client.
+// surface is one API the gateway serves: the model kind, the upstream path,
+// and the format it speaks to the client.
 type surface struct {
 	kind  policy.Kind
 	path  string
 	shape shape
-	// dialect is set on an API a hosted provider also serves as its own, and
-	// says how to forward it there untranslated. See native.go.
+	// dialect is set on an API a hosted provider serves as its own, for
+	// forwarding it there untranslated. See native.go.
 	dialect dialect
 }
 
@@ -24,8 +24,8 @@ var (
 	chatSurface       = surface{kind: policy.KindChat, path: "/chat/completions", shape: openAIShape{}}
 	completionSurface = surface{kind: policy.KindCompletion, path: "/completions", shape: openAIShape{}}
 	embeddingSurface  = surface{kind: policy.KindEmbedding, path: "/embeddings", shape: openAIShape{}}
-	// messagesSurface is the Anthropic-shaped `/v1/messages`: the same models
-	// and guardrails as chatSurface, in another format.
+	// messagesSurface is the Anthropic-shaped `/v1/messages`: chatSurface in
+	// another format.
 	messagesSurface = surface{
 		kind: policy.KindChat, path: "/chat/completions",
 		shape: anthropicShape{}, dialect: anthropicDialect{},
@@ -37,43 +37,38 @@ var (
 	}
 )
 
-// What a shape answers when a backend's success cannot be translated: one it
-// cannot read, or one it cannot encode again.
+// What a shape answers when it cannot translate a backend's success.
 const (
 	msgUnreadableAnswer = "the inference plane returned a response the gateway could not read"
 	msgUnencodable      = "the gateway could not encode the response"
 )
 
-// shape is the request and response format one API surface speaks.
-//
-// The inference plane and serve speak the OpenAI shape. Other shapes are
-// translated at the edges, so one set of guardrails covers every client. The
-// one exception is a request forwarded to the provider whose own API it is in.
+// shape is the request and response format one API surface speaks. The
+// inference plane and serve speak the OpenAI shape; others are translated at
+// the edges, so one set of guardrails covers every client. The exception is a
+// request forwarded to the provider whose own API it is in.
 type shape interface {
 	// decodeBody turns a request in this shape into an OpenAI chat request,
-	// and returns the shape to answer it with: the Responses API names each
-	// call the way the request declared its tool. The error is shown to the
-	// client, so it says what is wrong with the body.
+	// and returns the shape to answer with: the Responses API names each call
+	// as the request declared its tool. The error is shown to the client.
 	decodeBody(raw []byte) (*body, shape, error)
-	// encode turns one buffered upstream response into this shape, and returns
-	// the status to answer with. The status in tells an error body from a
-	// completion. The status out may differ, since a success that cannot be
-	// translated has to become a failure.
+	// encode turns one buffered upstream response into this shape and
+	// returns the status to answer with. It may differ from the status in,
+	// since a success that cannot be translated becomes a failure.
 	encode(raw []byte, alias string, status int) ([]byte, int)
-	// pipe forwards a streamed upstream response in this shape, flushing as it
-	// goes, and reports what the stream carried.
+	// pipe forwards a streamed upstream response in this shape, flushing as
+	// it goes.
 	pipe(dst io.Writer, flush func(), src io.Reader, alias string, dropUsageEvent bool, limit int64) (streamStats, error)
-	// writeError renders a refusal the gateway generated itself. typ and code
-	// are the OpenAI spellings; a shape that names its errors differently
-	// translates them.
+	// writeError renders the gateway's own refusal. typ and code are OpenAI
+	// spellings, which a shape may translate.
 	writeError(w http.ResponseWriter, status int, typ, code, msg string)
-	// contentType is the media type this shape's buffered responses carry, or
-	// empty to keep whatever the inference plane sent.
+	// contentType is the media type of buffered responses, or "" to keep the
+	// plane's.
 	contentType() string
 }
 
-// openAIShape is the identity: the surfaces that already speak what the
-// inference plane speaks.
+// openAIShape is the identity, for surfaces that already speak the plane's
+// shape.
 type openAIShape struct{ openAIErrors }
 
 // openAIErrors renders a refusal in the chat shape's envelope. The Responses
@@ -89,8 +84,7 @@ func (sh openAIShape) decodeBody(raw []byte) (*body, shape, error) {
 	return b, sh, err
 }
 
-// encode names the alias as the model: the client was promised the alias,
-// never the backend's name for it.
+// encode names the alias as the model, never the backend's name.
 func (openAIShape) encode(raw []byte, alias string, status int) ([]byte, int) {
 	if status >= 300 {
 		return openAIErrorBody(raw, status), status
@@ -98,13 +92,10 @@ func (openAIShape) encode(raw []byte, alias string, status int) ([]byte, int) {
 	return renameModel(raw, alias), status
 }
 
-// openAIErrorBody puts an upstream error in the OpenAI envelope. One already
-// in it passes unchanged, type and code included. vLLM's bare message and
-// FastAPI's detail are wrapped, since an OpenAI SDK reads only error.message.
-//
-// A request too long for the backend's context is the exception: vLLM and
-// llama.cpp do not give OpenAI's code for it, which is what Codex and the
-// OpenAI SDKs act on, so it gets the code and the gateway's own wording.
+// openAIErrorBody puts an upstream error in the OpenAI envelope, since an
+// OpenAI SDK reads only error.message. One already in it passes unchanged.
+// A context overflow gets OpenAI's code and the gateway's wording, since
+// vLLM and llama.cpp do not send the code Codex and the SDKs act on.
 func openAIErrorBody(raw []byte, status int) []byte {
 	var envelope struct {
 		Error *struct {
@@ -124,9 +115,8 @@ func openAIErrorBody(raw []byte, status int) []byte {
 	return httpx.ErrorBody(openAIErrorType(status), "", upstreamErrorMessage(raw, status))
 }
 
-// openAIErrorType names an error by status with the types the gateway gives
-// its own refusals, so a client tells a rate limit from a bad request the same
-// way whichever side refused it.
+// openAIErrorType types an error by status as the gateway types its own
+// refusals, so a client reads both the same way.
 func openAIErrorType(status int) string {
 	switch {
 	case status == http.StatusForbidden:

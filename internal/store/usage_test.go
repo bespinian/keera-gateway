@@ -21,8 +21,7 @@ func TestEventsPayloadNamesEachOrganisationOnce(t *testing.T) {
 }
 
 func TestEventsPayloadWithoutRequestsAnnouncesNothing(t *testing.T) {
-	// Billing lines alone are not in the request log, so no stream has
-	// anything to look for.
+	// Billing lines alone are not in the request log, so nothing is announced.
 	if _, ok := eventsPayload([]Event{{OrgID: "org_a", BillsOnly: true}}); ok {
 		t.Error("a batch without requests was announced")
 	}

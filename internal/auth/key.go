@@ -64,8 +64,8 @@ func Encoded32(s string) bool {
 // Hash returns the value stored for a secret token: an API key, a session, a
 // command-line token or code, or a passkey link.
 //
-// SHA-256 rather than a password hash: each token is random, so there is no
-// dictionary to defend against, and a slow hash on every request would invite
+// SHA-256, not a password hash: the tokens are random, so there is no
+// dictionary to defend against, and a slow hash on every request invites
 // denial of service.
 func Hash(key string) []byte {
 	sum := sha256.Sum256([]byte(key))

@@ -30,9 +30,8 @@ func TestResponsesDecodeBuildsTheConversation(t *testing.T) {
 	for i, m := range msgs {
 		roles[i], _ = m["role"].(string)
 	}
-	// The reasoning item has no counterpart. The two calls of one turn join the
-	// assistant message before them, which is the only shape a chat template
-	// accepts.
+	// The reasoning item is dropped. The two calls of one turn join the
+	// assistant message before them, the only shape a chat template accepts.
 	want := "system system user assistant tool tool"
 	if got := strings.Join(roles, " "); got != want {
 		t.Fatalf("roles = %q, want %q", got, want)
@@ -77,9 +76,8 @@ func TestResponsesDecodeTranslatesToolsAndFormat(t *testing.T) {
 	}
 }
 
-// codexTools is how Codex declares tools: each MCP server's in a namespace,
-// its subagent tools in another, and apply_patch as a custom tool with a
-// grammar.
+// codexTools is how Codex declares tools: MCP servers and subagents in
+// namespaces, and apply_patch as a custom tool with a grammar.
 const codexTools = `"tools":[
 	{"type":"function","name":"exec_command","parameters":{"type":"object"}},
 	{"type":"namespace","name":"mcp__demo__","description":"Demo MCP server","tools":[
@@ -91,8 +89,7 @@ const codexTools = `"tools":[
 	{"type":"web_search"}]`
 
 func TestResponsesDecodeDeclaresNamespacesAndCustomTools(t *testing.T) {
-	// The chat shape has neither, and dropping them would leave Codex without
-	// its MCP tools, its subagents and its way of editing files.
+	// The chat shape has neither, but dropping them would break Codex.
 	req := decodeAs(t, responsesShape{}, `{"model":"keera-code","input":"hi",`+codexTools+`,
 		"tool_choice":{"type":"custom","name":"apply_patch"}}`)
 
@@ -154,8 +151,8 @@ func TestResponsesDecodeReplaysNamespacedAndCustomCalls(t *testing.T) {
 }
 
 func TestResponsesNameCallsAsTheClientDeclaredThem(t *testing.T) {
-	// Codex finds a call's tool by its namespace and name, and runs a custom
-	// tool on its text, so a call named as the chat shape knows it fails there.
+	// Codex finds a tool by namespace and name, and runs a custom tool on its
+	// text, so calls must come back as declared.
 	backend := jsonBackend(`{"choices":[{"message":{"tool_calls":[
 		{"id":"call_1","type":"function","function":{"name":"mcp__demo__get_weather","arguments":"{\"city\":\"Bern\"}"}},
 		{"id":"call_2","type":"function","function":{"name":"apply_patch","arguments":"{\"input\":\"*** Begin Patch\"}"}},
@@ -235,7 +232,7 @@ func TestResponsesStreamNamesCallsAsTheClientDeclaredThem(t *testing.T) {
 }
 
 // A custom tool's text is streamed as its arguments arrive, however they are
-// cut: an escape split across two pieces waits for the rest.
+// split. A split escape waits for the rest.
 func TestInputStreamReadsTheTextAsItArrives(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -331,8 +328,8 @@ func TestResponsesStreamEmitsTheEventSequence(t *testing.T) {
 		t.Fatalf("events =\n%v\nwant\n%v", types, want)
 	}
 
-	// Clients read the finished items off the closing events, so those carry
-	// the whole text and the whole arguments.
+	// Clients read finished items from the closing events, so those carry
+	// the whole text and arguments.
 	if item := events[13].payload["item"].(map[string]any); item["arguments"] != `{"a":1}` || item["call_id"] != "call_1" {
 		t.Errorf("finished call = %v", item)
 	}
@@ -350,8 +347,7 @@ func TestResponsesStreamEmitsTheEventSequence(t *testing.T) {
 }
 
 func TestResponsesStreamFailsAFailedStream(t *testing.T) {
-	// Closed as completed, a cut-off stream would read as a finished turn.
-	// response.failed tells the client to try again.
+	// A cut-off stream closed as completed would read as a finished turn.
 	for name, upstream := range map[string]string{
 		"cut off": "data: " + `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1",` +
 			`"function":{"name":"write","arguments":"{\"content\":\"half"}}]}}]}` + "\n\n",
@@ -493,8 +489,8 @@ func TestNativeResponsesStreamReadsTheUsage(t *testing.T) {
 	}
 }
 
-// The 200 is sent before the provider fails, so the row's error is what tells
-// a failed stream from a finished one.
+// The 200 is sent before the provider fails, so only the row's error marks
+// the stream as failed.
 func TestAFailedNativeStreamIsRecordedAsFailed(t *testing.T) {
 	for _, tc := range []struct{ provider, model, path, body, events, want string }{
 		{
@@ -535,8 +531,7 @@ func TestAStoredConversationOnlyGoesToOpenAI(t *testing.T) {
 	h, seen := providerHarness(t, "openai", "gpt-5.5",
 		jsonBackend(`{"model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}`), nil)
 
-	// No other model can read what OpenAI stored, so the refusal says so
-	// rather than answer without the conversation.
+	// No other model can read what OpenAI stored, so this is refused.
 	resp := h.post(t, "/v1/responses", `{"model":"keera-code","previous_response_id":"resp_1","input":"and?"}`)
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), "previous_response_id") {
@@ -563,9 +558,8 @@ func TestAStoredConversationOnlyGoesToOpenAI(t *testing.T) {
 }
 
 func TestAFilterReadsACustomToolsOutput(t *testing.T) {
-	// For Codex, apply_patch's output is where file contents travel, as a
-	// function's output is for any other tool. A request OpenAI gets in its own
-	// shape is filtered in that shape.
+	// For Codex, file contents travel in apply_patch's output. A request
+	// OpenAI gets in its own shape is filtered in that shape.
 	answer := `{"id":"resp_1","object":"response","model":"gpt-5.5","status":"completed",` +
 		`"output":[],"usage":{"input_tokens":10,"output_tokens":5}}`
 	h, seen := providerHarness(t, "openai", "gpt-5.5", jsonBackend(answer), nil)
@@ -588,8 +582,8 @@ func TestAFilterReadsACustomToolsOutput(t *testing.T) {
 }
 
 func TestAnItemThatFitsNoFieldIsDropped(t *testing.T) {
-	// A tool search call's arguments are an object, where a function call's
-	// are a string. It used to fail the whole input, and so the request.
+	// A tool search call's arguments are an object, not a string. That must
+	// not fail the request.
 	in := `{"model":"m","input":[{"type":"tool_search_call","call_id":"ts","arguments":{}},` +
 		`{"role":"user","content":"hi"}]}`
 	msgs := messagesOf(t, decodeAs(t, responsesShape{}, in))
@@ -600,7 +594,8 @@ func TestAnItemThatFitsNoFieldIsDropped(t *testing.T) {
 
 func TestImagesFromToolsFollowAllTheResults(t *testing.T) {
 	// Codex's view_image answers with an image, which the tool role cannot
-	// carry. A user turn between two results would part the second from its call.
+	// carry. A user turn between two results would split the second from its
+	// call.
 	in := `{"model":"m","input":[` +
 		`{"type":"function_call","call_id":"a","name":"view_image","arguments":"{}"},` +
 		`{"type":"function_call","call_id":"b","name":"view_image","arguments":"{}"},` +

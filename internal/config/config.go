@@ -1,7 +1,5 @@
-// Package config reads Keera Gateway's settings from the environment.
-//
-// Every setting is an environment variable. The model and sandbox catalogue
-// files are templates: each new organisation starts with a copy of them.
+// Package config reads the gateway's settings from the environment. The model
+// and sandbox files are templates that each new organisation starts from.
 package config
 
 import (
@@ -27,11 +25,11 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// DefaultTrustedProxies is loopback and the private ranges, where the proxy in
-// front of a gateway usually is.
+// DefaultTrustedProxies is loopback and the private ranges, where a proxy in
+// front usually is.
 const DefaultTrustedProxies = "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"
 
-// Config is the whole of Keera Gateway's configuration.
+// Config is the gateway's whole configuration.
 type Config struct {
 	DatabaseURL string
 	MaxDBConns  int32
@@ -41,20 +39,18 @@ type Config struct {
 	// surface under /sandbox.
 	Addr string
 
-	// OperatorKey authenticates the control API. It is the one credential not
-	// stored in the database, because it is how you reach an empty one.
+	// OperatorKey authenticates the control API. It is not stored in the
+	// database, because it is how you reach an empty one.
 	OperatorKey string
 
 	// SecretKey encrypts credentials stored through the control plane, such as
 	// a hosted model's API key.
 	SecretKey string
-	// SecretKeyPrevious is the key SecretKey replaced, while the stored
-	// credentials are moved to the new one.
+	// SecretKeyPrevious is the key SecretKey replaced, while credentials move.
 	SecretKeyPrevious string
 
-	// MetricsToken reads /metrics and nothing else, so a scrape configuration
-	// does not have to hold the operator key. Empty leaves the route to
-	// operators and the operator key.
+	// MetricsToken reads /metrics and nothing else, so a scraper needs no
+	// operator key. Empty leaves the route to operators.
 	MetricsToken string
 
 	// ModelsFile declares the models each new organisation starts with.
@@ -66,9 +62,8 @@ type Config struct {
 	MaxBodyBytes          int64
 	MaxResponseBytes      int64
 	UpstreamHeaderTimeout time.Duration
-	// UpstreamDeny is the addresses the gateway never sends a request to,
-	// whoever configured them: loopback and the cloud metadata service by
-	// default. See docs/install.md.
+	// UpstreamDeny is the addresses the gateway never sends a request to:
+	// loopback and the cloud metadata service by default. See docs/install.md.
 	UpstreamDeny []netip.Prefix
 	// LimitPrivate keeps organisations from addresses inside the network,
 	// except through the host names in PrivateHosts. KEERA_UPSTREAM_PRIVATE
@@ -80,31 +75,28 @@ type Config struct {
 
 	// UsageRetention and AuditRetention are how long usage events and audit
 	// entries are kept. Ended sandboxes and keys go with usage. Zero, the
-	// default, keeps them for ever, because billing and audits depend on them.
-	// See "Retention and sizing" in docs/install.md.
+	// default, keeps them for ever. See docs/install.md.
 	UsageRetention time.Duration
 	AuditRetention time.Duration
 
 	// SessionGap is how long an agent conversation may go quiet before the
-	// next request counts as a new task. Nothing is stored per session, so
-	// changing it re-cuts past sessions too. See docs/sessions.md.
+	// next request starts a new task. Changing it re-cuts past sessions too.
+	// See docs/sessions.md.
 	SessionGap time.Duration
 
-	// Platform is the deployment's own provider keys. An organisation's
-	// models of such a provider use it and are billed for it. See
-	// docs/billing.md.
+	// Platform is the deployment's own provider keys, which organisations
+	// use and are billed for. See docs/billing.md.
 	Platform catalog.Platform
 	// Payments is how organisations pay for those keys in advance. Nil
-	// without a PostFinance Checkout account: then nobody pays in advance.
+	// without a PostFinance Checkout account.
 	Payments *Payments
 	// ClaudeSubscriptions lets Claude Code signed in to a Claude plan through,
 	// paid by that plan. Off by default. See docs/subscriptions.md.
 	ClaudeSubscriptions bool
 
-	// Redis is the Redis the replicas share their rate limits through, read
-	// from KEERA_REDIS_URL. Nil, the default, keeps limits per process, so N
-	// replicas allow N times the limit. Nothing in Redis has to survive. See
-	// docs/gateway.md.
+	// Redis is where replicas share their rate limits, from KEERA_REDIS_URL.
+	// Nil, the default, keeps limits per process, so N replicas allow N times
+	// the limit. See docs/gateway.md.
 	Redis *redis.Options
 	// RedisPrefix namespaces the keys, so two deployments can share one Redis.
 	RedisPrefix string
@@ -116,16 +108,14 @@ type Config struct {
 	// UI serves the control panel from the listener's root.
 	UI bool
 	// PublicURL is the gateway's origin as a browser sees it, for the
-	// redirect after sign-out, the address under "My clients" and the panel
-	// link in a refusal. Empty uses the request's Host header for the first
-	// two and leaves the link out.
+	// redirect after sign-out, "My clients" and the panel link in a refusal.
+	// Empty uses the Host header for the first two and leaves the link out.
 	PublicURL string
 	// ChatURL is Keera Chat's origin. A sign-in started there may hand back
-	// to its /auth/callback, as `keera login` hands back to a loopback port.
-	// Empty, the default, allows only loopback. See docs/sso.md.
+	// to its /auth/callback. Empty allows only loopback. See docs/sso.md.
 	ChatURL string
-	// SecureCookies marks the session cookie Secure. On by default when the
-	// public URL is https; off lets a plain-http demo on localhost sign in.
+	// SecureCookies marks the session cookie Secure. On by default for an
+	// https public URL; off lets a plain-http demo on localhost sign in.
 	SecureCookies bool
 
 	// Sandbox is the machines this deployment lends out. Off by default.
@@ -135,8 +125,8 @@ type Config struct {
 	// them. With none and no passkeys, the operator key is the only way in.
 	OIDC []authn.OIDCConfig
 	// Passkeys lets administrators create accounts that sign in with a
-	// passkey instead of a directory. Nil when off, the default: such an
-	// account stays when its owner leaves the directory. See docs/sso.md.
+	// passkey instead of a directory. Nil when off, the default, as such an
+	// account outlives its owner leaving the directory. See docs/sso.md.
 	Passkeys *authn.RelyingParty
 }
 
@@ -173,8 +163,8 @@ func Load() (Config, error) {
 	if err := c.validate(); err != nil {
 		return c, err
 	}
-	// A passkey is bound to the public URL's host name, so a URL a browser
-	// runs no WebAuthn on stops the start.
+	// A passkey is bound to the public URL's host, which must support
+	// WebAuthn.
 	if envBool("KEERA_PASSKEYS", false) {
 		rp, err := authn.NewRelyingParty(c.PublicURL)
 		if err != nil {
@@ -209,8 +199,7 @@ func Load() (Config, error) {
 	return c, nil
 }
 
-// servedOverHTTPS reports whether the public URL is https, which is when
-// cookies should be Secure by default.
+// servedOverHTTPS reports whether the public URL is https.
 func (c Config) servedOverHTTPS() bool {
 	return strings.HasPrefix(c.PublicURL, "https://")
 }
@@ -261,8 +250,7 @@ func (c Config) validateCredentials() error {
 	return nil
 }
 
-// validateLogging refuses a log setting it does not know, rather than quietly
-// logging at another level or in another format than the one asked for.
+// validateLogging refuses an unknown log setting rather than quietly ignore it.
 func (c Config) validateLogging() error {
 	switch c.LogLevel {
 	case "debug", "info", "warn", "error":
@@ -277,10 +265,9 @@ func (c Config) validateLogging() error {
 	return nil
 }
 
-// minDBConns is the smallest pool that can serve. The two listeners take their
-// connections out of the pool (see store.Listen), so they are not counted
-// here. The floor leaves room for a transaction, such as a guardrail save,
-// while the usage recorder and other requests still get a connection.
+// minDBConns is the smallest pool that can serve, leaving room for a
+// transaction while the usage recorder and requests still get a connection.
+// The two listeners use their own connections (see store.Listen).
 const minDBConns = 4
 
 func (c Config) validateDBConns() error {
@@ -291,8 +278,8 @@ func (c Config) validateDBConns() error {
 	return nil
 }
 
-// validateRetention sets a floor of a day. Retention deletes rows for good,
-// and a stray "10m" would silently discard the day's billing data.
+// validateRetention sets a floor of a day, so a stray "10m" cannot delete the
+// day's billing data.
 func (c Config) validateRetention() error {
 	for _, r := range []struct {
 		name string
@@ -312,8 +299,8 @@ func (c Config) validateRetention() error {
 	return nil
 }
 
-// validateSessionGap sets a floor of a minute. Below that every request would
-// be its own session, which is just the request log.
+// validateSessionGap sets a floor of a minute. Below that, every request would
+// be its own session.
 func (c Config) validateSessionGap() error {
 	if c.SessionGap < time.Minute {
 		return fmt.Errorf("KEERA_SESSION_GAP is %s; below a minute every request "+
@@ -322,8 +309,7 @@ func (c Config) validateSessionGap() error {
 	return nil
 }
 
-// validateChatURL accepts a bare origin. Sign-ins are handed to exactly one
-// address under it, so a path or a query would only make that address wrong.
+// validateChatURL accepts a bare origin: sign-ins go to one fixed path under it.
 func (c Config) validateChatURL() error {
 	if c.ChatURL == "" {
 		return nil
@@ -338,8 +324,7 @@ func (c Config) validateChatURL() error {
 }
 
 func (c Config) validateOIDC() error {
-	// The identity provider sends the browser back to the callback under this
-	// address, so without it there is nowhere to send it.
+	// The identity provider sends the browser back to a callback under it.
 	if len(c.OIDC) > 0 && c.PublicURL == "" {
 		return errors.New("set KEERA_PUBLIC_URL to the address a browser reaches the " +
 			"panel on; single sign-on returns to its /control/auth/callback")
@@ -352,8 +337,7 @@ func (c Config) validateOIDC() error {
 		seen[p.Name] = true
 	}
 	for _, p := range c.OIDC {
-		// A provider left out is seen only as its button missing from the
-		// sign-in screen, which is hard to trace back to a typo.
+		// Otherwise a typo only shows as a missing sign-in button.
 		if !p.Configured() {
 			return fmt.Errorf("KEERA_OIDC_PROVIDERS names %q, but %sISSUER is not set, "+
 				"or %sCLIENT_ID for an OpenID Connect provider", p.Name, OIDCEnvPrefix(p.Name),
@@ -366,7 +350,7 @@ func (c Config) validateOIDC() error {
 			return err
 		}
 		// Not operator: that role comes only from KEERA_OPERATORS or an
-		// operator group, so reading those shows everyone who holds it.
+		// operator group, so those show everyone who holds it.
 		if !p.Mapping.Default.Assignable() {
 			return fmt.Errorf("the default role for the %s identity provider "+
 				"must be admin or member", p.Name)
@@ -376,15 +360,15 @@ func (c Config) validateOIDC() error {
 				return err
 			}
 		}
-		// With several directories, one customer's could otherwise give its
-		// users another customer's addresses, or an operator's.
+		// Otherwise, with several directories, one could give its users
+		// another customer's addresses, or an operator's.
 		if len(c.OIDC) > 1 && len(p.Domains) == 0 {
 			return fmt.Errorf("set %sDOMAINS to the email domains the %s "+
 				"identity provider may vouch for, or to %q for one that proves every "+
 				"address itself, such as Google", OIDCEnvPrefix(p.Name), p.Name, authn.AnyDomain)
 		}
-		// Any GitHub account can sign in to an OAuth App, and with one
-		// organisation each would land in it.
+		// Any GitHub account can sign in to an OAuth App, and would land in
+		// the one organisation.
 		if p.IsGitHub() && len(p.Domains) == 0 {
 			return fmt.Errorf("set %sDOMAINS: any GitHub account can sign in, so name the "+
 				"email domains of the people who may, or %q where people sign up",
@@ -394,8 +378,8 @@ func (c Config) validateOIDC() error {
 	return c.validateSignUp()
 }
 
-// requiredSettings names the settings a provider is missing. It is the one
-// check for them: authn does not know what the settings are called.
+// requiredSettings names the settings a provider is missing. Only config knows
+// their names.
 func requiredSettings(p authn.OIDCConfig) error {
 	prefix := OIDCEnvPrefix(p.Name)
 	var missing []string
@@ -418,8 +402,7 @@ func requiredSettings(p authn.OIDCConfig) error {
 }
 
 // ldapVouching refuses what is unsafe for a directory: its administrator sets
-// each person's address, so it may only vouch for its own domains, and it
-// cannot prove an address to a stranger who signs up.
+// each address, so it may only vouch for its own domains, and not for sign-up.
 func ldapVouching(p authn.OIDCConfig) error {
 	prefix := OIDCEnvPrefix(p.Name)
 	if len(p.Domains) == 0 || slices.Contains(p.Domains, authn.AnyDomain) {
@@ -435,9 +418,8 @@ func ldapVouching(p authn.OIDCConfig) error {
 }
 
 // validateSignUp refuses sign-up where an admin group decides who is an
-// administrator. That decision covers the whole gateway, so the person who
-// created an organisation would be a member again at their next sign-in, and
-// the organisation would have no administrator.
+// administrator: whoever created an organisation would lose the role at their
+// next sign-in, leaving it with no administrator.
 func (c Config) validateSignUp() error {
 	var signUp, group string
 	for _, p := range c.OIDC {
@@ -457,9 +439,8 @@ func (c Config) validateSignUp() error {
 	return nil
 }
 
-// privateHosts reads KEERA_UPSTREAM_PRIVATE. Where strangers can sign up, it
-// must be set: by default an organisation reaches the whole private network,
-// and anyone who signs up runs one.
+// privateHosts reads KEERA_UPSTREAM_PRIVATE. It must be set where strangers can
+// sign up: by default an organisation reaches the whole private network.
 func (c Config) privateHosts() (bool, []string, error) {
 	raw := env("KEERA_UPSTREAM_PRIVATE", "")
 	if raw == "" {
@@ -482,15 +463,13 @@ func (c Config) privateHosts() (bool, []string, error) {
 // oidcProviders reads the identity providers KEERA_OIDC_PROVIDERS names.
 // Provider N reads KEERA_OIDC_<N>_*, and nothing is shared between them.
 //
-// One callback serves every provider, because a sign-in is recognised by its
-// state and not by the address it comes back to.
+// One callback serves every provider: a sign-in is recognised by its state.
 func oidcProviders(publicURL string) []authn.OIDCConfig {
 	redirect := ""
 	if publicURL != "" {
 		redirect = publicURL + httpx.ControlPrefix + "/auth/callback"
 	}
-	// An address is the same whichever directory vouched for it, so there is
-	// one operator list for the deployment.
+	// One operator list for all directories: an address is the same in each.
 	operators := envList("KEERA_OPERATORS")
 	var out []authn.OIDCConfig
 	for _, name := range envList("KEERA_OIDC_PROVIDERS") {
@@ -544,15 +523,14 @@ func providerFrom(prefix, name, redirect string, operators []string) authn.OIDCC
 // "acme-ad" reads KEERA_OIDC_ACME_AD_*.
 func OIDCEnvPrefix(name string) string { return envPrefix("OIDC", name) }
 
-// envPrefix is how the settings of one named thing in a group start, such as
+// envPrefix is how the settings of one named item start, such as
 // KEERA_PROVIDER_STEPPING_STONE_.
 func envPrefix(group, name string) string {
 	return "KEERA_" + group + "_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_"
 }
 
-// providerLabel is what the sign-in button says when no label is set. People
-// type vendor names but read product names ("Microsoft", not "Entra");
-// anything unknown gets its own name capitalised.
+// providerLabel is the sign-in button's text when no label is set: a product
+// name ("Microsoft", not "Entra"), or the name capitalised.
 func providerLabel(name string) string {
 	switch name {
 	case "google", "workspace", "gsuite":
@@ -569,8 +547,8 @@ func providerLabel(name string) string {
 	return strings.ToUpper(name[:1]) + name[1:]
 }
 
-// envBool reads a switch. A value it cannot read is ignored, as for numbers:
-// a typo must not turn a safety setting off.
+// envBool reads a switch. An unreadable value is ignored, so a typo cannot turn
+// a safety setting off.
 func envBool(key string, def bool) bool {
 	switch strings.ToLower(env(key, "")) {
 	case "1", "true", "yes", "on":
@@ -610,8 +588,8 @@ func envListBy(key, sep string) []string {
 	return out
 }
 
-// Addr is KEERA_ADDR on its own, for `keera-gateway health`, which must not
-// need the settings only the server does.
+// Addr is KEERA_ADDR alone, for `keera-gateway health`, which needs nothing
+// else.
 func Addr() string { return env("KEERA_ADDR", ":8080") }
 
 func env(key, def string) string {
@@ -621,9 +599,8 @@ func env(key, def string) string {
 	return def
 }
 
-// envInt reads a size or a count. Zero or less is the default too: none of
-// them means "unlimited", and a pool of zero connections would be pgx's size,
-// not ours.
+// envInt reads a size or a count. Zero or less means the default: none of
+// them means "unlimited".
 func envInt(key string, def int) int {
 	n, err := strconv.Atoi(env(key, ""))
 	if err != nil || n <= 0 {
@@ -640,46 +617,40 @@ func envDuration(key string, def time.Duration) time.Duration {
 	return d
 }
 
-// SandboxConfig holds the sandbox settings, off by default: a gateway that
-// reached for a Kubernetes API on every start would fail over a feature nobody
-// asked for. Switching them on is one variable; the rest defaults to what the
-// Helm chart installs.
+// SandboxConfig holds the sandbox settings, off by default. Switching them on
+// is one variable; the rest defaults to what the Helm chart installs.
 type SandboxConfig struct {
 	// Driver is "kubernetes", "podman", or empty for no sandboxes.
 	Driver string
-	// File declares the sandbox classes each new organisation starts with,
-	// like the model file.
+	// File declares the sandbox classes each new organisation starts with.
 	File string
-	// Namespace is where the Kubernetes driver creates sandboxes. It should
-	// not be the gateway's own: a sandbox's API key is in its pod spec, so
-	// anyone who can read pods there can read every sandbox's credential.
+	// Namespace is where the Kubernetes driver creates sandboxes. Not the
+	// gateway's own: a sandbox's API key is in its pod spec, readable by anyone
+	// who can read pods there.
 	Namespace string
 	// Runtimes maps an isolation tier to this cluster's or host's name for it.
-	// A class asking for a tier with no name is refused rather than quietly
-	// given weaker isolation.
+	// A class asking for an unmapped tier is refused, not given weaker
+	// isolation.
 	Runtimes map[policy.Isolation]string
 
 	StorageClass     string
 	ServiceAccount   string
 	ImagePullSecrets []string
 	// Images are the image prefixes an organisation's administrator may give
-	// a class, besides the images of the template's classes. Any other image
-	// needs an operator: pods pull with the deployment's credentials.
+	// a class, besides the template's images. Others need an operator, as
+	// pods pull with the deployment's credentials.
 	Images []string
 
 	// PublicURL is the gateway as a sandbox sees it, usually the in-cluster
-	// Service rather than the ingress. Empty falls back to the deployment's
-	// PublicURL, which suits a single host.
+	// Service. Empty uses the deployment's PublicURL, which suits one host.
 	PublicURL string
 	// IdleSuspend is how long a sandbox may sit with nobody attached before it
-	// is suspended: the volume kept, the compute released. Zero leaves it
-	// running until it expires.
+	// is suspended, keeping the volume. Zero leaves it running until it
+	// expires.
 	IdleSuspend time.Duration
 
 	// Warm keeps a few sandboxes of each class started, so asking for one is
-	// instant. It is its own switch because it needs the agent-sandbox
-	// warm-pool extension; without it every reconcile would fail over a
-	// missing CRD.
+	// instant. It needs the agent-sandbox warm-pool extension.
 	Warm bool
 
 	// PodmanBinary and PodmanNetwork configure the single-host driver.
@@ -691,11 +662,11 @@ type SandboxConfig struct {
 }
 
 // GitConfig names the forge sandboxes check out from, and the deployment's
-// own credential there. Secrets are read from files, so they can come from a
-// mounted secret and stay out of the process environment.
+// credential there. Secrets are read from files, to keep them out of the
+// environment.
 type GitConfig struct {
-	// Forge is "github", "gitlab", or empty for none. With none, a sandbox
-	// cannot be created with a repository in it.
+	// Forge is "github", "gitlab", or empty for none, which allows no
+	// repository in a sandbox.
 	Forge string
 	// URL is GitHub's API (https://<host>/api/v3 for Enterprise Server) or the
 	// GitLab instance. Empty is GitHub.com or GitLab.com.
@@ -734,8 +705,8 @@ func sandboxConfig() SandboxConfig {
 	}
 }
 
-// sandboxRuntimes reads one variable per tier rather than one list, so the
-// order of a list cannot silently map the wrong tier.
+// sandboxRuntimes reads one variable per tier, not a list, so order cannot map
+// the wrong tier.
 func sandboxRuntimes() map[policy.Isolation]string {
 	out := map[policy.Isolation]string{}
 	for _, tier := range policy.Isolations {
@@ -753,18 +724,15 @@ func (s SandboxConfig) validate() error {
 		return fmt.Errorf("KEERA_SANDBOX_DRIVER is %q; it is 'kubernetes', 'podman', or unset "+
 			"for a deployment that lends out no sandboxes", s.Driver)
 	}
-	// The rest configures a driver. A stray setting with sandboxes off does
-	// nothing, so it must not stop the gateway from starting. The classes
-	// file is not one of them: it is read either way, as the template for new
-	// organisations.
+	// The rest configures a driver, so with sandboxes off a stray setting must
+	// not stop the start. The classes file is read either way.
 	if !s.Enabled() {
 		return nil
 	}
 	if s.IdleSuspend < 0 {
 		return errors.New("KEERA_SANDBOX_IDLE_SUSPEND cannot be negative")
 	}
-	// Suspending a sandbox in use is the worst this can do, and a short timer
-	// would also catch a laptop that is just reconnecting.
+	// A short timer could suspend a sandbox in use, or a laptop reconnecting.
 	if s.IdleSuspend > 0 && s.IdleSuspend < 5*time.Minute {
 		return fmt.Errorf("KEERA_SANDBOX_IDLE_SUSPEND is %s; below five minutes it could "+
 			"suspend a sandbox somebody is still connected to, because an open connection "+

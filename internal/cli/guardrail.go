@@ -14,8 +14,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// guardrailFlags are the flags of 'keera guardrail'. Numbers use -1 for "not
-// given" and 0 to clear the field; everything else is cleared by its --no- flag.
+// guardrailFlags numbers use -1 for "not given" and 0 to clear; everything
+// else is cleared by its --no- flag.
 type guardrailFlags struct {
 	models           string
 	noModels         bool
@@ -82,7 +82,7 @@ func registerGuardrailFlags(fs *flag.FlagSet) *guardrailFlags {
 	return f
 }
 
-// apply writes the flags that were given into lim and leaves the rest alone.
+// apply leaves fields alone whose flags were not given.
 func (f *guardrailFlags) apply(lim *policy.Limits) error {
 	if err := setList(&lim.AllowedModels, "models", f.models, f.noModels); err != nil {
 		return err
@@ -93,8 +93,8 @@ func (f *guardrailFlags) apply(lim *policy.Limits) error {
 	if err := f.applyBudget(lim); err != nil {
 		return err
 	}
-	// Each part is cleared by its own flag rather than by a reserved word,
-	// which nobody could then use as a prompt or an alias.
+	// A --no- flag rather than a reserved word, which nobody could then use as
+	// a prompt or an alias.
 	switch {
 	case f.noSystemPrompt && f.systemPrompt != "":
 		return opposites("system-prompt", "no-system-prompt")
@@ -128,8 +128,7 @@ func (f *guardrailFlags) apply(lim *policy.Limits) error {
 	return setList(&lim.AllowedRepos, "repos", f.repos, f.noRepos)
 }
 
-// setList applies a comma-separated list flag and its --no- flag, which
-// clears the list. An empty value means "not given".
+// setList treats an empty value as "not given".
 func setList(dst *[]string, name, v string, none bool) error {
 	switch {
 	case none && v != "":
@@ -137,19 +136,17 @@ func setList(dst *[]string, name, v string, none bool) error {
 	case none:
 		*dst = nil
 	case v != "":
-		// Never nil, which would read as "no limit": a list of only commas
-		// names nothing.
+		// Never nil, which would read as "no limit".
 		*dst = append([]string{}, splitList(v)...)
 	}
 	return nil
 }
 
-// micros converts francs to millionths. It rounds: 2.01 is 2009999.99... as
-// a float, and truncating would lose a millionth.
+// micros rounds, because 2.01 is 2009999.99... as a float.
 func micros(units float64) int64 { return int64(math.Round(units * 1_000_000)) }
 
-// applyRate changes the rate limit of one period, --per, and leaves the
-// others alone. A limit left with neither count goes.
+// applyRate changes the --per period only. A limit left with neither count
+// is removed.
 func (f *guardrailFlags) applyRate(lim *policy.Limits) error {
 	per := policy.PeriodMinute
 	if f.per != "" {
@@ -182,8 +179,7 @@ func (f *guardrailFlags) applyRate(lim *policy.Limits) error {
 	return nil
 }
 
-// applyBudget changes the budget of one period, --period, and leaves the
-// other alone. A budget of 0 goes.
+// applyBudget changes the --period budget only. A budget of 0 is removed.
 func (f *guardrailFlags) applyBudget(lim *policy.Limits) error {
 	period := policy.PeriodMonth
 	if f.period != "" {
@@ -239,10 +235,8 @@ func guardrailCmd(ctx context.Context, args []string) error {
 	}
 }
 
-// scopeArgs reads the scope and its id from the arguments already parsed. A
-// project may be named by its name and a key by its name, as everywhere else,
-// inside the organisation org. The id of an organisation may be left out: it
-// is then org, the caller's own, or an operator's only one.
+// scopeArgs accepts names for projects and keys. An organisation's id may be
+// left out: it is then org, the caller's own, or an operator's only one.
 func scopeArgs(ctx context.Context, c *client, fs *flag.FlagSet, org string) (string, string, error) {
 	scope, given := fs.Arg(0), fs.Arg(1)
 	switch policy.ScopeType(scope) {
@@ -267,8 +261,7 @@ func scopeArgs(ctx context.Context, c *client, fs *flag.FlagSet, org string) (st
 	}
 }
 
-// updateLimits reads a scope's guardrails, changes them and writes them back,
-// so that a field nobody named is kept rather than cleared.
+// updateLimits reads before writing, so a field nobody named is kept.
 func updateLimits(ctx context.Context, c *client, scope, scopeID string,
 	change func(*policy.Limits) error,
 ) (policy.Limits, error) {
@@ -284,19 +277,17 @@ func updateLimits(ctx context.Context, c *client, scope, scopeID string,
 	return lim, err
 }
 
-// A facet is one part of a guardrail on its own: 'keera limit' for the rates
-// and 'keera budget' for the spend. It is 'guardrail set' with only its own
-// flags. With no flags it reports rather than writes, because
+// A facet is 'guardrail set' with only some flags: 'keera limit' for the
+// rates and 'keera budget' for the spend. With no flags it reports, because
 // `keera limit project payments` is a question.
 
-// facetFields are the parts of the effective report each facet prints.
 var facetFields = map[string][]string{"limit": {"rates"}, "budget": {"spend"}}
 
 func facetCmd(ctx context.Context, name string, args []string) error {
 	r := newCmdRun(name, args)
 	f := registerGuardrailFlags(r.fs)
-	// Help comes first, then the other facet's flags, named by the command
-	// that takes them, before parse refuses them less helpfully.
+	// The other facet's flags are refused before parse, which says it less
+	// helpfully.
 	if want, ok := wantsHelp(args); ok {
 		return printHelp(r.fs, name, want)
 	}
@@ -317,8 +308,7 @@ func facetCmd(ctx context.Context, name string, args []string) error {
 			return err
 		}
 	}
-	// Print only this facet's part, even after a change: 'budget' answering
-	// with every sandbox ceiling would be saying more than was asked.
+	// Only this facet's part, even after a change.
 	eff, err := effectiveFor(ctx, c, scope, scopeID)
 	if err != nil {
 		return err
@@ -326,8 +316,6 @@ func facetCmd(ctx context.Context, name string, args []string) error {
 	return out(r.asJSON, eff, func(w *table) { printEffective(w, eff, facetFields[name]) })
 }
 
-// wrongFacet refuses a flag that belongs to the other facet, naming the
-// command that takes it.
 func wrongFacet(name string, args []string) error {
 	own, _ := find(name)
 	for _, arg := range args {
@@ -350,21 +338,18 @@ func wrongFacet(name string, args []string) error {
 	return nil
 }
 
-// guardrailPath addresses one scope's guardrails. Both parts are typed by
-// people, so both are escaped: a slash or a space would land on another route.
+// guardrailPath escapes both parts: a slash or a space would land on another
+// route.
 func guardrailPath(scope, scopeID string) string {
 	return "/v1/guardrails/" + url.PathEscape(scope) + "/" + url.PathEscape(scopeID)
 }
 
-// effectiveFor reads the whole chain above a scope.
 func effectiveFor(ctx context.Context, c *client, scope, scopeID string) (control.Effective, error) {
 	var eff control.Effective
 	err := c.do(ctx, "GET", guardrailPath(scope, scopeID)+"/effective", nil, &eff)
 	return eff, err
 }
 
-// effectiveParts are the parts of the effective report, in the order they
-// print.
 var effectiveParts = []struct {
 	name  string
 	print func(*table, control.Effective)
@@ -378,9 +363,8 @@ var effectiveParts = []struct {
 	{"sandboxes", printEffectiveSandboxes},
 }
 
-// printEffective says what actually holds a scope. Every row names the level
-// that decided it, so nobody changes the number on the wrong scope. It prints
-// the named parts, or every part when fields is nil.
+// printEffective names the level behind every row, so nobody changes the
+// number on the wrong scope. A nil fields prints every part.
 func printEffective(w *table, eff control.Effective, fields []string) {
 	w.header("WHAT\tIN FORCE\tFROM")
 	for _, part := range effectiveParts {
@@ -390,7 +374,6 @@ func printEffective(w *table, eff control.Effective, fields []string) {
 	}
 }
 
-// showFrom writes one row of the effective report.
 func showFrom(w *table, name string, v any, from string) {
 	if from == "" {
 		_, _ = fmt.Fprintf(w, "%s\t%v\t\n", name, v)
@@ -399,7 +382,6 @@ func showFrom(w *table, name string, v any, from string) {
 	_, _ = fmt.Fprintf(w, "%s\t%v\tset by %s\n", name, v, from)
 }
 
-// showSet writes a row that some level set, or what holds when none did.
 func showSet(w *table, name, unset string, set bool, v any, from string) {
 	if !set {
 		v, from = unset, ""
@@ -413,8 +395,8 @@ func printEffectiveModels(w *table, eff control.Effective) {
 		narrowedBy(eff, func(l policy.Limits) bool { return l.AllowedModels != nil }))
 }
 
-// Rate limits and budgets do not merge: each may count over another period,
-// and every one must hold, so every one is printed with its level.
+// Rate limits and budgets do not merge, since every one must hold, so each is
+// printed with its level.
 func printEffectiveRates(w *table, eff control.Effective) {
 	printEveryLevel(w, eff, "rate limit", ratesOf)
 }
@@ -436,8 +418,6 @@ func printEveryLevel(w *table, eff control.Effective, name string, says func(pol
 	}
 }
 
-// ratesOf says a guardrail's own rate limits, such as "120 requests and
-// 50000 tokens per minute".
 func ratesOf(lim policy.Limits) []string {
 	var out []string
 	for _, rl := range lim.RateLimits {
@@ -448,7 +428,6 @@ func ratesOf(lim policy.Limits) []string {
 	return out
 }
 
-// rateText says one rate limit, as a guardrail or a router step has it.
 func rateText(rl policy.RateLimit) string {
 	var parts []string
 	if rl.Requests > 0 {
@@ -460,7 +439,6 @@ func rateText(rl policy.RateLimit) string {
 	return strings.Join(parts, " and ") + " per " + string(rl.Per())
 }
 
-// budgetText says one budget, as a guardrail or a router step has it.
 func budgetText(b policy.Budget) string {
 	return policy.FormatMoney(b.BudgetMicros) + " per " + string(b.Per())
 }
@@ -514,8 +492,7 @@ func printEffectiveSandboxes(w *table, eff control.Effective) {
 		}))
 }
 
-// narrowedBy names the innermost level that set a field. For a field that
-// narrows, that level decided it.
+// narrowedBy names the innermost level that set a field, which decided it.
 func narrowedBy(eff control.Effective, set func(policy.Limits) bool) string {
 	from := ""
 	for _, l := range eff.Levels {
@@ -526,8 +503,7 @@ func narrowedBy(eff control.Effective, set func(policy.Limits) bool) string {
 	return from
 }
 
-// joinedFrom names every level that contributed, for the fields that add up
-// rather than narrow.
+// joinedFrom is for fields that add up rather than narrow.
 func joinedFrom(eff control.Effective, set func(policy.Limits) bool) string {
 	var names []string
 	for _, l := range eff.Levels {
@@ -538,7 +514,6 @@ func joinedFrom(eff control.Effective, set func(policy.Limits) bool) string {
 	return strings.Join(names, " then ")
 }
 
-// levelLabel names a level by its name, or by its id when it has none.
 func levelLabel(l control.EffectiveLevel) string {
 	if l.Name == "" {
 		return string(l.Type) + " " + l.ID
@@ -546,7 +521,6 @@ func levelLabel(l control.EffectiveLevel) string {
 	return string(l.Type) + " " + l.Name
 }
 
-// showEach shows a row for each value, or one saying the scope sets none.
 func showEach(w *table, name string, vs []string) {
 	if len(vs) == 0 {
 		vs = []string{notSet}
@@ -556,12 +530,11 @@ func showEach(w *table, name string, vs []string) {
 	}
 }
 
-// notSet is what a scope's own guardrail shows for a field it leaves to the
-// levels around it. "unlimited" would be wrong: an outer level may still set it.
+// notSet is not "unlimited", because an outer level may still set the field.
 const notSet = "(not set here)"
 
-// printLimits shows one scope's own guardrail, not what applies there; that is
-// 'guardrail effective'.
+// printLimits shows one scope's own guardrail; 'guardrail effective' shows
+// what applies.
 func printLimits(w *table, lim policy.Limits, scope string) {
 	show(w, "models", joinedOr(lim.AllowedModels, notSet))
 	showEach(w, "rate limit", ratesOf(lim))
@@ -575,11 +548,11 @@ func printLimits(w *table, lim policy.Limits, scope string) {
 	if lim.SystemPrompt == nil {
 		show(w, "system prompt", "(none)")
 	} else {
-		// One line; --json has the whole text.
+		// --json has the whole text.
 		show(w, "system prompt", firstLine(*lim.SystemPrompt))
 	}
 	show(w, "sandbox classes", joinedOr(lim.SandboxClasses, notSet))
-	// Only the organisation grants repositories, so there nothing set is none.
+	// Only the organisation grants repositories, so there unset means none.
 	noRepos := notSet
 	if scope == string(policy.ScopeOrg) {
 		noRepos = "(none)"
@@ -606,8 +579,7 @@ func notSetHere(p *int) any {
 	return *p
 }
 
-// maxSize is a ceiling on a sandbox's size, in cores and mebibytes, the units
-// the template file and the flags use. Either part may be unset.
+// maxSize uses cores and mebibytes, as the template file and the flags do.
 func maxSize(cpuMillis, memoryMiB int) string {
 	cpu, memory := "any CPU", "any memory"
 	if cpuMillis > 0 {
@@ -619,7 +591,6 @@ func maxSize(cpuMillis, memoryMiB int) string {
 	return cpu + ", " + memory
 }
 
-// joinedOr joins a list for a table cell, or says what a nil list means.
 func joinedOr(items []string, none string) string {
 	if items == nil {
 		return none

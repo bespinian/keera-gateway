@@ -14,7 +14,6 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// orgRun is one 'keera org' invocation.
 type orgRun struct {
 	*cmdRun
 	name      string
@@ -85,7 +84,7 @@ func (r *orgRun) set(ctx context.Context) error {
 		return opposites("domain", "no-domain")
 	}
 	// The organisation may be left off while there is only one, which is
-	// exactly when the domain has to be set.
+	// when the domain has to be set.
 	var orgID string
 	var err error
 	if r.fs.Arg(0) == "" {
@@ -137,8 +136,8 @@ func (r *orgRun) list(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// The domain is a column because a missing one is what an operator must
-	// notice: with two organisations or more, nobody new can sign in to it.
+	// The domain is shown because, with two organisations or more, nobody new
+	// can sign in to one without it.
 	return out(r.asJSON, orgs, func(w *table) {
 		if len(orgs) == 0 {
 			printNone(w, "organisations", "keera org create <name>")
@@ -159,8 +158,7 @@ func (r *orgRun) list(ctx context.Context) error {
 	})
 }
 
-// listMine lists the organisations a person is in, and the ones that
-// invited them.
+// listMine lists a person's organisations and the ones that invited them.
 func (r *orgRun) listMine(me identity) error {
 	orgs := myOrgs(me)
 	return out(r.asJSON, orgs, func(w *table) {
@@ -190,9 +188,8 @@ func myOrgs(me identity) []membership {
 	return []membership{{ID: me.OrgID, Name: me.OrgName, Role: me.Role}}
 }
 
-// switchTo chooses the organisation later commands act on. A person in
-// several moves their sign-in there, because their role differs in each. An
-// operator sees every one, so the choice is only remembered here.
+// switchTo moves a person's sign-in, because their role differs in each
+// organisation. An operator sees every one, so the choice is only remembered.
 func (r *orgRun) switchTo(ctx context.Context) error {
 	given := r.fs.Arg(0)
 	if given == "" && !r.all {
@@ -256,7 +253,6 @@ func (r *orgRun) switchTo(ctx context.Context) error {
 	return nil
 }
 
-// warnAboutEnv says when KEERA_ORG overrides the choice just made.
 func (r *orgRun) warnAboutEnv() {
 	if env("KEERA_ORG") != "" {
 		fmt.Fprintln(os.Stderr, styleErr.warn("\nNote: KEERA_ORG is set in this shell, and it "+
@@ -290,10 +286,9 @@ func (r *orgRun) delete(ctx context.Context) error {
 	})
 }
 
-// warnAboutDomains warns when there are several organisations and some have
-// no email domain: from the second one on, a first sign-in is placed by domain
-// or refused, so a new tenant can stop sign-ins to the first. It writes to
-// stderr so --json stays clean, and fails nothing: the organisation exists.
+// warnAboutDomains warns when some of several organisations have no email
+// domain: a first sign-in is then placed by domain or refused, so a new tenant
+// can stop sign-ins to the first. It writes to stderr and fails nothing.
 func warnAboutDomains(ctx context.Context, c *client) {
 	orgs, err := list[store.Org](ctx, c, "/v1/orgs")
 	if err != nil {
@@ -323,16 +318,13 @@ func warnAboutDomains(ctx context.Context, c *client) {
 	fmt.Fprintln(os.Stderr, "Anyone who has signed in before keeps the organisation they are in.")
 }
 
-// orgRow writes the row that create and set answer with.
 func orgRow(w *table, o store.Org) {
 	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", o.ID, o.Name, orNotSet(o.EmailDomain))
 }
 
-// orNotSet renders an empty email domain as something a table can show.
 func orNotSet(domain string) string { return cmp.Or(domain, "not set") }
 
-// deletedOrg is what DELETE /v1/orgs/{id} reports it removed, as far as the
-// table shows it.
+// deletedOrg is the part of the DELETE /v1/orgs/{id} reply the table shows.
 type deletedOrg struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
@@ -341,9 +333,8 @@ type deletedOrg struct {
 	Keys     int    `json:"keys"`
 }
 
-// confirmOrgDelete prints what the deletion destroys and makes the operator
-// type the organisation's name back. An id is easy to paste from the wrong
-// row; a name is not.
+// confirmOrgDelete asks for the name, not the id: an id is easy to paste from
+// the wrong row.
 func confirmOrgDelete(ctx context.Context, c *client, orgID string) error {
 	orgs, err := list[store.Org](ctx, c, "/v1/orgs")
 	if err != nil {
@@ -354,7 +345,7 @@ func confirmOrgDelete(ctx context.Context, c *client, orgID string) error {
 		return notFound("organisation", orgID, "", "org")
 	}
 
-	// Extra reads, only when asking, so the prompt can say how much goes.
+	// Read only when asking, so the prompt can say how much goes.
 	projects, err := list[store.Project](ctx, c, inOrg("/v1/projects", orgID))
 	if err != nil {
 		return err
@@ -367,9 +358,8 @@ func confirmOrgDelete(ctx context.Context, c *client, orgID string) error {
 	if err != nil {
 		return err
 	}
-	// The control plane refuses while sandboxes hold machines. Saying so now
-	// spares typing the name for nothing. A failed read leaves it to the
-	// control plane.
+	// The control plane refuses while sandboxes hold machines; saying so now
+	// spares typing the name for nothing.
 	if live, err := list[store.Sandbox](ctx, c, inOrg("/v1/sandboxes", orgID)); err == nil && len(live) > 0 {
 		return fmt.Errorf("%s still has %s; terminate them first "+
 			"(keera org switch %s, then keera sandbox list)", org.Name,

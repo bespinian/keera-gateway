@@ -11,8 +11,7 @@ import (
 	"testing"
 )
 
-// serve runs one request through Compress around a handler that writes what it
-// is told, and returns the recorded response.
+// serve runs one request through Compress and returns the recorded response.
 func serve(t *testing.T, accept, contentType, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	h := Compress(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -28,7 +27,7 @@ func serve(t *testing.T, accept, contentType, body string) *httptest.ResponseRec
 	return w
 }
 
-// unzip reads a gzipped response body back, failing the test if it is not one.
+// unzip reads a gzipped response body, failing the test if it is not one.
 func unzip(t *testing.T, w *httptest.ResponseRecorder) string {
 	t.Helper()
 	zr, err := gzip.NewReader(bytes.NewReader(w.Body.Bytes()))
@@ -56,8 +55,7 @@ func TestALargeJSONResponseIsCompressed(t *testing.T) {
 		t.Errorf("compressed to %d bytes from %d, which is no saving",
 			w.Body.Len(), len(body))
 	}
-	// A length describing the uncompressed body would be read as the length of
-	// this one, and the client would stop short or hang waiting for the rest.
+	// The uncompressed length would make the client stop short or hang.
 	if w.Header().Get("Content-Length") != "" {
 		t.Error("Content-Length survived compression")
 	}
@@ -85,16 +83,14 @@ func TestAClientThatDidNotAskIsNotSentGzip(t *testing.T) {
 	if w.Body.String() != body {
 		t.Error("the body was altered for a client that asked for no encoding")
 	}
-	// The resource still varies even though this response did not: a cache that
-	// was told otherwise would hand this answer to a client that did ask.
+	// The resource still varies, even though this response was not compressed.
 	if !strings.Contains(w.Header().Get("Vary"), "Accept-Encoding") {
 		t.Error("Vary is missing, so a shared cache cannot tell the two apart")
 	}
 }
 
 func TestAnUpgradeIsNotWrapped(t *testing.T) {
-	// The handler takes the connection over, so the compressor must not be
-	// between them to write its headers afterwards.
+	// The handler takes the connection over, so the compressor must step aside.
 	var wrapped bool
 	h := Compress(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, wrapped = w.(*compressWriter)
@@ -109,8 +105,7 @@ func TestAnUpgradeIsNotWrapped(t *testing.T) {
 }
 
 func TestAStreamIsNotHeldInTheCompressor(t *testing.T) {
-	// The request log's stream: events written and flushed one at a time, with
-	// the reader expected to see each one as it happens.
+	// The request log's stream: the reader sees each event as it is flushed.
 	seen := make(chan string, 4)
 	h := Compress(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -142,8 +137,7 @@ func TestAStreamIsNotHeldInTheCompressor(t *testing.T) {
 }
 
 func TestAnAlreadyEncodedResponsePassesThrough(t *testing.T) {
-	// Like the panel's embedded assets: compressed once at startup and served
-	// with their own Content-Encoding. They must not be compressed again.
+	// Like the panel's precompressed assets, which must not be compressed again.
 	var squeezed bytes.Buffer
 	zw := gzip.NewWriter(&squeezed)
 	_, _ = io.WriteString(zw, strings.Repeat("export const view = () => {};\n", 200))
@@ -184,8 +178,7 @@ func TestAStatusWithNoBodyIsStillSent(t *testing.T) {
 }
 
 func TestTheErrorEnvelopeSurvivesCompression(t *testing.T) {
-	// Every refusal the control plane writes goes through WriteJSON, and a
-	// client that cannot parse one is a developer looking at a blank failure.
+	// Every control plane refusal goes through WriteJSON.
 	h := Compress(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		WriteError(w, http.StatusForbidden, "permission_error", "csrf",
 			strings.Repeat("this request is missing its CSRF token. ", 60))
@@ -207,10 +200,8 @@ func TestTheErrorEnvelopeSurvivesCompression(t *testing.T) {
 }
 
 func TestAPanicStillReachesTheClientAsAnError(t *testing.T) {
-	// A handler that panics before the threshold has written nothing usable,
-	// and the compressor must not send that nothing: the middleware above
-	// answers a panic with a 500, which it can only do while the response line
-	// is still unsent.
+	// A panic before the threshold must leave the response unsent, so the
+	// middleware above can answer 500.
 	h := Middleware(slog.New(slog.DiscardHandler), Compress(http.HandlerFunc(
 		func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")

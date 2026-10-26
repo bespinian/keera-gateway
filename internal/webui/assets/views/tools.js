@@ -1,8 +1,8 @@
-// Tool calls an agent made through the gateway's MCP servers. Shared by a
-// session's screen and the MCP servers screen.
+// Tool calls an agent made through the gateway's MCP servers, for a session's
+// screen and the MCP screen.
 //
-// No call content is kept. Which tool, the outcome, the time and the bytes
-// each way are enough to spot an agent looping on one tool.
+// No call content is kept. Tool, outcome, time and bytes are enough to spot
+// an agent looping on one tool.
 
 import { h, table, pill, ms, bytes, dateTime, ago, capitalise } from "../ui.js";
 
@@ -16,7 +16,7 @@ const OUTCOMES = {
 };
 
 function toolOutcome(outcome) {
-  // An outcome this panel does not know yet is still shown as a word.
+  // An unknown outcome is still shown as a word.
   const [label, tone] = OUTCOMES[outcome] || [
     capitalise(outcome).replace(/_/g, " "),
     "",

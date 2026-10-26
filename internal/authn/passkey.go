@@ -26,19 +26,17 @@ import (
 // Passkeys are WebAuthn credentials that Keera checks itself, for accounts no
 // directory vouches for.
 //
-// Only what passkeys need is implemented. Attestation is "none", so the
-// gateway never parses CBOR: the browser hands over the public key as
-// SubjectPublicKeyInfo (getPublicKey), which Go reads directly. Without
-// attestation nothing at registration is signed anyway, so this trusts the
-// browser exactly as much as parsing the attestation object would.
+// Attestation is "none", so the gateway never parses CBOR: the browser hands
+// over the public key as SubjectPublicKeyInfo, which Go reads directly.
+// Without attestation nothing at registration is signed anyway, so this
+// trusts the browser no less than parsing the attestation object would.
 
-// PasskeyProvider is the name a passkey sign-in goes by wherever a provider is
-// named: in /auth/login?provider=, in `keera login --provider`, in the audit
-// log. No identity provider may use it.
+// PasskeyProvider is the provider name of a passkey sign-in. No identity
+// provider may use it.
 const PasskeyProvider = "passkey"
 
-// The COSE algorithms a passkey may use, in the order the browser is asked to
-// prefer them. RS256 is for older Windows Hello.
+// The COSE algorithms a passkey may use, most preferred first. RS256 is for
+// older Windows Hello.
 const (
 	AlgES256 = -7
 	AlgEdDSA = -8
@@ -46,14 +44,11 @@ const (
 )
 
 const (
-	// PasskeyTimeout is how long the browser waits for the person to touch
-	// their authenticator.
+	// PasskeyTimeout is how long the browser waits for the authenticator.
 	PasskeyTimeout = 5 * time.Minute
-	// PasskeyChallengeTTL bounds a registration in flight. It is a little
-	// longer than the browser's own timeout.
+	// PasskeyChallengeTTL is a little longer than the browser's timeout.
 	PasskeyChallengeTTL = PasskeyTimeout + time.Minute
-	// PasskeyLinkTTL is how long a set-up link works. It is handed over by
-	// hand, so it lasts a working day and a bit.
+	// PasskeyLinkTTL is a day, since the set-up link is handed over by hand.
 	PasskeyLinkTTL = 24 * time.Hour
 )
 
@@ -64,28 +59,23 @@ const (
 	flagAttested     = 0x40
 )
 
-// PasskeyExternalID marks an account that signs in with passkeys. The
-// provider part is reserved, so no directory can issue it, and a first SSO
-// sign-in never adopts the row: it already has a subject.
+// PasskeyExternalID marks an account that signs in with passkeys. The provider
+// part is reserved, so no directory can issue it.
 func PasskeyExternalID(userID string) string {
 	return ReservedProvider + ":" + PasskeyProvider + ":" + userID
 }
 
-// IsPasskeyAccount reports whether an external ID is one PasskeyExternalID
-// made.
 func IsPasskeyAccount(externalID string) bool {
 	return strings.HasPrefix(externalID, ReservedProvider+":"+PasskeyProvider+":")
 }
 
-// RelyingParty is this gateway as WebAuthn sees it.
 type RelyingParty struct {
 	id     string
 	origin string
 }
 
-// NewRelyingParty derives the relying party from the public URL. The RP ID is
-// the host name, so a passkey works only on that name: moving the gateway to
-// another domain makes every passkey useless.
+// NewRelyingParty uses the public URL's host name as the RP ID, so moving the
+// gateway to another domain makes every passkey useless.
 func NewRelyingParty(publicURL string) (*RelyingParty, error) {
 	u, err := url.Parse(publicURL)
 	if err != nil || u.Host == "" {
@@ -109,18 +99,14 @@ func NewRelyingParty(publicURL string) (*RelyingParty, error) {
 	return &RelyingParty{id: host, origin: u.Scheme + "://" + u.Host}, nil
 }
 
-// ID is the RP ID.
 func (rp *RelyingParty) ID() string { return rp.id }
 
-// NewPasskeyChallenge mints a ceremony's challenge, as base64url.
 func NewPasskeyChallenge() string { return auth.RandomToken() }
 
-// NewPasskeyLink mints the token of a set-up link and the hash stored for it.
 func NewPasskeyLink() (token string, hash []byte) { return newSecret("") }
 
-// credentialParam and credentialRef are the JSON forms of
-// PublicKeyCredentialParameters and PublicKeyCredentialDescriptor. Binary
-// values are base64url, which the panel decodes.
+// credentialParam and credentialRef are PublicKeyCredentialParameters and
+// PublicKeyCredentialDescriptor. Binary values are base64url.
 type credentialParam struct {
 	Type string `json:"type"`
 	Alg  int    `json:"alg"`
@@ -154,10 +140,9 @@ type CreationOptions struct {
 	Attestation string `json:"attestation"`
 }
 
-// CreationOptions asks the browser for a discoverable credential with user
-// verification, so the passkey alone signs the person in. exclude lists the
-// credentials the person already has, so one authenticator is not registered
-// twice.
+// CreationOptions asks for a discoverable credential with user verification,
+// so the passkey alone signs the person in. exclude keeps one authenticator
+// from being registered twice.
 func (rp *RelyingParty) CreationOptions(challenge, userID, email string,
 	exclude [][]byte,
 ) CreationOptions {
@@ -165,7 +150,7 @@ func (rp *RelyingParty) CreationOptions(challenge, userID, email string,
 	o.Challenge = challenge
 	o.RP.ID = rp.id
 	o.RP.Name = "Keera"
-	// The user handle is the user's id, which says nothing about the person.
+	// The user id says nothing about the person.
 	o.User.ID = b64(UserHandle(userID))
 	o.User.Name = email
 	o.User.DisplayName = email
@@ -193,8 +178,8 @@ type RequestOptions struct {
 	AllowCredentials []credentialRef `json:"allowCredentials"`
 }
 
-// RequestOptions lists no credentials, so the browser offers every passkey it
-// has for this gateway and the person picks one.
+// RequestOptions lists no credentials, so the browser offers every passkey for
+// this gateway.
 func (rp *RelyingParty) RequestOptions(challenge string) RequestOptions {
 	return RequestOptions{
 		Challenge:        challenge,
@@ -205,11 +190,9 @@ func (rp *RelyingParty) RequestOptions(challenge string) RequestOptions {
 	}
 }
 
-// UserHandle is the WebAuthn user handle for a user id.
 func UserHandle(userID string) []byte { return []byte(userID) }
 
-// Registration is what the browser returns from navigator.credentials.create.
-// Every binary field is base64url.
+// Registration is what navigator.credentials.create returns, in base64url.
 type Registration struct {
 	ID                string `json:"id"`
 	ClientDataJSON    string `json:"client_data_json"`
@@ -218,7 +201,6 @@ type Registration struct {
 	Algorithm         int    `json:"algorithm"`
 }
 
-// Credential is a registered passkey, as stored.
 type Credential struct {
 	ID        []byte
 	PublicKey []byte // SubjectPublicKeyInfo, DER
@@ -226,16 +208,13 @@ type Credential struct {
 	SignCount uint32
 }
 
-// ErrPasskey is the cause of every refused ceremony. The detail is for the
-// log; a person is told the ceremony failed.
+// ErrPasskey is the cause of every refused ceremony. The detail is for the log.
 var ErrPasskey = errors.New("authn: passkey refused")
 
 func refuse(format string, args ...any) error {
 	return fmt.Errorf("%w: "+format, append([]any{ErrPasskey}, args...)...)
 }
 
-// VerifyRegistration checks a new passkey against the challenge it was
-// created for, and returns it ready to store.
 func (rp *RelyingParty) VerifyRegistration(challenge string, r Registration) (Credential, error) {
 	rawID, err := unb64(r.ID)
 	if err != nil || len(rawID) == 0 || len(rawID) > 1023 {
@@ -274,8 +253,7 @@ func (rp *RelyingParty) VerifyRegistration(challenge string, r Registration) (Cr
 	}, nil
 }
 
-// Assertion is what the browser returns from navigator.credentials.get. Every
-// binary field is base64url.
+// Assertion is what navigator.credentials.get returns, in base64url.
 type Assertion struct {
 	ID                string `json:"id"`
 	ClientDataJSON    string `json:"client_data_json"`
@@ -284,7 +262,6 @@ type Assertion struct {
 	UserHandle        string `json:"user_handle"`
 }
 
-// CredentialID decodes the id of the passkey an assertion names, to look it up.
 func (a Assertion) CredentialID() ([]byte, error) {
 	id, err := unb64(a.ID)
 	if err != nil || len(id) == 0 {
@@ -303,11 +280,8 @@ func (a Assertion) OwnedBy(userID string) bool {
 	return err == nil && subtle.ConstantTimeCompare(got, UserHandle(userID)) == 1
 }
 
-// VerifyAssertion checks a sign-in against the challenge it answers and the
-// stored passkey. It returns the new signature counter to store.
-//
-// The caller has looked the credential up by id and checks with OwnedBy that
-// the user handle, if any, is its owner.
+// VerifyAssertion checks a sign-in and returns the new signature counter. The
+// caller has looked the credential up by id and checks OwnedBy.
 func (rp *RelyingParty) VerifyAssertion(challenge string, a Assertion, cred Credential) (uint32, error) {
 	if err := rp.checkClientData(a.ClientDataJSON, "webauthn.get", challenge); err != nil {
 		return 0, err
@@ -331,7 +305,7 @@ func (rp *RelyingParty) VerifyAssertion(challenge string, a Assertion, cred Cred
 		return 0, refuse("the signature does not match the passkey")
 	}
 	// A counter that does not move forward means a copy of the key signed in.
-	// Synced passkeys always send zero, which is fine.
+	// Synced passkeys always send zero.
 	if (ad.signCount != 0 || cred.SignCount != 0) && ad.signCount <= cred.SignCount {
 		return 0, refuse("the signature counter went backwards (%d after %d); the passkey "+
 			"may have been copied", ad.signCount, cred.SignCount)
@@ -339,9 +313,8 @@ func (rp *RelyingParty) VerifyAssertion(challenge string, a Assertion, cred Cred
 	return ad.signCount, nil
 }
 
-// checkClientData checks what the browser says the ceremony was: its kind, its
-// challenge, and the page that ran it. The origin check is what makes a
-// passkey useless to a phishing site.
+// checkClientData checks the ceremony's kind, challenge and origin. The origin
+// check makes a passkey useless to a phishing site.
 func (rp *RelyingParty) checkClientData(encoded, kind, challenge string) error {
 	raw, err := unb64(encoded)
 	if err != nil {
@@ -376,9 +349,8 @@ type authData struct {
 	signCount uint32
 }
 
-// parseAuthData reads the fixed header of the authenticator data: the RP ID
-// hash, the flags and the counter. Both ceremonies require user verification,
-// so the passkey stands in for a password and a second factor at once.
+// parseAuthData reads the authenticator data's fixed header. Both ceremonies
+// require user verification, so the passkey is password and second factor.
 func (rp *RelyingParty) parseAuthData(encoded string) (authData, error) {
 	raw, err := unb64(encoded)
 	if err != nil || len(raw) < 37 {
@@ -399,8 +371,7 @@ func (rp *RelyingParty) parseAuthData(encoded string) (authData, error) {
 	return a, nil
 }
 
-// parseKey reads a stored public key and checks it is what the algorithm
-// says.
+// parseKey checks a stored public key matches its algorithm.
 func parseKey(spki []byte, alg int) (crypto.PublicKey, error) {
 	key, err := x509.ParsePKIXPublicKey(spki)
 	if err != nil {

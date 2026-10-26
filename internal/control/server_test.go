@@ -287,9 +287,8 @@ func TestUnknownProviderIsRefused(t *testing.T) {
 	}
 }
 
-// The panel puts this URL in the configuration a developer copies, so a wrong
-// one cannot connect. One listener serves both planes, so it is always the
-// panel's origin plus /api; the question is which origin.
+// The panel puts this URL in the configuration a developer copies. It is always
+// the panel's origin plus /api; the question is which origin.
 func TestGatewayURL(t *testing.T) {
 	tests := []struct {
 		name string

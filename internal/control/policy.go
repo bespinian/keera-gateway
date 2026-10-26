@@ -148,8 +148,8 @@ type EffectiveLevel struct {
 // Effective is what a request against a scope actually meets: every level's
 // guardrails, and what they combine to. It answers "why is this key refused".
 //
-// Rate limits and budgets stay per level, because each level is enforced on
-// its own; one merged number would be wrong at some level.
+// Rate limits and budgets stay per level, because each level is enforced on its
+// own.
 type Effective struct {
 	Type   policy.ScopeType `json:"type"`
 	ID     string           `json:"id"`

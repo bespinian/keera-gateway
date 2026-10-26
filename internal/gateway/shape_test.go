@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// An OpenAI SDK reads only error.message, so an upstream error in any other
-// envelope reaches the client wrapped, and one already in it is left alone.
+// An OpenAI SDK reads only error.message, so other upstream envelopes are
+// wrapped, and an OpenAI one is left alone.
 func TestOpenAIErrorBody(t *testing.T) {
 	for _, tc := range []struct {
 		raw     string
@@ -19,8 +19,8 @@ func TestOpenAIErrorBody(t *testing.T) {
 		{`{"detail":"The model does not exist."}`, 404, "The model does not exist.", "invalid_request_error"},
 		{`{"message":"too long","object":"error"}`, 400, "too long", "invalid_request_error"},
 		{`upstream connect error`, http.StatusBadGateway, "upstream connect error", "server_error"},
-		// Typed as the gateway types its own refusals, so a client retries a
-		// rate limit whichever side set it.
+		// Typed like the gateway's own refusals, so a client retries any rate
+		// limit.
 		{`{"detail":"slow down"}`, http.StatusTooManyRequests, "slow down", "rate_limit_error"},
 		{`{"detail":"not for you"}`, http.StatusForbidden, "not for you", "permission_error"},
 	} {

@@ -16,7 +16,6 @@ import (
 	"github.com/bespinian/keera-gateway/internal/authn/oidctest"
 )
 
-// connect wires Keera Gateway to the fake provider.
 func connect(t *testing.T, idp *oidctest.IDP, mapping RoleMapping) *OIDC {
 	t.Helper()
 	o, err := NewOIDC(context.Background(), OIDCConfig{
@@ -38,8 +37,7 @@ func connect(t *testing.T, idp *oidctest.IDP, mapping RoleMapping) *OIDC {
 }
 
 func TestASignUpProviderForAnyDomainMustProveTheAddress(t *testing.T) {
-	// Anyone it signs in may take an invitation sent to the address, so an
-	// address the provider does not vouch for is refused.
+	// Anyone it signs in may take an invitation sent to the address.
 	for _, tc := range []struct {
 		domains []string
 		ok      bool
@@ -157,7 +155,7 @@ func TestExchangeRejectsAMismatchedNonce(t *testing.T) {
 }
 
 func TestExchangeRejectsAForeignSignature(t *testing.T) {
-	// The whole point of the JWKS fetch: a token signed by anybody else fails.
+	// A token signed by anybody else fails.
 	idp := oidctest.New(t)
 	o := connect(t, idp, RoleMapping{Default: RoleMember})
 
@@ -203,8 +201,7 @@ func TestExchangeRejectsAnExpiredToken(t *testing.T) {
 }
 
 func TestExchangeRefusesAnIdentityWithNoEmail(t *testing.T) {
-	// Without an email there is nothing to attribute an audit entry to and no
-	// way to place the person in a tenant.
+	// The email attributes audit entries and places the person.
 	idp := oidctest.New(t)
 	o := connect(t, idp, RoleMapping{Default: RoleMember})
 
@@ -222,9 +219,8 @@ func TestExchangeRefusesAnIdentityWithNoEmail(t *testing.T) {
 	}
 }
 
-// An email address places a first sign-in in a tenant and can name an operator,
-// so an address the directory calls unverified must do neither. Such addresses
-// come from guest, external or self-registered accounts.
+// An email places a first sign-in and can name an operator, so an unverified
+// one, as guest or self-registered accounts have, must do neither.
 func TestExchangeRefusesAnUnverifiedEmail(t *testing.T) {
 	idp := oidctest.New(t)
 	o := connect(t, idp, RoleMapping{OperatorEmails: []string{"ada@example.ch"}, Default: RoleMember})
@@ -245,8 +241,7 @@ func TestExchangeRefusesAnUnverifiedEmail(t *testing.T) {
 	}
 }
 
-// The claim is optional, and many enterprise providers issue none. Refusing
-// there would lock those deployments out.
+// The claim is optional, and many enterprise providers send none.
 func TestExchangeAcceptsAVerifiedOrUnstatedEmail(t *testing.T) {
 	idp := oidctest.New(t)
 	o := connect(t, idp, RoleMapping{Default: RoleMember})
@@ -271,8 +266,7 @@ func TestExchangeAcceptsAVerifiedOrUnstatedEmail(t *testing.T) {
 	}
 }
 
-// Entra sends no email_verified. Its optional xms_edov claim says whether the
-// tenant owns the address's domain, and stands in for it.
+// Entra sends no email_verified; its xms_edov claim stands in for it.
 func TestExchangeReadsEntrasVerifiedClaim(t *testing.T) {
 	idp := oidctest.New(t)
 	o, err := NewOIDC(context.Background(), OIDCConfig{
@@ -309,9 +303,8 @@ func TestExchangeReadsEntrasVerifiedClaim(t *testing.T) {
 	}
 }
 
-// On a hosted deployment a customer's directory admin can give anyone any
-// address. A provider is only trusted for its own domains, so that address
-// cannot place its user in another tenant or make them an operator.
+// A directory admin can give anyone any address, so a provider is only
+// trusted for its own domains.
 func TestExchangeRefusesAnAddressOutsideTheProvidersDomains(t *testing.T) {
 	idp := oidctest.New(t)
 	for _, tc := range []struct {
@@ -391,8 +384,7 @@ func TestLogoutURLUsesTheProvidersEndSession(t *testing.T) {
 }
 
 func TestNewOIDCFailsLoudlyOnABadIssuer(t *testing.T) {
-	// Discovery happens at start-up so a typo fails the start, not the first
-	// sign-in.
+	// A typo fails the start, not the first sign-in.
 	_, err := NewOIDC(context.Background(), OIDCConfig{
 		Name:      "test",
 		IssuerURL: "http://127.0.0.1:1", ClientID: "keera", ClientSecret: "s",
@@ -406,9 +398,8 @@ func TestNewOIDCFailsLoudlyOnABadIssuer(t *testing.T) {
 	}
 }
 
-// Entra leaves a pointer to Microsoft Graph instead of the groups once somebody
-// is in too many. Keera does not call Graph, so it looks like a person in no
-// groups, and it happens to the people in the most groups: the administrators.
+// Entra sends a pointer to Microsoft Graph instead of the groups once somebody
+// is in too many. Keera does not call Graph, so it would look like no groups.
 func TestExchangeRefusesAGroupsClaimTheProviderReplacedWithAPointer(t *testing.T) {
 	idp := oidctest.New(t)
 	o := connect(t, idp, RoleMapping{AdminGroups: []string{"keera-admins"}, Default: RoleMember})
@@ -454,9 +445,8 @@ func TestExchangeAllowsAnOverageWhenNoRoleDependsOnGroups(t *testing.T) {
 	}
 }
 
-// An identity carries the provider that vouched for it: a subject is unique
-// only inside its directory, and two directories sharing one key would let
-// somebody sign in as somebody else.
+// An identity carries its provider: a subject is unique only inside its
+// directory.
 func TestExchangeStampsTheProviderOnTheIdentity(t *testing.T) {
 	idp := oidctest.New(t)
 	o := connect(t, idp, RoleMapping{Default: RoleMember})
@@ -512,14 +502,12 @@ func TestProvidersResolveByName(t *testing.T) {
 		t.Error("Only returned nothing where there is nothing to choose between")
 	}
 
-	// Under one name the second would shadow the first, and every identity the
-	// first wrote would resolve to the wrong directory.
+	// The second would shadow the first.
 	if _, err := NewProviders(ctx, []OIDCConfig{base("google"), base("google")}, idp.Client()); err == nil {
 		t.Error("two providers were accepted under one name")
 	}
 
-	// Nothing configured is not an error: the operator key is the deployment's
-	// first ten minutes.
+	// Nothing configured is fine: the operator key works.
 	none, err := NewProviders(ctx, []OIDCConfig{{Name: "google"}}, idp.Client())
 	if err != nil {
 		t.Fatal(err)
@@ -529,8 +517,7 @@ func TestProvidersResolveByName(t *testing.T) {
 	}
 }
 
-// Where a group decides the administrator role, the directory owns it and the
-// panel says so rather than offering a control the next sign-in would undo.
+// Where a group decides the administrator role, the directory owns it.
 func TestAdminFromDirectoryIsTrueIfAnyProviderMapsAdminGroups(t *testing.T) {
 	idp := oidctest.New(t)
 	base := func(name string, m RoleMapping) OIDCConfig {
@@ -544,8 +531,7 @@ func TestAdminFromDirectoryIsTrueIfAnyProviderMapsAdminGroups(t *testing.T) {
 
 	// Google issues no groups claim, so roles there are Keera's own.
 	google := RoleMapping{Default: RoleMember, OperatorEmails: []string{"you@example.ch"}}
-	// Operator groups alone do not make it the directory's: the operator role
-	// is never assignable in the panel anyway.
+	// Operator groups alone do not: the operator role is never assignable.
 	operatorsOnly := RoleMapping{Default: RoleMember, OperatorGroups: []string{"keera-operators"}}
 	entra := RoleMapping{Default: RoleMember, AdminGroups: []string{"keera-admins"}}
 

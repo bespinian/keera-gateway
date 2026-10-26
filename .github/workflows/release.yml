@@ -1,25 +1,18 @@
 # What a tag produces: the image, its SBOM, the keera command for Linux, macOS
 # and Windows, and a provenance attestation for each.
 #
-# The attestation is why this builds here and not on a workstation:
-# actions/attest-build-provenance signs, with GitHub's key, the workflow,
-# repository and commit that produced each file. A laptop build could claim
-# the same and nobody could check it.
-#
-# The build is in release-build.yml, a reusable workflow, so the signature
-# names that file. It explains how the build cannot forge its own provenance
-# (SLSA Build L3).
-#
-# It runs the same `make` targets a developer does, with GATEWAY_IMAGE pointed
-# at the registry, so there is one definition of the image build.
+# It builds here, not on a workstation, so GitHub can sign which workflow,
+# repository and commit produced each file. The build is in release-build.yml,
+# a reusable workflow, which explains why it cannot forge its own provenance.
+# It runs the same `make` targets a developer does.
 name: Release
 
 on:
   push:
     tags: ["v*"]
 
-# The most any job in release-build.yml may have. Each job there asks for only
-# what it needs.
+# The most any job in release-build.yml may have; each asks for only what it
+# needs.
 permissions:
   contents: write
   packages: write

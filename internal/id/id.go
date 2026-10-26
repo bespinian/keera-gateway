@@ -1,5 +1,4 @@
-// Package id generates the short, sortable, prefixed identifiers used for
-// every row Keera Gateway owns.
+// Package id generates the short, sortable, prefixed identifiers of every row.
 package id
 
 import (
