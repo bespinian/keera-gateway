@@ -1157,15 +1157,15 @@ func TestFilterAndRouterSetKeepTheRest(t *testing.T) {
 	}
 }
 
-// A new filter starts in shadow, as it does in the panel, and --no-shadow
-// enforces from the start.
-func TestFilterAddStartsInShadow(t *testing.T) {
+// A new filter enforces, as it does in the panel, and --shadow starts it in
+// shadow.
+func TestFilterAddEnforcesUnlessShadow(t *testing.T) {
 	for _, tc := range []struct {
 		flags []string
 		want  bool
 	}{
-		{nil, true},
-		{[]string{"--no-shadow"}, false},
+		{nil, false},
+		{[]string{"--shadow"}, true},
 	} {
 		quiet(t)
 		f := newFakeControl(t, map[string]any{

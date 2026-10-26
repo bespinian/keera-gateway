@@ -41,8 +41,8 @@ func filterCmd(ctx context.Context, args []string) error {
 	fs.BoolVar(&r.shadow, "shadow", false,
 		"run the filter and enforce nothing; what it would have done is recorded")
 	fs.BoolVar(&r.noShadow, "no-shadow", false, "act on what the filter answers")
-	r.reword("add", "no-shadow", "act on what the filter answers from the start, rather than "+
-		"starting in shadow")
+	r.reword("add", "shadow", "start in shadow: run the filter and enforce nothing until "+
+		"'set --no-shadow'; what it would have done is recorded")
 	fs.StringVar(&r.prompt, "prompt", "", "the instruction its model is given; @path reads a file")
 	fs.StringVar(&r.rules, "rules", "",
 		"a pattern filter's rules, one per line: an expression, '=>', then what each match "+
@@ -104,9 +104,8 @@ func (r *filterRun) put(ctx context.Context) error {
 	alias := r.fs.Arg(0)
 	// 'set' starts from the stored filter, so what is not given is kept. 'add'
 	// starts from nothing, and the control plane refuses what is missing. A
-	// new filter starts in shadow, as in the panel: nobody's first instruction
-	// is right, and live traffic is a costly place to find that out.
-	f, err := startPut(ctx, r.aliasRun, alias, policy.Filter{Alias: alias, Shadow: true}, filterAlias)
+	// new filter enforces, as in the panel and the control API.
+	f, err := startPut(ctx, r.aliasRun, alias, policy.Filter{Alias: alias}, filterAlias)
 	if err != nil {
 		return err
 	}

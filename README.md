@@ -124,7 +124,7 @@ keera usage --by project
 **Filters** check what is _in_ a request before it is forwarded: a small model
 removes credentials or client names, or refuses the request, and a list of
 regular expressions catches anything with a fixed shape, such as an API key or
-an IBAN. A new filter starts in shadow, so you can measure it on a week of real
+an IBAN. A filter can start in shadow, so you can measure it on a week of real
 traffic before it enforces. [docs/filters.md](docs/filters.md)
 
 **Routers** are what a client calls besides a model, by naming one where it

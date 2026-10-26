@@ -501,19 +501,19 @@ var commands = []command{
 		subs: []subcommand{
 			{name: "list", summary: "this organisation's filters", flags: []string{"json"}},
 			{name: "add", args: "<alias>", summary: "add a filter",
-				flags: slices.Concat(filterFieldFlags, []string{"no-shadow", "json"}),
+				flags: slices.Concat(filterFieldFlags, []string{"shadow", "json"}),
 				prose: "A pattern filter's --rules are one rule per line: an expression, '=>', " +
 					"then what each match becomes - or 'REFUSE: why' to drop the request. " +
 					"@path reads them from a file.\n\n" +
 					"  (?i)\\bsk-[a-z0-9]{20,}\\b                  => [CREDENTIAL]\n" +
 					"  \\b[A-Z]{2}\\d{2}(?:[ ]?[A-Z0-9]{4}){2,7}\\b => [IBAN]\n" +
 					"  (?i)\\bexport all customers\\b              => REFUSE: that moves the customer list out\n\n" +
-					"A new filter starts in shadow: it runs and enforces nothing, the request " +
-					"is forwarded as it was sent, and 'report' says what it would have done. " +
-					"That is how an instruction is tuned against a week of an organisation's " +
-					"own traffic rather than against three sample segments. 'set --no-shadow' " +
-					"turns it on; the answers do not change, only whether they are acted on. " +
-					"--no-shadow on 'add' enforces from the start.",
+					"A new filter enforces. With --shadow it starts in shadow instead: it runs " +
+					"and enforces nothing, the request is forwarded as it was sent, and " +
+					"'report' says what it would have done. That is how an instruction is " +
+					"tuned against a week of an organisation's own traffic rather than against " +
+					"three sample segments. 'set --no-shadow' turns it on; the answers do not " +
+					"change, only whether they are acted on.",
 				examples: []string{
 					"keera filter add redact-keys --mode pattern --rules @redact.rules",
 					"keera filter add no-client-data --mode gate --model keera-speed \\\n" +

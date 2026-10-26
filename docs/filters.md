@@ -276,13 +276,12 @@ The gateway also enforces:
 
 ## Shadow: rolling one out
 
-A new filter starts in shadow, from the panel and from `keera filter add`
-(`--no-shadow` enforces from the start). The control API is the exception: a
-`PUT /control/v1/filters/{alias}` without `"shadow": true` enforces. In shadow,
-the filter runs on every request its guardrails and routers send through it, but
-enforces nothing. The rewrite is discarded,
-the refusal does not happen, the request is forwarded as the client sent it,
-and what the filter _would_ have done is recorded.
+A new filter enforces, from the panel, from `keera filter add` and from the
+control API. To start it in shadow, choose Shadow in the panel, pass `--shadow`
+to `keera filter add`, or send `"shadow": true`. In shadow, the filter runs on
+every request its guardrails and routers send through it, but enforces nothing.
+The rewrite is discarded, the refusal does not happen, the request is forwarded
+as the client sent it, and what the filter _would_ have done is recorded.
 
 Both ways an instruction goes wrong are quiet:
 

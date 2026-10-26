@@ -899,7 +899,7 @@ function editFilter(ctx, existing, readers, { onSaved } = {}) {
   const f = existing || {
     alias: "",
     model: "",
-    shadow: true,
+    shadow: false,
     prompt: "",
     description: "",
   };
@@ -938,8 +938,6 @@ function editFilter(ctx, existing, readers, { onSaved } = {}) {
   );
   const prompt = h("textarea", { class: "input", rows: "8" });
 
-  // A new filter starts in shadow: nobody's first instruction is right, and
-  // finding out on live traffic is costly.
   const enforceSelect = h(
     "select",
     { class: "select" },
