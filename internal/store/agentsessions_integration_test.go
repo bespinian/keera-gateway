@@ -423,8 +423,10 @@ func TestSessionsNarrowByOutcomeAndOfferWhatOccurred(t *testing.T) {
 	write("failing000000000", "user_1", "keera-code", 200, 500, 200)
 	write("refused000000000", "user_2", "keera-fast", 402)
 
-	window := AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID,
-		From: now.Add(-24 * time.Hour), To: now.Add(time.Hour)}
+	window := AgentSessionQuery{
+		Gap: DefaultSessionGap, OrgID: f.orgID,
+		From: now.Add(-24 * time.Hour), To: now.Add(time.Hour),
+	}
 	for _, tc := range []struct {
 		outcome Outcome
 		want    int

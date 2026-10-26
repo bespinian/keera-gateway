@@ -92,8 +92,14 @@ func TestEveryRequestFieldTheGatewayDecodesIsChecked(t *testing.T) {
 			walk(f.Type)
 		}
 	}
-	for _, v := range []any{anthropicRequest{}, anthropicBlock{}, anthropicSource{},
-		responsesRequest{}, responsesItem{}, responsesPart{}} {
+	for _, v := range []any{
+		anthropicRequest{},
+		anthropicBlock{},
+		anthropicSource{},
+		responsesRequest{},
+		responsesItem{},
+		responsesPart{},
+	} {
 		walk(reflect.TypeOf(v))
 	}
 }

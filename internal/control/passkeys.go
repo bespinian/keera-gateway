@@ -216,7 +216,8 @@ func (s *Server) passkeySignIn(w http.ResponseWriter, r *http.Request) {
 // checkPasskey checks a sign-in's answer and records the use. It returns who
 // signed in, and with which passkey.
 func (s *Server) checkPasskey(r *http.Request, challenge string,
-	a authn.Assertion) (store.User, store.Passkey, error) {
+	a authn.Assertion,
+) (store.User, store.Passkey, error) {
 	credID, err := a.CredentialID()
 	if err != nil {
 		return store.User{}, store.Passkey{}, err
@@ -361,7 +362,8 @@ func (s *Server) passkeySetup(w http.ResponseWriter, r *http.Request) {
 // verifyRegistration uses up the challenge and checks the browser's answer.
 // It returns whose registration it was.
 func (s *Server) verifyRegistration(w http.ResponseWriter, r *http.Request,
-	in registration) (string, authn.Credential, bool) {
+	in registration,
+) (string, authn.Credential, bool) {
 	userID, challenge, err := s.st.TakePasskeyChallenge(r.Context(), in.ChallengeID)
 	if err != nil {
 		badRequest(w, passkeyStale)
@@ -379,7 +381,8 @@ func (s *Server) verifyRegistration(w http.ResponseWriter, r *http.Request,
 
 // storePasskey saves a verified passkey and audits it.
 func (s *Server) storePasskey(w http.ResponseWriter, r *http.Request, p *authn.Principal,
-	user store.User, cred authn.Credential, name, via string) (store.Passkey, bool) {
+	user store.User, cred authn.Credential, name, via string,
+) (store.Passkey, bool) {
 	name = cmp.Or(strings.TrimSpace(name), "Passkey")
 	if utf8.RuneCountInString(name) > passkeyNameMax {
 		name = string([]rune(name)[:passkeyNameMax])
@@ -406,7 +409,8 @@ func (s *Server) storePasskey(w http.ResponseWriter, r *http.Request, p *authn.P
 
 // ownPasskeyAccount reads the caller's account, if it is a passkey account.
 func (s *Server) ownPasskeyAccount(w http.ResponseWriter, r *http.Request,
-	p *authn.Principal) (store.User, bool) {
+	p *authn.Principal,
+) (store.User, bool) {
 	if p.UserID == "" {
 		forbid(w, "the operator key is nobody, so it has no passkeys")
 		return store.User{}, false
@@ -577,7 +581,8 @@ func (s *Server) issuePasskeyLinkRoute(w http.ResponseWriter, r *http.Request, p
 
 // issuePasskeyLink mints a set-up link, replacing any earlier one.
 func (s *Server) issuePasskeyLink(r *http.Request, p *authn.Principal,
-	user store.User) (passkeyLinkOut, error) {
+	user store.User,
+) (passkeyLinkOut, error) {
 	token, hash := authn.NewPasskeyLink()
 	expires := time.Now().Add(authn.PasskeyLinkTTL)
 	if err := s.st.CreatePasskeyLink(r.Context(), hash, user.ID, expires); err != nil {
@@ -598,7 +603,8 @@ func (s *Server) issuePasskeyLink(r *http.Request, p *authn.Principal,
 // administrator may only use their organisation's domain. An operator may use
 // any.
 func (s *Server) mayVouchFor(w http.ResponseWriter, r *http.Request, p *authn.Principal,
-	orgID, email string) bool {
+	orgID, email string,
+) bool {
 	if p.Unrestricted() {
 		return true
 	}

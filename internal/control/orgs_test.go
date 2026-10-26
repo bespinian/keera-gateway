@@ -103,111 +103,183 @@ func TestHandlersRefuseWhatTheCallerMayNotDo(t *testing.T) {
 	}{
 		// An email domain decides which tenant a sign-in lands in, so setting
 		// it could take somebody else's people.
-		{"a member sets the domain", s.updateOrg, member("org_1"), patch, "/v1/orgs/org_1",
-			`{"email_domain":"example.ch"}`, forbidden, "only an operator"},
-		{"an administrator sets the domain", s.updateOrg, admin("org_1"), patch, "/v1/orgs/org_1",
-			`{"email_domain":"example.ch"}`, forbidden, "only an operator"},
+		{
+			"a member sets the domain", s.updateOrg, member("org_1"), patch, "/v1/orgs/org_1",
+			`{"email_domain":"example.ch"}`, forbidden, "only an operator",
+		},
+		{
+			"an administrator sets the domain", s.updateOrg, admin("org_1"), patch, "/v1/orgs/org_1",
+			`{"email_domain":"example.ch"}`, forbidden, "only an operator",
+		},
 		// Creating a tenant is not something a tenant does.
-		{"a member creates an organisation", s.createOrg, member("org_1"), post, "/v1/orgs",
-			`{"name":"Theirs"}`, forbidden, ""},
-		{"an administrator creates an organisation", s.createOrg, admin("org_1"), post, "/v1/orgs",
-			`{"name":"Theirs"}`, forbidden, ""},
+		{
+			"a member creates an organisation", s.createOrg, member("org_1"), post, "/v1/orgs",
+			`{"name":"Theirs"}`, forbidden, "",
+		},
+		{
+			"an administrator creates an organisation", s.createOrg, admin("org_1"), post, "/v1/orgs",
+			`{"name":"Theirs"}`, forbidden, "",
+		},
 		// Deleting a tenant takes its people and keys with it.
-		{"an administrator deletes an organisation", s.deleteOrg, admin("org_1"), del, "/v1/orgs/org_2",
-			"", forbidden, "only an operator"},
-		{"a member deletes an organisation", s.deleteOrg, member("org_1"), del, "/v1/orgs/org_2",
-			"", forbidden, "only an operator"},
+		{
+			"an administrator deletes an organisation", s.deleteOrg, admin("org_1"), del, "/v1/orgs/org_2",
+			"", forbidden, "only an operator",
+		},
+		{
+			"a member deletes an organisation", s.deleteOrg, member("org_1"), del, "/v1/orgs/org_2",
+			"", forbidden, "only an operator",
+		},
 		// It would sign them out mid-request and could remove the last operator.
-		{"an operator deletes their own organisation", s.deleteOrg, signedIn, del, "/v1/orgs/org_1",
-			"", forbidden, "signed in to"},
+		{
+			"an operator deletes their own organisation", s.deleteOrg, signedIn, del, "/v1/orgs/org_1",
+			"", forbidden, "signed in to",
+		},
 		// The panel sends what was typed. A URL saved as a domain would match no
 		// sign-in, so the control plane cleans it rather than trusting the client.
-		{"a URL as a domain", s.createOrg, operator(), post, "/v1/orgs",
-			`{"name":"Bank","email_domain":"https://example.ch/"}`, bad, "example.ch"},
+		{
+			"a URL as a domain", s.createOrg, operator(), post, "/v1/orgs",
+			`{"name":"Bank","email_domain":"https://example.ch/"}`, bad, "example.ch",
+		},
 		// The operator key belongs to no organisation, so it has to name one.
 		// Defaulting would pick a tenant for it.
-		{"an operator creates a project in no organisation", s.createProject, operator(), post,
-			"/v1/projects", `{"name":"Platform"}`, bad, "org_id"},
-		{"an operator lists keys of no organisation", s.listKeys, operator(), get, "/v1/keys",
-			"", bad, "org_required"},
-		{"an orphan lists keys", s.listKeys, orphan, get, "/v1/keys",
-			"", forbidden, "not attached to an organisation"},
-		{"an orphan lists projects", s.listProjects, orphan, get, "/v1/projects",
-			"", forbidden, "not attached to an organisation"},
-		{"an orphan lists people", s.listUsers, orphan, get, "/v1/users",
-			"", forbidden, "not attached to an organisation"},
+		{
+			"an operator creates a project in no organisation", s.createProject, operator(), post,
+			"/v1/projects", `{"name":"Platform"}`, bad, "org_id",
+		},
+		{
+			"an operator lists keys of no organisation", s.listKeys, operator(), get, "/v1/keys",
+			"", bad, "org_required",
+		},
+		{
+			"an orphan lists keys", s.listKeys, orphan, get, "/v1/keys",
+			"", forbidden, "not attached to an organisation",
+		},
+		{
+			"an orphan lists projects", s.listProjects, orphan, get, "/v1/projects",
+			"", forbidden, "not attached to an organisation",
+		},
+		{
+			"an orphan lists people", s.listUsers, orphan, get, "/v1/users",
+			"", forbidden, "not attached to an organisation",
+		},
 
 		// Only an administrator issues keys, so every key has the project and
 		// guardrails one chose. A member rotates the key they were given instead.
-		{"a member issues a key", s.createKey, member("org_1"), post, "/v1/keys",
-			`{"org_id":"org_1","name":"mine"}`, forbidden, "only an administrator"},
-		{"a member issues a key for themselves", s.createKey, member("org_1"), post, "/v1/keys",
-			`{"org_id":"org_1","user_id":"user_member","name":"mine"}`, forbidden, "only an administrator"},
-		{"a member issues a subscription key", s.createKey, member("org_1"), post, "/v1/keys",
-			`{"org_id":"org_1","user_id":"user_member","kind":"subscription"}`, forbidden, "only an administrator"},
+		{
+			"a member issues a key", s.createKey, member("org_1"), post, "/v1/keys",
+			`{"org_id":"org_1","name":"mine"}`, forbidden, "only an administrator",
+		},
+		{
+			"a member issues a key for themselves", s.createKey, member("org_1"), post, "/v1/keys",
+			`{"org_id":"org_1","user_id":"user_member","name":"mine"}`, forbidden, "only an administrator",
+		},
+		{
+			"a member issues a subscription key", s.createKey, member("org_1"), post, "/v1/keys",
+			`{"org_id":"org_1","user_id":"user_member","kind":"subscription"}`, forbidden, "only an administrator",
+		},
 		// The refusal does not depend on whom the key is for.
-		{"a member issues a key elsewhere", s.createKey, member("org_1"), post, "/v1/keys",
-			`{"org_id":"org_2","user_id":"user_member"}`, forbidden, ""},
-		{"an administrator issues a key elsewhere", s.createKey, admin("org_1"), post, "/v1/keys",
-			`{"org_id":"org_2","user_id":"user_member"}`, forbidden, ""},
-		{"a subscription key while they are off", s.createKey, admin("org_1"), post, "/v1/keys",
+		{
+			"a member issues a key elsewhere", s.createKey, member("org_1"), post, "/v1/keys",
+			`{"org_id":"org_2","user_id":"user_member"}`, forbidden, "",
+		},
+		{
+			"an administrator issues a key elsewhere", s.createKey, admin("org_1"), post, "/v1/keys",
+			`{"org_id":"org_2","user_id":"user_member"}`, forbidden, "",
+		},
+		{
+			"a subscription key while they are off", s.createKey, admin("org_1"), post, "/v1/keys",
 			`{"org_id":"org_1","user_id":"user_1","kind":"subscription"}`,
-			http.StatusNotImplemented, "KEERA_CLAUDE_SUBSCRIPTIONS"},
+			http.StatusNotImplemented, "KEERA_CLAUDE_SUBSCRIPTIONS",
+		},
 
 		// A project is a set of guardrails: whoever makes one can make a budget.
-		{"a member creates a project", s.createProject, member("org_1"), post, "/v1/projects",
-			`{"org_id":"org_1","name":"Platform"}`, forbidden, "administrator"},
+		{
+			"a member creates a project", s.createProject, member("org_1"), post, "/v1/projects",
+			`{"org_id":"org_1","name":"Platform"}`, forbidden, "administrator",
+		},
 		// Refused by the scope check, so the answer does not depend on being an
 		// administrator somewhere.
-		{"an administrator creates a project elsewhere", s.createProject, admin("org_mine"), post,
-			"/v1/projects", `{"org_id":"org_other","name":"Theirs"}`, forbidden, ""},
+		{
+			"an administrator creates a project elsewhere", s.createProject, admin("org_mine"), post,
+			"/v1/projects", `{"org_id":"org_other","name":"Theirs"}`, forbidden, "",
+		},
 		// A project's organisation comes from its row, so a caller who
 		// administers none is refused before the read.
-		{"a member renames a project", s.updateProject, member("org_1"), patch, "/v1/projects/project_1",
-			`{"name":"Payments"}`, forbidden, "administrator"},
-		{"a member deletes a project", s.deleteProject, member("org_1"), del, "/v1/projects/project_1",
-			"", forbidden, "administrator"},
+		{
+			"a member renames a project", s.updateProject, member("org_1"), patch, "/v1/projects/project_1",
+			`{"name":"Payments"}`, forbidden, "administrator",
+		},
+		{
+			"a member deletes a project", s.deleteProject, member("org_1"), del, "/v1/projects/project_1",
+			"", forbidden, "administrator",
+		},
 		// Nobody could tell a project without a name apart. A change with
 		// nothing in it is a mistake too.
-		{"an empty project name", s.updateProject, admin("org_1"), patch, "/v1/projects/project_1",
-			`{"name":""}`, bad, ""},
-		{"a blank project name", s.updateProject, admin("org_1"), patch, "/v1/projects/project_1",
-			`{"name":"   "}`, bad, ""},
-		{"a project change of nothing", s.updateProject, admin("org_1"), patch, "/v1/projects/project_1",
-			`{}`, bad, ""},
+		{
+			"an empty project name", s.updateProject, admin("org_1"), patch, "/v1/projects/project_1",
+			`{"name":""}`, bad, "",
+		},
+		{
+			"a blank project name", s.updateProject, admin("org_1"), patch, "/v1/projects/project_1",
+			`{"name":"   "}`, bad, "",
+		},
+		{
+			"a project change of nothing", s.updateProject, admin("org_1"), patch, "/v1/projects/project_1",
+			`{}`, bad, "",
+		},
 
 		// The operator role crosses organisations, so it comes only from
 		// KEERA_OPERATORS or an operator group. Nobody grants it through the API.
-		{"adding an operator", s.addUser, operator(), post, "/v1/users",
-			`{"org_id":"org_1","email":"a@example.ch","role":"operator"}`, forbidden, "KEERA_OPERATORS"},
+		{
+			"adding an operator", s.addUser, operator(), post, "/v1/users",
+			`{"org_id":"org_1","email":"a@example.ch","role":"operator"}`, forbidden, "KEERA_OPERATORS",
+		},
 		// Refused before the row is read: it does not depend on who is changed.
-		{"making someone an operator", s.updateUser, operator(), patch, "/v1/users/user_1",
-			`{"role":"operator"}`, forbidden, "KEERA_OPERATORS"},
+		{
+			"making someone an operator", s.updateUser, operator(), patch, "/v1/users/user_1",
+			`{"role":"operator"}`, forbidden, "KEERA_OPERATORS",
+		},
 		// An administrator could name somebody from another tenant's directory.
-		{"an administrator links a subject", s.addUser, admin("org_1"), post, "/v1/users",
-			`{"org_id":"org_1","email":"a@example.ch","external_id":"entra:victim"}`, forbidden, "first sign-in"},
+		{
+			"an administrator links a subject", s.addUser, admin("org_1"), post, "/v1/users",
+			`{"org_id":"org_1","email":"a@example.ch","external_id":"entra:victim"}`, forbidden, "first sign-in",
+		},
 		// Without an identity provider such an account could never sign in.
-		{"a default account without an identity provider", s.addUser, admin("org_1"), post, "/v1/users",
-			`{"org_id":"org_1","email":"a@example.ch","sign_in":""}`, bad, "passkey"},
-		{"an SSO account without an identity provider", s.addUser, admin("org_1"), post, "/v1/users",
-			`{"org_id":"org_1","email":"a@example.ch","sign_in":"sso"}`, bad, "passkey"},
+		{
+			"a default account without an identity provider", s.addUser, admin("org_1"), post, "/v1/users",
+			`{"org_id":"org_1","email":"a@example.ch","sign_in":""}`, bad, "passkey",
+		},
+		{
+			"an SSO account without an identity provider", s.addUser, admin("org_1"), post, "/v1/users",
+			`{"org_id":"org_1","email":"a@example.ch","sign_in":"sso"}`, bad, "passkey",
+		},
 
 		// A check reaches a backend on the model's own credential, so it is
 		// for whoever runs the model. A member runs none.
-		{"a member checks a model", s.checkModel, member("org_1"), post,
-			"/v1/models/keera-code/check?org_id=org_1", "", forbidden, "only an administrator"},
+		{
+			"a member checks a model", s.checkModel, member("org_1"), post,
+			"/v1/models/keera-code/check?org_id=org_1", "", forbidden, "only an administrator",
+		},
 		// A fallback grouping would answer another question, with the caller's
 		// string in the CSV filename.
-		{"an unknown grouping", s.usage, member("org_1"), get,
-			`/v1/usage?format=csv&group_by=x.bat%22%3Bx%3D%22`, "", bad, "group_by"},
+		{
+			"an unknown grouping", s.usage, member("org_1"), get,
+			`/v1/usage?format=csv&group_by=x.bat%22%3Bx%3D%22`, "", bad, "group_by",
+		},
 		// A member reads only their own keys' requests. Naming someone else is
 		// refused, not quietly answered with their own.
-		{"a member reads someone's requests", s.requests, member("org_1"), get,
-			"/v1/requests?user_id=user_other", "", forbidden, "their own keys"},
-		{"a member streams someone's requests", s.requestStream, member("org_1"), get,
-			"/v1/requests/stream?user_id=user_other", "", forbidden, "their own keys"},
-		{"a member reads someone's sessions", s.sessions, member("org_1"), get,
-			"/v1/sessions?user_id=user_other", "", forbidden, "their own keys"},
+		{
+			"a member reads someone's requests", s.requests, member("org_1"), get,
+			"/v1/requests?user_id=user_other", "", forbidden, "their own keys",
+		},
+		{
+			"a member streams someone's requests", s.requestStream, member("org_1"), get,
+			"/v1/requests/stream?user_id=user_other", "", forbidden, "their own keys",
+		},
+		{
+			"a member reads someone's sessions", s.sessions, member("org_1"), get,
+			"/v1/sessions?user_id=user_other", "", forbidden, "their own keys",
+		},
 		{"nobody reads the request log", s.requests, nobody, get, "/v1/requests", "", forbidden, ""},
 		{"nobody streams the request log", s.requestStream, nobody, get, "/v1/requests/stream", "", forbidden, ""},
 		{"nobody reads sessions", s.sessions, nobody, get, "/v1/sessions", "", forbidden, ""},

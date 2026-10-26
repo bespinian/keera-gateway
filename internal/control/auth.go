@@ -464,8 +464,10 @@ func (s *Server) syncOtherRoles(r *http.Request, user store.User, role authn.Rol
 		if m.UserID == user.ID {
 			continue
 		}
-		other := store.User{ID: m.UserID, OrgID: m.OrgID, Email: user.Email,
-			ExternalID: user.ExternalID, Role: m.Role}
+		other := store.User{
+			ID: m.UserID, OrgID: m.OrgID, Email: user.Email,
+			ExternalID: user.ExternalID, Role: m.Role,
+		}
 		if err := s.syncRole(r, &other, role); err != nil {
 			return err
 		}
@@ -496,7 +498,8 @@ func roleAtSignIn(stored string, fromIDP authn.Role, adminFromDirectory bool) (a
 // entry. was is their role before, so the log records a change; cli marks a
 // sign-in for the command line.
 func (s *Server) signedIn(w http.ResponseWriter, r *http.Request, user store.User, was string,
-	cli bool, entry map[string]any) bool {
+	cli bool, entry map[string]any,
+) bool {
 	if err := s.startSession(w, r, user); err != nil {
 		s.fail(w, err)
 		return false

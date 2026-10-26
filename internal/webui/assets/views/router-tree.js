@@ -216,6 +216,11 @@ export function clean(s) {
     if (out.mode === "size" && Object.keys(s.ceilings || {}).length) {
       out.ceilings = { ...s.ceilings };
     }
+    if (out.mode === "header") {
+      out.header = (s.header || "").trim();
+      out.values = { ...(s.values || {}) };
+      if (s.fallback) out.fallback = s.fallback;
+    }
     const branches = {};
     for (const [dest, b] of Object.entries(s.branches || {})) {
       if (b) branches[dest] = clean(b);
@@ -257,6 +262,19 @@ function routeProblem(s, refs) {
     const open = dests.filter((d) => !((s.ceilings || {})[d] > 0));
     if (open.length !== 1) {
       return "Leave the ceiling off exactly one destination.";
+    }
+  }
+  if (mode === "header") {
+    if (!(s.header || "").trim()) return "Name the header it reads.";
+    const values = s.values || {};
+    if (!Object.keys(values).length) return "Give a destination a value.";
+    if (s.fallback && !dests.includes(s.fallback)) {
+      return `It falls back to ${s.fallback}, which is not a destination.`;
+    }
+    for (const d of dests) {
+      if (d !== s.fallback && !Object.values(values).includes(d)) {
+        return `No value sends a request to ${d}, and it is not the fallback.`;
+      }
     }
   }
   for (const dest of Object.keys(s.branches || {})) {

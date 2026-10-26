@@ -17,15 +17,19 @@ const aliceUUID = "5B0F4C2E-1D3A-4F6B-9C8D-7E6F5A4B3C2D"
 
 // adGUID is an objectGUID as AD stores it, and guidText the same as Windows
 // shows it.
-var adGUID = []byte{0x78, 0x56, 0x34, 0x12, 0xbc, 0x9a, 0xf0, 0xde,
-	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef}
+var adGUID = []byte{
+	0x78, 0x56, 0x34, 0x12, 0xbc, 0x9a, 0xf0, 0xde,
+	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+}
 
 const guidText = "12345678-9abc-def0-0123-456789abcdef"
 
 func TestLDAPSignInOpenLDAP(t *testing.T) {
 	alice := ldaptest.Person("alice", "Alice@Corp.Example.ch", aliceUUID)
-	dir := &ldaptest.Directory{Entries: []*ldap.Entry{alice},
-		Passwords: map[string]string{alice.DN: "right"}}
+	dir := &ldaptest.Directory{
+		Entries:   []*ldap.Entry{alice},
+		Passwords: map[string]string{alice.DN: "right"},
+	}
 	o := ldaptest.New(t, ldaptest.Config("corp"), dir)
 	if !o.Password() {
 		t.Fatal("an LDAP provider asks for a password")
@@ -56,8 +60,10 @@ func TestLDAPSignInOpenLDAP(t *testing.T) {
 func TestLDAPSignInActiveDirectory(t *testing.T) {
 	admins := "CN=Keera Admins,OU=Groups,DC=corp,DC=example,DC=ch"
 	ada := ldaptest.ADUser("ada", "ada@corp.example.ch", adGUID, "512", admins)
-	dir := &ldaptest.Directory{AD: true, Entries: []*ldap.Entry{ada},
-		Passwords: map[string]string{ada.DN: "right"}}
+	dir := &ldaptest.Directory{
+		AD: true, Entries: []*ldap.Entry{ada},
+		Passwords: map[string]string{ada.DN: "right"},
+	}
 	cfg := ldaptest.Config("corp")
 	// Spelled differently from the directory on purpose.
 	cfg.Mapping.AdminGroups = []string{"cn=keera admins, ou=groups, dc=corp, dc=example, dc=ch"}
@@ -88,8 +94,10 @@ func TestLDAPSignInActiveDirectory(t *testing.T) {
 func TestLDAPRefusals(t *testing.T) {
 	alice := ldaptest.Person("alice", "shared@corp.example.ch", aliceUUID)
 	bob := ldaptest.Person("bob", "shared@corp.example.ch", "11111111-2222-3333-4444-555555555555")
-	dir := &ldaptest.Directory{Entries: []*ldap.Entry{alice, bob},
-		Passwords: map[string]string{alice.DN: "right"}}
+	dir := &ldaptest.Directory{
+		Entries:   []*ldap.Entry{alice, bob},
+		Passwords: map[string]string{alice.DN: "right"},
+	}
 	o := ldaptest.New(t, ldaptest.Config("corp"), dir)
 	ctx := context.Background()
 
@@ -147,8 +155,10 @@ func TestLDAPRefusals(t *testing.T) {
 
 func TestLDAPAdmitSeesTheAccountBeforeThePassword(t *testing.T) {
 	alice := ldaptest.Person("alice", "alice@corp.example.ch", aliceUUID)
-	dir := &ldaptest.Directory{Entries: []*ldap.Entry{alice},
-		Passwords: map[string]string{alice.DN: "right"}}
+	dir := &ldaptest.Directory{
+		Entries:   []*ldap.Entry{alice},
+		Passwords: map[string]string{alice.DN: "right"},
+	}
 	o := ldaptest.New(t, ldaptest.Config("corp"), dir)
 	dir.Reset()
 
@@ -173,7 +183,8 @@ func TestLDAPAdmitSeesTheAccountBeforeThePassword(t *testing.T) {
 
 func TestLDAPRecheck(t *testing.T) {
 	dir := &ldaptest.Directory{Entries: []*ldap.Entry{
-		ldaptest.Person("alice", "alice@corp.example.ch", aliceUUID)}}
+		ldaptest.Person("alice", "alice@corp.example.ch", aliceUUID),
+	}}
 	o := ldaptest.New(t, ldaptest.Config("corp"), dir)
 	ctx := context.Background()
 	subject := strings.ToLower(aliceUUID)

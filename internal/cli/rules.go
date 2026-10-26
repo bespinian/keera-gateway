@@ -3,13 +3,15 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// The text form of a pattern filter's rules and of a size route step's ceilings.
+// The text form of a pattern filter's rules, of a size route step's ceilings,
+// and of a header step's values.
 // The wire carries them as JSON; people edit and review them as text, so the
 // command line reads and prints that text.
 
@@ -39,16 +41,16 @@ func parseRules(text string) ([]policy.FilterRule, error) {
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		at := strings.LastIndex(trimmed, ruleSeparator)
-		if at < 0 {
+		pattern, answer, found := strings.CutLast(trimmed, ruleSeparator)
+		if !found {
 			return nil, fmt.Errorf("line %d has no %q: a rule is an expression, then %q, "+
 				"then what each match becomes - or %q to drop the request instead:\n  %s",
 				i+1, ruleSeparator, ruleSeparator, ruleRefuseToken, trimmed)
 		}
 		rule := policy.FilterRule{
-			Pattern: strings.TrimSpace(trimmed[:at]),
+			Pattern: strings.TrimSpace(pattern),
 		}
-		answer := strings.TrimSpace(trimmed[at+len(ruleSeparator):])
+		answer = strings.TrimSpace(answer)
 		if reason, ok := cutRefusal(answer); ok {
 			rule.Refuse, rule.Reason = true, reason
 		} else {
@@ -146,6 +148,34 @@ func parseDestinations(spec string) ([]string, map[string]int, error) {
 		ceilings[alias] = n
 	}
 	return aliases, ceilings, nil
+}
+
+// parseValues reads which value of a header step's header sends a request
+// where, and the destinations in the order they were written:
+//
+//	--values cheap=keera-speed,hard=keera-frontier
+func parseValues(spec string) (map[string]string, []string, error) {
+	values := map[string]string{}
+	var dests []string
+	for part := range strings.SplitSeq(spec, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		value, dest, ok := strings.Cut(part, "=")
+		value, dest = strings.TrimSpace(value), strings.TrimSpace(dest)
+		if !ok || value == "" || dest == "" {
+			return nil, nil, fmt.Errorf("%q is not a value and a model; write 'cheap=keera-speed'", part)
+		}
+		if _, twice := values[value]; twice {
+			return nil, nil, fmt.Errorf("the value %q is given twice", value)
+		}
+		values[value] = dest
+		if !slices.Contains(dests, dest) {
+			dests = append(dests, dest)
+		}
+	}
+	return values, dests, nil
 }
 
 // parseTokenCount reads a ceiling in tokens, where 'k' means a thousand.

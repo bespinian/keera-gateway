@@ -156,21 +156,35 @@ func TestTheDirectoryToSignInThroughIsSettledFirst(t *testing.T) {
 		want      string
 		wantErr   string
 	}{
-		{name: "one directory needs no choosing", sso: true,
-			providers: []string{"sso"}, want: "sso"},
-		{name: "several, and none named", sso: true,
-			providers: []string{"google", "entra"}, wantErr: "google, entra"},
-		{name: "several, one named", sso: true,
-			providers: []string{"google", "entra"}, asked: "entra", want: "entra"},
-		{name: "a name this gateway does not have", sso: true,
-			providers: []string{"google"}, asked: "okta", wantErr: "google"},
-		{name: "no identity provider at all", sso: false,
-			wantErr: "KEERA_OPERATOR_KEY"},
+		{
+			name: "one directory needs no choosing", sso: true,
+			providers: []string{"sso"}, want: "sso",
+		},
+		{
+			name: "several, and none named", sso: true,
+			providers: []string{"google", "entra"}, wantErr: "google, entra",
+		},
+		{
+			name: "several, one named", sso: true,
+			providers: []string{"google", "entra"}, asked: "entra", want: "entra",
+		},
+		{
+			name: "a name this gateway does not have", sso: true,
+			providers: []string{"google"}, asked: "okta", wantErr: "google",
+		},
+		{
+			name: "no identity provider at all", sso: false,
+			wantErr: "KEERA_OPERATOR_KEY",
+		},
 		{name: "passkeys only", passkeys: true, want: "passkey"},
-		{name: "a directory and passkeys", sso: true, passkeys: true,
-			providers: []string{"google"}, wantErr: "google, passkey"},
-		{name: "passkey named", sso: true, passkeys: true,
-			providers: []string{"google"}, asked: "passkey", want: "passkey"},
+		{
+			name: "a directory and passkeys", sso: true, passkeys: true,
+			providers: []string{"google"}, wantErr: "google, passkey",
+		},
+		{
+			name: "passkey named", sso: true, passkeys: true,
+			providers: []string{"google"}, asked: "passkey", want: "passkey",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

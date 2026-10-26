@@ -20,7 +20,8 @@ type CLICode struct {
 // CreateCLICode records the code the browser is about to carry to a loopback
 // listener.
 func (s *Store) CreateCLICode(ctx context.Context, hash []byte, userID, challenge string,
-	expires time.Time) error {
+	expires time.Time,
+) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO cli_codes (id, user_id, challenge, expires_at)
 		VALUES ($1,$2,$3,$4)`, hash, userID, challenge, expires)
 	return err
@@ -46,7 +47,8 @@ type CLITokenUser struct {
 // CreateCLIToken stores a token under its hash, and notes that its person
 // signed in.
 func (s *Store) CreateCLIToken(ctx context.Context, hash []byte, userID string,
-	expires time.Time) error {
+	expires time.Time,
+) error {
 	_, err := s.pool.Exec(ctx, `WITH signed_in AS (
 			UPDATE users SET signed_in_at = now() WHERE id = $2)
 		INSERT INTO cli_tokens (id, user_id, expires_at)

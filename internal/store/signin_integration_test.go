@@ -113,7 +113,8 @@ func TestLinkUserAdoptsAPersonInsteadOfDuplicatingThem(t *testing.T) {
 	// The first sign-in matches on email and adopts the row, writing the
 	// subject back so it only ever happens once.
 	linked, err := st.LinkUser(ctx, "user_new", Link{
-		OrgID: f.orgID, Email: "dev@example.ch", ExternalID: "sub-1", Role: "admin"})
+		OrgID: f.orgID, Email: "dev@example.ch", ExternalID: "sub-1", Role: "admin",
+	})
 	if err != nil {
 		t.Fatalf("LinkUser: %v", err)
 	}
@@ -126,7 +127,8 @@ func TestLinkUserAdoptsAPersonInsteadOfDuplicatingThem(t *testing.T) {
 
 	// The second sign-in matches on the subject, and follows a changed address.
 	again, err := st.LinkUser(ctx, "user_newer", Link{
-		OrgID: f.orgID, Email: "renamed@example.ch", ExternalID: "sub-1", Role: "admin"})
+		OrgID: f.orgID, Email: "renamed@example.ch", ExternalID: "sub-1", Role: "admin",
+	})
 	if err != nil {
 		t.Fatalf("LinkUser: %v", err)
 	}
@@ -244,14 +246,16 @@ func TestLinkUserRefusesToTakeOverAnotherProvidersIdentity(t *testing.T) {
 
 	// Ada signs in through the first directory and is an administrator there.
 	_, err := st.LinkUser(ctx, "user_ada", Link{
-		OrgID: f.orgID, Email: "ada@example.ch", ExternalID: "google:1", Role: "admin"})
+		OrgID: f.orgID, Email: "ada@example.ch", ExternalID: "google:1", Role: "admin",
+	})
 	if err != nil {
 		t.Fatalf("LinkUser: %v", err)
 	}
 
 	// Somebody arrives through the second directory carrying the same address.
 	_, err = st.LinkUser(ctx, "user_other", Link{
-		OrgID: f.orgID, Email: "ada@example.ch", ExternalID: "entra:2", Role: "member"})
+		OrgID: f.orgID, Email: "ada@example.ch", ExternalID: "entra:2", Role: "member",
+	})
 	if !errors.Is(err, ErrEmailTaken) {
 		t.Fatalf("LinkUser = %v, want ErrEmailTaken", err)
 	}
@@ -336,8 +340,10 @@ func TestTheDirectoryNamesAPersonInEveryOrganisation(t *testing.T) {
 
 	link := func(newID, orgID, name string) User {
 		t.Helper()
-		u, err := st.LinkUser(ctx, newID, Link{OrgID: orgID, Email: "ada@example.ch",
-			Name: name, ExternalID: "google:sub-1", Role: "member"})
+		u, err := st.LinkUser(ctx, newID, Link{
+			OrgID: orgID, Email: "ada@example.ch",
+			Name: name, ExternalID: "google:sub-1", Role: "member",
+		})
 		if err != nil {
 			t.Fatalf("LinkUser: %v", err)
 		}
@@ -378,8 +384,10 @@ func TestTheDirectoryNamesAPersonInEveryOrganisation(t *testing.T) {
 func TestASignUpKeepsTheName(t *testing.T) {
 	st, ctx := db(t)
 	hash := []byte("hash-of-a-sign-up-token-32-bytes")
-	if err := st.CreateSignup(ctx, Signup{TokenHash: hash, Provider: "google",
-		ExternalID: "google:sub-1", Email: "ada@example.ch", Name: "Ada Lovelace", Role: "member"},
+	if err := st.CreateSignup(ctx, Signup{
+		TokenHash: hash, Provider: "google",
+		ExternalID: "google:sub-1", Email: "ada@example.ch", Name: "Ada Lovelace", Role: "member",
+	},
 		time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("CreateSignup: %v", err)
 	}

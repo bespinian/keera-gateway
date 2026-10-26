@@ -32,19 +32,27 @@ var sealedColumns = []struct {
 	kind          SealedKind
 	query, update string
 }{
-	{SealedModel,
+	{
+		SealedModel,
 		"SELECT org_id, alias, api_key_ct FROM models WHERE api_key_ct IS NOT NULL FOR UPDATE",
-		"UPDATE models SET api_key_ct = $3 WHERE org_id = $1 AND alias = $2"},
-	{SealedMCP,
+		"UPDATE models SET api_key_ct = $3 WHERE org_id = $1 AND alias = $2",
+	},
+	{
+		SealedMCP,
 		"SELECT org_id, alias, api_key_ct FROM mcp_servers WHERE api_key_ct IS NOT NULL FOR UPDATE",
-		"UPDATE mcp_servers SET api_key_ct = $3 WHERE org_id = $1 AND alias = $2"},
-	{SealedRefreshToken,
+		"UPDATE mcp_servers SET api_key_ct = $3 WHERE org_id = $1 AND alias = $2",
+	},
+	{
+		SealedRefreshToken,
 		"SELECT external_id, '', refresh_token FROM identities WHERE refresh_token IS NOT NULL FOR UPDATE",
-		"UPDATE identities SET refresh_token = $3 WHERE external_id = $1 AND $2 = ''"},
-	{SealedRefreshToken,
+		"UPDATE identities SET refresh_token = $3 WHERE external_id = $1 AND $2 = ''",
+	},
+	{
+		SealedRefreshToken,
 		`SELECT external_id, encode(token_hash, 'hex'), refresh_token FROM signups
 		WHERE refresh_token IS NOT NULL FOR UPDATE`,
-		"UPDATE signups SET refresh_token = $3 WHERE external_id = $1 AND token_hash = decode($2, 'hex')"},
+		"UPDATE signups SET refresh_token = $3 WHERE external_id = $1 AND token_hash = decode($2, 'hex')",
+	},
 }
 
 // ResealSecrets passes every sealed value to reseal, and stores what it

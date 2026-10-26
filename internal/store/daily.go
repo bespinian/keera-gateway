@@ -33,8 +33,10 @@ type dailySum struct {
 
 // addDaily counts one written usage row into sums.
 func addDaily(sums map[dailyKey]*dailySum, e Event) {
-	k := dailyKey{policy.PeriodDay.Start(e.TS), e.OrgID, e.KeyID, e.Alias, e.Client,
-		e.ProjectID, e.UserID}
+	k := dailyKey{
+		policy.PeriodDay.Start(e.TS), e.OrgID, e.KeyID, e.Alias, e.Client,
+		e.ProjectID, e.UserID,
+	}
 	d := sums[k]
 	if d == nil {
 		d = &dailySum{}

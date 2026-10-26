@@ -101,8 +101,10 @@ func TestResponsesDecodeDeclaresNamespacesAndCustomTools(t *testing.T) {
 		fn := tool.(map[string]any)["function"].(map[string]any)
 		fns[fn["name"].(string)] = fn
 	}
-	for _, name := range []string{"exec_command", "mcp__demo__get_weather",
-		"multi_agent_v1__spawn_agent", "apply_patch"} {
+	for _, name := range []string{
+		"exec_command", "mcp__demo__get_weather",
+		"multi_agent_v1__spawn_agent", "apply_patch",
+	} {
 		if fns[name] == nil {
 			t.Errorf("no tool %q in %v", name, req["tools"])
 		}
@@ -495,18 +497,24 @@ func TestNativeResponsesStreamReadsTheUsage(t *testing.T) {
 // a failed stream from a finished one.
 func TestAFailedNativeStreamIsRecordedAsFailed(t *testing.T) {
 	for _, tc := range []struct{ provider, model, path, body, events, want string }{
-		{"openai", "gpt-5.5", "/v1/responses", `{"model":"keera-frontier","stream":true,"input":"hi"}`,
+		{
+			"openai", "gpt-5.5", "/v1/responses", `{"model":"keera-frontier","stream":true,"input":"hi"}`,
 			`{"type":"response.created","response":{"id":"r","status":"in_progress"}}` + "\n\n" +
 				`{"type":"response.failed","response":{"id":"r","status":"failed",` +
 				`"error":{"code":"server_error","message":"it broke"}}}`,
-			"it broke"},
-		{"openai", "gpt-5.5", "/v1/responses", `{"model":"keera-frontier","stream":true,"input":"hi"}`,
-			`{"type":"response.output_text.delta","delta":"hi"}`, "stopped before"},
-		{"anthropic", "claude-opus-5", "/v1/messages", `{"model":"keera-frontier","max_tokens":64,` +
-			`"stream":true,"messages":[{"role":"user","content":"hi"}]}`,
+			"it broke",
+		},
+		{
+			"openai", "gpt-5.5", "/v1/responses", `{"model":"keera-frontier","stream":true,"input":"hi"}`,
+			`{"type":"response.output_text.delta","delta":"hi"}`, "stopped before",
+		},
+		{
+			"anthropic", "claude-opus-5", "/v1/messages", `{"model":"keera-frontier","max_tokens":64,` +
+				`"stream":true,"messages":[{"role":"user","content":"hi"}]}`,
 			`{"type":"message_start","message":{"usage":{"input_tokens":1}}}` + "\n\n" +
 				`{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`,
-			"Overloaded"},
+			"Overloaded",
+		},
 	} {
 		backend := func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "text/event-stream")

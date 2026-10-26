@@ -426,7 +426,8 @@ func buildLimiter(ctx context.Context, cfg config.Config, mreg *metrics.Registry
 // sweep bounds the memory the caches hold. Without it a public endpoint keeps
 // one entry per token anyone has ever sent.
 func sweep(ctx context.Context, reg *registry.Registry, limiter limiter,
-	ctl *control.Server, st *store.Store, log *slog.Logger) {
+	ctl *control.Server, st *store.Store, log *slog.Logger,
+) {
 	every(ctx, time.Minute, false, func(now time.Time) {
 		reg.Sweep()
 		limiter.Sweep(control.BucketIdle, now)

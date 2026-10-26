@@ -60,10 +60,15 @@ func TestAPaymentSettingThatCannotWorkStopsTheStart(t *testing.T) {
 		want string
 	}{
 		{"half an account", map[string]string{"KEERA_BILLING_POSTFINANCE_SPACE_ID": "1"}, "all three"},
-		{"VAT without an account", map[string]string{"KEERA_BILLING_VAT": "8.1"},
-			"KEERA_BILLING_VAT does nothing"},
-		{"space not a number", with("KEERA_BILLING_POSTFINANCE_SPACE_ID", "main"),
-			"KEERA_BILLING_POSTFINANCE_SPACE_ID"},
+		{
+			"VAT without an account",
+			map[string]string{"KEERA_BILLING_VAT": "8.1"},
+			"KEERA_BILLING_VAT does nothing",
+		},
+		{
+			"space not a number", with("KEERA_BILLING_POSTFINANCE_SPACE_ID", "main"),
+			"KEERA_BILLING_POSTFINANCE_SPACE_ID",
+		},
 		{"key not base64", with("KEERA_BILLING_POSTFINANCE_AUTH_KEY", "not base64!"), "base64"},
 		{"no provider key", with("KEERA_PROVIDER_CSCS_API_KEY", ""), "KEERA_PROVIDER_<NAME>_API_KEY"},
 		{"no https address", with("KEERA_PUBLIC_URL", "http://keera.example"), "KEERA_PUBLIC_URL"},
@@ -82,8 +87,10 @@ func TestAPaymentSettingThatCannotWorkStopsTheStart(t *testing.T) {
 
 // In the development loop, the browser comes back to this machine over http.
 func TestPaymentsWorkOnThisMachineOverHTTP(t *testing.T) {
-	for _, u := range []string{"http://localhost:8080", "http://keera.localhost:8080",
-		"http://127.0.0.1:8080", "http://[::1]:8080"} {
+	for _, u := range []string{
+		"http://localhost:8080", "http://keera.localhost:8080",
+		"http://127.0.0.1:8080", "http://[::1]:8080",
+	} {
 		c, err := loadWith(t, valid(map[string]string{
 			"KEERA_PUBLIC_URL":                   u,
 			"KEERA_PROVIDER_CSCS_API_KEY":        "sk",

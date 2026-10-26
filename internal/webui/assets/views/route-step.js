@@ -53,6 +53,12 @@ const MODES = [
     name: "Size",
     what: "Choose by how many tokens the request has.",
   },
+  {
+    value: "header",
+    icon: icons.header,
+    name: "Header",
+    what: "The client's app says where, with a request header.",
+  },
 ];
 
 /** modeOf is a step's mode, instruction when left out. */
@@ -68,6 +74,19 @@ export function modeName(mode) {
  *  destination there is nothing to choose, so the gateway does not ask. */
 export function decides(step) {
   return modeOf(step) === "instruction" && (step.destinations || []).length > 1;
+}
+
+/** chooses reports whether a step picks one destination itself, and so has
+ *  a fallback for when it cannot. */
+export function chooses(step) {
+  return decides(step) || modeOf(step) === "header";
+}
+
+/** valuesFor is the values of a header step that send a request to dest. */
+export function valuesFor(step, dest) {
+  return Object.keys(step.values || {})
+    .filter((v) => step.values[v] === dest)
+    .sort();
 }
 
 // measures reports whether the gateway works out this step's order. That
@@ -87,6 +106,8 @@ function ordersBy(mode) {
       return "requests in flight, least busy first";
     case "size":
       return "request size, against each one's ceiling";
+    case "header":
+      return "the value of a header the client sends";
     default:
       return "the order they are written in";
   }
@@ -144,6 +165,7 @@ export function routeFields(models, step) {
   let chosen = creating ? null : modeOf(step);
   const reads = () => chosen === "instruction";
   const bySize = () => chosen === "size";
+  const byHeader = () => chosen === "header";
   // On measured modes the order only breaks ties.
   const ranks = () => measures(chosen);
 
@@ -241,6 +263,23 @@ export function routeFields(models, step) {
     );
   };
 
+  // perDestination fills list with a row per destination: its name, then
+  // what row gives for it.
+  const perDestination = (list, row) => {
+    list.replaceChildren(
+      ...(picked.length
+        ? picked.map((alias) =>
+            h(
+              "div",
+              { class: "row-tight" },
+              h("span", { class: "mono", style: { minWidth: "160px" } }, alias),
+              row(alias),
+            ),
+          )
+        : [h("div", { class: "empty" }, "Nothing chosen yet.")]),
+    );
+  };
+
   // Kept here, not read off the inputs, so choosing a destination again keeps
   // its ceiling.
   const ceilings = { ...(step.ceilings || {}) };
@@ -273,52 +312,74 @@ export function routeFields(models, step) {
   };
   const renderCeilings = () => {
     notes.clear();
-    if (picked.length === 0) {
-      ceilingList.replaceChildren(
-        h("div", { class: "empty" }, "Nothing chosen yet."),
-      );
-      ceilingHint.textContent = "";
-      return;
-    }
-    ceilingList.replaceChildren(
-      ...picked.map((alias) => {
-        const box = h("input", {
-          class: "input mono",
-          style: { maxWidth: "120px" },
-          placeholder: "no ceiling",
-          value: ceilings[alias] ? tokens(ceilings[alias]) : "",
-          onInput: () => {
-            // The CLI's form: whole tokens, where 'k' means a thousand.
-            const raw = box.value.trim().toLowerCase();
-            const m = /^(\d+)(k?)$/.exec(raw);
-            const n = m ? Number(m[1]) * (m[2] ? 1000 : 1) : 0;
-            badCeilings.delete(alias);
-            if (n > 0) {
-              ceilings[alias] = n;
-            } else {
-              delete ceilings[alias];
-              if (raw !== "") badCeilings.add(alias);
-            }
-            syncCeilingNotes();
-          },
-        });
-        const note = h("span", { class: "faint" });
-        notes.set(alias, note);
-        return h(
-          "div",
-          { class: "row-tight" },
-          h("span", { class: "mono", style: { minWidth: "160px" } }, alias),
-          box,
-          note,
-        );
-      }),
-    );
-    syncCeilingNotes();
+    perDestination(ceilingList, (alias) => {
+      const box = h("input", {
+        class: "input mono",
+        style: { maxWidth: "120px" },
+        placeholder: "no ceiling",
+        value: ceilings[alias] ? tokens(ceilings[alias]) : "",
+        onInput: () => {
+          // The CLI's form: whole tokens, where 'k' means a thousand.
+          const raw = box.value.trim().toLowerCase();
+          const m = /^(\d+)(k?)$/.exec(raw);
+          const n = m ? Number(m[1]) * (m[2] ? 1000 : 1) : 0;
+          badCeilings.delete(alias);
+          if (n > 0) {
+            ceilings[alias] = n;
+          } else {
+            delete ceilings[alias];
+            if (raw !== "") badCeilings.add(alias);
+          }
+          syncCeilingNotes();
+        },
+      });
+      const note = h("span", { class: "faint" });
+      notes.set(alias, note);
+      return [box, note];
+    });
+    if (picked.length) syncCeilingNotes();
+    else ceilingHint.textContent = "";
   };
   const ceilingField = field(
     "Up to this many input tokens",
     ceilingList,
     ceilingHint,
+  );
+
+  // A header step's values, as typed per destination. Kept here for the same
+  // reason as the ceilings.
+  const headerName = h("input", {
+    class: "input mono",
+    placeholder: "X-Keera-Route",
+    value: step.header || "",
+  });
+  const valueText = {};
+  for (const alias of picked) {
+    valueText[alias] = valuesFor(step, alias).join(", ");
+  }
+  const valueList = h("div", { class: "stack", style: { gap: "4px" } });
+  const renderValues = () =>
+    perDestination(valueList, (alias) =>
+      h("input", {
+        class: "input mono",
+        placeholder: "cheap, quick",
+        value: valueText[alias] || "",
+        onInput: (e) => {
+          valueText[alias] = e.target.value;
+        },
+      }),
+    );
+  const headerField = field(
+    "Header",
+    headerName,
+    "The request header the client's app sets, such as X-Keera-Route.",
+  );
+  const valuesField = field(
+    "Header values per model",
+    valueList,
+    "Lowercase words, separated by commas. Case does not matter in the " +
+      "request. A destination without values can only be reached as the " +
+      "fallback.",
   );
 
   const destinationList = h("div", { class: "stack", style: { gap: "6px" } });
@@ -342,6 +403,7 @@ export function routeFields(models, step) {
     renderOrder();
     syncFallback();
     renderCeilings();
+    renderValues();
   };
   // Each dropdown offers only what the others have not taken, so no model is
   // named twice.
@@ -413,6 +475,7 @@ export function routeFields(models, step) {
   syncFallback();
   renderOrder();
   renderCeilings();
+  renderValues();
 
   // Fields only an instruction step has. Hidden, not disabled, so nobody
   // writes an instruction the step then ignores.
@@ -423,13 +486,9 @@ export function routeFields(models, step) {
     "A small, fast model. It reads every request that reaches this step, so " +
       "keep it inside the cluster.",
   );
-  const fallbackField = field(
-    "When it cannot decide",
-    fallback,
-    // The right answer depends on the deployment, so the hint gives both.
-    "Fall back if the step saves money. Refuse if it keeps prompts inside " +
-      "the cluster.",
-  );
+  const fallbackHint = h("div", { class: "hint" });
+  const fallbackField = field("When it cannot decide", fallback, fallbackHint);
+  const fallbackLabel = fallbackField.querySelector("label");
   const promptField = field(
     "Instruction",
     prompt,
@@ -438,19 +497,34 @@ export function routeFields(models, step) {
   );
   const orderHint = h("div", { class: "hint" });
   const orderField = field("In this order", order, orderHint);
-  const destinationsLabel = h("label", {}, "Destination models");
   const destinationsHint = h("div", { class: "hint" });
-  const costBanner = banner("info");
+  const costBanner = banner(
+    "info",
+    "Requests are sent to the deciding model, then to the destination " +
+      "model. Both count against the same budgets.",
+  );
 
   const syncMode = () => {
     rest.hidden = chosen === null;
     if (chosen === null) return;
-    for (const el of [modelField, fallbackField, promptField]) {
+    for (const el of [modelField, promptField]) {
       el.hidden = !reads();
     }
+    fallbackField.hidden = !reads() && !byHeader();
+    fallbackLabel.textContent = byHeader()
+      ? "Without a known value"
+      : "When it cannot decide";
+    // The right answer depends on the deployment, so the hint gives both.
+    fallbackHint.textContent = byHeader()
+      ? "Where a request goes when its header is missing or names no " +
+        "destination. Refused requests get a 400 that lists the values."
+      : "Fall back if the step saves money. Refuse if it keeps prompts " +
+        "inside the cluster.";
     ceilingField.hidden = !bySize();
-    // A size step's order is its ceilings.
-    orderField.hidden = reads() || bySize();
+    headerField.hidden = !byHeader();
+    valuesField.hidden = !byHeader();
+    // A size step's order is its ceilings, and a header step has none.
+    orderField.hidden = reads() || bySize() || byHeader();
     orderHint.textContent = ranks()
       ? "Only in a tie-break. The gateway reorders these on every request " +
         "from what it measures."
@@ -458,30 +532,21 @@ export function routeFields(models, step) {
         "above cannot answer.";
     destinationsHint.textContent = bySize()
       ? "Each with the largest request it should be given."
-      : "";
+      : byHeader()
+        ? "Each with the values of the header that send a request there."
+        : "";
     destinationsHint.hidden = !destinationsHint.textContent;
     costBanner.hidden = !reads();
-    if (bySize()) {
-      renderCeilings();
-      return;
-    }
-    costBanner.textContent =
-      "Requests are sent to the deciding model, then to the destination " +
-      "model. Both count against the same budgets.";
   };
 
   const rest = h(
     "div",
     {},
     modelField,
-    h(
-      "div",
-      { class: "field" },
-      destinationsLabel,
-      destinationPicker,
-      destinationsHint,
-    ),
+    field("Destination models", destinationPicker, destinationsHint),
     ceilingField,
+    headerField,
+    valuesField,
     orderField,
     fallbackField,
     promptField,
@@ -509,13 +574,19 @@ export function routeFields(models, step) {
       if (reads() && !prompt.value.trim()) {
         throw new Error("Write the instruction.");
       }
+      const values = byHeader() ? readValues(picked, valueText) : {};
+      if (byHeader() && !headerName.value.trim()) {
+        throw new Error("Name the header it reads.");
+      }
       // Leftovers of another mode are dropped.
       return {
         mode: chosen,
         destinations: [...picked],
         model: reads() ? model.value : "",
         prompt: reads() ? prompt.value.trim() : "",
-        fallback: reads() ? fallback.value : "",
+        fallback: reads() || byHeader() ? fallback.value : "",
+        header: byHeader() ? headerName.value.trim() : "",
+        values,
         ceilings: bySize()
           ? Object.fromEntries(
               picked.filter((a) => ceilings[a]).map((a) => [a, ceilings[a]]),
@@ -524,6 +595,28 @@ export function routeFields(models, step) {
       };
     },
   };
+}
+
+/** readValues turns the values typed per destination into the map a header
+ *  step keeps, refusing a value given to two destinations. */
+export function readValues(picked, valueText) {
+  const values = {};
+  for (const alias of picked) {
+    for (const raw of (valueText[alias] || "").split(",")) {
+      const v = raw.trim().toLowerCase();
+      if (!v) continue;
+      if (values[v] && values[v] !== alias) {
+        throw new Error(
+          `The value ${v} is given to ${values[v]} and ${alias}.`,
+        );
+      }
+      values[v] = alias;
+    }
+  }
+  if (!Object.keys(values).length) {
+    throw new Error("Give at least one destination a value.");
+  }
+  return values;
 }
 
 /** checkReport shows what checking a router's route steps found: each
@@ -550,6 +643,7 @@ function routeProbe(probe, named) {
   const chained = probe.mode !== "instruction";
   const ranked = measures(probe.mode);
   const banded = probe.mode === "size";
+  const labelled = probe.mode === "header";
   const intro = !probe.ok
     ? chained
       ? "This step has nowhere to send a request."
@@ -557,14 +651,17 @@ function routeProbe(probe, named) {
     : banded
       ? "Each destination, the request sizes it takes first, and whether it " +
         "is answering. This depends only on size, so it is the full picture."
-      : ranked
-        ? "Each destination in the order this step would try them now, with " +
-          "what it measured. The order can change from minute to minute."
-        : chained
-          ? "Each destination in the order this step would try them. The " +
-            "first that answers serves every request."
-          : "Three very different prompts. They should not all go to the " +
-            "same model.";
+      : labelled
+        ? "Each destination, the header values that send a request there, " +
+          "and whether it is answering. This is the full picture."
+        : ranked
+          ? "Each destination in the order this step would try them now, with " +
+            "what it measured. The order can change from minute to minute."
+          : chained
+            ? "Each destination in the order this step would try them. The " +
+              "first that answers serves every request."
+            : "Three very different prompts. They should not all go to the " +
+              "same model.";
   return h(
     "div",
     {},
@@ -586,7 +683,11 @@ function routeProbe(probe, named) {
         : null,
       ranked || banded ? ["In the order of", ordersBy(probe.mode)] : null,
       [
-        banded ? "Places between" : chained ? "Would try, in order" : "Offered",
+        banded || labelled
+          ? "Places between"
+          : chained
+            ? "Would try, in order"
+            : "Offered",
         h(
           "div",
           { class: "wrap-chips" },
@@ -621,7 +722,7 @@ function routeProbe(probe, named) {
           table(
             [
               {
-                label: banded ? "Placed on" : "Tries",
+                label: banded || labelled ? "Placed on" : "Tries",
                 shrink: true,
                 cell: (hop) =>
                   h(
@@ -650,9 +751,9 @@ function routeProbe(probe, named) {
               },
               // Why a destination is where it is, when the order is measured
               // rather than written.
-              ranked || banded
+              ranked || banded || labelled
                 ? {
-                    label: banded ? "Takes" : "Reading",
+                    label: banded ? "Takes" : labelled ? "For" : "Reading",
                     cell: (hop) =>
                       hop.reading
                         ? h("span", { class: "muted" }, hop.reading)

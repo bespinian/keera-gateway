@@ -27,8 +27,10 @@ import (
 // X-Session-Id, Helicone-Session-Id, and Claude Code's own. Claude Code sends
 // its session id on every call, its subagents' calls included, and keeps it
 // when it compacts the conversation.
-var sessionHeaders = []string{httpx.SessionHeader, "X-Session-Id", "Helicone-Session-Id",
-	"X-Claude-Code-Session-Id"}
+var sessionHeaders = []string{
+	httpx.SessionHeader, "X-Session-Id", "Helicone-Session-Id",
+	"X-Claude-Code-Session-Id",
+}
 
 // sessionKey derives the session key for one request, or empty for one that
 // is not part of a conversation. Only chat gets one: labelling completions and

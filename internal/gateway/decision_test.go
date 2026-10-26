@@ -67,10 +67,14 @@ func TestARouterDecidesWithADecisionModel(t *testing.T) {
 		return choiceAnswer("B", "A")
 	}, jsonBackend(hiAnswer))
 	models := decisionModels()
-	models["keera-large"] = policy.Model{OrgID: "org_1", Alias: "keera-large", Kind: policy.KindChat,
-		BackendModel: "large-served", Description: "hard work: design and reasoning", Enabled: true}
-	models["keera-code"] = policy.Model{OrgID: "org_1", Alias: "keera-code", Kind: policy.KindChat,
-		BackendModel: "served-name", Description: "small edits", Enabled: true}
+	models["keera-large"] = policy.Model{
+		OrgID: "org_1", Alias: "keera-large", Kind: policy.KindChat,
+		BackendModel: "large-served", Description: "hard work: design and reasoning", Enabled: true,
+	}
+	models["keera-code"] = policy.Model{
+		OrgID: "org_1", Alias: "keera-code", Kind: policy.KindChat,
+		BackendModel: "served-name", Description: "small edits", Enabled: true,
+	}
 	h := newHarness(t, backend, models, nil)
 	h.withRouters(policy.Route{
 		OrgID: "org_1", Router: "auto", Model: "keera-decider",
@@ -263,8 +267,10 @@ func TestADecisionModelIsMeasuredByWhatItIsSent(t *testing.T) {
 			return choiceAnswer("B", "A")
 		}, jsonBackend(hiAnswer))
 		models := small()
-		models["keera-large"] = policy.Model{OrgID: "org_1", Alias: "keera-large",
-			Kind: policy.KindChat, BackendModel: "large-served", Enabled: true}
+		models["keera-large"] = policy.Model{
+			OrgID: "org_1", Alias: "keera-large",
+			Kind: policy.KindChat, BackendModel: "large-served", Enabled: true,
+		}
 		h := newHarness(t, backend, models, nil)
 		h.withRouters(policy.Route{
 			OrgID: "org_1", Router: "auto", Model: "keera-decider",

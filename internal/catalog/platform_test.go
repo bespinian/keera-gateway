@@ -63,8 +63,10 @@ func TestTheDeploymentsKeyLeavesOtherModelsAlone(t *testing.T) {
 	for _, m := range []policy.Model{
 		{Provider: "openai", BackendModel: "gpt-5.5", Backends: []string{"https://proxy/v1"}},
 		{Backends: []string{"http://vllm:8000/v1"}, BackendModel: "local"},
-		{Provider: "anthropic", BackendModel: "claude-haiku-4-5", Subscription: true,
-			Backends: []string{"https://api.anthropic.com/v1"}},
+		{
+			Provider: "anthropic", BackendModel: "claude-haiku-4-5", Subscription: true,
+			Backends: []string{"https://api.anthropic.com/v1"},
+		},
 	} {
 		before := m.Backends[0]
 		if err := p.Lock(&m); err != nil || m.PlatformKey || m.Backends[0] != before {

@@ -119,10 +119,15 @@ type routeDecision struct {
 // the client sent it. It only refuses when it could not place the request and
 // has no fallback.
 func (s *Server) route(ctx context.Context, rt policy.Route, b *body, kind policy.Kind,
+	h http.Header,
 ) (routeDecision, *refusal) {
 	// A size step reads the body but no model. See size.go.
 	if rt.Sizes() {
 		return s.sized(rt, b, kind)
+	}
+	// A header step reads neither. See header.go.
+	if rt.Mode == policy.RouteModeHeader {
+		return s.byHeader(rt, h)
 	}
 	// The other trying modes read nothing.
 	if !rt.Decides() {
@@ -304,13 +309,17 @@ func (d *routeDecision) settle(f forwarded) {
 // always falls back is switched off without anyone noticing.
 func (s *Server) routeFallback(rt policy.Route, d routeDecision) (routeDecision, *refusal) {
 	if rt.Refuses() {
+		how := "reads each request to choose which model answers it"
+		if rt.Mode == policy.RouteModeHeader {
+			how = "chooses the model by the header " + rt.Header
+		}
 		d.outcome = store.RouterError
 		return d, &refusal{
 			status: http.StatusServiceUnavailable,
 			typ:    "server_error", code: "router_undecided",
-			msg: fmt.Sprintf("%s reads each request to choose which model answers it, "+
-				"and it could not choose for this one - %s. It has no fallback destination, "+
-				"so nothing was sent to a model", stepSubject(rt), d.why),
+			msg: fmt.Sprintf("%s %s, and it could not choose for this one - %s. It has no "+
+				"fallback destination, so nothing was sent to a model", stepSubject(rt), how,
+				d.why),
 			advise: true,
 		}
 	}

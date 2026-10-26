@@ -55,8 +55,10 @@ type Diagnosis struct {
 }
 
 func (d *Diagnosis) add(area, name string, verdict Verdict, detail, fix string) {
-	d.Checks = append(d.Checks, Check{Area: area, Name: name, Verdict: verdict,
-		Detail: detail, Fix: fix})
+	d.Checks = append(d.Checks, Check{
+		Area: area, Name: name, Verdict: verdict,
+		Detail: detail, Fix: fix,
+	})
 	switch verdict {
 	case VerdictFail:
 		d.Failures++

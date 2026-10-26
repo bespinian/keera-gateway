@@ -81,8 +81,10 @@ func (m *Manager) mintGit(ctx context.Context, req GitRequest) (GitCredential, e
 func (m *Manager) checkOut(ctx context.Context, env map[string]string, req CreateRequest,
 	until time.Time,
 ) (GitCredential, error) {
-	cred, err := m.mintGit(ctx, GitRequest{Repo: req.Repo, Until: until, Sandbox: req.Name,
-		Allow: allowRepo(req.Limits)})
+	cred, err := m.mintGit(ctx, GitRequest{
+		Repo: req.Repo, Until: until, Sandbox: req.Name,
+		Allow: allowRepo(req.Limits),
+	})
 	if err != nil {
 		return cred, err
 	}
@@ -137,8 +139,10 @@ func (m *Manager) RefreshGit(ctx context.Context, sb store.Sandbox,
 	case sb.ExpiresAt == nil || !sb.ExpiresAt.After(time.Now()):
 		return GitCredential{}, Refuse("sandbox %s has run out of time", sb.Name)
 	}
-	cred, err := m.mintGit(ctx, GitRequest{Repo: sb.Repo, Until: *sb.ExpiresAt, Sandbox: sb.Name,
-		Allow: allowRepo(limits)})
+	cred, err := m.mintGit(ctx, GitRequest{
+		Repo: sb.Repo, Until: *sb.ExpiresAt, Sandbox: sb.Name,
+		Allow: allowRepo(limits),
+	})
 	if err != nil {
 		return GitCredential{}, err
 	}

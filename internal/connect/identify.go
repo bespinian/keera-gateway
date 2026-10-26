@@ -35,8 +35,10 @@ var agents = []struct {
 	{key: "claude-code", products: []string{"claude-cli", "claude-code"}},
 	// Codex names the surface it runs in: the terminal, `codex exec`, the
 	// VS Code extension or the TypeScript SDK.
-	{key: "codex", products: []string{"codex", "codex-cli", "codex_cli_rs", "codex_exec",
-		"codex_vscode", "codex_sdk_ts"}},
+	{key: "codex", products: []string{
+		"codex", "codex-cli", "codex_cli_rs", "codex_exec",
+		"codex_vscode", "codex_sdk_ts",
+	}},
 	{key: "aider", label: "Aider", products: []string{"aider"}},
 	{key: "keera", label: "Keera CLI", products: []string{"keera", "keera-cli"}},
 	// The panel's playground states its name in the header. Its User-Agent is
@@ -44,17 +46,27 @@ var agents = []struct {
 	{key: "keera-playground", label: "Keera Playground"},
 	// Keera Chat sends through the playground route and names itself there.
 	{key: "keera-chat", label: "Keera Chat"},
-	{key: "openai-sdk", label: "OpenAI SDK", generic: true,
-		products: []string{"openai", "openai-python", "openai-node", "async-openai"}},
-	{key: "anthropic-sdk", label: "Anthropic SDK", generic: true,
-		products: []string{"anthropic", "anthropic-sdk-python", "anthropic-ai-sdk"}},
-	{key: "langchain", label: "LangChain", generic: true,
-		products: []string{"langchain", "langchainjs"}},
+	{
+		key: "openai-sdk", label: "OpenAI SDK", generic: true,
+		products: []string{"openai", "openai-python", "openai-node", "async-openai"},
+	},
+	{
+		key: "anthropic-sdk", label: "Anthropic SDK", generic: true,
+		products: []string{"anthropic", "anthropic-sdk-python", "anthropic-ai-sdk"},
+	},
+	{
+		key: "langchain", label: "LangChain", generic: true,
+		products: []string{"langchain", "langchainjs"},
+	},
 	{key: "curl", generic: true, products: []string{"curl"}},
-	{key: "python", generic: true,
-		products: []string{"python-requests", "python-httpx", "python-urllib3", "httpx", "urllib3"}},
-	{key: "node", label: "Node", generic: true,
-		products: []string{"node", "node-fetch", "undici", "axios"}},
+	{
+		key: "python", generic: true,
+		products: []string{"python-requests", "python-httpx", "python-urllib3", "httpx", "urllib3"},
+	},
+	{
+		key: "node", label: "Node", generic: true,
+		products: []string{"node", "node-fetch", "undici", "axios"},
+	},
 	{key: "go", label: "Go client", generic: true, products: []string{"go-http-client"}},
 }
 

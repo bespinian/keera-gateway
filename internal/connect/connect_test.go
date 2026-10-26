@@ -150,8 +150,10 @@ func TestTOMLTemplatesRenderToTOML(t *testing.T) {
 	codex, _ := Find(Clients(), "codex")
 	rendered := codex.Render("https://keera.example.ch", two)
 	top, _, _ := strings.Cut(rendered, "\n[")
-	for _, want := range []string{`model = "keera-code"`, `model_provider = "keera"`,
-		"model_context_window = 32768"} {
+	for _, want := range []string{
+		`model = "keera-code"`, `model_provider = "keera"`,
+		"model_context_window = 32768",
+	} {
 		if !strings.Contains(top, want) {
 			t.Errorf("codex does not set %s above its first section:\n%s", want, rendered)
 		}
@@ -319,11 +321,15 @@ func TestEveryModelOfTheKeyIsConfigured(t *testing.T) {
 // every id it goes by.
 func TestClaudeCodeGetsTheSettingsConnectWrites(t *testing.T) {
 	models := []Model{
-		{Alias: "claude-opus", BackendModel: "claude-opus-5-5", Provider: "anthropic",
-			MaxContext: 1_000_000},
+		{
+			Alias: "claude-opus", BackendModel: "claude-opus-5-5", Provider: "anthropic",
+			MaxContext: 1_000_000,
+		},
 		{Alias: "keera-code", BackendModel: "qwen", MaxContext: 256_000},
-		{Alias: "claude-haiku", BackendModel: "claude-haiku-4-5", Provider: "anthropic",
-			MaxContext: 200_000},
+		{
+			Alias: "claude-haiku", BackendModel: "claude-haiku-4-5", Provider: "anthropic",
+			MaxContext: 200_000,
+		},
 	}
 	cc, _ := Find(Clients(), "claude-code")
 	var got struct {

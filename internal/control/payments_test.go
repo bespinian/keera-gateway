@@ -36,8 +36,10 @@ type fakePostFinance struct {
 }
 
 func newFakePostFinance(t *testing.T) *fakePostFinance {
-	f := &fakePostFinance{next: 100, created: map[int64]payment.NewTransaction{},
-		state: map[int64]payment.Transaction{}, charged: payment.Transaction{State: "FULFILL"}}
+	f := &fakePostFinance{
+		next: 100, created: map[int64]payment.NewTransaction{},
+		state: map[int64]payment.Transaction{}, charged: payment.Transaction{State: "FULFILL"},
+	}
 	mux := http.NewServeMux()
 	const base = "/api/v2.0/payment"
 	mux.HandleFunc("POST "+base+"/transactions", func(w http.ResponseWriter, r *http.Request) {
@@ -54,9 +56,11 @@ func newFakePostFinance(t *testing.T) *fakePostFinance {
 			v, _ := item.AmountIncludingTax.Float64()
 			amount += v
 		}
-		tx := payment.Transaction{ID: id, State: "PENDING", Currency: in.Currency,
+		tx := payment.Transaction{
+			ID: id, State: "PENDING", Currency: in.Currency,
 			AuthorizationAmount: amount, CustomerID: in.CustomerID,
-			MerchantReference: in.MerchantReference}
+			MerchantReference: in.MerchantReference,
+		}
 		f.state[id] = tx
 		f.mu.Unlock()
 		w.WriteHeader(http.StatusCreated)
@@ -85,8 +89,10 @@ func newFakePostFinance(t *testing.T) *fakePostFinance {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"title": "Invoice", "mimeType": "application/pdf",
-			"data": []byte(fmt.Sprintf("%%PDF-1.7 invoice of %d", pathID(r)))})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"title": "Invoice", "mimeType": "application/pdf",
+			"data": []byte(fmt.Sprintf("%%PDF-1.7 invoice of %d", pathID(r))),
+		})
 	})
 	mux.HandleFunc("GET "+base+"/tokens/{id}/active-version", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"name":"•••• 4821","expiresOn":"2028-09-30T00:00:00Z",
@@ -140,8 +146,10 @@ func paymentServer(ctx context.Context, t *testing.T, st *store.Store, pf *fakeP
 	if err != nil {
 		t.Fatal(err)
 	}
-	reg, err := registry.New(ctx, st, registry.Options{Secrets: box, Platform: testPlatform,
-		Prepaid: true}, slog.New(slog.DiscardHandler))
+	reg, err := registry.New(ctx, st, registry.Options{
+		Secrets: box, Platform: testPlatform,
+		Prepaid: true,
+	}, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,8 +157,10 @@ func paymentServer(ctx context.Context, t *testing.T, st *store.Store, pf *fakeP
 		OperatorKey: testOperatorKey, Secrets: box, Platform: testPlatform,
 		PublicURL: "https://keera.example",
 		Payments: &Payments{
-			Client: payment.New(payment.Settings{URL: pf.URL, SpaceID: 4711, UserID: "1",
-				AuthKey: []byte("key")}),
+			Client: payment.New(payment.Settings{
+				URL: pf.URL, SpaceID: 4711, UserID: "1",
+				AuthKey: []byte("key"),
+			}),
 			VATBP: 810,
 		},
 	}, slog.New(slog.DiscardHandler))
@@ -376,8 +386,10 @@ func TestAnAccountThatRanLowIsToppedUpFromTheSavedCard(t *testing.T) {
 	}
 
 	// Far below zero, say by a burst of traffic: no run of charges follows.
-	if _, err := st.Grant(ctx, store.Payment{ID: "pay_burst", OrgID: "org_1",
-		AmountMicros: -1_000_000_000, Actor: "test", Note: "burst"}); err != nil {
+	if _, err := st.Grant(ctx, store.Payment{
+		ID: "pay_burst", OrgID: "org_1",
+		AmountMicros: -1_000_000_000, Actor: "test", Note: "burst",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	s.topUpDue(ctx)
@@ -479,26 +491,34 @@ func TestWhoMayDoWhatWithCredit(t *testing.T) {
 			"/v1/billing/topups", `{"amount_micros":100000000}`), http.StatusForbidden},
 		{"a member cannot read the account", invoke(s.creditAccount, member("org_1"),
 			http.MethodGet, "/v1/billing/account", ""), http.StatusForbidden},
-		{"another organisation's admin cannot pay for it", invoke(s.createTopUp, admin("org_2"),
-			http.MethodPost, "/v1/billing/topups?org_id=org_1", `{"amount_micros":100000000}`),
-			http.StatusForbidden},
+		{
+			"another organisation's admin cannot pay for it", invoke(s.createTopUp, admin("org_2"),
+				http.MethodPost, "/v1/billing/topups?org_id=org_1", `{"amount_micros":100000000}`),
+			http.StatusForbidden,
+		},
 		{"too little", invoke(s.createTopUp, admin("org_1"), http.MethodPost,
 			"/v1/billing/topups", `{"amount_micros":500000}`), http.StatusBadRequest},
 		{"half a centime", invoke(s.createTopUp, admin("org_1"), http.MethodPost,
 			"/v1/billing/topups", `{"amount_micros":10005000}`), http.StatusBadRequest},
-		{"an admin cannot grant", invoke(s.grantCredit, admin("org_1"), http.MethodPost,
-			"/v1/billing/grants", `{"org_id":"org_1","amount_micros":1000000,"note":"x"}`),
-			http.StatusForbidden},
+		{
+			"an admin cannot grant", invoke(s.grantCredit, admin("org_1"), http.MethodPost,
+				"/v1/billing/grants", `{"org_id":"org_1","amount_micros":1000000,"note":"x"}`),
+			http.StatusForbidden,
+		},
 		{"an admin cannot bill by invoice", invoke(s.updateCreditAccount, admin("org_1"),
 			http.MethodPatch, "/v1/billing/account", `{"invoiced":true}`), http.StatusForbidden},
 		{"a grant needs a reason", invoke(s.grantCredit, operator(), http.MethodPost,
 			"/v1/billing/grants", `{"org_id":"org_1","amount_micros":1000000}`), http.StatusBadRequest},
-		{"a grant needs an organisation", invoke(s.grantCredit, operator(), http.MethodPost,
-			"/v1/billing/grants", `{"org_id":"org_nope","amount_micros":1000000,"note":"x"}`),
-			http.StatusNotFound},
-		{"an operator grants", invoke(s.grantCredit, operator(), http.MethodPost,
-			"/v1/billing/grants", `{"org_id":"org_1","amount_micros":25000000,"note":"trial"}`),
-			http.StatusCreated},
+		{
+			"a grant needs an organisation", invoke(s.grantCredit, operator(), http.MethodPost,
+				"/v1/billing/grants", `{"org_id":"org_nope","amount_micros":1000000,"note":"x"}`),
+			http.StatusNotFound,
+		},
+		{
+			"an operator grants", invoke(s.grantCredit, operator(), http.MethodPost,
+				"/v1/billing/grants", `{"org_id":"org_1","amount_micros":25000000,"note":"trial"}`),
+			http.StatusCreated,
+		},
 	}
 	for _, tt := range tests {
 		if tt.w.Code != tt.want {

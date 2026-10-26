@@ -230,7 +230,8 @@ func (s *Server) limitsFor(r *http.Request, scope policy.ScopeType, id string) *
 // budget period; they are shown as one.
 func (s *Server) scopeStates(res *policy.Resolved, orgName string,
 	projectNames map[string]string, keyName string, now time.Time,
-	says map[policy.ScopeType]scopeSays) []accessScope {
+	says map[policy.ScopeType]scopeSays,
+) []accessScope {
 	out := make([]accessScope, 0, len(res.Scopes))
 	for _, sc := range res.Scopes {
 		if n := len(out); n == 0 || out[n-1].Type != sc.Type || out[n-1].ID != sc.ID {
@@ -253,7 +254,8 @@ func (s *Server) scopeStates(res *policy.Resolved, orgName string,
 // levelState is one level with its rate limits, before its budgets.
 func (s *Server) levelState(res *policy.Resolved, sc policy.Scope, orgName string,
 	projectNames map[string]string, keyName string, now time.Time,
-	says map[policy.ScopeType]scopeSays) accessScope {
+	says map[policy.ScopeType]scopeSays,
+) accessScope {
 	st := accessScope{
 		Type: sc.Type, ID: sc.ID,
 		SystemPrompt: says[sc.Type].prompt, Filters: says[sc.Type].filters,

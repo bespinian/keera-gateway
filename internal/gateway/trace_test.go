@@ -43,8 +43,10 @@ func TestServedRequestRecordsItsSteps(t *testing.T) {
 	}
 
 	ev := h.sink.last(t)
-	want := []string{store.SpanAuth, store.SpanReceive, store.SpanAdmit, store.SpanPrepare,
-		store.SpanUpstream, store.SpanRespond}
+	want := []string{
+		store.SpanAuth, store.SpanReceive, store.SpanAdmit, store.SpanPrepare,
+		store.SpanUpstream, store.SpanRespond,
+	}
 	if got := stepNames(ev.Spans); !slices.Equal(got, want) {
 		t.Fatalf("steps = %v, want %v", got, want)
 	}
@@ -127,8 +129,10 @@ func TestStreamedAnswerIsRecordedAsWaitingAndThenStreaming(t *testing.T) {
 	}
 
 	ev := h.sink.last(t)
-	want := []string{store.SpanAuth, store.SpanReceive, store.SpanAdmit, store.SpanPrepare,
-		store.SpanUpstream, store.SpanWait, store.SpanStream}
+	want := []string{
+		store.SpanAuth, store.SpanReceive, store.SpanAdmit, store.SpanPrepare,
+		store.SpanUpstream, store.SpanWait, store.SpanStream,
+	}
 	if got := stepNames(ev.Spans); !slices.Equal(got, want) {
 		t.Fatalf("steps = %v, want %v", got, want)
 	}

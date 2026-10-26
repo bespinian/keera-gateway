@@ -61,11 +61,15 @@ func TestLookupKeyCollapsesTheWholeChain(t *testing.T) {
 	// Budgets are kept per level rather than merged: two limits that both hold.
 	// The project's budget per day is a scope of its own, beside its month.
 	want := []policy.Scope{
-		{Type: policy.ScopeOrg, ID: f.orgID, RPM: 600, TPM: 400000,
-			BudgetMicros: 10_000_000_000, Period: policy.PeriodMonth},
+		{
+			Type: policy.ScopeOrg, ID: f.orgID, RPM: 600, TPM: 400000,
+			BudgetMicros: 10_000_000_000, Period: policy.PeriodMonth,
+		},
 		{Type: policy.ScopeProject, ID: f.projectID, RPM: 120, Period: policy.PeriodMonth},
-		{Type: policy.ScopeProject, ID: f.projectID,
-			BudgetMicros: 500_000_000, Period: policy.PeriodDay},
+		{
+			Type: policy.ScopeProject, ID: f.projectID,
+			BudgetMicros: 500_000_000, Period: policy.PeriodDay,
+		},
 		{Type: policy.ScopeKey, ID: f.keyID, RPM: 30, Period: policy.PeriodMonth},
 	}
 	if len(res.Scopes) != len(want) {
@@ -276,8 +280,10 @@ func TestActivateKeyGivesAPendingKeyItsSecretOnce(t *testing.T) {
 		t.Errorf("activating a revoked key: err = %v, want ErrKeyRevoked", err)
 	}
 	past := time.Now().Add(-time.Hour)
-	if _, err := st.CreateKey(ctx, KeyInfo{ID: "key_lapsed", OrgID: f.orgID, Name: "lapsed",
-		ExpiresAt: &past}, nil); err != nil {
+	if _, err := st.CreateKey(ctx, KeyInfo{
+		ID: "key_lapsed", OrgID: f.orgID, Name: "lapsed",
+		ExpiresAt: &past,
+	}, nil); err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
 	if _, err := st.ActivateKey(ctx, AnyOrg, "key_lapsed", "", []byte("hash-lapsed-00000000000000000000"),

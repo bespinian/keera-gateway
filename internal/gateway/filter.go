@@ -459,8 +459,10 @@ func (s *Server) runFilter(ctx context.Context, f policy.Filter, m policy.Model,
 	instruction := strings.TrimSpace(f.Prompt) +
 		"\n" + fmt.Sprintf(protocol, len(texts), len(texts))
 
-	ask := guardQuestion{instruction: instruction, input: input, outputTokens: outputTokens,
-		timeout: filterTimeout, limit: maxFilterResponseBytes, subject: "the filter's model"}
+	ask := guardQuestion{
+		instruction: instruction, input: input, outputTokens: outputTokens,
+		timeout: filterTimeout, limit: maxFilterResponseBytes, subject: "the filter's model",
+	}
 	if gate {
 		q := gateDecision(f.Prompt)
 		ask.decision = &q

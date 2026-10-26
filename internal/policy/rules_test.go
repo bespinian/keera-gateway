@@ -13,30 +13,52 @@ func TestFilterRuleValid(t *testing.T) {
 	}{
 		{"a replacement", FilterRule{Pattern: `\bsk-\w+\b`, Replace: "[CREDENTIAL]"}, ""},
 		{"a refusal", FilterRule{Pattern: `\bexport\b`, Refuse: true, Reason: "why"}, ""},
-		{"a replacement with nothing to put back",
-			FilterRule{Pattern: `\bsk-\w+\b`}, ""},
+		{
+			"a replacement with nothing to put back",
+			FilterRule{Pattern: `\bsk-\w+\b`},
+			"",
+		},
 		{"no expression", FilterRule{Replace: "x"}, "needs an expression"},
-		{"an expression that will not compile",
-			FilterRule{Pattern: `([`, Replace: "x"}, "not a valid regular expression"},
-		{"both at once",
+		{
+			"an expression that will not compile",
+			FilterRule{Pattern: `([`, Replace: "x"},
+			"not a valid regular expression",
+		},
+		{
+			"both at once",
 			FilterRule{Pattern: `x`, Replace: "y", Refuse: true},
-			"both replaces and refuses"},
-		{"a reason on a rule that replaces",
+			"both replaces and refuses",
+		},
+		{
+			"a reason on a rule that replaces",
 			FilterRule{Pattern: `x`, Replace: "y", Reason: "because"},
-			"carries a reason and does not refuse"},
-		{"an expression longer than the limit",
+			"carries a reason and does not refuse",
+		},
+		{
+			"an expression longer than the limit",
 			FilterRule{Pattern: strings.Repeat("a", maxFilterPatternLen+1), Replace: "x"},
-			"the limit is"},
-		{"a reason longer than the limit",
-			FilterRule{Pattern: `x`, Refuse: true,
-				Reason: strings.Repeat("a", MaxRefusalReasonBytes+1)},
-			"the limit is"},
+			"the limit is",
+		},
+		{
+			"a reason longer than the limit",
+			FilterRule{
+				Pattern: `x`, Refuse: true,
+				Reason: strings.Repeat("a", MaxRefusalReasonBytes+1),
+			},
+			"the limit is",
+		},
 		// It matches at every position, so a replacing rule built on it puts
 		// its replacement between every character of the request.
-		{"an expression that matches the empty string",
-			FilterRule{Pattern: `x*`, Replace: "[X]"}, "matches the empty string"},
-		{"an optional group that matches nothing",
-			FilterRule{Pattern: `(foo)?`, Replace: "[X]"}, "matches the empty string"},
+		{
+			"an expression that matches the empty string",
+			FilterRule{Pattern: `x*`, Replace: "[X]"},
+			"matches the empty string",
+		},
+		{
+			"an optional group that matches nothing",
+			FilterRule{Pattern: `(foo)?`, Replace: "[X]"},
+			"matches the empty string",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -108,8 +130,10 @@ func TestRouteModePredicates(t *testing.T) {
 	if !RouteModeSize.Sizes() {
 		t.Error("a size step sizes")
 	}
-	for _, m := range []RouteMode{"", RouteModeInstruction, RouteModeFallback,
-		RouteModeLatency, RouteModeLeastBusy} {
+	for _, m := range []RouteMode{
+		"", RouteModeInstruction, RouteModeFallback,
+		RouteModeLatency, RouteModeLeastBusy,
+	} {
 		if m.Sizes() {
 			t.Errorf("%q does not choose by size", m)
 		}

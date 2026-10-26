@@ -83,8 +83,10 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 	}
 	// The list is never paged. has_more and the two ids are Anthropic's
 	// paging fields, which its SDKs read.
-	list := map[string]any{"object": "list", "data": out, "has_more": false,
-		"first_id": nil, "last_id": nil}
+	list := map[string]any{
+		"object": "list", "data": out, "has_more": false,
+		"first_id": nil, "last_id": nil,
+	}
 	if len(out) > 0 {
 		list["first_id"], list["last_id"] = out[0].ID, out[len(out)-1].ID
 	}

@@ -598,8 +598,10 @@ func TestABodyThatCannotBeReadSaysWhy(t *testing.T) {
 	}{
 		// A misspelt field is named, not reported as a missing one.
 		{`{"name":"x","email_domian":"y"}`, http.StatusBadRequest, "email_domian"},
-		{`{"name":"` + strings.Repeat("x", httpx.MaxJSONBody) + `"}`,
-			http.StatusRequestEntityTooLarge, "request_too_large"},
+		{
+			`{"name":"` + strings.Repeat("x", httpx.MaxJSONBody) + `"}`,
+			http.StatusRequestEntityTooLarge, "request_too_large",
+		},
 	} {
 		var in struct {
 			Name string `json:"name"`

@@ -302,9 +302,11 @@ func (s *Server) requestQuery(w http.ResponseWriter, r *http.Request, p *authn.P
 		badRequest(w, "'outcome' must be one of "+strings.Join(store.Outcomes(), ", "))
 		return rq, from, to, false
 	}
-	rq = store.RequestQuery{OrgID: orgID, ReportScope: sc, Holder: holder,
+	rq = store.RequestQuery{
+		OrgID: orgID, ReportScope: sc, Holder: holder,
 		Outcome:   outcome,
-		RequestID: strings.TrimSpace(q.Get("request_id"))}
+		RequestID: strings.TrimSpace(q.Get("request_id")),
+	}
 	rq.Status, rq.StatusClass = parseStatus(q.Get("status"))
 	return rq, from, to, true
 }
@@ -317,7 +319,8 @@ func (s *Server) requestQuery(w http.ResponseWriter, r *http.Request, p *authn.P
 // a request never does something other than what it says. It comes before
 // any read, so a member cannot probe who exists.
 func (s *Server) trafficHolder(w http.ResponseWriter, p *authn.Principal,
-	named string) (string, bool) {
+	named string,
+) (string, bool) {
 	if p.CanAdminOrg(p.OrgID) {
 		return "", true
 	}

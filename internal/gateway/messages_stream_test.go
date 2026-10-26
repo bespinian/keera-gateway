@@ -600,8 +600,10 @@ func TestMessagesStreamPingsWhileTheUpstreamIsSilent(t *testing.T) {
 			turn = append(turn, e.name)
 		}
 	}
-	want := []string{"message_start", "content_block_start", "content_block_delta",
-		"content_block_stop", "message_delta", "message_stop"}
+	want := []string{
+		"message_start", "content_block_start", "content_block_delta",
+		"content_block_stop", "message_delta", "message_stop",
+	}
 	if !slices.Equal(turn, want) {
 		t.Errorf("events without the pings = %v,\nwant %v", turn, want)
 	}

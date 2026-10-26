@@ -76,20 +76,24 @@ func parseMonth(raw string, now time.Time) (time.Time, error) {
 
 func billingCSV(w http.ResponseWriter, month string, lines []store.BillingRow, payments bool) {
 	cw := beginCSV(w, "keera-billing-"+month+".csv")
-	head := []string{"month", "org_id", "org_name", "provider", "model", "calls",
-		"input_tokens", "cached_input_tokens", "cache_write_tokens", "output_tokens", "amount"}
+	head := []string{
+		"month", "org_id", "org_name", "provider", "model", "calls",
+		"input_tokens", "cached_input_tokens", "cache_write_tokens", "output_tokens", "amount",
+	}
 	if payments {
 		head = append(head, "from_credit")
 	}
 	_ = cw.Write(head)
 	for _, l := range lines {
-		rec := []string{month, l.OrgID, l.OrgName, l.Provider, l.BackendModel,
+		rec := []string{
+			month, l.OrgID, l.OrgName, l.Provider, l.BackendModel,
 			strconv.FormatInt(l.Calls, 10),
 			strconv.FormatInt(l.InputTokens, 10),
 			strconv.FormatInt(l.CachedInputTokens, 10),
 			strconv.FormatInt(l.CacheWriteTokens, 10),
 			strconv.FormatInt(l.OutputTokens, 10),
-			policy.FormatMicros(l.BilledMicros)}
+			policy.FormatMicros(l.BilledMicros),
+		}
 		if payments {
 			rec = append(rec, policy.FormatMicros(l.CreditMicros))
 		}

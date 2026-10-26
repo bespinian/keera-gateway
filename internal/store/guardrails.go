@@ -12,9 +12,11 @@ import (
 // limitFields are a guardrail's columns, in the order limitTargets reads them
 // and limitValues writes them. Every query over them is built from this list,
 // so a new limit is one entry here and one in each of those two.
-var limitFields = []string{"allowed_models", "rate_limits", "budgets", "system_prompt", "filters",
+var limitFields = []string{
+	"allowed_models", "rate_limits", "budgets", "system_prompt", "filters",
 	"max_sandboxes", "max_sandbox_ttl_seconds", "sandbox_classes",
-	"max_sandbox_cpu_millis", "max_sandbox_memory_mib", "allowed_tools", "allowed_repos"}
+	"max_sandbox_cpu_millis", "max_sandbox_memory_mib", "allowed_tools", "allowed_repos",
+}
 
 // limitColumns is a guardrail row as policy.Limits holds it, read from a table
 // aliased p.
@@ -43,17 +45,21 @@ var copyKeyGuardrailSQL = `INSERT INTO guardrails (scope_type, scope_id, ` +
 
 // limitTargets points at the fields limitColumns fills.
 func limitTargets(lim *policy.Limits) []any {
-	return []any{&lim.AllowedModels, &lim.RateLimits, &lim.Budgets, &lim.SystemPrompt, &lim.Filters,
+	return []any{
+		&lim.AllowedModels, &lim.RateLimits, &lim.Budgets, &lim.SystemPrompt, &lim.Filters,
 		&lim.MaxSandboxes, &lim.MaxSandboxTTLSeconds, &lim.SandboxClasses,
-		&lim.MaxSandboxCPU, &lim.MaxSandboxMemory, &lim.AllowedTools, &lim.AllowedRepos}
+		&lim.MaxSandboxCPU, &lim.MaxSandboxMemory, &lim.AllowedTools, &lim.AllowedRepos,
+	}
 }
 
 // limitValues is what putGuardrailSQL writes, in limitFields' order.
 func limitValues(lim policy.Limits) []any {
-	return []any{lim.AllowedModels, jsonList(lim.RateLimits), jsonList(lim.Budgets),
+	return []any{
+		lim.AllowedModels, jsonList(lim.RateLimits), jsonList(lim.Budgets),
 		lim.SystemPrompt, lim.Filters,
 		lim.MaxSandboxes, lim.MaxSandboxTTLSeconds, lim.SandboxClasses,
-		lim.MaxSandboxCPU, lim.MaxSandboxMemory, lim.AllowedTools, lim.AllowedRepos}
+		lim.MaxSandboxCPU, lim.MaxSandboxMemory, lim.AllowedTools, lim.AllowedRepos,
+	}
 }
 
 // jsonList writes an empty list as NULL. The driver would send a nil slice as

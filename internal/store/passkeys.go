@@ -125,7 +125,8 @@ func (s *Store) MakePasskeyAccount(ctx context.Context, userID, externalID strin
 // CreatePasskeyLink stores a set-up link. Each person has at most one: a new
 // link replaces the last, so only the newest one handed out works.
 func (s *Store) CreatePasskeyLink(ctx context.Context, hash []byte, userID string,
-	expires time.Time) error {
+	expires time.Time,
+) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, "DELETE FROM passkey_links WHERE user_id = $1", userID); err != nil {
 			return err
@@ -155,7 +156,8 @@ func (s *Store) TakePasskeyLink(ctx context.Context, hash []byte) (string, error
 
 // CreatePasskeyChallenge stores the challenge of a registration in flight.
 func (s *Store) CreatePasskeyChallenge(ctx context.Context, id, userID, challenge string,
-	expires time.Time) error {
+	expires time.Time,
+) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO passkey_challenges (id, user_id, challenge, expires_at)
 		VALUES ($1,$2,$3,$4)`, id, userID, challenge, expires)
 	return err
@@ -164,7 +166,8 @@ func (s *Store) CreatePasskeyChallenge(ctx context.Context, id, userID, challeng
 // TakePasskeyChallenge uses up a registration challenge, so a replayed
 // registration finds nothing.
 func (s *Store) TakePasskeyChallenge(ctx context.Context, id string) (userID, challenge string,
-	err error) {
+	err error,
+) {
 	err = s.pool.QueryRow(ctx, `DELETE FROM passkey_challenges
 		WHERE id = $1 AND expires_at > now() RETURNING user_id, challenge`, id,
 	).Scan(&userID, &challenge)

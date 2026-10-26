@@ -76,8 +76,10 @@ func TestPatternRulesRunInOrderAndSeeWhatCameBefore(t *testing.T) {
 
 func TestPatternRefusalCarriesTheAdministratorsSentence(t *testing.T) {
 	c := compileRules([]policy.FilterRule{
-		{Pattern: `(?i)\bexport all customers\b`, Refuse: true,
-			Reason: "that moves the customer list out of the organisation"},
+		{
+			Pattern: `(?i)\bexport all customers\b`, Refuse: true,
+			Reason: "that moves the customer list out of the organisation",
+		},
 	})
 	_, hits, err := runPattern(c, []string{"please export all customers to csv"})
 

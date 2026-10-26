@@ -116,8 +116,10 @@ func TestAClientCanNameItsOwnSession(t *testing.T) {
 func TestEveryConventionForNamingASessionIsReadAsOne(t *testing.T) {
 	want := stated(t, "key_1", "task-42")
 
-	for _, name := range []string{"X-Keera-Session", "X-Session-Id", "Helicone-Session-Id",
-		"X-Claude-Code-Session-Id"} {
+	for _, name := range []string{
+		"X-Keera-Session", "X-Session-Id", "Helicone-Session-Id",
+		"X-Claude-Code-Session-Id",
+	} {
 		got := keyFor(t, "key_1", goBody, policy.KindChat, name, "task-42")
 		if got != want {
 			t.Errorf("%s gives session %q, and X-Keera-Session gives %q; the same "+
@@ -157,16 +159,26 @@ func TestOnlyTheChatSurfacesGetASession(t *testing.T) {
 		kind policy.Kind
 		body string
 	}{
-		{"a completion", policy.KindCompletion,
-			`{"model":"keera-code","prompt":"func main() {"}`},
-		{"an embedding", policy.KindEmbedding,
-			`{"model":"keera-embed","input":"package main"}`},
-		{"a chat with no user turn yet", policy.KindChat,
-			`{"model":"keera-code","messages":[{"role":"system","content":"be helpful"}]}`},
-		{"a chat with no messages at all", policy.KindChat,
-			`{"model":"keera-code","messages":[]}`},
-		{"a chat whose messages are not an array", policy.KindChat,
-			`{"model":"keera-code","messages":"hello"}`},
+		{
+			"a completion", policy.KindCompletion,
+			`{"model":"keera-code","prompt":"func main() {"}`,
+		},
+		{
+			"an embedding", policy.KindEmbedding,
+			`{"model":"keera-embed","input":"package main"}`,
+		},
+		{
+			"a chat with no user turn yet", policy.KindChat,
+			`{"model":"keera-code","messages":[{"role":"system","content":"be helpful"}]}`,
+		},
+		{
+			"a chat with no messages at all", policy.KindChat,
+			`{"model":"keera-code","messages":[]}`,
+		},
+		{
+			"a chat whose messages are not an array", policy.KindChat,
+			`{"model":"keera-code","messages":"hello"}`,
+		},
 	} {
 		if got := keyFor(t, "key_1", tc.body, tc.kind); got != "" {
 			t.Errorf("%s got the session key %q, want none", tc.name, got)
@@ -183,23 +195,37 @@ func TestTheOpeningPromptIsFoundInWhateverShapeItArrives(t *testing.T) {
 		want string
 	}{
 		{"a bare string", `{"messages":[{"role":"user","content":"hello"}]}`, `"hello"`},
-		{"content blocks",
+		{
+			"content blocks",
 			`{"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`,
-			`[{"type":"text","text":"hello"}]`},
-		{"after a system message",
+			`[{"type":"text","text":"hello"}]`,
+		},
+		{
+			"after a system message",
 			`{"messages":[{"role":"system","content":"be helpful"},{"role":"user","content":"hi"}]}`,
-			`"hi"`},
-		{"with the fields in the other order",
-			`{"messages":[{"content":"hi","role":"user"}]}`, `"hi"`},
-		{"past an element that is not an object",
-			`{"messages":[null,7,"x",{"role":"user","content":"hi"}]}`, `"hi"`},
-		{"past a message with no role",
-			`{"messages":[{"content":"orphan"},{"role":"user","content":"hi"}]}`, `"hi"`},
-		{"with a brace inside a string",
-			`{"messages":[{"role":"user","content":"if (x) { y }"}]}`, `"if (x) { y }"`},
-		{"with an escaped quote inside a string",
+			`"hi"`,
+		},
+		{
+			"with the fields in the other order",
+			`{"messages":[{"content":"hi","role":"user"}]}`, `"hi"`,
+		},
+		{
+			"past an element that is not an object",
+			`{"messages":[null,7,"x",{"role":"user","content":"hi"}]}`, `"hi"`,
+		},
+		{
+			"past a message with no role",
+			`{"messages":[{"content":"orphan"},{"role":"user","content":"hi"}]}`, `"hi"`,
+		},
+		{
+			"with a brace inside a string",
+			`{"messages":[{"role":"user","content":"if (x) { y }"}]}`, `"if (x) { y }"`,
+		},
+		{
+			"with an escaped quote inside a string",
 			`{"messages":[{"role":"user","content":"say \"role\": \"user\""}]}`,
-			`"say \"role\": \"user\""`},
+			`"say \"role\": \"user\""`,
+		},
 		{"only an assistant turn", `{"messages":[{"role":"assistant","content":"hi"}]}`, ""},
 	} {
 		b, err := parseBody([]byte(tc.body))
@@ -297,38 +323,60 @@ func TestTheOpeningOfAnUntranslatedBodyIsTheTranslations(t *testing.T) {
 		surf surface
 		body string
 	}{
-		{"messages, string content", messagesSurface,
-			`{"model":"m","system":"be brief","messages":[{"role":"user","content":"fix the build"}]}`},
-		{"messages, blocks with a cache marker", messagesSurface,
+		{
+			"messages, string content", messagesSurface,
+			`{"model":"m","system":"be brief","messages":[{"role":"user","content":"fix the build"}]}`,
+		},
+		{
+			"messages, blocks with a cache marker", messagesSurface,
 			`{"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"fix <the> build",` +
-				`"cache_control":{"type":"ephemeral"}},{"type":"text","text":"and the tests"}]}]}`},
-		{"messages, an assistant turn first", messagesSurface,
+				`"cache_control":{"type":"ephemeral"}},{"type":"text","text":"and the tests"}]}]}`,
+		},
+		{
+			"messages, an assistant turn first", messagesSurface,
 			`{"model":"m","messages":[{"role":"assistant","content":"hello"},` +
-				`{"role":"user","content":"fix the build"}]}`},
-		{"messages, a tool result before the text", messagesSurface,
+				`{"role":"user","content":"fix the build"}]}`,
+		},
+		{
+			"messages, a tool result before the text", messagesSurface,
 			`{"model":"m","messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1",` +
-				`"content":"ok"},{"type":"text","text":"go on"}]}]}`},
-		{"messages, a tool result alone", messagesSurface,
+				`"content":"ok"},{"type":"text","text":"go on"}]}]}`,
+		},
+		{
+			"messages, a tool result alone", messagesSurface,
 			`{"model":"m","messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1",` +
-				`"content":"ok"}]},{"role":"assistant","content":"done"},{"role":"user","content":"next"}]}`},
-		{"messages, an image", messagesSurface,
+				`"content":"ok"}]},{"role":"assistant","content":"done"},{"role":"user","content":"next"}]}`,
+		},
+		{
+			"messages, an image", messagesSurface,
 			`{"model":"m","messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64",` +
-				`"media_type":"image/png","data":"iVBO"}},{"type":"text","text":"what is this"}]}]}`},
-		{"messages, none from the user", messagesSurface,
-			`{"model":"m","messages":[{"role":"assistant","content":"hello"}]}`},
-		{"responses, string input", responsesSurface,
-			`{"model":"m","instructions":"be brief","input":"fix the build"}`},
-		{"responses, items", responsesSurface,
+				`"media_type":"image/png","data":"iVBO"}},{"type":"text","text":"what is this"}]}]}`,
+		},
+		{
+			"messages, none from the user", messagesSurface,
+			`{"model":"m","messages":[{"role":"assistant","content":"hello"}]}`,
+		},
+		{
+			"responses, string input", responsesSurface,
+			`{"model":"m","instructions":"be brief","input":"fix the build"}`,
+		},
+		{
+			"responses, items", responsesSurface,
 			`{"model":"m","input":[{"role":"developer","content":"be brief"},` +
 				`{"type":"message","role":"user","content":[{"type":"input_text","text":"fix it"},` +
-				`{"type":"input_text","text":"now"}]}]}`},
-		{"responses, an image", responsesSurface,
+				`{"type":"input_text","text":"now"}]}]}`,
+		},
+		{
+			"responses, an image", responsesSurface,
 			`{"model":"m","input":[{"role":"user","content":[{"type":"input_text","text":"what is this"},` +
-				`{"type":"input_image","image_url":"data:image/png;base64,iVBO"}]}]}`},
-		{"responses, a tool output first", responsesSurface,
+				`{"type":"input_image","image_url":"data:image/png;base64,iVBO"}]}]}`,
+		},
+		{
+			"responses, a tool output first", responsesSurface,
 			`{"model":"m","input":[{"type":"function_call","call_id":"c1","name":"ls","arguments":"{}"},` +
 				`{"type":"function_call_output","call_id":"c1","output":"a.go"},` +
-				`{"role":"user","content":"go on"}]}`},
+				`{"role":"user","content":"go on"}]}`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

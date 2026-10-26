@@ -215,18 +215,20 @@ organisation's, is refused with a 409 `router_in_use`.
 
 ## Modes
 
-A route step chooses in one of five modes:
+A route step chooses in one of six modes:
 
 | Mode                        | Picks the model by                             | Extra cost                 |
 | --------------------------- | ---------------------------------------------- | -------------------------- |
 | `instruction` (the default) | asking a small model to read the request       | one generation per request |
 | `size`                      | the length of the request                      | only failed attempts       |
+| `header`                    | a header the client sends                      | nothing                    |
 | `fallback`                  | the order the destinations are written         | only failed attempts       |
 | `latency`                   | each one's recent time to first token          | only failed attempts       |
 | `least-busy`                | the requests the gateway has in flight to each | only failed attempts       |
 
-Only `instruction` reads what the request says. The other four put the
-destinations in an order and try them until one answers.
+Only `instruction` reads what the request says. `header` sends the request where
+the client's header says. The other four put the destinations in an order and
+try them until one answers.
 
 A route step may have a single destination. That gives clients a name that
 stays the same when the model behind it changes. An `instruction` step with one
@@ -237,6 +239,7 @@ fallback, or is refused with a 503 if the step has none.
 
 Most of what follows is about `instruction` steps. The other modes have their
 own sections - [routing by size](#routing-by-size),
+[routing by header](#routing-by-header),
 [the fallback mode](#the-fallback-mode) and
 [balancing between equals](#balancing-between-equals).
 
@@ -291,7 +294,8 @@ is kept as the request's note, shown on the Requests screen and by
 `keera session show`.
 
 Filters always fail closed. Route steps get a choice because there may be a
-safe place to send the request.
+safe place to send the request. A [header step](#routing-by-header) has a
+fallback too.
 
 A route step cannot decide when:
 
@@ -450,6 +454,62 @@ preferred destination is down, a larger one serves the request. It costs more
 but is not refused, and shows as `fallback`
 ([What is recorded](#what-is-recorded)).
 
+## Routing by header
+
+Sometimes the client knows best: an app knows which of its requests are quick
+lookups and which are hard. A header step lets the app say so. It sends a
+header, such as `X-Keera-Route: hard`, and the step sends the request where that
+value says:
+
+```json
+{
+  "id": "route",
+  "kind": "route",
+  "mode": "header",
+  "header": "X-Keera-Route",
+  "values": { "cheap": "keera-speed", "hard": "keera-frontier" },
+  "destinations": ["keera-speed", "keera-frontier"],
+  "fallback": "keera-speed"
+}
+```
+
+The app names a value, not a model. So an administrator can point `hard` at
+another model without changing the app.
+
+- **A value** is lowercase letters, digits and inner hyphens. The header is
+  compared in lowercase, with spaces trimmed. Several values may send to the
+  same destination. At most 32 values.
+- **Every destination** must be named by a value or be the fallback. Otherwise
+  no request could reach it, and it would still be allowed with the router.
+- **The header** cannot be one that carries the client's key, such as
+  `Authorization` or `X-Api-Key`. It is not passed on to the model.
+
+### When the header names no destination
+
+The header may be missing, sent twice, or have a value the step does not know.
+Or its value may send to a model that cannot be served right now, such as a
+disabled one. Then the request goes to the fallback, recorded as `fallback`,
+and the reason is kept as the request's note.
+
+Without a fallback, the request is refused with `router_undecided`. When the
+client sent the wrong header, that is a 400 that lists the values it may send. A
+model that cannot be served is a 503, as for an instruction step.
+
+Like an instruction step's choice, the destination is the only one tried. If it
+fails, the client gets its error: the client asked for that model.
+
+### What it cannot do
+
+**The client decides.** A developer can leave the header out, or send `hard` on
+everything. So a header step cannot keep data in the cluster or hold spend down.
+Use an instruction step, a filter, a budget or an allow-list for that. It can
+only choose between the step's destinations, which the router allows anyway,
+and the branch of the one it chooses still runs.
+
+**Coding agents send fixed headers.** Most can add a header to every request,
+but not choose one per request. Header routing pays off for your own apps that
+call the API.
+
 ## The fallback mode
 
 Use it when two or more models can serve the same request and one may be
@@ -602,6 +662,10 @@ model directly would do. It also warns when some samples could not be placed.
 It also lists destinations that were not offered, and destinations with no
 description.
 
+A [header step's](#routing-by-header) check asks each destination whether it
+is there, and prints the values that send a request to each. Like a size step's
+bands, that is the step's whole behaviour.
+
 A check
 [calls the backend directly](gateway.md#models-that-filters-and-routers-run-on):
 at least three requests for a step that decides, since a sample whose lettered
@@ -658,7 +722,7 @@ So the screen shows, over a time window:
 The split is the main figure. Each request a route step placed has one of three
 outcomes:
 
-| Outcome    | Instruction                    | Fallback                       | Size, latency or least-busy           |
+| Outcome    | Instruction or header          | Fallback                       | Size, latency or least-busy           |
 | ---------- | ------------------------------ | ------------------------------ | ------------------------------------- |
 | `chose`    | the decision was made and kept | the first destination answered | the destination ranked first answered |
 | `fallback` | it could not decide            | a later destination answered   | a lower-ranked destination answered   |
@@ -676,7 +740,8 @@ a destination is failing while measuring well.
 `/metrics` has these figures too, labelled by router, step, organisation,
 outcome and destination: `keera_router_decisions_total`,
 `keera_router_cost_micros_total` and `keera_router_duration_seconds`. It counts
-every decision of an instruction step with two or more destinations. A route
+every decision of an instruction step with two or more destinations, and of a
+header step. A route
 step that only tries its destinations, which includes an instruction step with
 one, is counted only when it is the request's last route step, as in the
 report. Alert on a rising fallback rate.

@@ -212,8 +212,10 @@ func (s *Store) writeBatch(ctx context.Context, events []Event) error {
 // NUL byte or invalid UTF-8 in text and JSON. Much of it is what a client or
 // an upstream sent, such as the model name or an error message.
 func (e *Event) clean() {
-	for _, s := range []*string{&e.Alias, &e.Client, &e.Error, &e.Note, &e.SessionKey, &e.Router,
-		&e.RequestID, &e.ClientRequestID} {
+	for _, s := range []*string{
+		&e.Alias, &e.Client, &e.Error, &e.Note, &e.SessionKey, &e.Router,
+		&e.RequestID, &e.ClientRequestID,
+	} {
 		*s = cleanText(*s)
 	}
 	if e.Tool != nil {
@@ -580,8 +582,10 @@ func (s *Store) UsageChart(ctx context.Context, q UsageQuery) (UsageChart, error
 			l = lines[[2]string{p.group, p.org}]
 		}
 		if l == nil {
-			l = &UsageLine{Group: p.group, OrgID: p.org, Other: p.other,
-				Counts: make([]int64, len(c.At))}
+			l = &UsageLine{
+				Group: p.group, OrgID: p.org, Other: p.other,
+				Counts: make([]int64, len(c.At)),
+			}
 			if p.other {
 				other = l
 			} else {

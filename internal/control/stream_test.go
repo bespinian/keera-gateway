@@ -180,7 +180,8 @@ type batch struct {
 // awaitEvent reads the stream until a requests event arrives, ignoring the
 // keepalive comments in between.
 func awaitEvent(t *testing.T, body interface{ Read([]byte) (int, error) },
-	within time.Duration) batch {
+	within time.Duration,
+) batch {
 	t.Helper()
 	type result struct {
 		b   batch

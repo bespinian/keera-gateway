@@ -159,7 +159,8 @@ type CreationOptions struct {
 // credentials the person already has, so one authenticator is not registered
 // twice.
 func (rp *RelyingParty) CreationOptions(challenge, userID, email string,
-	exclude [][]byte) CreationOptions {
+	exclude [][]byte,
+) CreationOptions {
 	var o CreationOptions
 	o.Challenge = challenge
 	o.RP.ID = rp.id

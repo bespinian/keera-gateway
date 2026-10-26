@@ -56,8 +56,10 @@ func patternBody() map[string]any {
 		"mode": string(policy.FilterModePattern),
 		"rules": []map[string]any{
 			{"pattern": `(?i)\bsk-[a-z0-9]{16,}\b`, "replace": "[CREDENTIAL]"},
-			{"pattern": `(?i)\bexport all customers\b`, "refuse": true,
-				"reason": "that moves the customer list out of the organisation"},
+			{
+				"pattern": `(?i)\bexport all customers\b`, "refuse": true,
+				"reason": "that moves the customer list out of the organisation",
+			},
 		},
 		"description": "Takes what has a shape out of everything",
 	}

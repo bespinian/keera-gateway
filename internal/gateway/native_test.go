@@ -233,11 +233,13 @@ func TestAFilterReadsDocumentsAndRefusalsInANativeRequest(t *testing.T) {
 			`{"type":"tool_result","tool_use_id":"t1","content":[{"type":"search_result",` +
 			`"source":"https://example.ch","title":"x","content":[{"type":"text","text":"hunter2"}]}]},` +
 			`{"type":"text","text":"summarise"}]}]}`},
-		{"openai", "/v1/responses", `{"id":"resp_1","object":"response","status":"completed",` +
-			`"output":[],"usage":{"input_tokens":1,"output_tokens":1}}`,
+		{
+			"openai", "/v1/responses", `{"id":"resp_1","object":"response","status":"completed",` +
+				`"output":[],"usage":{"input_tokens":1,"output_tokens":1}}`,
 			`{"model":"keera-frontier","input":[{"type":"message","role":"assistant",` +
 				`"content":[{"type":"refusal","refusal":"not hunter2"}]},` +
-				`{"type":"message","role":"user","content":"why?"}]}`},
+				`{"type":"message","role":"user","content":"why?"}]}`,
+		},
 	} {
 		h, seen := providerHarness(t, tc.provider, "frontier-model", jsonBackend(tc.answer), nil)
 		h.src.filters = map[string]policy.Filter{

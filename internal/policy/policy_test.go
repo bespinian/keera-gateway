@@ -107,12 +107,18 @@ func TestResolveCountsARateLimitPerDayOrMonth(t *testing.T) {
 		t.Errorf("key scope = %+v, want its requests per minute", key)
 	}
 	want := []Scope{
-		{Type: ScopeProject, ID: "project_1|requests", Period: PeriodDay,
-			Meter: MeterRequests, Quota: 1000},
-		{Type: ScopeProject, ID: "project_1|tokens", Period: PeriodDay,
-			Meter: MeterTokens, Quota: 5_000_000},
-		{Type: ScopeKey, ID: "key_1|tokens", Period: PeriodMonth,
-			Meter: MeterTokens, Quota: 9_000_000_000},
+		{
+			Type: ScopeProject, ID: "project_1|requests", Period: PeriodDay,
+			Meter: MeterRequests, Quota: 1000,
+		},
+		{
+			Type: ScopeProject, ID: "project_1|tokens", Period: PeriodDay,
+			Meter: MeterTokens, Quota: 5_000_000,
+		},
+		{
+			Type: ScopeKey, ID: "key_1|tokens", Period: PeriodMonth,
+			Meter: MeterTokens, Quota: 9_000_000_000,
+		},
 	}
 	if !slices.Equal(got.Quotas, want) {
 		t.Errorf("Quotas = %+v, want %+v", got.Quotas, want)
@@ -204,46 +210,76 @@ func TestModelCost(t *testing.T) {
 	}{
 		{"in and out", plain, Tokens{Input: 1_000_000, Output: 100_000}, 2_500_000 + 1_000_000},
 		{"nothing", plain, Tokens{}, 0},
-		{"a model with no prices", Model{},
-			Tokens{Input: 999_999_999, CachedInput: 999_999_999, Output: 999_999_999}, 0},
+		{
+			"a model with no prices",
+			Model{},
+			Tokens{Input: 999_999_999, CachedInput: 999_999_999, Output: 999_999_999},
+			0,
+		},
 
 		// A long prompt is charged the dearer prices for all of it, cached
 		// part and answer included. At the threshold: 50,000 at 0.10, 50,000
 		// cached at 0.01, a million out at 0.50.
-		{"a long prompt at the threshold", long,
-			Tokens{Input: 100_000, CachedInput: 50_000, Output: 1_000_000}, 5_000 + 500 + 500_000},
+		{
+			"a long prompt at the threshold", long,
+			Tokens{Input: 100_000, CachedInput: 50_000, Output: 1_000_000},
+			5_000 + 500 + 500_000,
+		},
 		// One token over: 50,001 at 0.50, 50,000 cached at 0.05, a million out
 		// at 2.50.
-		{"a long prompt one token over", long,
-			Tokens{Input: 100_001, CachedInput: 50_000, Output: 1_000_000}, 25_000 + 2_500 + 2_500_000},
+		{
+			"a long prompt one token over", long,
+			Tokens{Input: 100_001, CachedInput: 50_000, Output: 1_000_000},
+			25_000 + 2_500 + 2_500_000,
+		},
 
 		// Cached tokens are charged at their own rate, and are part of the
 		// prompt, not added to it. A million-token prompt, 800,000 of it
 		// cached: 200,000 at 2.50 and 800,000 at 0.25 per million.
-		{"cached input at its own rate", cached,
-			Tokens{Input: 1_000_000, CachedInput: 800_000}, 500_000 + 200_000},
+		{
+			"cached input at its own rate", cached,
+			Tokens{Input: 1_000_000, CachedInput: 800_000},
+			500_000 + 200_000,
+		},
 		// The same prompt priced as if none of it had been cached. If the two
 		// ever come out equal, the discount is not applied.
 		{"the same prompt uncached", cached, Tokens{Input: 1_000_000}, 2_500_000},
 		// Zero means "not stated", not "free".
-		{"cached input with no cached rate", plain,
-			Tokens{Input: 1_000_000, CachedInput: 800_000}, 2_500_000},
+		{
+			"cached input with no cached rate", plain,
+			Tokens{Input: 1_000_000, CachedInput: 800_000},
+			2_500_000,
+		},
 		// The counts come off somebody else's response body, so an impossible
 		// one has to price as something rather than as a refund.
-		{"more cached than the prompt", Model{InputMicrosPerMTok: 2_500_000, CachedInputMicrosPerMTok: 250_000},
-			Tokens{Input: 1_000_000, CachedInput: 4_000_000}, 250_000},
-		{"a negative cached count", Model{InputMicrosPerMTok: 2_500_000, CachedInputMicrosPerMTok: 250_000},
-			Tokens{Input: 1_000_000, CachedInput: -1}, 2_500_000},
+		{
+			"more cached than the prompt",
+			Model{InputMicrosPerMTok: 2_500_000, CachedInputMicrosPerMTok: 250_000},
+			Tokens{Input: 1_000_000, CachedInput: 4_000_000},
+			250_000,
+		},
+		{
+			"a negative cached count",
+			Model{InputMicrosPerMTok: 2_500_000, CachedInputMicrosPerMTok: 250_000},
+			Tokens{Input: 1_000_000, CachedInput: -1},
+			2_500_000,
+		},
 
 		// A write to the cache costs more than the input price, and is part
 		// of the prompt, as a read is. 100,000 at 2.00, 600,000 cached at 0.20,
 		// 300,000 written at 2.50.
-		{"a cache write at its own rate", writes,
-			Tokens{Input: 1_000_000, CachedInput: 600_000, CacheWrite: 300_000}, 200_000 + 120_000 + 750_000},
+		{
+			"a cache write at its own rate", writes,
+			Tokens{Input: 1_000_000, CachedInput: 600_000, CacheWrite: 300_000},
+			200_000 + 120_000 + 750_000,
+		},
 		// Unstated, a write costs the input price, as on a provider that
 		// charges nothing more for one.
-		{"a cache write with no write rate", unstatedWrites,
-			Tokens{Input: 1_000_000, CacheWrite: 1_000_000}, 2_000_000},
+		{
+			"a cache write with no write rate", unstatedWrites,
+			Tokens{Input: 1_000_000, CacheWrite: 1_000_000},
+			2_000_000,
+		},
 		{"a long prompt's write at the long rate", Model{
 			InputMicrosPerMTok: 100_000, CacheWriteMicrosPerMTok: 125_000,
 			LongPrompt: &PriceTier{
@@ -484,8 +520,10 @@ func TestLimitsIsZeroCountsEveryField(t *testing.T) {
 }
 
 func TestAnEmptyAllowListSurvivesJSON(t *testing.T) {
-	none := Limits{AllowedModels: []string{}, AllowedTools: []string{},
-		SandboxClasses: []string{}, AllowedRepos: []string{}}
+	none := Limits{
+		AllowedModels: []string{}, AllowedTools: []string{},
+		SandboxClasses: []string{}, AllowedRepos: []string{},
+	}
 	b, err := json.Marshal(none)
 	if err != nil {
 		t.Fatal(err)

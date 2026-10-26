@@ -66,8 +66,11 @@ func TestTakeColorMode(t *testing.T) {
 		{[]string{"org", "--color=always"}, []string{"org"}, "always"},
 		{[]string{"--no-color", "org"}, []string{"org"}, "never"},
 		// Everything after -- belongs to the command being run in a sandbox.
-		{[]string{"sandbox", "ssh", "box", "--", "ls", "--color=always"},
-			[]string{"sandbox", "ssh", "box", "--", "ls", "--color=always"}, "auto"},
+		{
+			[]string{"sandbox", "ssh", "box", "--", "ls", "--color=always"},
+			[]string{"sandbox", "ssh", "box", "--", "ls", "--color=always"},
+			"auto",
+		},
 	}
 	for _, c := range cases {
 		colorMode = "auto"

@@ -118,8 +118,10 @@ func TestALimitedOrganisationCannotDialAPrivateAddress(t *testing.T) {
 }
 
 func TestALockedModelFailsWhereARouterOrFilterWouldUseIt(t *testing.T) {
-	if why := chatProblem(policy.Model{Enabled: true, Kind: policy.KindChat,
-		Backends: []string{"http://x"}, Locked: true}, true); !strings.Contains(why, "credit") {
+	if why := chatProblem(policy.Model{
+		Enabled: true, Kind: policy.KindChat,
+		Backends: []string{"http://x"}, Locked: true,
+	}, true); !strings.Contains(why, "credit") {
 		t.Errorf("chatProblem = %q, want it to say the model is locked", why)
 	}
 }

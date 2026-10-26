@@ -249,7 +249,8 @@ func (s *Server) checkModelAlias(w http.ResponseWriter, r *http.Request, orgID, 
 // the checks in checkReaderModel and Router.Problem, since the writes can come
 // in either order.
 func (s *Server) checkSubscriptionUsers(w http.ResponseWriter, r *http.Request,
-	orgID, alias string) bool {
+	orgID, alias string,
+) bool {
 	return s.checkModelUsers(w, r, orgID, alias,
 		"A subscription model is reached only by Claude Code signed in to a Claude plan, "+
 			"so they would fail - point them at another model first")
@@ -259,7 +260,8 @@ func (s *Server) checkSubscriptionUsers(w http.ResponseWriter, r *http.Request,
 // it, and reports whether it did not. why ends the refusal. The caller holds
 // LockReferences.
 func (s *Server) checkModelUsers(w http.ResponseWriter, r *http.Request,
-	orgID, alias, why string) bool {
+	orgID, alias, why string,
+) bool {
 	filters, err := s.st.ListFilters(r.Context(), orgID)
 	if err != nil {
 		s.fail(w, err)

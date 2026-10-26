@@ -72,8 +72,10 @@ const secretPrompt = `{"model":"safe","messages":[{"role":"user","content":"depl
 // sent, and the route step decides on it unredacted.
 func TestRouterFiltersOnlyTheBranchTheRouterChose(t *testing.T) {
 	p := policy.Router{Alias: "safe", Start: autoStep("route", map[string]*policy.Step{
-		"keera-large": {ID: "redact", Kind: policy.StepFilter, Ref: "redact",
-			Next: modelStep("large", "keera-large")},
+		"keera-large": {
+			ID: "redact", Kind: policy.StepFilter, Ref: "redact",
+			Next: modelStep("large", "keera-large"),
+		},
 	})}
 	for _, tt := range []struct {
 		chosen, served string
@@ -260,8 +262,10 @@ func TestAFilterTheRouterRanIsNotRunAgainForTheKey(t *testing.T) {
 // sends it.
 func TestRouterChainsRouteSteps(t *testing.T) {
 	p := policy.Router{Alias: "safe", Start: autoStep("first", map[string]*policy.Step{
-		"keera-large": {ID: "second", Kind: policy.StepRoute, Mode: policy.RouteModeFallback,
-			Destinations: []string{"keera-small"}},
+		"keera-large": {
+			ID: "second", Kind: policy.StepRoute, Mode: policy.RouteModeFallback,
+			Destinations: []string{"keera-small"},
+		},
 	})}
 	h := treeHarness(t, picks("keera-large"), p, nil)
 
@@ -327,8 +331,10 @@ func TestRouterEndingAtAMissingModelIsRefused(t *testing.T) {
 
 func TestRoutersAreListedWhereAClientLooksForModels(t *testing.T) {
 	p := policy.Router{Alias: "safe", DisplayName: "Safe", Start: autoStep("route", map[string]*policy.Step{
-		"keera-large": {ID: "redact", Kind: policy.StepFilter, Ref: "redact",
-			Next: modelStep("large", "keera-large")},
+		"keera-large": {
+			ID: "redact", Kind: policy.StepFilter, Ref: "redact",
+			Next: modelStep("large", "keera-large"),
+		},
 	})}
 	h := treeHarness(t, picks("keera-small"), p, nil)
 
@@ -353,8 +359,10 @@ func TestRoutersAreListedWhereAClientLooksForModels(t *testing.T) {
 // translation made before it.
 func TestRouterFilterAfterARouteStepRewritesWhatIsSent(t *testing.T) {
 	p := policy.Router{Alias: "safe", Start: autoStep("route", map[string]*policy.Step{
-		"keera-large": {ID: "redact", Kind: policy.StepFilter, Ref: "redact",
-			Next: modelStep("large", "keera-large")},
+		"keera-large": {
+			ID: "redact", Kind: policy.StepFilter, Ref: "redact",
+			Next: modelStep("large", "keera-large"),
+		},
 	})}
 	h := treeHarness(t, picks("keera-large"), p, nil)
 
@@ -382,8 +390,10 @@ func TestRouterNeverFailsOverPastABranch(t *testing.T) {
 	safe := routerOf(chainRoute("keera-small", "keera-large"))
 	safe.Alias = "safe"
 	safe.Start.Branches = map[string]*policy.Step{
-		"keera-large": {ID: "redact", Kind: policy.StepFilter, Ref: "redact",
-			Next: modelStep("large", "keera-large")},
+		"keera-large": {
+			ID: "redact", Kind: policy.StepFilter, Ref: "redact",
+			Next: modelStep("large", "keera-large"),
+		},
 	}
 	h.src.routers["org_1/safe"] = safe
 
@@ -462,10 +472,14 @@ func TestRouterSystemPromptGoesOnlyWhereItsBranchGoes(t *testing.T) {
 	resolved := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"},
 		&policy.Limits{SystemPrompt: new("Be brief.")}, nil, nil)
 	p := policy.Router{Alias: "safe", Start: autoStep("route", map[string]*policy.Step{
-		"keera-large": {ID: "careful", Kind: policy.StepSystemPrompt,
+		"keera-large": {
+			ID: "careful", Kind: policy.StepSystemPrompt,
 			Prompt: "Never name a customer.",
-			Next: &policy.Step{ID: "redact", Kind: policy.StepFilter, Ref: "redact",
-				Next: modelStep("large", "keera-large")}},
+			Next: &policy.Step{
+				ID: "redact", Kind: policy.StepFilter, Ref: "redact",
+				Next: modelStep("large", "keera-large"),
+			},
+		},
 	})}
 	for _, tt := range []struct {
 		chosen, system string

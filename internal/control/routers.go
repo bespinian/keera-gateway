@@ -171,6 +171,18 @@ func tidySteps(rtr policy.Router) {
 		s.Prompt = strings.TrimSpace(s.Prompt)
 		s.Model = strings.TrimSpace(s.Model)
 		s.Fallback = strings.TrimSpace(s.Fallback)
+		// Header names are not case-sensitive, so the stored one is written
+		// the way the gateway looks it up.
+		if h := strings.TrimSpace(s.Header); h != "" {
+			s.Header = http.CanonicalHeaderKey(h)
+		}
+		if s.Values != nil {
+			values := make(map[string]string, len(s.Values))
+			for value, dest := range s.Values {
+				values[strings.TrimSpace(value)] = strings.TrimSpace(dest)
+			}
+			s.Values = values
+		}
 		switch {
 		case s.Kind == policy.StepBudget:
 			s.Period = s.Budget().Per()
@@ -192,8 +204,10 @@ func tidySteps(rtr policy.Router) {
 }
 
 func (s *Server) routerRefs(ctx context.Context, orgID string) (policy.RouterRefs, error) {
-	refs := policy.RouterRefs{Models: map[string]policy.Model{},
-		Filters: map[string]policy.Filter{}}
+	refs := policy.RouterRefs{
+		Models:  map[string]policy.Model{},
+		Filters: map[string]policy.Filter{},
+	}
 	models, err := s.st.ListModels(ctx, orgID)
 	if err != nil {
 		return refs, err

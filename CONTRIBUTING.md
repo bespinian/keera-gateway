@@ -24,8 +24,8 @@ run `make test-integration` as well.
 
 Follow the existing style:
 
-- Format with `gofmt`. Use the standard library; do not add a dependency without
-  asking first.
+- Format with `golangci-lint fmt`, which runs gofumpt. Use the standard
+  library; do not add a dependency without asking first.
 - Comments explain why the code is the way it is, not what it does.
 - Tests live next to the code they test.
 - Never log a secret, and never store a key in plaintext.

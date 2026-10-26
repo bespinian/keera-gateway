@@ -129,7 +129,8 @@ type Server struct {
 }
 
 func New(st *store.Store, reg *registry.Registry, m *metrics.Registry, rec *usage.Recorder,
-	opts Options, log *slog.Logger) *Server {
+	opts Options, log *slog.Logger,
+) *Server {
 	opts.SessionGap = cmp.Or(opts.SessionGap, store.DefaultSessionGap)
 	return &Server{
 		st: st, reg: reg, metrics: m, recorder: rec, opts: opts,
@@ -360,7 +361,8 @@ func (s *Server) authenticated(next handler) http.Handler {
 // withPrincipal applies the checks that depend on how the caller signed in,
 // then runs the route.
 func (s *Server) withPrincipal(w http.ResponseWriter, r *http.Request,
-	p *authn.Principal, next handler) {
+	p *authn.Principal, next handler,
+) {
 	// Another site can make a browser send its cookie, but not a header. Only
 	// sessions ride on a cookie, so only they need the CSRF token.
 	if p.Via == authn.MethodSession && !safeMethod(r.Method) {
@@ -406,7 +408,8 @@ const signInThrottled = "too many sign-in attempts from this address; wait a mom
 // brake, not a security boundary: many people can share one address and one
 // person can use many, which is why the rates are generous.
 func (s *Server) throttle(name string, perMinute int, msg string,
-	next http.HandlerFunc) http.Handler {
+	next http.HandlerFunc,
+) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := name + "|" + clientIP(r, s.opts.TrustedProxies)
 		now := time.Now()
@@ -711,7 +714,8 @@ func Announce(ctx context.Context, reg *registry.Registry, st *store.Store, log 
 }
 
 func (s *Server) auditf(r *http.Request, p *authn.Principal, orgID, action,
-	targetType, targetID string, detail any) {
+	targetType, targetID string, detail any,
+) {
 	if err := s.st.Audit(r.Context(), p.Actor(), orgID, action, targetType, targetID, detail); err != nil {
 		s.log.Warn("writing audit entry failed", "error", err, "action", action)
 	}

@@ -40,11 +40,15 @@ func TestDailyTotalsCountWhatTheReportsCount(t *testing.T) {
 	day := time.Date(2026, 10, 18, 0, 0, 0, 0, time.UTC)
 	sums := map[dailyKey]*dailySum{}
 	for _, e := range []Event{
-		{TS: day.Add(time.Hour), OrgID: "o", KeyID: "k", Alias: "m", Status: 200,
-			InputTokens: 10, OutputTokens: 5, CostMicros: 7},
+		{
+			TS: day.Add(time.Hour), OrgID: "o", KeyID: "k", Alias: "m", Status: 200,
+			InputTokens: 10, OutputTokens: 5, CostMicros: 7,
+		},
 		{TS: day.Add(3 * time.Hour), OrgID: "o", KeyID: "k", Alias: "m", Status: 429},
-		{TS: day.Add(2 * time.Hour), OrgID: "o", KeyID: "k", Alias: "m", Status: 502,
-			CostMicros: 1},
+		{
+			TS: day.Add(2 * time.Hour), OrgID: "o", KeyID: "k", Alias: "m", Status: 502,
+			CostMicros: 1,
+		},
 		{TS: day.Add(25 * time.Hour), OrgID: "o", KeyID: "k", Alias: "m", Status: 200},
 	} {
 		addDaily(sums, e)

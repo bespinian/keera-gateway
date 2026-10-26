@@ -158,7 +158,8 @@ type Server struct {
 
 // New builds the data plane.
 func New(src policy.Source, budgets Budgeter, limiter Limiter, sink Sink,
-	m *metrics.Registry, opts Options, log *slog.Logger) *Server {
+	m *metrics.Registry, opts Options, log *slog.Logger,
+) *Server {
 	opts.setDefaults()
 	// An organisation's requests connect as KEERA_UPSTREAM_DENY and
 	// KEERA_UPSTREAM_PRIVATE say.
@@ -191,7 +192,8 @@ func newDialer(deny func(string, string, syscall.RawConn) error) *net.Dialer {
 
 // upstreamClient is the client requests leave through, connecting with dial.
 func upstreamClient(headerTimeout time.Duration,
-	dial func(context.Context, string, string) (net.Conn, error)) *http.Client {
+	dial func(context.Context, string, string) (net.Conn, error),
+) *http.Client {
 	return &http.Client{
 		// No client timeout: a stream may run longer than any value worth
 		// setting. The request context cancels it when the client leaves.

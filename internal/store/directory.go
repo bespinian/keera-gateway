@@ -48,7 +48,8 @@ func (s *Store) RecordDirectoryCheck(ctx context.Context, externalID string, sea
 // caller wins: a provider that rotates refresh tokens refuses the second use
 // of one, and that refusal would sign the person out.
 func (s *Store) ClaimDirectoryCheck(ctx context.Context, externalID string,
-	checkedBefore time.Time) ([]byte, bool, error) {
+	checkedBefore time.Time,
+) ([]byte, bool, error) {
 	var sealed []byte
 	err := s.pool.QueryRow(ctx, `UPDATE identities SET directory_checked_at = now()
 		WHERE external_id = $1 AND refresh_token IS NOT NULL

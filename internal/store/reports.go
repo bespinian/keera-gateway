@@ -127,7 +127,8 @@ func chartBucket(from, to time.Time) string {
 // are widened to whole days. The first-token times always come from the
 // request log, which retention may have cut shorter.
 func (s *Store) Overview(ctx context.Context, orgID string, from, to time.Time,
-	sc ReportScope) (Overview, error) {
+	sc ReportScope,
+) (Overview, error) {
 	src, from, to := sourceFor(from, to)
 	o := Overview{From: from, To: to, Bucket: chartBucket(from, to)}
 
@@ -180,7 +181,8 @@ func (s *Store) Overview(ctx context.Context, orgID string, from, to time.Time,
 // series is the dashboard's chart. Every bucket in the window is generated, not
 // only those with traffic, so a quiet stretch shows as a dip, not a flat line.
 func (s *Store) series(ctx context.Context, src usageSource, orgID string, from, to time.Time,
-	bucket string, sc ReportScope) ([]SeriesPoint, error) {
+	bucket string, sc ReportScope,
+) ([]SeriesPoint, error) {
 	// A LEFT JOIN leaves one row of NULLs for an empty bucket, so the raw log
 	// counts ids, not rows.
 	requests, failed := "count(e.id)", "count(e.id) FILTER (WHERE e.status >= 500)"
@@ -473,7 +475,8 @@ type Refusal struct {
 // keyIDs, newest first. An empty keyIDs returns nothing, not everything: the
 // caller is asking about their own keys.
 func (s *Store) Refusals(ctx context.Context, orgID string, keyIDs []string,
-	since time.Time, limit int) ([]Refusal, error) {
+	since time.Time, limit int,
+) ([]Refusal, error) {
 	if len(keyIDs) == 0 {
 		return []Refusal{}, nil
 	}

@@ -19,14 +19,18 @@ func routerTenants(t *testing.T) tenants {
 	t.Helper()
 	tn := twoTenants(t)
 	for _, alias := range []string{"local", "hosted"} {
-		if err := tn.srv.st.UpsertModel(tn.ctx, policy.Model{OrgID: "org_a", Alias: alias,
+		if err := tn.srv.st.UpsertModel(tn.ctx, policy.Model{
+			OrgID: "org_a", Alias: alias,
 			Kind: policy.KindChat, Backends: []string{"http://" + alias + ":8000"},
-			BackendModel: alias, Location: "ch", Enabled: true}, store.Credential{}); err != nil {
+			BackendModel: alias, Location: "ch", Enabled: true,
+		}, store.Credential{}); err != nil {
 			t.Fatalf("UpsertModel: %v", err)
 		}
 	}
-	if _, err := tn.srv.st.UpsertFilter(tn.ctx, policy.Filter{OrgID: "org_a", Alias: "redact",
-		Model: "local", Mode: policy.FilterModeRewrite, Prompt: "Take out names."}); err != nil {
+	if _, err := tn.srv.st.UpsertFilter(tn.ctx, policy.Filter{
+		OrgID: "org_a", Alias: "redact",
+		Model: "local", Mode: policy.FilterModeRewrite, Prompt: "Take out names.",
+	}); err != nil {
 		t.Fatalf("UpsertFilter: %v", err)
 	}
 	return tn
@@ -38,10 +42,14 @@ const redactThenRoute = `{"display_name":"Safe","start":{"id":"redact","kind":"f
 
 func TestAnAdministratorDrawsARouter(t *testing.T) {
 	tn := routerTenants(t)
-	carol := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin,
-		OrgID: "org_a", UserID: "user_carol"}
-	alice := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleMember,
-		OrgID: "org_a", UserID: "user_alice"}
+	carol := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleAdmin,
+		OrgID: "org_a", UserID: "user_carol",
+	}
+	alice := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleMember,
+		OrgID: "org_a", UserID: "user_alice",
+	}
 
 	if w := tn.call(tn.srv.putRouter, alice, "PUT", "/v1/routers/safe", redactThenRoute); w.Code != http.StatusForbidden {
 		t.Errorf("a member got %d, want 403", w.Code)
@@ -94,14 +102,18 @@ func TestAnAdministratorDrawsARouter(t *testing.T) {
 
 func TestARouterMustNameWhatItsOrganisationHas(t *testing.T) {
 	tn := routerTenants(t)
-	carol := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin,
-		OrgID: "org_a", UserID: "user_carol"}
+	carol := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleAdmin,
+		OrgID: "org_a", UserID: "user_carol",
+	}
 
 	for _, tt := range []struct{ name, body, want string }{
 		{"a filter of another name", `{"start":{"id":"a","kind":"filter","ref":"nope",
 			"next":{"id":"b","kind":"model","ref":"local"}}}`, "not one of this organisation's filters"},
-		{"a branch that ends nowhere", `{"start":{"id":"a","kind":"rate_limit","requests":5}}`,
-			"has no 'next' step"},
+		{
+			"a branch that ends nowhere", `{"start":{"id":"a","kind":"rate_limit","requests":5}}`,
+			"has no 'next' step",
+		},
 		{"no steps at all", `{}`, "at least one step"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -124,8 +136,10 @@ func TestARouterMustNameWhatItsOrganisationHas(t *testing.T) {
 // that step would be refused.
 func TestARouterKeepsWhatItUses(t *testing.T) {
 	tn := routerTenants(t)
-	carol := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin,
-		OrgID: "org_a", UserID: "user_carol"}
+	carol := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleAdmin,
+		OrgID: "org_a", UserID: "user_carol",
+	}
 	if w := tn.call(tn.srv.putRouter, carol, "PUT", "/v1/routers/safe", redactThenRoute); w.Code != http.StatusOK {
 		t.Fatalf("put got %d: %s", w.Code, w.Body)
 	}

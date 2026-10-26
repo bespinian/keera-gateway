@@ -54,8 +54,10 @@ const (
 	StepSystemPrompt StepKind = "system_prompt"
 )
 
-var stepKinds = []StepKind{StepFilter, StepRoute, StepRateLimit, StepBudget, StepModel,
-	StepSystemPrompt}
+var stepKinds = []StepKind{
+	StepFilter, StepRoute, StepRateLimit, StepBudget, StepModel,
+	StepSystemPrompt,
+}
 
 // Limits reports whether the step counts requests, tokens or money.
 func (k StepKind) Limits() bool { return k == StepRateLimit || k == StepBudget }
@@ -91,6 +93,10 @@ type Step struct {
 	Destinations []string       `json:"destinations,omitempty"`
 	Ceilings     map[string]int `json:"ceilings,omitempty"`
 	Fallback     string         `json:"fallback,omitempty"`
+	// Header and Values are a header step's: the request header it reads,
+	// and which of its values sends a request to which destination.
+	Header string            `json:"header,omitempty"`
+	Values map[string]string `json:"values,omitempty"`
 	// Period is what a limit counts over: minute, day or month for a rate
 	// limit, which is minute when empty, and day or month for a budget,
 	// which is month when empty. Day and month start on UTC boundaries.
@@ -171,6 +177,7 @@ func (p Router) Route(s *Step) Route {
 		OrgID: p.OrgID, Router: p.Alias, Step: s.ID,
 		Mode: s.Mode, Model: s.Model, Prompt: s.Prompt,
 		Destinations: s.Destinations, Ceilings: s.Ceilings, Fallback: s.Fallback,
+		Header: s.Header, Values: s.Values,
 	}
 }
 
@@ -217,8 +224,10 @@ func quotas(t ScopeType, id string, p Period, requests, tokens int64) []Scope {
 		quota int64
 	}{{MeterRequests, requests}, {MeterTokens, tokens}} {
 		if m.quota > 0 {
-			out = append(out, Scope{Type: t, ID: id + "|" + string(m.meter),
-				Period: p, Meter: m.meter, Quota: m.quota})
+			out = append(out, Scope{
+				Type: t, ID: id + "|" + string(m.meter),
+				Period: p, Meter: m.meter, Quota: m.quota,
+			})
 		}
 	}
 	return out
@@ -311,9 +320,9 @@ func (s *Step) problem(refs RouterRefs) string {
 	case s.Kind != StepSystemPrompt && s.Kind != StepRoute && s.Prompt != "":
 		return "sets a 'prompt', which only a system prompt or route step has"
 	case s.Kind != StepRoute && (s.Mode != "" || s.Model != "" || len(s.Destinations) > 0 ||
-		len(s.Ceilings) > 0 || s.Fallback != ""):
-		return "sets 'mode', 'model', 'destinations', 'ceilings' or 'fallback', which only a " +
-			"route step has"
+		len(s.Ceilings) > 0 || s.Fallback != "" || s.Header != "" || len(s.Values) > 0):
+		return "sets 'mode', 'model', 'destinations', 'ceilings', 'header', 'values' or " +
+			"'fallback', which only a route step has"
 	case s.Kind != StepRateLimit && (s.Requests != 0 || s.Tokens != 0):
 		return "sets 'requests' or 'tokens', which only a rate limit has"
 	case s.Kind != StepBudget && s.BudgetMicros != 0:
@@ -422,8 +431,8 @@ func stepName(s *Step) string {
 // name.
 func (s *Step) routeProblem(refs RouterRefs) string {
 	if !s.Mode.Valid() {
-		return "has the mode '" + string(s.Mode) + "'; use instruction, size, fallback, " +
-			"latency or least-busy"
+		return "has the mode '" + string(s.Mode) + "'; use instruction, size, header, " +
+			"fallback, latency or least-busy"
 	}
 	if msg := s.leftoverProblem(); msg != "" {
 		return msg
@@ -432,6 +441,8 @@ func (s *Step) routeProblem(refs RouterRefs) string {
 	switch {
 	case len(s.Ceilings) > 0 && !s.Mode.Sizes():
 		return "sets 'ceilings', which only a step with the mode 'size' has"
+	case (s.Header != "" || len(s.Values) > 0) && s.Mode != RouteModeHeader:
+		return "sets 'header' or 'values', which only a step with the mode 'header' has"
 	case s.Mode.Decides() && s.Model == "":
 		return "needs a 'model': the model that decides, best a fast one served locally"
 	case s.Mode.Decides() && strings.TrimSpace(s.Prompt) == "":
@@ -468,6 +479,11 @@ func (s *Step) routeProblem(refs RouterRefs) string {
 			return msg
 		}
 	}
+	if s.Mode == RouteModeHeader {
+		if msg := s.headerProblem(); msg != "" {
+			return msg
+		}
+	}
 	for dest, next := range s.Branches {
 		if !seen[dest] {
 			return "has a branch for '" + dest + "', which is not one of its destinations"
@@ -480,19 +496,18 @@ func (s *Step) routeProblem(refs RouterRefs) string {
 }
 
 // leftoverProblem refuses a model, prompt or fallback on a route step that
-// decides nothing. None of them would do anything, but a reader would take
+// does not use it. None of them would do anything, but a reader would take
 // them as the reason its traffic goes where it goes.
 func (s *Step) leftoverProblem() string {
-	if s.Mode.Decides() {
-		return ""
-	}
 	mode := "a " + string(s.Mode) + " step"
 	switch {
+	case s.Mode.Decides():
+		return ""
 	case s.Model != "":
 		return "sets a 'model', but " + mode + " has no deciding model"
 	case s.Prompt != "":
 		return "sets a 'prompt', but " + mode + " has no deciding model to give it to"
-	case s.Fallback != "":
+	case s.Fallback != "" && !s.Mode.Chooses():
 		return "sets a 'fallback', but " + mode + " already tries its destinations in turn, " +
 			"so put '" + s.Fallback + "' in 'destinations'"
 	}
@@ -521,6 +536,85 @@ func (s *Step) ceilingProblem() string {
 		return "may leave the ceiling off only one destination, but '" +
 			strings.Join(unbounded, "' and '") + "' have none"
 	}
+}
+
+// headerProblem refuses a header step that reads a credential, or whose
+// values do not account for its destinations.
+//
+// A value is compared in lowercase, so it is written in lowercase. Every
+// destination must be named by a value or be the fallback; otherwise no
+// request can reach it, and it would still be allowed with the router.
+func (s *Step) headerProblem() string {
+	switch {
+	case s.Header == "":
+		return "needs a 'header': the request header whose value chooses the destination"
+	case !validHeaderName(s.Header):
+		return "reads the header '" + s.Header + "', which is not a usable header name; " +
+			"use up to 64 letters, digits and inner hyphens"
+	case credentialHeaders[strings.ToLower(s.Header)]:
+		return "reads the header '" + s.Header + "', which carries the client's " +
+			"credential. Use a header of its own, such as X-Keera-Route"
+	case len(s.Values) == 0:
+		return "needs 'values': which value of the header sends a request where"
+	case len(s.Values) > MaxHeaderValues:
+		return fmt.Sprintf("has %d values; the limit is %d", len(s.Values), MaxHeaderValues)
+	}
+	reached := map[string]bool{s.Fallback: true}
+	for _, value := range slices.Sorted(maps.Keys(s.Values)) {
+		dest := s.Values[value]
+		if !validName(value, 32) {
+			return "has the value '" + value + "', which is not usable; use up to 32 " +
+				"lowercase letters, digits and inner hyphens"
+		}
+		if !slices.Contains(s.Destinations, dest) {
+			return "sends the value '" + value + "' to '" + dest + "', which is not one of " +
+				"its destinations"
+		}
+		reached[dest] = true
+	}
+	for _, dest := range s.Destinations {
+		if !reached[dest] {
+			return "sends no value to '" + dest + "', and it is not the fallback, so no " +
+				"request can reach it"
+		}
+	}
+	return ""
+}
+
+// ValuesTo is the values of a header step that send a request to dest, in
+// order.
+func ValuesTo(values map[string]string, dest string) []string {
+	var out []string
+	for _, v := range slices.Sorted(maps.Keys(values)) {
+		if values[v] == dest {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// credentialHeaders are the headers a client signs in with, in lowercase. A
+// header step reading one would put the key in a routing decision.
+var credentialHeaders = map[string]bool{
+	"authorization": true, "proxy-authorization": true, "cookie": true,
+	"x-api-key": true, "x-keera-key": true,
+}
+
+// validHeaderName is the part of the HTTP token grammar people use for header
+// names.
+func validHeaderName(s string) bool {
+	if s == "" || len(s) > 64 || s[0] == '-' || s[len(s)-1] == '-' {
+		return false
+	}
+	for i := range len(s) {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // answererProblem says why a model cannot answer a request through a

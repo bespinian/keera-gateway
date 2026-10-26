@@ -134,20 +134,35 @@ func TestTheClientAddressCannotBeForged(t *testing.T) {
 	}{
 		{"no proxy", "203.0.113.5:4000", nil, "203.0.113.5"},
 		// Without a proxy in front, the header is the client's own words.
-		{"a header from an untrusted peer is ignored", "203.0.113.5:4000",
-			[]string{"198.51.100.1"}, "203.0.113.5"},
+		{
+			"a header from an untrusted peer is ignored", "203.0.113.5:4000",
+			[]string{"198.51.100.1"},
+			"203.0.113.5",
+		},
 		{"behind a proxy", "10.0.0.2:4000", []string{"203.0.113.5"}, "203.0.113.5"},
 		// The proxy appends whom it heard from; what the client wrote is to
 		// the left of it.
-		{"a forged entry is left of the real one", "10.0.0.2:4000",
-			[]string{"198.51.100.1, 203.0.113.5"}, "203.0.113.5"},
-		{"through two proxies", "10.0.0.2:4000",
-			[]string{"198.51.100.1, 203.0.113.5, 10.0.0.3"}, "203.0.113.5"},
-		{"over several header lines", "10.0.0.2:4000",
-			[]string{"198.51.100.1", "203.0.113.5"}, "203.0.113.5"},
+		{
+			"a forged entry is left of the real one", "10.0.0.2:4000",
+			[]string{"198.51.100.1, 203.0.113.5"},
+			"203.0.113.5",
+		},
+		{
+			"through two proxies", "10.0.0.2:4000",
+			[]string{"198.51.100.1, 203.0.113.5, 10.0.0.3"},
+			"203.0.113.5",
+		},
+		{
+			"over several header lines", "10.0.0.2:4000",
+			[]string{"198.51.100.1", "203.0.113.5"},
+			"203.0.113.5",
+		},
 		{"a proxy without the header", "10.0.0.2:4000", nil, "10.0.0.2"},
-		{"an entry that is not an address stops the walk", "10.0.0.2:4000",
-			[]string{"203.0.113.5, unknown"}, "10.0.0.2"},
+		{
+			"an entry that is not an address stops the walk", "10.0.0.2:4000",
+			[]string{"203.0.113.5, unknown"},
+			"10.0.0.2",
+		},
 		{"only proxies", "10.0.0.2:4000", []string{"10.0.0.4, 10.0.0.3"}, "10.0.0.4"},
 		{"an IPv4-mapped peer", "[::ffff:10.0.0.2]:4000", []string{"203.0.113.5"}, "203.0.113.5"},
 	}
@@ -169,8 +184,10 @@ func TestTheClientAddressCannotBeForged(t *testing.T) {
 // sits beside the field for the operator key.
 func TestASignInErrorCannotComeFromALink(t *testing.T) {
 	corp := ldaptest.New(t, ldaptest.Config("corp"), &ldaptest.Directory{})
-	s := New(nil, nil, nil, nil, Options{OperatorKey: testOperatorKey,
-		Providers: authn.Providers{corp}}, slog.New(slog.DiscardHandler))
+	s := New(nil, nil, nil, nil, Options{
+		OperatorKey: testOperatorKey,
+		Providers:   authn.Providers{corp},
+	}, slog.New(slog.DiscardHandler))
 	const lure = "call 0800 123 456 and read out your key"
 	for _, tc := range []struct {
 		name string

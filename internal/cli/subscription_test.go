@@ -17,10 +17,14 @@ import (
 func TestSubscriptionEnvMapsEachFamilyToAModel(t *testing.T) {
 	models := []policy.Model{
 		{Alias: "keera-code", Kind: policy.KindChat, Enabled: true},
-		{Alias: "claude-opus", BackendModel: "claude-opus-5-5", Kind: policy.KindChat,
-			Enabled: true, Subscription: true, MaxContext: 1_000_000},
-		{Alias: "claude-haiku", BackendModel: "claude-haiku-4-5", Kind: policy.KindChat,
-			Enabled: true, Subscription: true, MaxContext: 200_000},
+		{
+			Alias: "claude-opus", BackendModel: "claude-opus-5-5", Kind: policy.KindChat,
+			Enabled: true, Subscription: true, MaxContext: 1_000_000,
+		},
+		{
+			Alias: "claude-haiku", BackendModel: "claude-haiku-4-5", Kind: policy.KindChat,
+			Enabled: true, Subscription: true, MaxContext: 200_000,
+		},
 	}
 	env, main, err := subscriptionEnv(models, "")
 	if err != nil {
@@ -124,12 +128,18 @@ func TestManagedBaseURLReadsEveryManagedSource(t *testing.T) {
 func TestModelOverridesTellClaudeCodeWhichModelEachAliasIs(t *testing.T) {
 	models := []policy.Model{
 		{Alias: "keera-code", BackendModel: "qwen", Kind: policy.KindChat, Enabled: true},
-		{Alias: "claude-haiku", BackendModel: "claude-haiku-4-5", Provider: "anthropic",
-			Kind: policy.KindChat, Enabled: true, Subscription: true},
-		{Alias: "claude-opus", BackendModel: "claude-opus-5-5", Provider: "anthropic",
-			Kind: policy.KindChat, Enabled: true, Subscription: true},
-		{Alias: "claude-opus-too", BackendModel: "claude-opus-5-5", Provider: "anthropic",
-			Kind: policy.KindChat, Enabled: true, Subscription: true},
+		{
+			Alias: "claude-haiku", BackendModel: "claude-haiku-4-5", Provider: "anthropic",
+			Kind: policy.KindChat, Enabled: true, Subscription: true,
+		},
+		{
+			Alias: "claude-opus", BackendModel: "claude-opus-5-5", Provider: "anthropic",
+			Kind: policy.KindChat, Enabled: true, Subscription: true,
+		},
+		{
+			Alias: "claude-opus-too", BackendModel: "claude-opus-5-5", Provider: "anthropic",
+			Kind: policy.KindChat, Enabled: true, Subscription: true,
+		},
 	}
 	// Claude Code knows Haiku 4.5 by its dated id only, so both are written.
 	want := map[string]string{
@@ -197,12 +207,18 @@ func TestTheMachineIDStaysTheSame(t *testing.T) {
 // memberKeys is /v1/keys for a member with a key on another machine and a
 // subscription key an administrator issued them that no machine holds yet.
 var memberKeys = map[string]any{"data": []map[string]any{
-	{"id": "key_desktop", "org_id": "org_1", "user_id": "user_1", "kind": "subscription",
-		"name": "claude-code on desktop (0a1b2c3d)"},
-	{"id": "key_issued", "org_id": "org_1", "user_id": "user_1", "kind": "subscription",
-		"name": "ada's Claude Code"},
-	{"id": "key_bob", "org_id": "org_1", "user_id": "user_2", "kind": "subscription",
-		"name": "bob's Claude Code"},
+	{
+		"id": "key_desktop", "org_id": "org_1", "user_id": "user_1", "kind": "subscription",
+		"name": "claude-code on desktop (0a1b2c3d)",
+	},
+	{
+		"id": "key_issued", "org_id": "org_1", "user_id": "user_1", "kind": "subscription",
+		"name": "ada's Claude Code",
+	},
+	{
+		"id": "key_bob", "org_id": "org_1", "user_id": "user_2", "kind": "subscription",
+		"name": "bob's Claude Code",
+	},
 }}
 
 var member = identity{UserID: "user_1", Email: "ada@example.ch", Role: "member", OrgID: "org_1"}

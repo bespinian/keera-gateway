@@ -75,9 +75,11 @@ func TestARequestIsSignedForItsMethodAndPath(t *testing.T) {
 	tx, err := c.Create(context.Background(), NewTransaction{
 		Currency: "CHF", CustomerID: "org_1", MerchantReference: "pay_1",
 		CompletionBehavior: "COMPLETE_IMMEDIATELY",
-		LineItems: []LineItem{{Name: "Keera credit", Quantity: 1, Type: "PRODUCT",
+		LineItems: []LineItem{{
+			Name: "Keera credit", Quantity: 1, Type: "PRODUCT",
 			UniqueID: "credit", AmountIncludingTax: Amount(108_100_000),
-			Taxes: []Tax{{Rate: Percent(810), Title: "VAT"}}}},
+			Taxes: []Tax{{Rate: Percent(810), Title: "VAT"}},
+		}},
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -149,8 +151,10 @@ func TestAnInvoiceArrivesAsAPDF(t *testing.T) {
 		if claims := checkJWT(t, r); claims["requestPath"] != "/api/v2.0/payment/transactions/42/invoice-document" {
 			t.Errorf("path = %v", claims["requestPath"])
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"title": "Invoice 42",
-			"mimeType": "application/pdf", "data": pdf})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"title":    "Invoice 42",
+			"mimeType": "application/pdf", "data": pdf,
+		})
 	})
 	doc, err := c.InvoiceDocument(context.Background(), 42)
 	if err != nil {
@@ -165,8 +169,10 @@ func TestAnInvoiceArrivesAsAPDF(t *testing.T) {
 // such as a page that runs script, is not passed on.
 func TestAnInvoiceThatIsNotAPDFIsRefused(t *testing.T) {
 	c := testClient(t, func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"mimeType": "text/html",
-			"data": []byte("<script>alert(1)</script>")})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"mimeType": "text/html",
+			"data":     []byte("<script>alert(1)</script>"),
+		})
 	})
 	if _, err := c.InvoiceDocument(context.Background(), 42); err == nil {
 		t.Error("a document that is not a PDF was handed out")

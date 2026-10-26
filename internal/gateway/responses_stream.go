@@ -25,8 +25,10 @@ func (sh responsesShape) pipe(dst io.Writer, flush func(), src io.Reader, alias 
 	_ bool, limit int64,
 ) (streamStats, error) {
 	return pipeEvents(dst, flush, src, limit, 0, func(send func([]byte) error) eventStream {
-		return &responsesStream{alias: alias, tools: sh.tools, respID: id.New("resp"),
-			createdAt: time.Now().Unix(), open: -1, send: send}
+		return &responsesStream{
+			alias: alias, tools: sh.tools, respID: id.New("resp"),
+			createdAt: time.Now().Unix(), open: -1, send: send,
+		}
 	})
 }
 

@@ -390,8 +390,10 @@ func TestAResumedStreamStillHidesToolsTheKeyMayNotCall(t *testing.T) {
 	// An answer can arrive on a stream the client resumed, where the request
 	// it answers was made on another connection.
 	h, _ := mcpHarness(t, allowing("github/search_code"))
-	x := &mcpExchange{s: h.srv, res: h.src.resolved[testKey],
-		srv: h.src.mcp["github"], pending: map[string]*pendingRPC{}}
+	x := &mcpExchange{
+		s: h.srv, res: h.src.resolved[testKey],
+		srv: h.src.mcp["github"], pending: map[string]*pendingRPC{},
+	}
 	out := x.serverMessage([]byte(`{"jsonrpc":"2.0","id":9,"result":{"tools":[` +
 		`{"name":"search_code"},{"name":"create_issue"}]}}`))
 	if out == nil || strings.Contains(string(out), "create_issue") {

@@ -13,20 +13,26 @@ func dailyTraffic(t *testing.T, st *Store, f fixture, day time.Time) {
 	t.Helper()
 	ctx := t.Context()
 	event := func(ts time.Time, alias, client string, status int, cost int64) Event {
-		return Event{TS: ts, OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+		return Event{
+			TS: ts, OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: alias, Client: client, Status: status,
 			InputTokens: 100, OutputTokens: 20, CachedInputTokens: 40, CacheWriteTokens: 10,
-			CostMicros: cost, ListCostMicros: cost / 2}
+			CostMicros: cost, ListCostMicros: cost / 2,
+		}
 	}
 	batches := [][]Event{{
 		event(day.Add(time.Hour), "keera-code", "claude-code", 200, 1000),
 		event(day.Add(2*time.Hour), "keera-code", "claude-code", 429, 0),
 		event(day.Add(3*time.Hour), "keera-large", "", 502, 50),
 		// A tool call and a check's bills are not requests.
-		{TS: day.Add(time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
-			Status: 200, Tool: &ToolCall{Server: "git", Tool: "log", Outcome: ToolOK}},
-		{TS: day.Add(time.Hour), OrgID: f.orgID, Alias: "keera-code", BillsOnly: true,
-			CostMicros: 7},
+		{
+			TS: day.Add(time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
+			Status: 200, Tool: &ToolCall{Server: "git", Tool: "log", Outcome: ToolOK},
+		},
+		{
+			TS: day.Add(time.Hour), OrgID: f.orgID, Alias: "keera-code", BillsOnly: true,
+			CostMicros: 7,
+		},
 	}, {
 		event(day.Add(4*time.Hour), "keera-code", "claude-code", 200, 3000),
 		event(day.Add(26*time.Hour), "keera-code", "opencode", 200, 500),
@@ -47,16 +53,20 @@ func TestDailyTotalsAgreeWithTheRequestLog(t *testing.T) {
 	// Three whole days read usage_daily; each single day reads the log. Every
 	// grouping has to add up to the same.
 	for _, groupBy := range GroupBys() {
-		whole, err := st.Usage(ctx, UsageQuery{OrgID: f.orgID, From: day, To: day.AddDate(0, 0, 3),
-			GroupBy: groupBy})
+		whole, err := st.Usage(ctx, UsageQuery{
+			OrgID: f.orgID, From: day, To: day.AddDate(0, 0, 3),
+			GroupBy: groupBy,
+		})
 		if err != nil {
 			t.Fatalf("Usage by %s: %v", groupBy, err)
 		}
 		sums := map[string]UsageBucket{}
 		for d := range 3 {
 			from := day.AddDate(0, 0, d)
-			part, err := st.Usage(ctx, UsageQuery{OrgID: f.orgID, From: from, To: from.AddDate(0, 0, 1),
-				GroupBy: groupBy})
+			part, err := st.Usage(ctx, UsageQuery{
+				OrgID: f.orgID, From: from, To: from.AddDate(0, 0, 1),
+				GroupBy: groupBy,
+			})
 			if err != nil {
 				t.Fatalf("Usage by %s on day %d: %v", groupBy, d, err)
 			}
@@ -138,8 +148,10 @@ func TestReportsOutliveTheRequestLog(t *testing.T) {
 	f := newFixture(t, st, ctx)
 	now := time.Now().UTC()
 	old := now.AddDate(0, 0, -10)
-	if err := st.WriteEvents(ctx, []Event{{TS: old, OrgID: f.orgID, ProjectID: f.projectID,
-		KeyID: f.keyID, Alias: "keera-code", Status: 200, CostMicros: 100}}); err != nil {
+	if err := st.WriteEvents(ctx, []Event{{
+		TS: old, OrgID: f.orgID, ProjectID: f.projectID,
+		KeyID: f.keyID, Alias: "keera-code", Status: 200, CostMicros: 100,
+	}}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
 	if _, err := st.PurgeUsage(ctx, now.AddDate(0, 0, -2)); err != nil {
@@ -173,8 +185,10 @@ func TestReportsOutliveTheRequestLog(t *testing.T) {
 	}
 
 	// Two days or less reads the request log, which no longer has it.
-	short, err := st.Usage(ctx, UsageQuery{OrgID: f.orgID, From: old.Add(-time.Hour),
-		To: old.Add(time.Hour)})
+	short, err := st.Usage(ctx, UsageQuery{
+		OrgID: f.orgID, From: old.Add(-time.Hour),
+		To: old.Add(time.Hour),
+	})
 	if err != nil || len(short) != 0 {
 		t.Errorf("Usage over two hours = %+v, %v; want nothing", short, err)
 	}

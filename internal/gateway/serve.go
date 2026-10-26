@@ -534,7 +534,7 @@ func (s *Server) checkBudgets(c *call, scopes []policy.Scope) (refusal, bool) {
 func (s *Server) useRoute(c *call, b *body) bool {
 	rt := c.route
 	routeAt := time.Now()
-	d, ref := s.route(c.r.Context(), rt, b, c.surf.kind)
+	d, ref := s.route(c.r.Context(), rt, b, c.surf.kind, c.r.Header)
 	c.decision = d
 	if d.micros > 0 {
 		s.budgets.Charge(c.scopes, d.micros, c.now)
@@ -546,10 +546,10 @@ func (s *Server) useRoute(c *call, b *body) bool {
 	// A fallback step reads nothing, so its cost is the failed attempts,
 	// which are drawn on their own. It is drawn only when it has a reason
 	// to show.
-	if rt.Decides() || ref != nil || d.why != "" {
+	if rt.Chooses() || ref != nil || d.why != "" {
 		c.tr.since(store.SpanRoute, rt.Router+"/"+rt.Step, routeAt, routeNote(d, ref))
 	}
-	// A step that decides is counted here; one that tries is counted after
+	// A step that chooses is counted here; one that tries is counted after
 	// forwarding. A refusal is counted either way, since nothing else would
 	// show a step that has stopped placing traffic.
 	count := func(outcome store.RouterOutcome) {
@@ -568,7 +568,7 @@ func (s *Server) useRoute(c *call, b *body) bool {
 		return false
 	}
 	if c.r.Context().Err() != nil {
-		if rt.Decides() {
+		if rt.Chooses() {
 			count(d.outcome)
 		}
 		s.hungUp(c, "while the router was deciding", "")
@@ -589,7 +589,7 @@ func (s *Server) useRoute(c *call, b *body) bool {
 			"no backend", rt.Router, c.alias)))
 		return false
 	}
-	if rt.Decides() {
+	if rt.Chooses() {
 		count(d.outcome)
 	}
 	c.model = model
@@ -899,8 +899,10 @@ func (c *call) outbound(b *body) func(policy.Model) outbound {
 			if m.Subscription {
 				auth = subscriptionAuth(c.r.Header)
 			}
-			return outbound{path: c.surf.dialect.path(), payload: c.native.encode(),
-				auth: auth, clientID: clientID}
+			return outbound{
+				path: c.surf.dialect.path(), payload: c.native.encode(),
+				auth: auth, clientID: clientID,
+			}
 		}
 		b.setString("model", m.BackendModel)
 		return outbound{path: c.surf.path, payload: b.encode(), clientID: clientID}
@@ -950,7 +952,7 @@ func (a *afterHangUp) Write(p []byte) (int, error) {
 // in a header where it sent the request. Both are set once the attempts are
 // over, whether a model answered or every destination failed.
 func (s *Server) settleRoute(c *call, fw forwarded) {
-	if !c.route.Decides() {
+	if !c.route.Chooses() {
 		c.decision.settle(fw)
 		c.ev.RouterOutcome, c.ev.RouterMS = c.decision.outcome, c.decision.took.Milliseconds()
 		s.metrics.RouterRun(c.route.Router, c.route.Step, c.res.Key.OrgID, string(c.decision.outcome),
@@ -959,7 +961,7 @@ func (s *Server) settleRoute(c *call, fw forwarded) {
 	d := c.decision
 	// The step's branch may end at a model step naming another model. The
 	// header names the one that answered, as X-Keera-Model does.
-	if c.route.Decides() {
+	if c.route.Chooses() {
 		d.alias = c.alias
 	}
 	routeHeader(c.w, d, c.route.Router)
@@ -1152,9 +1154,11 @@ func setUsage(ev *store.Event, u *tokenUsage) {
 func (s *Server) finish(c *call) {
 	ev := c.ev
 	ev.Spans = c.tr.steps("")
-	used := policy.Tokens{Input: ev.InputTokens, CachedInput: ev.CachedInputTokens,
+	used := policy.Tokens{
+		Input: ev.InputTokens, CachedInput: ev.CachedInputTokens,
 		CacheWrite: ev.CacheWriteTokens, CacheWriteHour: ev.CacheWriteHourTokens,
-		Output: ev.OutputTokens}
+		Output: ev.OutputTokens,
+	}
 	cost, bills := answerCost(c.model, used)
 	ev.CostMicros, ev.Bills = cost, append(c.hookBills(), bills...)
 	// A subscription paid for this. What it would have cost on the API is kept

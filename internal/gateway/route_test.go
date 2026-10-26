@@ -102,6 +102,7 @@ func routerOf(rt policy.Route) policy.Router {
 	return policy.Router{OrgID: rt.OrgID, Alias: rt.Router, Start: &policy.Step{
 		ID: step, Kind: policy.StepRoute, Mode: rt.Mode, Model: rt.Model, Prompt: rt.Prompt,
 		Destinations: rt.Destinations, Ceilings: rt.Ceilings, Fallback: rt.Fallback,
+		Header: rt.Header, Values: rt.Values,
 	}}
 }
 

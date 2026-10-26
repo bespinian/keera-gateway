@@ -162,8 +162,10 @@ sandboxes:
 func TestASubscriptionModelIsAnthropicsOwnAPI(t *testing.T) {
 	// Each caller's Claude sign-in goes to the backend, so nothing else may
 	// stand there.
-	ok := Model{Alias: "claude-opus", Provider: "anthropic", BackendModel: "claude-opus-5-5",
-		Subscription: true}
+	ok := Model{
+		Alias: "claude-opus", Provider: "anthropic", BackendModel: "claude-opus-5-5",
+		Subscription: true,
+	}
 	m, err := ParseModel(ok)
 	if err != nil {
 		t.Fatalf("ParseModel: %v", err)
@@ -173,14 +175,22 @@ func TestASubscriptionModelIsAnthropicsOwnAPI(t *testing.T) {
 	}
 
 	for name, bad := range map[string]Model{
-		"another provider": {Alias: "x", Provider: "openai", BackendModel: "gpt-5.5",
-			Subscription: true},
-		"no provider": {Alias: "x", Backends: []string{"http://vllm:8000/v1"},
-			BackendModel: "served", Subscription: true},
-		"another address": {Alias: "x", Provider: "anthropic", BackendModel: "claude-opus-5-5",
-			Backends: []string{"https://proxy.example.ch/v1"}, Subscription: true},
-		"not chat": {Alias: "x", Provider: "anthropic", BackendModel: "claude-opus-5-5",
-			Kind: "embedding", Subscription: true},
+		"another provider": {
+			Alias: "x", Provider: "openai", BackendModel: "gpt-5.5",
+			Subscription: true,
+		},
+		"no provider": {
+			Alias: "x", Backends: []string{"http://vllm:8000/v1"},
+			BackendModel: "served", Subscription: true,
+		},
+		"another address": {
+			Alias: "x", Provider: "anthropic", BackendModel: "claude-opus-5-5",
+			Backends: []string{"https://proxy.example.ch/v1"}, Subscription: true,
+		},
+		"not chat": {
+			Alias: "x", Provider: "anthropic", BackendModel: "claude-opus-5-5",
+			Kind: "embedding", Subscription: true,
+		},
 	} {
 		if _, err := ParseModel(bad); err == nil {
 			t.Errorf("%s: a subscription model was accepted", name)
@@ -203,8 +213,10 @@ func TestABackendMustBeAWebAddress(t *testing.T) {
 
 func TestAModelIsCheckedAgainstItsProvider(t *testing.T) {
 	model := func(kind policy.Kind, backendModel string) policy.Model {
-		return policy.Model{Provider: "anthropic", Kind: kind, BackendModel: backendModel,
-			Backends: []string{"https://api.anthropic.com/v1"}}
+		return policy.Model{
+			Provider: "anthropic", Kind: kind, BackendModel: backendModel,
+			Backends: []string{"https://api.anthropic.com/v1"},
+		}
 	}
 	tests := []struct {
 		name   string

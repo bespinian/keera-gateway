@@ -114,17 +114,25 @@ func TestAMemberSeesOnlyTheTrafficOfTheirOwnKeys(t *testing.T) {
 	tn := twoTenants(t)
 	now := time.Now()
 	if err := tn.srv.st.WriteEvents(tn.ctx, []store.Event{
-		{TS: now.Add(-2 * time.Minute), OrgID: "org_a", UserID: "user_alice", KeyID: "key_alice",
-			Alias: "keera-code", Client: "claude-code", Status: 200, SessionKey: "p-alice"},
-		{TS: now.Add(-time.Minute), OrgID: "org_a", UserID: "user_bob", KeyID: "key_bob",
-			Alias: "keera-chat", Client: "codex", Status: 500, SessionKey: "p-bob"},
+		{
+			TS: now.Add(-2 * time.Minute), OrgID: "org_a", UserID: "user_alice", KeyID: "key_alice",
+			Alias: "keera-code", Client: "claude-code", Status: 200, SessionKey: "p-alice",
+		},
+		{
+			TS: now.Add(-time.Minute), OrgID: "org_a", UserID: "user_bob", KeyID: "key_bob",
+			Alias: "keera-chat", Client: "codex", Status: 500, SessionKey: "p-bob",
+		},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
-	alice := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleMember,
-		OrgID: "org_a", UserID: "user_alice"}
-	carol := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin,
-		OrgID: "org_a", UserID: "user_carol"}
+	alice := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleMember,
+		OrgID: "org_a", UserID: "user_alice",
+	}
+	carol := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleAdmin,
+		OrgID: "org_a", UserID: "user_carol",
+	}
 
 	read := func(h handler, p *authn.Principal, target string) (int, map[string]any) {
 		t.Helper()

@@ -46,6 +46,7 @@ func Spec() (*yaml.Node, error) {
 
 // YAML serves the spec as YAML, JSON as JSON.
 func YAML() http.Handler { return serve("application/yaml", func(r rendered) []byte { return r.yaml }) }
+
 func JSON() http.Handler { return serve("application/json", func(r rendered) []byte { return r.json }) }
 
 type rendered struct{ yaml, json []byte }

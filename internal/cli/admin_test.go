@@ -186,8 +186,10 @@ func TestOrgCreateSendsTheDomain(t *testing.T) {
 		},
 	})
 
-	if err := Run(context.Background(), []string{"org", "create", "Another Bank",
-		"--domain", "AnotherBank.CH"}); err != nil {
+	if err := Run(context.Background(), []string{
+		"org", "create", "Another Bank",
+		"--domain", "AnotherBank.CH",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	// Lowercased, because that is what a sign-in is compared against.
@@ -202,8 +204,10 @@ func TestOrgSetPatchesTheDomain(t *testing.T) {
 		"PATCH /v1/orgs/org_2": map[string]any{"id": "org_2", "email_domain": "anotherbank.ch"},
 	})
 
-	if err := Run(context.Background(), []string{"org", "set", "org_2",
-		"--domain", "anotherbank.ch"}); err != nil {
+	if err := Run(context.Background(), []string{
+		"org", "set", "org_2",
+		"--domain", "anotherbank.ch",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.request("PATCH", "/v1/orgs/org_2").body["email_domain"]; got != "anotherbank.ch" {
@@ -217,8 +221,10 @@ func TestOrgSetRenamesWithoutTouchingTheDomain(t *testing.T) {
 		"PATCH /v1/orgs/org_2": map[string]any{"id": "org_2", "name": "Another Bank AG"},
 	})
 
-	if err := Run(context.Background(), []string{"org", "set", "org_2",
-		"--name", " Another Bank AG "}); err != nil {
+	if err := Run(context.Background(), []string{
+		"org", "set", "org_2",
+		"--name", " Another Bank AG ",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	body := f.request("PATCH", "/v1/orgs/org_2").body
@@ -685,8 +691,10 @@ func TestModelSetChangesWhatItIsGivenAndKeepsTheRest(t *testing.T) {
 				t.Fatal(err)
 			}
 			body := f.request("PUT", "/v1/models/keera-speed").body
-			for _, field := range []string{"input_micros_per_mtok", "output_micros_per_mtok",
-				"cached_input_micros_per_mtok", "max_context_tokens"} {
+			for _, field := range []string{
+				"input_micros_per_mtok", "output_micros_per_mtok",
+				"cached_input_micros_per_mtok", "max_context_tokens",
+			} {
 				want := stored[field].(int)
 				if field == tc.field {
 					want = tc.want
@@ -1038,8 +1046,10 @@ func TestFilterAddSendsTheModelAndTheInstruction(t *testing.T) {
 		},
 	})
 
-	if err := Run(context.Background(), []string{"filter", "add", "redact-secrets",
-		"--model", "keera-guard", "--prompt", "Remove credentials."}); err != nil {
+	if err := Run(context.Background(), []string{
+		"filter", "add", "redact-secrets",
+		"--model", "keera-guard", "--prompt", "Remove credentials.",
+	}); err != nil {
 		t.Fatalf("filter add: %v", err)
 	}
 
@@ -1138,13 +1148,17 @@ func TestFilterAndRouterSetKeepTheRest(t *testing.T) {
 			f := newFakeControl(t, map[string]any{
 				"GET /v1/routers": map[string]any{"data": []map[string]any{{
 					"alias": "auto", "description": "the original", "display_name": "Auto",
-					"start": map[string]any{"id": "route", "kind": "route", "model": "keera-speed",
-						"destinations": []string{"a", "b"}, "prompt": "Pick one."},
+					"start": map[string]any{
+						"id": "route", "kind": "route", "model": "keera-speed",
+						"destinations": []string{"a", "b"}, "prompt": "Pick one.",
+					},
 				}}},
 				"PUT /v1/routers/auto": map[string]any{"alias": "auto"},
 			})
-			if err := Run(context.Background(), []string{"router", verb, "auto",
-				"--description", "changed"}); err != nil {
+			if err := Run(context.Background(), []string{
+				"router", verb, "auto",
+				"--description", "changed",
+			}); err != nil {
 				t.Fatal(err)
 			}
 			req := f.request("PUT", "/v1/routers/auto")
@@ -1173,8 +1187,10 @@ func TestFilterAddEnforcesUnlessShadow(t *testing.T) {
 			"PUT /v1/filters/redact-secrets": map[string]any{"alias": "redact-secrets"},
 		})
 
-		args := append([]string{"filter", "add", "redact-secrets",
-			"--model", "keera-guard", "--prompt", "Remove credentials."}, tc.flags...)
+		args := append([]string{
+			"filter", "add", "redact-secrets",
+			"--model", "keera-guard", "--prompt", "Remove credentials.",
+		}, tc.flags...)
 		if err := Run(context.Background(), args); err != nil {
 			t.Fatalf("filter add %v: %v", tc.flags, err)
 		}
@@ -1197,8 +1213,10 @@ func TestFilterReportAsksForTheWindowAndPrintsTheSplit(t *testing.T) {
 				"latency_median_ms": 210, "latency_p95_ms": 900,
 				"segments": 1600, "changed": 120,
 				"projects": []map[string]any{
-					{"project_id": "project_1", "runs": 100, "refused": 16, "rewrote": 20,
-						"cost_micros": 500_000},
+					{
+						"project_id": "project_1", "runs": 100, "refused": 16, "rewrote": 20,
+						"cost_micros": 500_000,
+					},
 				},
 			},
 		},
@@ -1233,8 +1251,10 @@ func TestPolicySetAppliesFiltersAndClearsThemByFlag(t *testing.T) {
 		"PUT /v1/guardrails/project/project_1": map[string]any{},
 	})
 
-	if err := Run(context.Background(), []string{"guardrail", "set", "project", "project_1",
-		"--filters", "redact-secrets,redact-clients"}); err != nil {
+	if err := Run(context.Background(), []string{
+		"guardrail", "set", "project", "project_1",
+		"--filters", "redact-secrets,redact-clients",
+	}); err != nil {
 		t.Fatalf("guardrail set: %v", err)
 	}
 	req := f.request("PUT", "/v1/guardrails/project/project_1")
@@ -1257,8 +1277,10 @@ func TestPolicySetClearsFiltersOnlyWithItsOwnFlag(t *testing.T) {
 		"PUT /v1/guardrails/project/project_1": map[string]any{},
 	})
 
-	if err := Run(context.Background(), []string{"guardrail", "set", "project", "project_1",
-		"--no-filters"}); err != nil {
+	if err := Run(context.Background(), []string{
+		"guardrail", "set", "project", "project_1",
+		"--no-filters",
+	}); err != nil {
 		t.Fatalf("guardrail set: %v", err)
 	}
 	if got, present := f.request("PUT", "/v1/guardrails/project/project_1").body["filters"]; present {
@@ -1283,8 +1305,10 @@ func TestAnOperatorsModelGoesToTheOnlyOrganisation(t *testing.T) {
 		"PUT /v1/models/keera-frontier": map[string]any{"alias": "keera-frontier"},
 	})
 
-	if err := modelCmd(context.Background(), []string{"add", "mine",
-		"--backend", "http://vllm:8000/v1", "--backend-model", "qwen"}); err != nil {
+	if err := modelCmd(context.Background(), []string{
+		"add", "mine",
+		"--backend", "http://vllm:8000/v1", "--backend-model", "qwen",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.request("PUT", "/v1/models/mine").query; got != "org_id=org_1" {
@@ -1294,8 +1318,10 @@ func TestAnOperatorsModelGoesToTheOnlyOrganisation(t *testing.T) {
 		t.Errorf("the models were listed for %q, want org_id=org_1", got)
 	}
 
-	if err := modelCmd(context.Background(), []string{"set", "keera-frontier",
-		"--api-key", "sk-test"}); err != nil {
+	if err := modelCmd(context.Background(), []string{
+		"set", "keera-frontier",
+		"--api-key", "sk-test",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.request("PUT", "/v1/models/keera-frontier").query; got != "org_id=org_1" {
@@ -1351,13 +1377,19 @@ func TestModelUsersNamesTheFiltersAndRoutersOnIt(t *testing.T) {
 			{"alias": "other", "model": "keera-speed"},
 		}},
 		"GET /v1/routers": map[string]any{"data": []map[string]any{
-			{"alias": "auto", "start": map[string]any{"id": "r", "kind": "route",
-				"model": "keera-speed", "destinations": []string{"keera-guard", "big"}}},
-			{"alias": "decide", "start": map[string]any{"id": "r", "kind": "route",
-				"model": "keera-guard", "destinations": []string{"big"}}},
+			{"alias": "auto", "start": map[string]any{
+				"id": "r", "kind": "route",
+				"model": "keera-speed", "destinations": []string{"keera-guard", "big"},
+			}},
+			{"alias": "decide", "start": map[string]any{
+				"id": "r", "kind": "route",
+				"model": "keera-guard", "destinations": []string{"big"},
+			}},
 			{"alias": "direct", "start": map[string]any{"id": "m", "kind": "model", "ref": "keera-guard"}},
-			{"alias": "elsewhere", "start": map[string]any{"id": "r", "kind": "route",
-				"model": "keera-speed", "destinations": []string{"big"}}},
+			{"alias": "elsewhere", "start": map[string]any{
+				"id": "r", "kind": "route",
+				"model": "keera-speed", "destinations": []string{"big"},
+			}},
 		}},
 	})
 
@@ -1382,8 +1414,10 @@ func TestAnAdministratorsModelNeedsNoOrg(t *testing.T) {
 		"PUT /v1/models/mine": map[string]any{"alias": "mine", "org_id": "org_1"},
 	})
 
-	if err := modelCmd(context.Background(), []string{"add", "mine",
-		"--backend", "http://vllm:8000/v1", "--backend-model", "qwen"}); err != nil {
+	if err := modelCmd(context.Background(), []string{
+		"add", "mine",
+		"--backend", "http://vllm:8000/v1", "--backend-model", "qwen",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.request("PUT", "/v1/models/mine").query; got != "org_id=org_1" {
@@ -1414,8 +1448,10 @@ func TestReportsTakeAProjectByNameAndAPersonByEmail(t *testing.T) {
 		"GET /v1/requests": map[string]any{"data": []any{}},
 	})
 
-	if err := Run(context.Background(), []string{"failures",
-		"--project", "payments platform", "--user", "Ada@example.ch"}); err != nil {
+	if err := Run(context.Background(), []string{
+		"failures",
+		"--project", "payments platform", "--user", "Ada@example.ch",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	q := f.request("GET", "/v1/requests").query
@@ -1512,8 +1548,10 @@ func TestLimitCountsPerDayWithPer(t *testing.T) {
 
 		"GET /v1/guardrails/project/project_1/effective": map[string]any{},
 	})
-	if err := Run(context.Background(), []string{"limit", "project", "payments",
-		"--tokens", "5000000", "--per", "day"}); err != nil {
+	if err := Run(context.Background(), []string{
+		"limit", "project", "payments",
+		"--tokens", "5000000", "--per", "day",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	got := rateLimits(f.request("PUT", "/v1/guardrails/project/project_1").body)
@@ -1544,8 +1582,10 @@ func TestGuardrailTakesAProjectByNameInOneOfSeveralOrgs(t *testing.T) {
 		t.Errorf("without a chosen organisation = %v, want to be told to choose one", err)
 	}
 	t.Setenv("KEERA_ORG", "org_1")
-	if err := Run(context.Background(), []string{"budget", "project", "payments",
-		"--budget", "500"}); err != nil {
+	if err := Run(context.Background(), []string{
+		"budget", "project", "payments",
+		"--budget", "500",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if !f.called("PUT", "/v1/guardrails/project/project_1") {
@@ -1880,8 +1920,10 @@ func TestGuardrailClearsWithNoFlags(t *testing.T) {
 		},
 		"PUT /v1/guardrails/org/org_1": map[string]any{},
 	})
-	if err := Run(context.Background(), []string{"guardrail", "set", "org", "org_1",
-		"--no-models", "--no-tools"}); err != nil {
+	if err := Run(context.Background(), []string{
+		"guardrail", "set", "org", "org_1",
+		"--no-models", "--no-tools",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	body := f.request("PUT", "/v1/guardrails/org/org_1").body
@@ -1889,8 +1931,10 @@ func TestGuardrailClearsWithNoFlags(t *testing.T) {
 		t.Errorf("sent %v, want both cleared", body)
 	}
 
-	err := Run(context.Background(), []string{"guardrail", "set", "org", "org_1",
-		"--models", "any", "--no-models"})
+	err := Run(context.Background(), []string{
+		"guardrail", "set", "org", "org_1",
+		"--models", "any", "--no-models",
+	})
 	if err == nil || !strings.Contains(err.Error(), "opposites") {
 		t.Errorf("--models with --no-models: err = %v, want opposites", err)
 	}
@@ -1902,8 +1946,10 @@ func TestUsageNarrowsLikeTheOtherReports(t *testing.T) {
 		"GET /v1/projects": paymentsProject,
 		"GET /v1/usage":    map[string]any{"data": []any{}},
 	})
-	if err := Run(context.Background(), []string{"usage", "--project", "payments",
-		"--model", "keera-speed"}); err != nil {
+	if err := Run(context.Background(), []string{
+		"usage", "--project", "payments",
+		"--model", "keera-speed",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	q := f.request("GET", "/v1/usage").query

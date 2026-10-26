@@ -72,7 +72,8 @@ func TestAnAdministratorManagesTheirOrganisationsOwnModels(t *testing.T) {
 	// model, so the two may not share an alias.
 	router := func(alias string, destinations ...string) *httptest.ResponseRecorder {
 		body, _ := json.Marshal(map[string]any{"start": map[string]any{
-			"id": "route", "kind": "route", "mode": "fallback", "destinations": destinations}})
+			"id": "route", "kind": "route", "mode": "fallback", "destinations": destinations,
+		}})
 		return invoke(s.putRouter, admin("org_1"), http.MethodPut, "/v1/routers/"+alias, string(body))
 	}
 	if w := router("chain", "mine", "keera-small"); w.Code != http.StatusOK {

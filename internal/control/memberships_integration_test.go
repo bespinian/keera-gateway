@@ -42,8 +42,10 @@ func membershipServer(t *testing.T, adminGroups bool) orgsSetup {
 			t.Fatalf("creating %s: %v", o.Name, err)
 		}
 	}
-	mapping := authn.RoleMapping{Default: authn.RoleMember,
-		OperatorEmails: []string{"op@example.ch"}}
+	mapping := authn.RoleMapping{
+		Default:        authn.RoleMember,
+		OperatorEmails: []string{"op@example.ch"},
+	}
 	if adminGroups {
 		mapping.AdminGroups = []string{"keera-admins"}
 	}
@@ -79,7 +81,8 @@ func membershipServer(t *testing.T, adminGroups bool) orgsSetup {
 // the reason after it when it was refused, and the session cookie, which is
 // nil when the sign-in was refused.
 func (s orgsSetup) signIn(t *testing.T, provider, subject, email string, groups []string,
-	cookies ...*http.Cookie) (string, *http.Cookie) {
+	cookies ...*http.Cookie,
+) (string, *http.Cookie) {
 	t.Helper()
 	resp, err := noRedirects.Get(s.ts.URL + httpx.ControlPrefix + "/auth/login?provider=" + provider)
 	if err != nil {
@@ -130,7 +133,8 @@ func (s orgsSetup) me(t *testing.T, session *http.Cookie) (whoAmI, int) {
 }
 
 func (s orgsSetup) do(t *testing.T, method, path, body string, session *http.Cookie, csrf string,
-	out any) (int, []*http.Cookie) {
+	out any,
+) (int, []*http.Cookie) {
 	t.Helper()
 	req, _ := http.NewRequest(method, s.ts.URL+httpx.ControlPrefix+path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

@@ -17,16 +17,24 @@ func TestUnhappyRequestsCarryWhatTheClientWasTold(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now.Add(-3 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			Alias: "keera-code", Status: 200, CostMicros: 500},
-		{TS: now.Add(-2 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+		{
+			TS: now.Add(-3 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-code", Status: 200, CostMicros: 500,
+		},
+		{
+			TS: now.Add(-2 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 500, Error: "CUDA out of memory",
-			Latency: 1200 * time.Millisecond, Stream: true},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			Alias: "keera-fast", Status: 429, Error: "your project is over its rate limit"},
+			Latency: 1200 * time.Millisecond, Stream: true,
+		},
+		{
+			TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-fast", Status: 429, Error: "your project is over its rate limit",
+		},
 		// Answered, and then cut short: the 200 the client was sent stands.
-		{TS: now.Add(-30 * time.Minute), OrgID: f.orgID, KeyID: f.keyID,
-			Alias: "keera-code", Status: 200, Error: "the stream ended before the model was done"},
+		{
+			TS: now.Add(-30 * time.Minute), OrgID: f.orgID, KeyID: f.keyID,
+			Alias: "keera-code", Status: 200, Error: "the stream ended before the model was done",
+		},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
@@ -89,21 +97,31 @@ func TestUnhappyRequestsNarrowAndStayInsideOneTenant(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	events := []Event{
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
-			Status: 502, Error: "connection refused"},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: "key_2", Alias: "keera-fast",
-			Status: 500, Error: "internal server error"},
-		{TS: now.Add(-40 * 24 * time.Hour), OrgID: f.orgID, KeyID: f.keyID,
-			Alias: "keera-code", Status: 500, Error: "long ago"},
-		{TS: now.Add(-time.Hour), OrgID: "org_2", KeyID: "key_9", Alias: "keera-code",
-			Status: 500, Error: "someone else's problem"},
+		{
+			TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
+			Status: 502, Error: "connection refused",
+		},
+		{
+			TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: "key_2", Alias: "keera-fast",
+			Status: 500, Error: "internal server error",
+		},
+		{
+			TS: now.Add(-40 * 24 * time.Hour), OrgID: f.orgID, KeyID: f.keyID,
+			Alias: "keera-code", Status: 500, Error: "long ago",
+		},
+		{
+			TS: now.Add(-time.Hour), OrgID: "org_2", KeyID: "key_9", Alias: "keera-code",
+			Status: 500, Error: "someone else's problem",
+		},
 	}
 	if err := st.WriteEvents(ctx, events); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
 
-	window := RequestQuery{OrgID: f.orgID, Outcome: OutcomeUnhappy, From: now.AddDate(0, 0, -7),
-		To: now.Add(time.Minute)}
+	window := RequestQuery{
+		OrgID: f.orgID, Outcome: OutcomeUnhappy, From: now.AddDate(0, 0, -7),
+		To: now.Add(time.Minute),
+	}
 
 	byAlias := window
 	byAlias.Alias = "keera-code"
@@ -142,8 +160,10 @@ func TestUnhappyRequestsNarrowAndStayInsideOneTenant(t *testing.T) {
 	if len(page) != 1 {
 		t.Fatalf("%d rows, want the one asked for", len(page))
 	}
-	next, err := st.Requests(ctx, RequestQuery{OrgID: f.orgID, Outcome: OutcomeUnhappy, Limit: 1,
-		Before: page[0].ID})
+	next, err := st.Requests(ctx, RequestQuery{
+		OrgID: f.orgID, Outcome: OutcomeUnhappy, Limit: 1,
+		Before: page[0].ID,
+	})
 	if err != nil {
 		t.Fatalf("Requests: %v", err)
 	}
@@ -199,19 +219,27 @@ func TestOverviewNarrowsToOneEntity(t *testing.T) {
 		t.Fatalf("CreateKey: %v", err)
 	}
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now.Add(-2 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+		{
+			TS: now.Add(-2 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", InputTokens: 100, OutputTokens: 20,
-			CostMicros: 500, Status: 200, TTFT: 200 * time.Millisecond},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			CostMicros: 500, Status: 200, TTFT: 200 * time.Millisecond,
+		},
+		{
+			TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-fast", InputTokens: 10, OutputTokens: 5,
-			CostMicros: 100, Status: 200, TTFT: 50 * time.Millisecond},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			Alias: "keera-code", Status: 502, Error: "no backend answered"},
+			CostMicros: 100, Status: 200, TTFT: 50 * time.Millisecond,
+		},
+		{
+			TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-code", Status: 502, Error: "no backend answered",
+		},
 		// Another project, another key, the same window: none of it belongs in the
 		// first project's report.
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: "project_2", KeyID: "key_2",
+		{
+			TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: "project_2", KeyID: "key_2",
 			Alias: "keera-code", InputTokens: 900, OutputTokens: 90,
-			CostMicros: 9000, Status: 200, TTFT: 400 * time.Millisecond},
+			CostMicros: 9000, Status: 200, TTFT: 400 * time.Millisecond,
+		},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
@@ -298,15 +326,21 @@ func TestRequestsCarryWhereTheirTimeWent(t *testing.T) {
 		{Name: SpanReceive, At: 130, For: 2400},
 		{Name: SpanAdmit, At: 2540, For: 95},
 		{Name: SpanFilter, Of: "redact", At: 2640, For: 310000, Note: "rewrote"},
-		{Name: SpanUpstream, Of: "keera-code", At: 312700, For: 890000,
-			Note: "answered 200"},
+		{
+			Name: SpanUpstream, Of: "keera-code", At: 312700, For: 890000,
+			Note: "answered 200",
+		},
 	}
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+		{
+			TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 200, Latency: 1203 * time.Millisecond,
-			Spans: steps},
-		{TS: now, OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			Alias: "keera-code", Status: 200, Latency: time.Second},
+			Spans: steps,
+		},
+		{
+			TS: now, OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-code", Status: 200, Latency: time.Second,
+		},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
@@ -335,17 +369,25 @@ func TestRequestsCarryWhatWasServedAndWhatWasNot(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now.Add(-4 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+		{
+			TS: now.Add(-4 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", InputTokens: 1000, OutputTokens: 200,
 			CostMicros: 2500, Status: 200, Latency: 4 * time.Second,
-			TTFT: 300 * time.Millisecond, Stream: true},
-		{TS: now.Add(-3 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			Alias: "keera-code", Status: 500, Error: "CUDA out of memory"},
-		{TS: now.Add(-2 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			Alias: "keera-fast", Status: 429, Error: "over the rate limit"},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			TTFT: 300 * time.Millisecond, Stream: true,
+		},
+		{
+			TS: now.Add(-3 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-code", Status: 500, Error: "CUDA out of memory",
+		},
+		{
+			TS: now.Add(-2 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-fast", Status: 429, Error: "over the rate limit",
+		},
+		{
+			TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 200, Error: "the stream ended early",
-			Canceled: true, Estimated: true, OutputTokens: 12},
+			Canceled: true, Estimated: true, OutputTokens: 12,
+		},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
@@ -433,10 +475,14 @@ func TestRequestsAfterACursorIsWhatALiveReaderSees(t *testing.T) {
 	}
 
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now.Add(-2 * time.Minute), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			Alias: "keera-code", Status: 200},
-		{TS: now.Add(-time.Minute), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			Alias: "keera-code", Status: 500, Error: "CUDA out of memory"},
+		{
+			TS: now.Add(-2 * time.Minute), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-code", Status: 200,
+		},
+		{
+			TS: now.Add(-time.Minute), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-code", Status: 500, Error: "CUDA out of memory",
+		},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
@@ -459,8 +505,10 @@ func TestRequestsAfterACursorIsWhatALiveReaderSees(t *testing.T) {
 	}
 
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now, OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			Alias: "keera-fast", Status: 429, Error: "over the rate limit"},
+		{
+			TS: now, OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-fast", Status: 429, Error: "over the rate limit",
+		},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
@@ -515,8 +563,10 @@ func TestWriteEventsAnnouncesThatTheLogGrew(t *testing.T) {
 	}
 
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: time.Now(), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			Alias: "keera-code", Status: 200},
+		{
+			TS: time.Now(), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-code", Status: 200,
+		},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
@@ -542,19 +592,29 @@ func TestOutcomesCountTheWindowNotThePage(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	events := []Event{
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			Alias: "keera-code", Status: 500, Error: "backend fell over"},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			Alias: "keera-code", Status: 402, Error: "budget spent"},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			Alias: "keera-code", Status: 200, Error: "cut short"},
+		{
+			TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-code", Status: 500, Error: "backend fell over",
+		},
+		{
+			TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-code", Status: 402, Error: "budget spent",
+		},
+		{
+			TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-code", Status: 200, Error: "cut short",
+		},
 		// Outside the window, and so outside every count.
-		{TS: now.AddDate(0, 0, -10), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			Alias: "keera-code", Status: 200},
+		{
+			TS: now.AddDate(0, 0, -10), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-code", Status: 200,
+		},
 	}
 	for range 3 {
-		events = append(events, Event{TS: now.Add(-time.Hour), OrgID: f.orgID,
-			ProjectID: f.projectID, KeyID: f.keyID, Alias: "keera-code", Status: 200})
+		events = append(events, Event{
+			TS: now.Add(-time.Hour), OrgID: f.orgID,
+			ProjectID: f.projectID, KeyID: f.keyID, Alias: "keera-code", Status: 200,
+		})
 	}
 	if err := st.WriteEvents(ctx, events); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
@@ -594,8 +654,10 @@ func TestOutcomesCountTheWindowNotThePage(t *testing.T) {
 	if _, err := st.CreateProject(ctx, Project{ID: "project_2", OrgID: f.orgID, Name: "Data Science"}); err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
-	if err := st.WriteEvents(ctx, []Event{{TS: now.Add(-time.Hour), OrgID: f.orgID,
-		ProjectID: "project_2", Alias: "keera-code", Status: 500, Error: "not ours"}}); err != nil {
+	if err := st.WriteEvents(ctx, []Event{{
+		TS: now.Add(-time.Hour), OrgID: f.orgID,
+		ProjectID: "project_2", Alias: "keera-code", Status: 500, Error: "not ours",
+	}}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
 	again, err := st.Outcomes(ctx, q)
@@ -632,14 +694,22 @@ func TestRequestsNarrowToAClassOfStatuses(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now.Add(-4 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			Alias: "keera-code", Status: 200},
-		{TS: now.Add(-3 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			Alias: "keera-code", Status: 402, Error: "budget spent"},
-		{TS: now.Add(-2 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			Alias: "keera-code", Status: 429, Error: "over the rate limit"},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			Alias: "keera-code", Status: 503, Error: "nothing serving"},
+		{
+			TS: now.Add(-4 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-code", Status: 200,
+		},
+		{
+			TS: now.Add(-3 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-code", Status: 402, Error: "budget spent",
+		},
+		{
+			TS: now.Add(-2 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-code", Status: 429, Error: "over the rate limit",
+		},
+		{
+			TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-code", Status: 503, Error: "nothing serving",
+		},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
@@ -687,16 +757,24 @@ func TestRequestFiltersOfferOnlyWhatOccurred(t *testing.T) {
 		t.Fatalf("AddUser: %v", err)
 	}
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			UserID: "user_1", Alias: "keera-code", Status: 200},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			UserID: "user_1", Alias: "keera-code", Status: 500, Error: "backend fell over"},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			Alias: "keera-fast", Status: 500, Error: "backend fell over"},
+		{
+			TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			UserID: "user_1", Alias: "keera-code", Status: 200,
+		},
+		{
+			TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			UserID: "user_1", Alias: "keera-code", Status: 500, Error: "backend fell over",
+		},
+		{
+			TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-fast", Status: 500, Error: "backend fell over",
+		},
 		// Outside the window, so outside every facet: a model nobody has called
 		// this week must not be offered as a way to narrow this week.
-		{TS: now.AddDate(0, 0, -10), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			Alias: "keera-retired", Status: 200},
+		{
+			TS: now.AddDate(0, 0, -10), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-retired", Status: 200,
+		},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
@@ -762,14 +840,22 @@ func TestRequestsRankTheWholeWindow(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now.Add(-5 * time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
-			Status: 200, CostMicros: 9000, InputTokens: 10, TTFT: time.Second},
-		{TS: now.Add(-4 * time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
-			Status: 200, CostMicros: 10, InputTokens: 5000, TTFT: 100 * time.Millisecond},
-		{TS: now.Add(-3 * time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
-			Status: 200, CostMicros: 20, InputTokens: 20, TTFT: 8 * time.Second},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
-			Status: 200, CostMicros: 30, InputTokens: 30, TTFT: 200 * time.Millisecond},
+		{
+			TS: now.Add(-5 * time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
+			Status: 200, CostMicros: 9000, InputTokens: 10, TTFT: time.Second,
+		},
+		{
+			TS: now.Add(-4 * time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
+			Status: 200, CostMicros: 10, InputTokens: 5000, TTFT: 100 * time.Millisecond,
+		},
+		{
+			TS: now.Add(-3 * time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
+			Status: 200, CostMicros: 20, InputTokens: 20, TTFT: 8 * time.Second,
+		},
+		{
+			TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
+			Status: 200, CostMicros: 30, InputTokens: 30, TTFT: 200 * time.Millisecond,
+		},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
@@ -801,14 +887,18 @@ func TestRequestsCarryTheCachedShareOfThePrompt(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now.Add(-time.Minute), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+		{
+			TS: now.Add(-time.Minute), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 200, InputTokens: 1000, CachedInputTokens: 900,
-			OutputTokens: 500, CostMicros: 2190},
+			OutputTokens: 500, CostMicros: 2190,
+		},
 		// A model served inside your own infrastructure caches nothing, which
 		// has to come back as none cached rather than as absent.
-		{TS: now, OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+		{
+			TS: now, OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 200, InputTokens: 1000, OutputTokens: 500,
-			CostMicros: 3000},
+			CostMicros: 3000,
+		},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
@@ -839,12 +929,18 @@ func TestARequestIsFoundByEitherID(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
-			Status: 200, RequestID: "req_1", ClientRequestID: "job-12"},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
-			Status: 200, RequestID: "req_2"},
-		{TS: now.Add(-time.Hour), OrgID: "org_2", KeyID: "key_9", Alias: "keera-code",
-			Status: 200, RequestID: "req_3", ClientRequestID: "job-12"},
+		{
+			TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
+			Status: 200, RequestID: "req_1", ClientRequestID: "job-12",
+		},
+		{
+			TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
+			Status: 200, RequestID: "req_2",
+		},
+		{
+			TS: now.Add(-time.Hour), OrgID: "org_2", KeyID: "key_9", Alias: "keera-code",
+			Status: 200, RequestID: "req_3", ClientRequestID: "job-12",
+		},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}

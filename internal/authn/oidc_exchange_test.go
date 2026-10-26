@@ -287,8 +287,14 @@ func TestExchangeReadsEntrasVerifiedClaim(t *testing.T) {
 		claim any
 		ok    bool
 	}{
-		{true, true}, {"true", true}, {"1", true}, {1.0, true},
-		{false, false}, {"false", false}, {"0", false}, {0.0, false},
+		{true, true},
+		{"true", true},
+		{"1", true},
+		{1.0, true},
+		{false, false},
+		{"false", false},
+		{"0", false},
+		{0.0, false},
 	} {
 		flow := NewFlow()
 		idp.Claims = func(m map[string]any) {
@@ -551,11 +557,17 @@ func TestAdminFromDirectoryIsTrueIfAnyProviderMapsAdminGroups(t *testing.T) {
 		{"nothing configured", nil, false},
 		{"by address only", []OIDCConfig{base("google", google)}, false},
 		{"operator groups only", []OIDCConfig{base("entra", operatorsOnly)}, false},
-		{"blank entries do not count",
-			[]OIDCConfig{base("entra", RoleMapping{AdminGroups: []string{"", " "}})}, false},
+		{
+			"blank entries do not count",
+			[]OIDCConfig{base("entra", RoleMapping{AdminGroups: []string{"", " "}})},
+			false,
+		},
 		{"admin groups", []OIDCConfig{base("entra", entra)}, true},
-		{"one of several",
-			[]OIDCConfig{base("google", google), base("entra", entra)}, true},
+		{
+			"one of several",
+			[]OIDCConfig{base("google", google), base("entra", entra)},
+			true,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ps, err := NewProviders(ctx, tc.cfgs, idp.Client())

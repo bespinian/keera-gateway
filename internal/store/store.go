@@ -243,7 +243,8 @@ type row interface{ Scan(dest ...any) error }
 // queryAll runs a query and reads every row with scan. No rows gives an empty
 // slice rather than nil, so a list encodes as [] in JSON.
 func queryAll[T any](ctx context.Context, pool *pgxpool.Pool, scan func(row) (T, error),
-	sql string, args ...any) ([]T, error) {
+	sql string, args ...any,
+) ([]T, error) {
 	rows, err := pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
@@ -254,7 +255,8 @@ func queryAll[T any](ctx context.Context, pool *pgxpool.Pool, scan func(row) (T,
 // queryMap runs a query whose first column is a key and the rest what targets
 // points at, and returns its rows by key.
 func queryMap[V any](ctx context.Context, pool *pgxpool.Pool, targets func(*V) []any,
-	sql string, args ...any) (map[string]V, error) {
+	sql string, args ...any,
+) (map[string]V, error) {
 	rows, err := pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
@@ -338,12 +340,12 @@ func nullableTime(t time.Time) *time.Time {
 }
 
 // pageLimit is how many rows a list reads: n, def when n is unset, and at
-// most max. A cap keeps one request from reading a whole table.
-func pageLimit(n, def, max int) int {
+// most ceiling. A cap keeps one request from reading a whole table.
+func pageLimit(n, def, ceiling int) int {
 	if n <= 0 {
 		return def
 	}
-	return min(n, max)
+	return min(n, ceiling)
 }
 
 // countOf counts the rows whose col is one of vals. The values are this

@@ -23,8 +23,10 @@ import (
 // and its own subagent tools in one.
 var (
 	anthropicClientTools = []string{"custom", "bash_", "text_editor_", "computer_", "memory_"}
-	openAIClientTools    = []string{"function", "custom", "namespace", "local_shell",
-		"computer_use_preview", "shell", "apply_patch"}
+	openAIClientTools    = []string{
+		"function", "custom", "namespace", "local_shell",
+		"computer_use_preview", "shell", "apply_patch",
+	}
 )
 
 // keepsTool reports whether a tool of this type is one the client runs.
@@ -87,8 +89,10 @@ func stripTools(b *body, client []string) []string {
 
 // choiceKinds are the tool_choice types that say how to choose, rather than
 // name a hosted tool to use.
-var choiceKinds = []string{"auto", "any", "none", "required", "tool", "function", "custom",
-	"allowed_tools"}
+var choiceKinds = []string{
+	"auto", "any", "none", "required", "tool", "function", "custom",
+	"allowed_tools",
+}
 
 // hostedChoice reports whether a tool_choice type names a hosted tool, as
 // {"type": "web_search_preview"} does on the Responses API.

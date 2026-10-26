@@ -40,7 +40,8 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		f.verifier = r.PostForm.Get("code_verifier")
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"access_token": "gho_token", "token_type": "bearer"})
+			"access_token": "gho_token", "token_type": "bearer",
+		})
 		return
 	}
 	if r.Header.Get("Authorization") != "Bearer gho_token" {
@@ -67,7 +68,8 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		var teams []map[string]any
 		for _, t := range f.teams {
 			teams = append(teams, map[string]any{
-				"slug": t[1], "organization": map[string]any{"login": t[0]}})
+				"slug": t[1], "organization": map[string]any{"login": t[0]},
+			})
 		}
 		out = teams
 	default:
@@ -140,8 +142,10 @@ func TestGitHubSignIn(t *testing.T) {
 	if f.verifier != flow.Verifier {
 		t.Error("the exchange did not send the PKCE verifier")
 	}
-	want := Identity{Provider: "github", Subject: "42", Email: "alice@example.ch",
-		Name: "Alice Example", RefreshToken: "gho_token"}
+	want := Identity{
+		Provider: "github", Subject: "42", Email: "alice@example.ch",
+		Name: "Alice Example", RefreshToken: "gho_token",
+	}
 	if id.Provider != want.Provider || id.Subject != want.Subject || id.Email != want.Email ||
 		id.Name != want.Name || id.RefreshToken != want.RefreshToken {
 		t.Errorf("identity = %+v, want %+v", id, want)
@@ -210,7 +214,8 @@ func TestGitHubGroupsAreOrgsAndTeams(t *testing.T) {
 	}
 
 	o = f.connect(OIDCConfig{Mapping: RoleMapping{
-		Default: RoleMember, AdminGroups: []string{"bespinian/keera-admins"}}})
+		Default: RoleMember, AdminGroups: []string{"bespinian/keera-admins"},
+	}})
 	if !slices.Contains(o.oauth.Scopes, "read:org") {
 		t.Errorf("scopes = %v, want read:org where groups decide a role", o.oauth.Scopes)
 	}

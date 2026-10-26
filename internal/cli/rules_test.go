@@ -132,3 +132,23 @@ func TestParseDestinationsRejectsACeilingThatIsNotOne(t *testing.T) {
 		}
 	}
 }
+
+func TestParseValues(t *testing.T) {
+	values, dests, err := parseValues("cheap=keera-speed, quick=keera-speed,hard=keera-frontier")
+	if err != nil {
+		t.Fatalf("parseValues: %v", err)
+	}
+	if values["cheap"] != "keera-speed" || values["quick"] != "keera-speed" ||
+		values["hard"] != "keera-frontier" || len(values) != 3 {
+		t.Errorf("values = %v", values)
+	}
+	// Each model once, in the order first written.
+	if strings.Join(dests, ",") != "keera-speed,keera-frontier" {
+		t.Errorf("destinations = %v", dests)
+	}
+	for _, spec := range []string{"cheap", "cheap=", "=keera-speed", "a=x,a=y"} {
+		if _, _, err := parseValues(spec); err == nil {
+			t.Errorf("parseValues(%q) = nil, want an error", spec)
+		}
+	}
+}

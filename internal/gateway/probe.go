@@ -279,9 +279,11 @@ func servedWarnings(p Probe, m policy.Model) []string {
 
 // decisionProbe is the question a decision model's check asks. The answer
 // is obvious, so a wrong one says the model is not reading what it is sent.
-var decisionProbe = decisionQuestion{Type: "choice",
+var decisionProbe = decisionQuestion{
+	Type:         "choice",
 	Instructions: "Which language is this text written in?",
-	Criteria:     map[string]string{"A": "English", "B": "Go source code"}}
+	Criteria:     map[string]string{"A": "English", "B": "Go source code"},
+}
 
 // checkDecision asks one question with an obvious answer. There is no stream
 // or tool call to check: routers and gates read one answer.
@@ -361,7 +363,8 @@ func (s *Server) checkEmbedding(ctx context.Context, m policy.Model, p Probe) Pr
 // probeCall sends a check's request and records which backend answered, and
 // its status. It returns nil when the check is over, with p.Error saying why.
 func (s *Server) probeCall(ctx context.Context, m policy.Model, path string,
-	request map[string]any, p *Probe) *http.Response {
+	request map[string]any, p *Probe,
+) *http.Response {
 	payload, err := json.Marshal(request)
 	if err != nil {
 		p.Error = err.Error()
@@ -377,8 +380,10 @@ func (s *Server) probeCall(ctx context.Context, m policy.Model, path string,
 		// Billed at its ceiling: a check reads too little of the answer to
 		// find the usage record, and it is small either way.
 		output, _ := request["max_tokens"].(int)
-		if line, ok := m.Bill(policy.Tokens{Input: len(payload) / bytesPerToken,
-			Output: output}); ok {
+		if line, ok := m.Bill(policy.Tokens{
+			Input:  len(payload) / bytesPerToken,
+			Output: output,
+		}); ok {
 			s.billCheck(m.OrgID, []policy.BillLine{line})
 		}
 	}
@@ -398,7 +403,8 @@ func (s *Server) probeCall(ctx context.Context, m policy.Model, path string,
 // probeAnswer sends a check's request and reads the whole answer, timing
 // both. It returns false when the check is over, with p.Error saying why.
 func (s *Server) probeAnswer(ctx context.Context, m policy.Model, path string,
-	request map[string]any, p *Probe) ([]byte, bool) {
+	request map[string]any, p *Probe,
+) ([]byte, bool) {
 	start := time.Now()
 	resp := s.probeCall(ctx, m, path, request, p)
 	if resp == nil {

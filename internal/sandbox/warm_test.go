@@ -162,10 +162,14 @@ func TestClaimedStatusFollowsTheBoundSandbox(t *testing.T) {
 		want          policy.SandboxState
 		exited        bool
 	}{
-		{"failed", `{"status":{"conditions":[{"type":"Finished","status":"True","reason":"PodFailed"}]}}`,
-			policy.SandboxFailed, false},
-		{"exited", `{"status":{"conditions":[{"type":"Finished","status":"True","reason":"PodSucceeded"}]}}`,
-			policy.SandboxFailed, true},
+		{
+			"failed", `{"status":{"conditions":[{"type":"Finished","status":"True","reason":"PodFailed"}]}}`,
+			policy.SandboxFailed, false,
+		},
+		{
+			"exited", `{"status":{"conditions":[{"type":"Finished","status":"True","reason":"PodSucceeded"}]}}`,
+			policy.SandboxFailed, true,
+		},
 		{"suspended", `{"spec":{"operatingMode":"Suspended"}}`, policy.SandboxSuspended, false},
 	}
 	for _, tc := range cases {

@@ -13,11 +13,15 @@ import (
 // activate, and the routes `keera connect claude-code` reads.
 func claudeCodeRoutes(extra map[string]any) map[string]any {
 	routes := connectRoutes("https://keera.example.ch/api", map[string]any{
-		"GET /v1/me": map[string]any{"user_id": "user_1", "email": "ada@example.ch",
-			"role": "member", "org_id": "org_1"},
+		"GET /v1/me": map[string]any{
+			"user_id": "user_1", "email": "ada@example.ch",
+			"role": "member", "org_id": "org_1",
+		},
 		"GET /v1/keys": map[string]any{"data": []map[string]any{
-			{"id": "key_pending", "org_id": "org_1", "user_id": "user_1", "kind": "standard",
-				"name": "Ada's laptop", "pending": true},
+			{
+				"id": "key_pending", "org_id": "org_1", "user_id": "user_1", "kind": "standard",
+				"name": "Ada's laptop", "pending": true,
+			},
 		}},
 		"POST /v1/keys/key_pending/activate": map[string]any{
 			"id": "key_pending", "org_id": "org_1", "user_id": "user_1", "kind": "standard",
@@ -25,8 +29,10 @@ func claudeCodeRoutes(extra map[string]any) map[string]any {
 			"key": "keera_sk_new",
 		},
 		"GET /v1/access": map[string]any{"keys": []map[string]any{
-			{"id": "key_pending", "org_id": "org_1", "name": "claude-code on laptop (0a1b2c3d)",
-				"kind": "standard", "state": "active", "allowed_models": []string{"keera-code"}},
+			{
+				"id": "key_pending", "org_id": "org_1", "name": "claude-code on laptop (0a1b2c3d)",
+				"kind": "standard", "state": "active", "allowed_models": []string{"keera-code"},
+			},
 		}},
 	})
 	maps.Copy(routes, extra)
@@ -136,8 +142,10 @@ func thisMachinesKey(t *testing.T, kind string) map[string]any {
 	if host == "" {
 		host = "this machine"
 	}
-	return map[string]any{"id": "key_mine", "org_id": "org_1", "user_id": "user_1",
-		"kind": kind, "name": machineKeyName(host, machine)}
+	return map[string]any{
+		"id": "key_mine", "org_id": "org_1", "user_id": "user_1",
+		"kind": kind, "name": machineKeyName(host, machine),
+	}
 }
 
 // Replacing the machine's key revokes the one Claude Code holds, so a model the
@@ -149,8 +157,10 @@ func TestConnectClaudeCodeKeepsTheKeyWhenItMayNotUseTheModel(t *testing.T) {
 	f := newFakeControl(t, claudeCodeRoutes(map[string]any{
 		"GET /v1/keys": map[string]any{"data": []map[string]any{thisMachinesKey(t, "standard")}},
 		"GET /v1/access": map[string]any{"keys": []map[string]any{
-			{"id": "key_mine", "org_id": "org_1", "kind": "standard", "state": "active",
-				"allowed_models": []string{"keera-code"}},
+			{
+				"id": "key_mine", "org_id": "org_1", "kind": "standard", "state": "active",
+				"allowed_models": []string{"keera-code"},
+			},
 		}},
 	}))
 
@@ -172,8 +182,10 @@ func TestConnectClaudeCodeReplacesAnExpiredKey(t *testing.T) {
 	f := newFakeControl(t, claudeCodeRoutes(map[string]any{
 		"GET /v1/keys": map[string]any{"data": []map[string]any{thisMachinesKey(t, "standard")}},
 		"GET /v1/access": map[string]any{"keys": []map[string]any{
-			{"id": "key_mine", "org_id": "org_1", "kind": "standard", "state": "expired",
-				"allowed_models": []string{"keera-code"}},
+			{
+				"id": "key_mine", "org_id": "org_1", "kind": "standard", "state": "expired",
+				"allowed_models": []string{"keera-code"},
+			},
 		}},
 		"POST /v1/keys/key_mine/rotate": map[string]any{
 			"id": "key_new", "key": "keera_sk_new", "kind": "standard",
@@ -201,11 +213,15 @@ func TestConnectClaudeCodeSubscriptionRemovesTheKeeraKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	newFakeControl(t, claudeCodeRoutes(map[string]any{
-		"GET /v1/me": map[string]any{"user_id": "user_1", "email": "ada@example.ch",
-			"role": "member", "org_id": "org_1", "claude_subscriptions": true},
+		"GET /v1/me": map[string]any{
+			"user_id": "user_1", "email": "ada@example.ch",
+			"role": "member", "org_id": "org_1", "claude_subscriptions": true,
+		},
 		"GET /v1/models": map[string]any{"data": []map[string]any{
-			{"alias": "claude-opus", "kind": "chat", "enabled": true, "provider": "anthropic",
-				"backend_model": "claude-opus-5-5", "subscription": true},
+			{
+				"alias": "claude-opus", "kind": "chat", "enabled": true, "provider": "anthropic",
+				"backend_model": "claude-opus-5-5", "subscription": true,
+			},
 		}},
 		"GET /v1/keys": map[string]any{"data": []map[string]any{thisMachinesKey(t, "subscription")}},
 		"POST /v1/keys/key_mine/rotate": map[string]any{
@@ -236,17 +252,23 @@ func TestConnectClaudeCodeRevokesANewKeyThatMayNotUseTheModel(t *testing.T) {
 	t.Setenv("KEERA_CONFIG_DIR", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	f := newFakeControl(t, claudeCodeRoutes(map[string]any{
-		"GET /v1/me": map[string]any{"user_id": "user_1", "email": "ada@example.ch",
-			"role": "admin", "org_id": "org_1"},
+		"GET /v1/me": map[string]any{
+			"user_id": "user_1", "email": "ada@example.ch",
+			"role": "admin", "org_id": "org_1",
+		},
 		"GET /v1/projects": map[string]any{"data": []map[string]any{
 			{"id": "project_1", "org_id": "org_1", "name": "Default"},
 		}},
 		"GET /v1/keys": map[string]any{"data": []any{}},
-		"POST /v1/keys": map[string]any{"id": "key_new", "org_id": "org_1", "key": "keera_sk_new",
-			"kind": "standard"},
+		"POST /v1/keys": map[string]any{
+			"id": "key_new", "org_id": "org_1", "key": "keera_sk_new",
+			"kind": "standard",
+		},
 		"GET /v1/access": map[string]any{"keys": []map[string]any{
-			{"id": "key_new", "org_id": "org_1", "kind": "standard", "state": "active",
-				"allowed_models": []string{"keera-code"}},
+			{
+				"id": "key_new", "org_id": "org_1", "kind": "standard", "state": "active",
+				"allowed_models": []string{"keera-code"},
+			},
 		}},
 		"DELETE /v1/keys/key_new": map[string]any{},
 	}))

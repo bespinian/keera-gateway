@@ -930,8 +930,10 @@ func TestAShadowFilterDoesNotStopTheRequest(t *testing.T) {
 		// Everywhere else this refuses the request, but a shadow filter is a
 		// measurement and must not take a department offline. The failure is
 		// still recorded: a shadow filter that cannot run measures nothing.
-		{"when it cannot run", func([]string) string { return "I have redacted it." }, "",
-			store.FilterError},
+		{
+			"when it cannot run", func([]string) string { return "I have redacted it." }, "",
+			store.FilterError,
+		},
 		{"when its model is gone", redactor, "keera-vanished", store.FilterError},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -35,14 +35,22 @@ func routerStore(t *testing.T) (*store.Store, context.Context) {
 		t.Fatalf("CreateOrg: %v", err)
 	}
 	for _, m := range []policy.Model{
-		{OrgID: "org_1", Alias: "keera-small", Kind: policy.KindChat, Backends: []string{"http://x/v1"},
-			BackendModel: "small", Description: "fast and local", Enabled: true},
-		{OrgID: "org_1", Alias: "keera-large", Kind: policy.KindChat, Backends: []string{"http://x/v1"},
-			BackendModel: "large", Description: "hosted and capable", Enabled: true},
-		{OrgID: "org_1", Alias: "keera-picker", Kind: policy.KindChat, Backends: []string{"http://x/v1"},
-			BackendModel: "picker", Enabled: true},
-		{OrgID: "org_1", Alias: "keera-embed", Kind: policy.KindEmbedding, Backends: []string{"http://x/v1"},
-			BackendModel: "embed", Enabled: true},
+		{
+			OrgID: "org_1", Alias: "keera-small", Kind: policy.KindChat, Backends: []string{"http://x/v1"},
+			BackendModel: "small", Description: "fast and local", Enabled: true,
+		},
+		{
+			OrgID: "org_1", Alias: "keera-large", Kind: policy.KindChat, Backends: []string{"http://x/v1"},
+			BackendModel: "large", Description: "hosted and capable", Enabled: true,
+		},
+		{
+			OrgID: "org_1", Alias: "keera-picker", Kind: policy.KindChat, Backends: []string{"http://x/v1"},
+			BackendModel: "picker", Enabled: true,
+		},
+		{
+			OrgID: "org_1", Alias: "keera-embed", Kind: policy.KindEmbedding, Backends: []string{"http://x/v1"},
+			BackendModel: "embed", Enabled: true,
+		},
 	} {
 		if err := st.UpsertModel(ctx, m, store.Credential{}); err != nil {
 			t.Fatalf("UpsertModel: %v", err)
@@ -81,8 +89,10 @@ func validRoute() map[string]any {
 
 // validRouter is the simplest router: validRoute alone.
 func validRouter() map[string]any {
-	return map[string]any{"description": "Keeps the large model for the work that needs it",
-		"start": validRoute()}
+	return map[string]any{
+		"description": "Keeps the large model for the work that needs it",
+		"start":       validRoute(),
+	}
 }
 
 func TestPutRouterWritesARouteStep(t *testing.T) {
@@ -104,6 +114,30 @@ func TestPutRouterWritesARouteStep(t *testing.T) {
 	}
 }
 
+// A header step is stored the way the gateway reads it: the header name in
+// its usual spelling, and what was typed around the values trimmed.
+func TestPutRouterWritesAHeaderStep(t *testing.T) {
+	st, ctx := routerStore(t)
+	body := map[string]any{"start": map[string]any{
+		"id": "route", "kind": "route", "mode": "header",
+		"header":       " x-keera-route ",
+		"values":       map[string]string{" hard ": "keera-large ", "cheap": "keera-small"},
+		"destinations": []string{"keera-small", "keera-large"},
+	}}
+	if code, out := putTo(t, routerServer(ctx, t, st), "/v1/routers/byapp", body); code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", code, out)
+	}
+	saved, err := st.Router(ctx, "org_1", "byapp")
+	if err != nil {
+		t.Fatalf("Router: %v", err)
+	}
+	rt := saved.Routes()[0]
+	if rt.Header != "X-Keera-Route" || rt.Values["hard"] != "keera-large" ||
+		rt.Values["cheap"] != "keera-small" || len(rt.Values) != 2 {
+		t.Errorf("saved = %+v", rt)
+	}
+}
+
 // Each of these makes a route step that looks like it works, and saving is
 // the only moment the mistake is visible. The step's other problems are
 // policy's TestRouteStepProblems; the deciding model is checked here.
@@ -114,10 +148,14 @@ func TestPutRouterRefusesARouteStepThatWouldLookLikeItWorked(t *testing.T) {
 		name, want string
 		change     func(map[string]any)
 	}{
-		{"a deciding model that is not a chat model", "reads text and answers with an alias",
-			func(s map[string]any) { s["model"] = "keera-embed" }},
-		{"a deciding model that does not exist", "model_not_found",
-			func(s map[string]any) { s["model"] = "keera-huge" }},
+		{
+			"a deciding model that is not a chat model", "reads text and answers with an alias",
+			func(s map[string]any) { s["model"] = "keera-embed" },
+		},
+		{
+			"a deciding model that does not exist", "model_not_found",
+			func(s map[string]any) { s["model"] = "keera-huge" },
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := validRouter()

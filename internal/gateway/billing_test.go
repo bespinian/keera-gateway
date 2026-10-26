@@ -357,8 +357,10 @@ func TestAResponsesRequestOnTheDeploymentsKeyStoresNothing(t *testing.T) {
 		t.Errorf("forwarded = %s, want store off", got)
 	}
 
-	for _, field := range []string{`"background":true`, `"previous_response_id":"resp_1"`,
-		`"conversation":"conv_1"`} {
+	for _, field := range []string{
+		`"background":true`, `"previous_response_id":"resp_1"`,
+		`"conversation":"conv_1"`,
+	} {
 		resp := h.post(t, "/v1/responses", `{"model":"keera-frontier","input":"hi",`+field+`}`)
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("%s: status = %d, want 400", field, resp.StatusCode)

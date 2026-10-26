@@ -8054,7 +8054,8 @@ components:
 
         - `filter` and `model` name what they use in `ref`.
         - `route` has `mode`, `destinations` and `branches`; an instruction
-          step also `model`, `prompt` and `fallback`, a size step `ceilings`.
+          step also `model`, `prompt` and `fallback`, a size step `ceilings`,
+          a header step `header`, `values` and `fallback`.
         - `rate_limit` has `requests`, `tokens` and `period`; `budget` has
           `budget_micros` and `period`. Both may have `exceeded`.
         - `system_prompt` has `prompt`.
@@ -8092,7 +8093,7 @@ components:
             step's instruction (up to 4 KiB).
         mode:
           type: string
-          enum: [instruction, fallback, latency, least-busy, size]
+          enum: [instruction, fallback, latency, least-busy, size, header]
           description: A route step's way of choosing. Defaults to instruction.
         model:
           type: string
@@ -8110,9 +8111,28 @@ components:
             destination. Exactly one destination has none.
           additionalProperties:
             type: integer
+        header:
+          type: string
+          maxLength: 64
+          description: |
+            The request header a header step chooses by, such as
+            `X-Keera-Route`. It cannot be a header that carries a credential.
+        values:
+          type: object
+          maxProperties: 32
+          description: |
+            A header step's values, each naming the destination it sends a
+            request to. A value is lowercase letters, digits and inner
+            hyphens; the header is compared in lowercase. Every destination
+            is named by a value or is the fallback.
+          additionalProperties:
+            type: string
         fallback:
           type: string
-          description: Where an instruction step sends what it could not decide. Empty refuses it.
+          description: |
+            Where an instruction step sends what it could not decide, or a
+            header step a request whose header names no destination. Empty
+            refuses it.
         period:
           type: string
           enum: [minute, day, month]

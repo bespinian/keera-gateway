@@ -310,7 +310,7 @@ export const icons = {
   route: "M4 6h5l4 6h7M20 12l-3-3m3 3l-3 3M9 6l4 12h7",
   // A plug: the socket an agent's tools come through.
   mcp: "M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4",
-  // The five route modes, for the tiles that pick one. Instruction: a model
+  // The route modes, for the tiles that pick one. Instruction: a model
   // reading lines of text, with the spark of a decision.
   instruction:
     "M4 6h11M4 11h7M4 16h5" +
@@ -324,6 +324,10 @@ export const icons = {
   leastBusy: "M3 20h18M7 20v-7M12 20v-12M17 20v-4",
   // A ruler: this mode measures the request and reads nothing in it.
   size: "M2 9h20v6H2zM7 9v2.5M12 9v3.5M17 9v2.5",
+  // A tag: the client labels its request, and the label says where it goes.
+  header:
+    "M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" +
+    "M8 8h.01",
   // A box with a clock: a sandbox is a machine that goes away by itself.
   sandboxes:
     "M21 8v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8M3 8l2-4h14l2 4zM3 8h18" +

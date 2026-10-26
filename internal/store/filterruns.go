@@ -95,9 +95,11 @@ var filterStatColumns = `count(*),
 
 // filterStatTargets points at the fields filterStatColumns fills, in its order.
 func filterStatTargets(s *FilterStat) []any {
-	return []any{&s.Runs, &s.Passed, &s.Rewrote, &s.Refused, &s.Errored, &s.Shadowed,
+	return []any{
+		&s.Runs, &s.Passed, &s.Rewrote, &s.Refused, &s.Errored, &s.Shadowed,
 		&s.LatencyMedianMS, &s.LatencyP95MS, &s.CostMicros, &s.Segments, &s.Changed,
-		&s.FirstRunAt, &s.LastRunAt}
+		&s.FirstRunAt, &s.LastRunAt,
+	}
 }
 
 // FilterStats summarises how each of aliases ran inside a window, keyed by
@@ -106,7 +108,8 @@ func filterStatTargets(s *FilterStat) []any {
 // A filter with no traffic is absent rather than zeroed. The caller knows which
 // filters exist, and a zero row would not prove the filter never ran.
 func (s *Store) FilterStats(ctx context.Context, orgID string, aliases []string,
-	from, to time.Time) (map[string]FilterStat, error) {
+	from, to time.Time,
+) (map[string]FilterStat, error) {
 	stats, err := queryAll(ctx, s.pool, scanFilterStat, `SELECT filter, `+filterStatColumns+`
 		FROM filter_runs
 		WHERE ts >= $1 AND ts < $2 AND org_id = $3 AND filter = ANY($4)
@@ -168,10 +171,13 @@ type FilterReport struct {
 // FilterReportFor reads one filter's traffic: its totals, its shape over the
 // window, and which projects it affects.
 func (s *Store) FilterReportFor(ctx context.Context, orgID, alias string,
-	from, to time.Time) (FilterReport, error) {
+	from, to time.Time,
+) (FilterReport, error) {
 	bucket := chartBucket(from, to)
-	rep := FilterReport{From: from, To: to, Bucket: bucket,
-		Filter: alias}
+	rep := FilterReport{
+		From: from, To: to, Bucket: bucket,
+		Filter: alias,
+	}
 
 	err := s.pool.QueryRow(ctx, `SELECT `+filterStatColumns+`
 		FROM filter_runs
@@ -195,7 +201,8 @@ func (s *Store) FilterReportFor(ctx context.Context, orgID, alias string,
 // filterSeries is one filter's chart. Every bucket in the window is generated,
 // quiet ones included, so a filter that stopped running shows as a gap.
 func (s *Store) filterSeries(ctx context.Context, orgID, alias string,
-	from, to time.Time, bucket string) ([]FilterPoint, error) {
+	from, to time.Time, bucket string,
+) ([]FilterPoint, error) {
 	return queryAll(ctx, s.pool, scanFilterPoint, `
 		WITH buckets AS (
 		    SELECT generate_series(
@@ -224,7 +231,8 @@ func scanFilterPoint(r row) (FilterPoint, error) {
 
 // filterProjects is one filter's runs split by project, most refused first.
 func (s *Store) filterProjects(ctx context.Context, orgID, alias string,
-	from, to time.Time) ([]FilterProjectRow, error) {
+	from, to time.Time,
+) ([]FilterProjectRow, error) {
 	return queryAll(ctx, s.pool, scanFilterProjectRow, `
 		SELECT COALESCE(project_id, ''), count(*),
 		       `+countOf("outcome", FilterRefuse)+`,

@@ -108,6 +108,9 @@ var routeCheckSamples = []struct{ prompt, asks string }{
 // credit and is billed.
 func (s *Server) CheckRoute(ctx context.Context, rt policy.Route) RouteProbe {
 	p := RouteProbe{Step: rt.Step, Mode: rt.Mode}
+	if rt.Mode == policy.RouteModeHeader {
+		return s.checkHeader(ctx, rt)
+	}
 	if !rt.Decides() {
 		return s.checkChain(ctx, rt)
 	}
@@ -136,8 +139,10 @@ func (s *Server) CheckRoute(ctx context.Context, rt policy.Route) RouteProbe {
 		chose, err := s.decide(ctx, rt, m, p.Destinations, []string{sample.prompt})
 		p.CostMicros += chose.micros
 		s.billCheck(rt.OrgID, chose.bills)
-		d := SampleDecision{Prompt: sample.prompt, Asks: sample.asks, Chosen: chose.alias,
-			Confidence: chose.confidence}
+		d := SampleDecision{
+			Prompt: sample.prompt, Asks: sample.asks, Chosen: chose.alias,
+			Confidence: chose.confidence,
+		}
 		if err != nil {
 			d.Error = err.Error()
 		}

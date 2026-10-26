@@ -262,8 +262,10 @@ func connectList(models []policy.Model) []connect.Model {
 }
 
 func connectModel(m policy.Model) connect.Model {
-	return connect.Model{Alias: m.Alias, Name: m.DisplayName, MaxContext: m.MaxContext,
-		BackendModel: m.BackendModel, Provider: m.Provider}
+	return connect.Model{
+		Alias: m.Alias, Name: m.DisplayName, MaxContext: m.MaxContext,
+		BackendModel: m.BackendModel, Provider: m.Provider,
+	}
 }
 
 func aliasesOf(models []policy.Model) []string {

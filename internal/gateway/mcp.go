@@ -619,8 +619,10 @@ func (x *mcpExchange) rpcFail(status int, id json.RawMessage, code int, msg stri
 	if len(id) == 0 {
 		id = json.RawMessage("null")
 	}
-	httpx.WriteJSON(x.w, status, rpcMessage{JSONRPC: "2.0", ID: id,
-		Error: &rpcError{Code: code, Message: msg}})
+	httpx.WriteJSON(x.w, status, rpcMessage{
+		JSONRPC: "2.0", ID: id,
+		Error: &rpcError{Code: code, Message: msg},
+	})
 }
 
 // relay writes the server's answer to the client, reading every message in it

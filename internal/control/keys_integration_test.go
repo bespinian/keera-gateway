@@ -125,12 +125,18 @@ func TestAMemberRotatesTheirOwnKeyAndItKeepsItsLimits(t *testing.T) {
 // without the right to rotate their own keys.
 func TestAPendingKeyIsActivatedByItsHolderOnce(t *testing.T) {
 	tn := twoTenants(t)
-	carol := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin,
-		OrgID: "org_a", UserID: "user_carol"}
-	alice := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleMember,
-		OrgID: "org_a", UserID: "user_alice"}
-	bob := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleMember,
-		OrgID: "org_a", UserID: "user_bob"}
+	carol := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleAdmin,
+		OrgID: "org_a", UserID: "user_carol",
+	}
+	alice := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleMember,
+		OrgID: "org_a", UserID: "user_alice",
+	}
+	bob := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleMember,
+		OrgID: "org_a", UserID: "user_bob",
+	}
 
 	if w := tn.create(carol, `{"org_id":"org_a","name":"ci","pending":true}`); w.Code != http.StatusBadRequest {
 		t.Errorf("a pending key for nobody: %d %s", w.Code, w.Body)
@@ -509,8 +515,10 @@ func (tn tenants) create(p *authn.Principal, body string) *httptest.ResponseReco
 func TestASubscriptionKeyAlwaysBelongsToSomebody(t *testing.T) {
 	tn := twoTenants(t)
 	tn.srv.opts.ClaudeSubscriptions = true
-	carol := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin,
-		OrgID: "org_a", UserID: "user_carol"}
+	carol := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleAdmin,
+		OrgID: "org_a", UserID: "user_carol",
+	}
 
 	// What an administrator issues for a member to claim with `keera connect
 	// claude-code --subscription`.

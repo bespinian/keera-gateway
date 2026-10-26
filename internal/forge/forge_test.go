@@ -231,8 +231,10 @@ func TestGitLabMintAndRevoke(t *testing.T) {
 		t.Errorf("token asked for = %v", created)
 	}
 
-	_, err = gl.Mint(context.Background(), sandbox.GitRequest{Repo: srv.URL + "/group/denied", Until: until,
-		Allow: allowAll})
+	_, err = gl.Mint(context.Background(), sandbox.GitRequest{
+		Repo: srv.URL + "/group/denied", Until: until,
+		Allow: allowAll,
+	})
 	var refused *sandbox.ErrRefused
 	if !errors.As(err, &refused) || !strings.Contains(refused.Reason, "Maintainer") {
 		t.Errorf("a project the token may not use = %v, want a refusal saying why", err)

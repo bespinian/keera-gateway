@@ -68,8 +68,10 @@ func gateDecision(prompt string) decisionQuestion {
 // description. The alias is left out when there is a description: measured on
 // Laya, it only adds words that say nothing about the request.
 func (s *Server) routeQuestion(orgID, prompt string, offered []string) decisionQuestion {
-	q := decisionQuestion{Type: "choice", Instructions: strings.TrimSpace(prompt),
-		Criteria: make(map[string]string, len(offered))}
+	q := decisionQuestion{
+		Type: "choice", Instructions: strings.TrimSpace(prompt),
+		Criteria: make(map[string]string, len(offered)),
+	}
 	for i, alias := range offered {
 		about := alias
 		if m, _ := s.src.Model(orgID, alias); m.Description != "" {
@@ -167,8 +169,10 @@ func chatFromDecision(raw []byte, q decisionQuestion) ([]byte, error) {
 		top = append(top, logprob{token, math.Log(max(p, 1e-9))})
 	}
 	word, _, _ := strings.Cut(content, ":")
-	first := map[string]any{"token": word, "logprob": math.Log(max(dist[word], 1e-9)),
-		"top_logprobs": top}
+	first := map[string]any{
+		"token": word, "logprob": math.Log(max(dist[word], 1e-9)),
+		"top_logprobs": top,
+	}
 	return json.Marshal(map[string]any{
 		"object": "chat.completion",
 		"model":  r.Model,

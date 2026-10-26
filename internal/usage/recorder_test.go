@@ -361,8 +361,10 @@ func TestTheDefaultsAreTheOnesTheCommentsPromise(t *testing.T) {
 	if o.WriteTimeout != 10*time.Second {
 		t.Errorf("WriteTimeout = %v, want 10s", o.WriteTimeout)
 	}
-	set := Options{Buffer: 1, BatchSize: 2, FlushInterval: time.Second, BlockFor: time.Minute,
-		WriteTimeout: time.Hour}
+	set := Options{
+		Buffer: 1, BatchSize: 2, FlushInterval: time.Second, BlockFor: time.Minute,
+		WriteTimeout: time.Hour,
+	}
 	was := set
 	set.setDefaults()
 	if set != was {
@@ -390,15 +392,19 @@ func TestWaitReturnsOnlyOnceEverythingIsWritten(t *testing.T) {
 // events must not crowd out what an organisation pays for.
 func TestABilledEventIsNotCrowdedOutByOthers(t *testing.T) {
 	w := &recorded{block: make(chan struct{})}
-	r, stop := run(t, w, Options{Buffer: 4, BatchSize: 1, BlockFor: time.Millisecond,
-		FlushInterval: time.Hour})
+	r, stop := run(t, w, Options{
+		Buffer: 4, BatchSize: 1, BlockFor: time.Millisecond,
+		FlushInterval: time.Hour,
+	})
 
 	// The first is taken by the writer and held; the rest fill the buffer.
 	for range 20 {
 		r.Record(event("refused"))
 	}
-	r.Record(store.Event{OrgID: "org_1", Alias: "billed",
-		Bills: []policy.BillLine{{CreditMicros: 1}}})
+	r.Record(store.Event{
+		OrgID: "org_1", Alias: "billed",
+		Bills: []policy.BillLine{{CreditMicros: 1}},
+	})
 	close(w.block)
 	stop()
 

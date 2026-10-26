@@ -455,7 +455,8 @@ func TestSandboxPolicyLimitsRoundTrip(t *testing.T) {
 		MaxSandboxTTLSeconds: &ttl,
 		SandboxClasses:       []string{"standard", "small"},
 		MaxSandboxCPU:        new(8000),
-		MaxSandboxMemory:     new(32768)}
+		MaxSandboxMemory:     new(32768),
+	}
 	if err := st.PutGuardrail(ctx, policy.ScopeOrg, f.orgID, want); err != nil {
 		t.Fatalf("PutGuardrail: %v", err)
 	}

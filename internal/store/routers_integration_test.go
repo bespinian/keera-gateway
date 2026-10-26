@@ -18,12 +18,16 @@ func TestRouterRoundTripAndTheAllowListsThatNameOne(t *testing.T) {
 		Start: &policy.Step{
 			ID: "cap", Kind: policy.StepBudget, BudgetMicros: 50_000_000, Period: policy.PeriodMonth,
 			Exceeded: &policy.Step{ID: "spent", Kind: policy.StepModel, Ref: "keera-small"},
-			Next: &policy.Step{ID: "route", Kind: policy.StepRoute, Mode: policy.RouteModeFallback,
+			Next: &policy.Step{
+				ID: "route", Kind: policy.StepRoute, Mode: policy.RouteModeFallback,
 				Destinations: []string{"keera-small", "keera-large"},
 				Branches: map[string]*policy.Step{
-					"keera-large": {ID: "redact", Kind: policy.StepFilter, Ref: "redact",
-						Next: &policy.Step{ID: "out", Kind: policy.StepModel, Ref: "keera-large"}},
-				}},
+					"keera-large": {
+						ID: "redact", Kind: policy.StepFilter, Ref: "redact",
+						Next: &policy.Step{ID: "out", Kind: policy.StepModel, Ref: "keera-large"},
+					},
+				},
+			},
 		},
 	}
 	saved, err := st.UpsertRouter(ctx, safe)
@@ -113,13 +117,19 @@ func TestRouterReportAndSpend(t *testing.T) {
 	step := policy.Scope{Type: policy.ScopeRouter, ID: f.orgID + "/safe/cap", Period: policy.PeriodMonth}
 
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now.Add(-2 * time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-large",
+		{
+			TS: now.Add(-2 * time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-large",
 			Status: 200, CostMicros: 900, Router: "safe", RouterOutcome: RouterChose, RouterMS: 40,
-			Scopes: []policy.Scope{step}},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small",
-			Status: 200, CostMicros: 100, Router: "safe", RouterOutcome: RouterFellBack},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small",
-			Status: 200, CostMicros: 100},
+			Scopes: []policy.Scope{step},
+		},
+		{
+			TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small",
+			Status: 200, CostMicros: 100, Router: "safe", RouterOutcome: RouterFellBack,
+		},
+		{
+			TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small",
+			Status: 200, CostMicros: 100,
+		},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
@@ -145,16 +155,24 @@ func TestRouterReportAndSpend(t *testing.T) {
 
 	// A daily limit counts requests and tokens in the same table, under its
 	// own ids.
-	requests := policy.Scope{Type: policy.ScopeRouter, ID: f.orgID + "/safe/daily|requests",
-		Period: policy.PeriodDay, Meter: policy.MeterRequests, Quota: 100}
-	tokens := policy.Scope{Type: policy.ScopeRouter, ID: f.orgID + "/safe/daily|tokens",
-		Period: policy.PeriodDay, Meter: policy.MeterTokens, Quota: 100_000}
+	requests := policy.Scope{
+		Type: policy.ScopeRouter, ID: f.orgID + "/safe/daily|requests",
+		Period: policy.PeriodDay, Meter: policy.MeterRequests, Quota: 100,
+	}
+	tokens := policy.Scope{
+		Type: policy.ScopeRouter, ID: f.orgID + "/safe/daily|tokens",
+		Period: policy.PeriodDay, Meter: policy.MeterTokens, Quota: 100_000,
+	}
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now, OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small", Status: 200,
-			InputTokens: 30, OutputTokens: 12, Router: "safe", Scopes: []policy.Scope{requests, tokens}},
+		{
+			TS: now, OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small", Status: 200,
+			InputTokens: 30, OutputTokens: 12, Router: "safe", Scopes: []policy.Scope{requests, tokens},
+		},
 		// Refused before an answer: a request all the same, and no tokens.
-		{TS: now, OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small", Status: 403,
-			Router: "safe", Scopes: []policy.Scope{requests, tokens}},
+		{
+			TS: now, OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small", Status: 403,
+			Router: "safe", Scopes: []policy.Scope{requests, tokens},
+		},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
@@ -182,8 +200,10 @@ func TestRouterReportLeavesOutWhatNoStepPlaced(t *testing.T) {
 	f := newFixture(t, st, ctx)
 	now := time.Now().UTC().Truncate(time.Second)
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now, OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small", Status: 200,
-			Router: "safe", RouterOutcome: RouterChose},
+		{
+			TS: now, OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small", Status: 200,
+			Router: "safe", RouterOutcome: RouterChose,
+		},
 		{TS: now, OrgID: f.orgID, KeyID: f.keyID, Status: 429, Router: "safe"},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
@@ -207,20 +227,28 @@ func TestDeletingARouterForgetsWhatItsLimitsCounted(t *testing.T) {
 	f := newFixture(t, st, ctx)
 	now := time.Now().UTC().Truncate(time.Second)
 	for _, alias := range []string{"safe", "safer"} {
-		if _, err := st.UpsertRouter(ctx, policy.Router{OrgID: f.orgID, Alias: alias,
-			Start: &policy.Step{ID: "out", Kind: policy.StepModel, Ref: "keera-small"}}); err != nil {
+		if _, err := st.UpsertRouter(ctx, policy.Router{
+			OrgID: f.orgID, Alias: alias,
+			Start: &policy.Step{ID: "out", Kind: policy.StepModel, Ref: "keera-small"},
+		}); err != nil {
 			t.Fatalf("UpsertRouter: %v", err)
 		}
 	}
 	scope := func(alias string) policy.Scope {
-		return policy.Scope{Type: policy.ScopeRouter, ID: f.orgID + "/" + alias + "/cap",
-			Period: policy.PeriodMonth}
+		return policy.Scope{
+			Type: policy.ScopeRouter, ID: f.orgID + "/" + alias + "/cap",
+			Period: policy.PeriodMonth,
+		}
 	}
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now, OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small", Status: 200,
-			CostMicros: 500, Router: "safe", Scopes: []policy.Scope{scope("safe")}},
-		{TS: now, OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small", Status: 200,
-			CostMicros: 700, Router: "safer", Scopes: []policy.Scope{scope("safer")}},
+		{
+			TS: now, OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small", Status: 200,
+			CostMicros: 500, Router: "safe", Scopes: []policy.Scope{scope("safe")},
+		},
+		{
+			TS: now, OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small", Status: 200,
+			CostMicros: 700, Router: "safer", Scopes: []policy.Scope{scope("safer")},
+		},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}

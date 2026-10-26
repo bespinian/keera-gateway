@@ -30,13 +30,15 @@ func TestDeleteOrgTakesItsTenancyAndKeepsItsHistory(t *testing.T) {
 			t.Fatalf("PutGuardrail %s: %v", sc.typ, err)
 		}
 	}
-	if err := st.WriteEvents(ctx, []Event{{TS: now, OrgID: f.orgID, ProjectID: f.projectID,
+	if err := st.WriteEvents(ctx, []Event{{
+		TS: now, OrgID: f.orgID, ProjectID: f.projectID,
 		KeyID: f.keyID, Alias: "keera-code", CostMicros: 500, Status: 200,
 		Scopes: []policy.Scope{
 			{Type: policy.ScopeOrg, ID: f.orgID, Period: policy.PeriodMonth},
 			{Type: policy.ScopeProject, ID: f.projectID, Period: policy.PeriodMonth},
 			{Type: policy.ScopeKey, ID: f.keyID, Period: policy.PeriodMonth},
-		}}}); err != nil {
+		},
+	}}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
 	if err := st.Audit(ctx, "operator key", f.orgID, "org.delete", "org", f.orgID, nil); err != nil {
@@ -126,8 +128,10 @@ func TestTenancyLookupsUsedForAuthorisation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FirstProject: %v", err)
 	}
-	want = KeyOwner{OrgID: f.orgID, ProjectID: firstID, UserID: person.ID,
-		Kind: policy.KeyStandard}
+	want = KeyOwner{
+		OrgID: f.orgID, ProjectID: firstID, UserID: person.ID,
+		Kind: policy.KeyStandard,
+	}
 	if o, err := st.KeyOwnerOf(ctx, "key_2"); err != nil || o != want {
 		t.Errorf("KeyOwnerOf = %+v, %v; want %+v", o, err, want)
 	}
@@ -292,18 +296,24 @@ func TestSetupStateCountsWhatAFirstRunHasToCreate(t *testing.T) {
 	if _, err := st.AddUser(ctx, "user_1", f.orgID, "dev@example.ch", "", "member"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.UpsertModel(ctx, policy.Model{OrgID: f.orgID, Alias: "keera-code", Kind: policy.KindChat,
-		Backends: []string{"http://vllm:8000/v1"}, BackendModel: "served", Enabled: true}, Credential{}); err != nil {
+	if err := st.UpsertModel(ctx, policy.Model{
+		OrgID: f.orgID, Alias: "keera-code", Kind: policy.KindChat,
+		Backends: []string{"http://vllm:8000/v1"}, BackendModel: "served", Enabled: true,
+	}, Credential{}); err != nil {
 		t.Fatal(err)
 	}
 	// A disabled model is not one a client can reach, so it is not a step
 	// somebody has completed.
-	if err := st.UpsertModel(ctx, policy.Model{OrgID: f.orgID, Alias: "keera-off", Kind: policy.KindChat,
-		Backends: []string{"http://vllm:8000/v1"}, BackendModel: "served", Enabled: false}, Credential{}); err != nil {
+	if err := st.UpsertModel(ctx, policy.Model{
+		OrgID: f.orgID, Alias: "keera-off", Kind: policy.KindChat,
+		Backends: []string{"http://vllm:8000/v1"}, BackendModel: "served", Enabled: false,
+	}, Credential{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.WriteEvents(ctx, []Event{{TS: time.Now(), OrgID: f.orgID,
-		Alias: "keera-code", Status: 200}}); err != nil {
+	if err := st.WriteEvents(ctx, []Event{{
+		TS: time.Now(), OrgID: f.orgID,
+		Alias: "keera-code", Status: 200,
+	}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -348,12 +358,16 @@ func TestAddUserLeavesAnExistingPersonAlone(t *testing.T) {
 // before the domain was refused would be made a second time on the retry.
 func TestCreateOrgWithATakenDomainCreatesNothing(t *testing.T) {
 	st, ctx := db(t)
-	if _, err := st.CreateOrg(ctx, Org{ID: "org_1", Name: "Example Bank",
-		EmailDomain: "example.ch"}, OrgTemplate{}); err != nil {
+	if _, err := st.CreateOrg(ctx, Org{
+		ID: "org_1", Name: "Example Bank",
+		EmailDomain: "example.ch",
+	}, OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
-	_, err := st.CreateOrg(ctx, Org{ID: "org_2", Name: "Another Bank",
-		EmailDomain: "Example.ch"}, OrgTemplate{})
+	_, err := st.CreateOrg(ctx, Org{
+		ID: "org_2", Name: "Another Bank",
+		EmailDomain: "Example.ch",
+	}, OrgTemplate{})
 	if !errors.Is(err, ErrDomainTaken) {
 		t.Fatalf("CreateOrg with a taken domain = %v, want ErrDomainTaken", err)
 	}
@@ -499,8 +513,10 @@ func TestListUsersSaysWhenEachPersonWasLastActive(t *testing.T) {
 	}
 	// A request after the sign-in is the later of the two, so it is what shows.
 	later := time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond)
-	if err := st.WriteEvents(ctx, []Event{{TS: later, OrgID: f.orgID, ProjectID: f.projectID,
-		UserID: busy.ID, KeyID: f.keyID, Alias: "keera-code", Status: 200}}); err != nil {
+	if err := st.WriteEvents(ctx, []Event{{
+		TS: later, OrgID: f.orgID, ProjectID: f.projectID,
+		UserID: busy.ID, KeyID: f.keyID, Alias: "keera-code", Status: 200,
+	}}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
 

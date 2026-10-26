@@ -37,8 +37,10 @@ func subscriptionHarness(t *testing.T, res *policy.Resolved) (*harness, chan see
 	m.Subscription, m.APIKey = true, ""
 	h.src.models["keera-frontier"] = m
 	if res == nil {
-		res = policy.Resolve(policy.Key{ID: "key_sub", OrgID: testOrg, UserID: "usr_1",
-			Kind: policy.KeySubscription}, nil, nil, nil)
+		res = policy.Resolve(policy.Key{
+			ID: "key_sub", OrgID: testOrg, UserID: "usr_1",
+			Kind: policy.KeySubscription,
+		}, nil, nil, nil)
 	}
 	h.src.resolved[subKey] = res
 	h.srv.opts.ClaudeSubscriptions = true

@@ -25,8 +25,10 @@ func guardedRouter() policy.Router {
 				Model: "keera-decider", Prompt: "Keep client data local.",
 				Destinations: []string{"keera-speed", "qwen3"},
 				Branches: map[string]*policy.Step{
-					"qwen3": {ID: "names", Kind: policy.StepFilter, Ref: "redact-names",
-						Next: &policy.Step{ID: "hosted", Kind: policy.StepModel, Ref: "qwen3"}},
+					"qwen3": {
+						ID: "names", Kind: policy.StepFilter, Ref: "redact-names",
+						Next: &policy.Step{ID: "hosted", Kind: policy.StepModel, Ref: "qwen3"},
+					},
 				},
 			},
 		},
@@ -66,8 +68,10 @@ func TestStepTreeDrawsEveryBranch(t *testing.T) {
 // same line of the tree rather than under a lone 'within'.
 func TestStepTreeKeepsALimitWithoutBranchesInLine(t *testing.T) {
 	plain(t)
-	start := &policy.Step{ID: "rl", Kind: policy.StepRateLimit, Requests: 60, Tokens: 100000,
-		Next: &policy.Step{ID: "m", Kind: policy.StepModel, Ref: "keera-local"}}
+	start := &policy.Step{
+		ID: "rl", Kind: policy.StepRateLimit, Requests: 60, Tokens: 100000,
+		Next: &policy.Step{ID: "m", Kind: policy.StepModel, Ref: "keera-local"},
+	}
 	got := stepTree(start)
 	want := []string{
 		"rate limit 60 requests and 100000 tokens per minute (rl), refuses what is over it",
@@ -82,10 +86,14 @@ func TestStepTreeKeepsALimitWithoutBranchesInLine(t *testing.T) {
 // its period.
 func TestStepTreeShowsAPromptAndAPeriod(t *testing.T) {
 	plain(t)
-	start := &policy.Step{ID: "p", Kind: policy.StepSystemPrompt,
+	start := &policy.Step{
+		ID: "p", Kind: policy.StepSystemPrompt,
 		Prompt: "Answer in German.\nNever name a customer, and keep every answer short enough to read.",
-		Next: &policy.Step{ID: "rl", Kind: policy.StepRateLimit, Requests: 500, Period: policy.PeriodDay,
-			Next: &policy.Step{ID: "m", Kind: policy.StepModel, Ref: "keera-local"}}}
+		Next: &policy.Step{
+			ID: "rl", Kind: policy.StepRateLimit, Requests: 500, Period: policy.PeriodDay,
+			Next: &policy.Step{ID: "m", Kind: policy.StepModel, Ref: "keera-local"},
+		},
+	}
 	got := stepTree(start)
 	want := []string{
 		`system prompt "Answer in German. Never name a customer, and keep every ans…"`,
@@ -102,12 +110,16 @@ func TestStepTreeShowsAPromptAndAPeriod(t *testing.T) {
 // what each one takes.
 func TestStepTreeShowsABranchForAGoneDestination(t *testing.T) {
 	plain(t)
-	start := &policy.Step{ID: "r", Kind: policy.StepRoute, Mode: policy.RouteModeSize,
+	start := &policy.Step{
+		ID: "r", Kind: policy.StepRoute, Mode: policy.RouteModeSize,
 		Destinations: []string{"small", "big"}, Ceilings: map[string]int{"small": 4000},
-		Branches: map[string]*policy.Step{"old": {ID: "m", Kind: policy.StepModel, Ref: "old"}}}
+		Branches: map[string]*policy.Step{"old": {ID: "m", Kind: policy.StepModel, Ref: "old"}},
+	}
 	got := strings.Join(stepTree(start), "\n")
-	for _, want := range []string{"route by size (r)", "├─ to small (up to 4k tokens), sent straight there",
-		"└─ to old\n   model old"} {
+	for _, want := range []string{
+		"route by size (r)", "├─ to small (up to 4k tokens), sent straight there",
+		"└─ to old\n   model old",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("tree lacks %q:\n%s", want, got)
 		}
@@ -115,10 +127,16 @@ func TestStepTreeShowsABranchForAGoneDestination(t *testing.T) {
 }
 
 func TestNameStepsFillsOnlyMissingIDs(t *testing.T) {
-	p := policy.Router{Start: &policy.Step{Kind: policy.StepFilter, Ref: "a",
-		Next: &policy.Step{ID: "filter-1", Kind: policy.StepFilter, Ref: "b",
-			Next: &policy.Step{Kind: policy.StepRateLimit, Requests: 1,
-				Next: &policy.Step{Kind: policy.StepModel, Ref: "m"}}}}}
+	p := policy.Router{Start: &policy.Step{
+		Kind: policy.StepFilter, Ref: "a",
+		Next: &policy.Step{
+			ID: "filter-1", Kind: policy.StepFilter, Ref: "b",
+			Next: &policy.Step{
+				Kind: policy.StepRateLimit, Requests: 1,
+				Next: &policy.Step{Kind: policy.StepModel, Ref: "m"},
+			},
+		},
+	}}
 	nameSteps(p)
 	var ids []string
 	for s := range p.Steps() {
@@ -187,8 +205,10 @@ func TestRouterAddSendsTheFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, read := quiet(t)
-	err := Run(context.Background(), []string{"router", "add", "guarded",
-		"--file", file, "--display-name", "Guarded"})
+	err := Run(context.Background(), []string{
+		"router", "add", "guarded",
+		"--file", file, "--display-name", "Guarded",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,8 +232,10 @@ func TestRouterAddWithOneRouteStep(t *testing.T) {
 		},
 	})
 	t.Setenv("KEERA_ORG", "org_1")
-	if err := Run(context.Background(), []string{"router", "add", "auto", "--model", "picker",
-		"--destinations", "small,big", "--fallback", "small", "--prompt", "Choose."}); err != nil {
+	if err := Run(context.Background(), []string{
+		"router", "add", "auto", "--model", "picker",
+		"--destinations", "small,big", "--fallback", "small", "--prompt", "Choose.",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	start, _ := f.request("PUT", "/v1/routers/auto").body["start"].(map[string]any)
@@ -229,10 +251,14 @@ func TestRouterSetChangesOneRouteStep(t *testing.T) {
 	quiet(t)
 	stored := map[string]any{"alias": "guarded", "start": map[string]any{
 		"id": "keys", "kind": "filter", "ref": "redact-keys",
-		"next": map[string]any{"id": "first", "kind": "route", "mode": "fallback",
+		"next": map[string]any{
+			"id": "first", "kind": "route", "mode": "fallback",
 			"destinations": []string{"a", "b"},
-			"branches": map[string]any{"b": map[string]any{"id": "second", "kind": "route",
-				"mode": "fallback", "destinations": []string{"c", "d"}}}},
+			"branches": map[string]any{"b": map[string]any{
+				"id": "second", "kind": "route",
+				"mode": "fallback", "destinations": []string{"c", "d"},
+			}},
+		},
 	}}
 	f := newFakeControl(t, map[string]any{
 		"GET /v1/routers":         map[string]any{"data": []any{stored}},
@@ -244,8 +270,10 @@ func TestRouterSetChangesOneRouteStep(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "--step") {
 		t.Fatalf("two route steps and no --step: err = %v", err)
 	}
-	if err := Run(context.Background(), []string{"router", "set", "guarded", "--step", "second",
-		"--destinations", "c,e"}); err != nil {
+	if err := Run(context.Background(), []string{
+		"router", "set", "guarded", "--step", "second",
+		"--destinations", "c,e",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	start, _ := f.request("PUT", "/v1/routers/guarded").body["start"].(map[string]any)
@@ -274,9 +302,51 @@ func TestRouterDecidingFlagsNeedADecidingStep(t *testing.T) {
 	newFakeControl(t, map[string]any{"GET /v1/routers": map[string]any{"data": []any{}}})
 	t.Setenv("KEERA_ORG", "org_1")
 	for _, flag := range []string{"--fallback", "--model"} {
-		err := Run(context.Background(), []string{"router", "add", "x", "--mode", "least-busy",
-			"--destinations", "small,big", flag, "small"})
+		err := Run(context.Background(), []string{
+			"router", "add", "x", "--mode", "least-busy",
+			"--destinations", "small,big", flag, "small",
+		})
 		if err == nil || !strings.Contains(err.Error(), flag+" is for a route step that decides") {
+			t.Errorf("%s: err = %v", flag, err)
+		}
+	}
+}
+
+// Without --destinations, a header step's destinations are where its values
+// send, and the fallback.
+func TestRouterAddWithAHeaderStep(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/routers": map[string]any{"data": []any{}},
+		"PUT /v1/routers/byapp": map[string]any{
+			"alias": "byapp", "start": map[string]any{"id": "route", "kind": "route"},
+		},
+	})
+	t.Setenv("KEERA_ORG", "org_1")
+	if err := Run(context.Background(), []string{
+		"router", "add", "byapp", "--mode", "header",
+		"--header", "X-Keera-Route", "--values", "hard=big", "--fallback", "small",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	start, _ := f.request("PUT", "/v1/routers/byapp").body["start"].(map[string]any)
+	values, _ := start["values"].(map[string]any)
+	if start["mode"] != "header" || start["header"] != "X-Keera-Route" ||
+		values["hard"] != "big" || start["fallback"] != "small" ||
+		strings.Join(toStrings(start["destinations"]), ",") != "big,small" {
+		t.Errorf("start = %v, want a header step sending to big and small", start)
+	}
+}
+
+func TestRouterHeaderFlagsNeedAHeaderStep(t *testing.T) {
+	newFakeControl(t, map[string]any{"GET /v1/routers": map[string]any{"data": []any{}}})
+	t.Setenv("KEERA_ORG", "org_1")
+	for _, flag := range []string{"--header", "--values"} {
+		err := Run(context.Background(), []string{
+			"router", "add", "x", "--mode", "fallback",
+			"--destinations", "small,big", flag, "hard=big",
+		})
+		if err == nil || !strings.Contains(err.Error(), "use --mode header") {
 			t.Errorf("%s: err = %v", flag, err)
 		}
 	}

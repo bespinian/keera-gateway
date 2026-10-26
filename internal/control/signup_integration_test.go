@@ -109,7 +109,8 @@ func (s signupSetup) signIn(t *testing.T, subject, email string) (string, []*htt
 }
 
 func (s signupSetup) call(t *testing.T, method, body string, cookies []*http.Cookie,
-	out any) (int, []*http.Cookie) {
+	out any,
+) (int, []*http.Cookie) {
 	t.Helper()
 	req, _ := http.NewRequest(method, s.ts.URL+httpx.ControlPrefix+"/auth/signup",
 		strings.NewReader(body))

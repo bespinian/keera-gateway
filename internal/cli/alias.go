@@ -63,7 +63,7 @@ func startPut[T any](ctx context.Context, a *aliasRun, alias string, fresh T, al
 // checkProbe runs the check at path and prints what came back. A check that
 // did not pass fails the command, so a pipeline can gate on it.
 func checkProbe[T any](ctx context.Context, c *client, path, what string, asJSON bool,
-	print func(*table, T), passed func(T) bool,
+	show func(*table, T), passed func(T) bool,
 ) error {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
@@ -71,7 +71,7 @@ func checkProbe[T any](ctx context.Context, c *client, path, what string, asJSON
 	if err := c.do(ctx, "POST", path, nil, &probe); err != nil {
 		return err
 	}
-	if err := out(asJSON, probe, func(w *table) { print(w, probe) }); err != nil {
+	if err := out(asJSON, probe, func(w *table) { show(w, probe) }); err != nil {
 		return err
 	}
 	if !passed(probe) {
@@ -136,7 +136,7 @@ func (a *aliasRun) run(ctx context.Context, v aliasVerbs) error {
 	}
 }
 
-func listAliases[T any](ctx context.Context, a *aliasRun, print func(*table, []T)) error {
+func listAliases[T any](ctx context.Context, a *aliasRun, show func(*table, []T)) error {
 	entries, err := list[T](ctx, a.c, inOrg("/v1/"+a.kind, a.orgID))
 	if err != nil {
 		return err
@@ -146,27 +146,27 @@ func listAliases[T any](ctx context.Context, a *aliasRun, print func(*table, []T
 			printNone(w, a.noun+"s", a.addHint)
 			return
 		}
-		print(w, entries)
+		show(w, entries)
 	})
 }
 
 // reportAlias prints what the entry named by the first argument has done over
 // the since window.
 func reportAlias[T any](ctx context.Context, a *aliasRun, since time.Duration,
-	print func(w *table, alias string, since time.Duration, res T),
+	show func(w *table, alias string, since time.Duration, res T),
 ) error {
 	alias := a.fs.Arg(0)
 	path := a.path(alias, "/report") + "&from=" + url.QueryEscape(sinceParam(since))
 	return doOut(ctx, a.c, "GET", path, nil, a.asJSON, func(w *table, res T) {
-		print(w, alias, since, res)
+		show(w, alias, since, res)
 	})
 }
 
 // putAlias writes an entry and prints what was stored.
 func putAlias[T any](ctx context.Context, a *aliasRun, alias string, body any,
-	print func(*table, T),
+	show func(*table, T),
 ) error {
-	return doOut(ctx, a.c, "PUT", a.path(alias, ""), body, a.asJSON, print)
+	return doOut(ctx, a.c, "PUT", a.path(alias, ""), body, a.asJSON, show)
 }
 
 // deleteEntry deletes an entry and says so. Unless --yes was given it asks

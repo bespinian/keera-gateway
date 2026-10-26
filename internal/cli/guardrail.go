@@ -130,11 +130,11 @@ func (f *guardrailFlags) apply(lim *policy.Limits) error {
 
 // setList applies a comma-separated list flag and its --no- flag, which
 // clears the list. An empty value means "not given".
-func setList(dst *[]string, name, v string, clear bool) error {
+func setList(dst *[]string, name, v string, none bool) error {
 	switch {
-	case clear && v != "":
+	case none && v != "":
 		return opposites(name, "no-"+name)
-	case clear:
+	case none:
 		*dst = nil
 	case v != "":
 		// Never nil, which would read as "no limit": a list of only commas

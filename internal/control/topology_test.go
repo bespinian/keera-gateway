@@ -52,13 +52,17 @@ func TestTheMapDrawsTheCatalogueAndTheTrafficTogether(t *testing.T) {
 		t.Fatalf("CreateOrg: %v", err)
 	}
 	for _, m := range []policy.Model{
-		{OrgID: "org_1", Alias: "keera-code", Kind: policy.KindChat, Backends: []string{"http://vllm:8000/v1"},
-			BackendModel: "served-name", Enabled: true},
+		{
+			OrgID: "org_1", Alias: "keera-code", Kind: policy.KindChat, Backends: []string{"http://vllm:8000/v1"},
+			BackendModel: "served-name", Enabled: true,
+		},
 		// Enabled, hosted, and unused this week. It is still a way out of the
 		// building, so the map must show it.
-		{OrgID: "org_1", Alias: "keera-frontier", Kind: policy.KindChat,
+		{
+			OrgID: "org_1", Alias: "keera-frontier", Kind: policy.KindChat,
 			Backends:     []string{"https://api.anthropic.com/v1"},
-			BackendModel: "claude-opus-5", Enabled: true},
+			BackendModel: "claude-opus-5", Enabled: true,
+		},
 	} {
 		if err := st.UpsertModel(ctx, m, store.Credential{}); err != nil {
 			t.Fatalf("UpsertModel: %v", err)
@@ -67,13 +71,19 @@ func TestTheMapDrawsTheCatalogueAndTheTrafficTogether(t *testing.T) {
 
 	now := time.Now()
 	if err := st.WriteEvents(ctx, []store.Event{
-		{TS: now, OrgID: "org_1", Alias: "keera-code", Client: "claude-code",
-			Status: 200, CostMicros: 100, InputTokens: 10, OutputTokens: 5},
-		{TS: now, OrgID: "org_1", Alias: "keera-code", Client: "opencode",
-			Status: 429},
+		{
+			TS: now, OrgID: "org_1", Alias: "keera-code", Client: "claude-code",
+			Status: 200, CostMicros: 100, InputTokens: 10, OutputTokens: 5,
+		},
+		{
+			TS: now, OrgID: "org_1", Alias: "keera-code", Client: "opencode",
+			Status: 429,
+		},
 		// An alias the organisation has no model for.
-		{TS: now, OrgID: "org_1", Alias: "keera-typo", Client: "claude-code",
-			Status: 404},
+		{
+			TS: now, OrgID: "org_1", Alias: "keera-typo", Client: "claude-code",
+			Status: 404,
+		},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}

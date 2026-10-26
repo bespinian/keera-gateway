@@ -427,10 +427,14 @@ type Route struct {
 	// needs exactly one. The estimate comes from the text's bytes, not a
 	// tokeniser; see docs/routers.md.
 	Ceilings map[string]int
-	// Fallback is where an instruction step sends a request it could not
-	// decide. Empty refuses it. Neither is right in general: a step that
-	// saves money can fall back, one that keeps prompts in the cluster cannot.
-	// See docs/routers.md.
+	// Header and Values are a header step's: the request header it reads,
+	// and which of its values sends a request to which destination.
+	Header string
+	Values map[string]string
+	// Fallback is where an instruction or header step sends a request it
+	// could not decide. Empty refuses it. Neither is right in general: a step
+	// that saves money can fall back, one that keeps prompts in the cluster
+	// cannot. See docs/routers.md.
 	Fallback string
 }
 
@@ -451,6 +455,9 @@ func (r Route) Refuses() bool { return r.Fallback == "" }
 //   - size picks the destination meant for the request's length; one too
 //     small to hold it always ranks last.
 //
+// A header step reads no text either. It sends the request where the value of
+// one of its headers says, so the client's own code chooses.
+//
 // Least-busy suits destinations that are alike; latency suits ones that are
 // not, since queue depth cannot be compared across machines of different
 // speeds. Both use only what this process has seen. See
@@ -465,11 +472,12 @@ const (
 	RouteModeLatency     RouteMode = "latency"
 	RouteModeLeastBusy   RouteMode = "least-busy"
 	RouteModeSize        RouteMode = "size"
+	RouteModeHeader      RouteMode = "header"
 )
 
 var routeModes = []RouteMode{
 	RouteModeInstruction, RouteModeFallback, RouteModeLatency, RouteModeLeastBusy,
-	RouteModeSize,
+	RouteModeSize, RouteModeHeader,
 }
 
 // Valid reports whether m names a mode. The empty string does: it means
@@ -477,8 +485,17 @@ var routeModes = []RouteMode{
 func (m RouteMode) Valid() bool { return m == "" || slices.Contains(routeModes, m) }
 
 // Decides reports whether this mode asks a model to choose. Only instruction
-// does, and only it has Model, Prompt and Fallback.
+// does, and only it has Model and Prompt.
 func (m RouteMode) Decides() bool { return m == "" || m == RouteModeInstruction }
+
+// Chooses reports whether this mode picks one destination itself, and so has
+// a Fallback for when it cannot. The other modes try their destinations in
+// turn.
+func (m RouteMode) Chooses() bool { return m.Decides() || m == RouteModeHeader }
+
+// Chooses reports whether this step picks one destination before anything is
+// sent. An instruction step with one destination does not: it tries that one.
+func (r Route) Chooses() bool { return r.Decides() || r.Mode == RouteModeHeader }
 
 // Decides reports whether this step asks a model to choose. An instruction
 // step with one destination has nothing to choose, so it sends every request
@@ -532,6 +549,10 @@ func (r Route) Unbounded() []string {
 // maxAliasLen bounds a model, router, filter or MCP server alias. People type
 // these, and `keera connect` writes them unquoted into editor configuration.
 const maxAliasLen = 64
+
+// MaxHeaderValues bounds how many values a header step knows. Several may
+// name the same destination, but a longer list is no longer read by anyone.
+const MaxHeaderValues = 32
 
 // MaxDestinations bounds how many models one route step may choose between. The
 // list goes into the instruction on every request, and a small model choosing

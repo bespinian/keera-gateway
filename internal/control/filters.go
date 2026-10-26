@@ -206,7 +206,8 @@ var (
 // step, which would refuse every request it covers. choice says it is only
 // asked to choose, which a decision model can also do.
 func (s *Server) checkReaderModel(w http.ResponseWriter, r *http.Request, orgID, alias string,
-	rd reader, choice bool) bool {
+	rd reader, choice bool,
+) bool {
 	m, err := s.st.Model(r.Context(), orgID, alias)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
@@ -306,7 +307,8 @@ func (s *Server) checkFilter(w http.ResponseWriter, r *http.Request, p *authn.Pr
 // Only the organisation scope is checked: filters and routers belong to the
 // organisation, and a project's or key's list narrows only that key.
 func (s *Server) checkAllowList(w http.ResponseWriter, r *http.Request,
-	scope policy.ScopeType, orgID string, lim *policy.Limits) bool {
+	scope policy.ScopeType, orgID string, lim *policy.Limits,
+) bool {
 	if scope != policy.ScopeOrg || lim.AllowedModels == nil {
 		return true
 	}
@@ -359,7 +361,8 @@ func strandedRefusal(w http.ResponseWriter, code, what string, stranded []string
 // At request time an unknown filter refuses everything, so a typo would take a
 // department offline.
 func (s *Server) checkGuardrailFilters(w http.ResponseWriter, r *http.Request,
-	orgID string, lim *policy.Limits) bool {
+	orgID string, lim *policy.Limits,
+) bool {
 	if len(lim.Filters) == 0 {
 		lim.Filters = nil
 		return true

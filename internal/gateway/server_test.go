@@ -252,14 +252,16 @@ type harness struct {
 
 // newHarness wires a gateway in front of a stand-in for vLLM.
 func newHarness(t *testing.T, backend http.HandlerFunc, models map[string]policy.Model,
-	resolved *policy.Resolved) *harness {
+	resolved *policy.Resolved,
+) *harness {
 	t.Helper()
 	return newHarnessWith(t, backend, models, resolved, Options{})
 }
 
 // newHarnessWith is newHarness with a deployment's settings.
 func newHarnessWith(t *testing.T, backend http.HandlerFunc, models map[string]policy.Model,
-	resolved *policy.Resolved, opts Options) *harness {
+	resolved *policy.Resolved, opts Options,
+) *harness {
 	t.Helper()
 
 	h := &harness{
@@ -827,8 +829,10 @@ func TestAProvidersRetryHeadersReachTheClient(t *testing.T) {
 // even where both use an alias.
 func TestAKeyReachesItsOrganisationsOwnModelsAndNoOtherTenants(t *testing.T) {
 	chat := func(alias, served string, org string) policy.Model {
-		return policy.Model{OrgID: org, Alias: alias, Kind: policy.KindChat, BackendModel: served,
-			Enabled: true}
+		return policy.Model{
+			OrgID: org, Alias: alias, Kind: policy.KindChat, BackendModel: served,
+			Enabled: true,
+		}
 	}
 	models := map[string]policy.Model{
 		"org_1/fast":  chat("fast", "own-fast", "org_1"),
@@ -894,8 +898,10 @@ func TestAKeyOfAnotherOrganisationDoesNotReachTheDefaultModels(t *testing.T) {
 // path unescaped as often as escaped.
 func TestGetModelTakesAnAliasWithASlash(t *testing.T) {
 	models := map[string]policy.Model{
-		"anthropic/claude-sonnet-4-5": {Alias: "anthropic/claude-sonnet-4-5",
-			Kind: policy.KindChat, BackendModel: "a", Enabled: true},
+		"anthropic/claude-sonnet-4-5": {
+			Alias: "anthropic/claude-sonnet-4-5",
+			Kind:  policy.KindChat, BackendModel: "a", Enabled: true,
+		},
 	}
 	h := newHarness(t, jsonBackend(`{}`), models, nil)
 	for _, path := range []string{
@@ -962,8 +968,10 @@ func TestListModelsShowsOnlyWhatTheKeyMayUse(t *testing.T) {
 func TestListModelsReadsAsAnthropicsListToo(t *testing.T) {
 	// Anthropic's SDKs list models from the same path, and read other names.
 	models := map[string]policy.Model{
-		"keera-code": {Alias: "keera-code", Kind: policy.KindChat, BackendModel: "a",
-			ReleaseDate: "2026-03-01", Enabled: true},
+		"keera-code": {
+			Alias: "keera-code", Kind: policy.KindChat, BackendModel: "a",
+			ReleaseDate: "2026-03-01", Enabled: true,
+		},
 	}
 	h := newHarness(t, jsonBackend(`{}`), models, nil)
 	req, _ := http.NewRequest(http.MethodGet, h.url("/v1/models"), nil)
@@ -1508,10 +1516,14 @@ func TestAnAnswerOverTheSizeLimitIsAFailureNotACut(t *testing.T) {
 	big := `{"choices":[{"message":{"content":"` + strings.Repeat("x", 200) + `"}}],` +
 		`"usage":{"prompt_tokens":1,"completion_tokens":1}}`
 	for _, tc := range []struct{ name, provider, path, body string }{
-		{"translated", "", "/v1/chat/completions",
-			`{"model":"keera-frontier","messages":[{"role":"user","content":"hi"}]}`},
-		{"native", "anthropic", "/v1/messages",
-			`{"model":"keera-frontier","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}`},
+		{
+			"translated", "", "/v1/chat/completions",
+			`{"model":"keera-frontier","messages":[{"role":"user","content":"hi"}]}`,
+		},
+		{
+			"native", "anthropic", "/v1/messages",
+			`{"model":"keera-frontier","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, _ := providerHarness(t, tc.provider, "served-name", jsonBackend(big), nil)

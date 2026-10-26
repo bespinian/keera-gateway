@@ -138,8 +138,10 @@ func (m *Manager) reconcile(ctx context.Context, sb store.Sandbox, now time.Time
 		// Gone. On Kubernetes that is usually the controller expiring it;
 		// otherwise somebody removed it by hand. Either way, record the end.
 		m.release(ctx, sb)
-		m.observeFrom(ctx, sb, Status{Ref: refOf(sb), State: policy.SandboxTerminated,
-			Detail: "no longer there"})
+		m.observeFrom(ctx, sb, Status{
+			Ref: refOf(sb), State: policy.SandboxTerminated,
+			Detail: "no longer there",
+		})
 		return
 	case err != nil:
 		// An unreachable driver is not a dead sandbox. Leave the row alone, so

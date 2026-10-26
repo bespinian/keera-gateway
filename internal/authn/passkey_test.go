@@ -34,8 +34,10 @@ func TestTheRelyingPartyComesFromThePublicURL(t *testing.T) {
 		t.Errorf("got %s, want localhost", local.ID())
 	}
 	// Browsers refuse each of these, so the gateway refuses to start with them.
-	for _, bad := range []string{"", "http://keera.example.ch", "https://127.0.0.1",
-		"http://127.0.0.1:8080", "https://[::1]:8443"} {
+	for _, bad := range []string{
+		"", "http://keera.example.ch", "https://127.0.0.1",
+		"http://127.0.0.1:8080", "https://[::1]:8443",
+	} {
 		if _, err := authn.NewRelyingParty(bad); err == nil {
 			t.Errorf("%q was accepted", bad)
 		}

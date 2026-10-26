@@ -44,7 +44,8 @@ const passwordRefused = "that username and password were not accepted"
 // login` reaches the form: the flow keeps the loopback hand-over, and the panel
 // asks for the password.
 func (s *Server) startPasswordLogin(w http.ResponseWriter, r *http.Request,
-	provider *authn.OIDC, cli cliLogin) {
+	provider *authn.OIDC, cli cliLogin,
+) {
 	f := store.LoginFlow{
 		State: authn.NewFlow().State, Provider: provider.Name(),
 		RedirectTo:  safeRedirect(r.URL.Query().Get("next")),

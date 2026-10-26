@@ -48,8 +48,10 @@ type credit struct {
 }
 
 func newBudgets(prepaid bool) *Budgets {
-	return &Budgets{w: make(map[string]*window), prepaid: prepaid, credit: map[string]credit{},
-		held: map[string]int64{}, running: map[string]*window{}}
+	return &Budgets{
+		w: make(map[string]*window), prepaid: prepaid, credit: map[string]credit{},
+		held: map[string]int64{}, running: map[string]*window{},
+	}
 }
 
 func windowKey(t policy.ScopeType, id string, p policy.Period) string {

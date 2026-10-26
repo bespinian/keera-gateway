@@ -24,10 +24,14 @@ func (tn tenants) call(h handler, p *authn.Principal, method, target, body strin
 func TestAnAdministratorManagesTheirOrganisationsMCPServers(t *testing.T) {
 	tn := twoTenants(t)
 	operator := &authn.Principal{Via: authn.MethodOperatorKey, Role: authn.RoleOperator}
-	carol := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin,
-		OrgID: "org_a", UserID: "user_carol"}
-	alice := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleMember,
-		OrgID: "org_a", UserID: "user_alice"}
+	carol := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleAdmin,
+		OrgID: "org_a", UserID: "user_carol",
+	}
+	alice := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleMember,
+		OrgID: "org_a", UserID: "user_alice",
+	}
 	body := `{"url":"https://mcp.example.ch/mcp","description":"Issues"}`
 
 	if w := tn.call(tn.srv.putMCPServer, alice, "PUT", "/v1/mcp-servers/github", body); w.Code != http.StatusForbidden {
@@ -79,8 +83,10 @@ func TestAPutAnswersWithTheStoredCredentialState(t *testing.T) {
 		t.Fatal(err)
 	}
 	tn.srv.opts.Secrets = box
-	carol := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin,
-		OrgID: "org_a", UserID: "user_carol"}
+	carol := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleAdmin,
+		OrgID: "org_a", UserID: "user_carol",
+	}
 
 	put := func(h handler, path, body string) bool {
 		t.Helper()
@@ -114,8 +120,10 @@ func TestAPutAnswersWithTheStoredCredentialState(t *testing.T) {
 // An edit that leaves out "enabled" does not switch a disabled server back on.
 func TestAnEditKeepsAServerDisabled(t *testing.T) {
 	tn := twoTenants(t)
-	carol := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin,
-		OrgID: "org_a", UserID: "user_carol"}
+	carol := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleAdmin,
+		OrgID: "org_a", UserID: "user_carol",
+	}
 	put := func(body string) policy.MCPServer {
 		t.Helper()
 		w := tn.call(tn.srv.putMCPServer, carol, "PUT", "/v1/mcp-servers/github", body)
@@ -148,8 +156,10 @@ func TestAStoredCredentialDoesNotMoveToANewHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	tn.srv.opts.Secrets = box
-	carol := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin,
-		OrgID: "org_a", UserID: "user_carol"}
+	carol := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleAdmin,
+		OrgID: "org_a", UserID: "user_carol",
+	}
 	put := func(h handler, path, body string) int {
 		t.Helper()
 		return tn.call(h, carol, "PUT", path, body).Code
@@ -187,8 +197,10 @@ func TestAToolAllowListMustNameRealServers(t *testing.T) {
 	}, store.Credential{}); err != nil {
 		t.Fatal(err)
 	}
-	carol := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin,
-		OrgID: "org_a", UserID: "user_carol"}
+	carol := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleAdmin,
+		OrgID: "org_a", UserID: "user_carol",
+	}
 
 	w := tn.call(tn.srv.putGuardrails, carol, "PUT", "/v1/guardrails/org/org_a",
 		`{"allowed_tools":["githbu/search"]}`)

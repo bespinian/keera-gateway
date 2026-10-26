@@ -33,7 +33,8 @@ const maxOrgName = 100
 // startSignup keeps what the identity provider said, and sends the browser to
 // the sign-up screen.
 func (s *Server) startSignup(w http.ResponseWriter, r *http.Request, provider *authn.OIDC,
-	identity authn.Identity, invited, redirectTo string) {
+	identity authn.Identity, invited, redirectTo string,
+) {
 	sealed := s.sealRefreshToken(identity.ExternalID(), identity.RefreshToken)
 	token := auth.RandomToken()
 	if err := s.st.CreateSignup(r.Context(), store.Signup{
@@ -184,7 +185,8 @@ func (s *Server) completeSignup(w http.ResponseWriter, r *http.Request) {
 // which customers this deployment has. The address is added to make it
 // unique, and an operator can rename it.
 func (s *Server) createSignedUpOrg(r *http.Request, hash []byte, name string) (
-	store.Signup, store.Org, store.User, error) {
+	store.Signup, store.Org, store.User, error,
+) {
 	org := store.Org{ID: id.New("org"), Name: name, Limited: true}
 	su, created, user, err := s.st.SignUp(r.Context(), hash, org, s.opts.Template)
 	if errors.Is(err, store.ErrOrgNameTaken) {

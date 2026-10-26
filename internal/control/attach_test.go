@@ -13,10 +13,14 @@ import (
 func TestPickSandboxNeverRevealsAColleaguesSandbox(t *testing.T) {
 	mine := store.Sandbox{ID: "sbx_mine", OrgID: "org_1", UserID: "user_me"}
 	theirs := store.Sandbox{ID: "sbx_theirs", OrgID: "org_1", UserID: "user_them"}
-	member := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleMember,
-		OrgID: "org_1", UserID: "user_me"}
-	admin := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin,
-		OrgID: "org_1", UserID: "user_admin"}
+	member := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleMember,
+		OrgID: "org_1", UserID: "user_me",
+	}
+	admin := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleAdmin,
+		OrgID: "org_1", UserID: "user_admin",
+	}
 
 	if sb, err := pickSandbox(member, []store.Sandbox{theirs, mine}); err != nil || sb.ID != mine.ID {
 		t.Errorf("member = %s, %v; want their own", sb.ID, err)

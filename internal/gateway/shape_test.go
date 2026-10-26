@@ -43,12 +43,16 @@ func TestOpenAIErrorBody(t *testing.T) {
 // neither vLLM nor llama.cpp sends.
 func TestABackendContextOverflowGetsOpenAIsCode(t *testing.T) {
 	for _, tc := range []struct{ raw, message string }{
-		{`{"object":"error","message":"This model's maximum context length is 16384 tokens. However, ` +
-			`you requested 20000 tokens (12000 in the messages, 8000 in the completion).","type":"BadRequestError","code":400}`,
-			"input length and `max_tokens` exceed context limit: 12000 + 8000 > 16384, decrease input length or `max_tokens` and try again"},
-		{`{"error":{"code":400,"message":"the request exceeds the available context size, try increasing it",` +
-			`"type":"exceed_context_size_error","n_prompt_tokens":20000,"n_ctx":16384}}`,
-			"prompt is too long: 20000 tokens > 16384 maximum"},
+		{
+			`{"object":"error","message":"This model's maximum context length is 16384 tokens. However, ` +
+				`you requested 20000 tokens (12000 in the messages, 8000 in the completion).","type":"BadRequestError","code":400}`,
+			"input length and `max_tokens` exceed context limit: 12000 + 8000 > 16384, decrease input length or `max_tokens` and try again",
+		},
+		{
+			`{"error":{"code":400,"message":"the request exceeds the available context size, try increasing it",` +
+				`"type":"exceed_context_size_error","n_prompt_tokens":20000,"n_ctx":16384}}`,
+			"prompt is too long: 20000 tokens > 16384 maximum",
+		},
 	} {
 		var got struct {
 			Error struct {

@@ -216,8 +216,10 @@ func (q RequestQuery) where() string {
 
 // whereArgs are the values where refers to.
 func (q RequestQuery) whereArgs() []any {
-	return append(append([]any{q.OrgID, nullableTime(q.From), nullableTime(q.To), q.Status,
-		q.StatusClass, q.Before, q.After, q.Skip, q.Holder}, q.args()...), q.RequestID)
+	return append(append([]any{
+		q.OrgID, nullableTime(q.From), nullableTime(q.To), q.Status,
+		q.StatusClass, q.Before, q.After, q.Skip, q.Holder,
+	}, q.args()...), q.RequestID)
 }
 
 // Requests returns the matching rows in the order q asks for, newest first by

@@ -96,8 +96,10 @@ func (m *mcpRun) save(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	put := mcpPut{URL: cur.URL, Description: cur.Description, AuthHeader: cur.AuthHeader,
-		Enabled: cur.Enabled}
+	put := mcpPut{
+		URL: cur.URL, Description: cur.Description, AuthHeader: cur.AuthHeader,
+		Enabled: cur.Enabled,
+	}
 	m.fs.Visit(func(fl *flag.Flag) {
 		switch fl.Name {
 		case "endpoint":
@@ -128,8 +130,10 @@ func (m *mcpRun) toggle(ctx context.Context, enable bool) error {
 	if err != nil {
 		return err
 	}
-	return m.put(ctx, cur.Alias, mcpPut{URL: cur.URL, Description: cur.Description,
-		AuthHeader: cur.AuthHeader, Enabled: enable})
+	return m.put(ctx, cur.Alias, mcpPut{
+		URL: cur.URL, Description: cur.Description,
+		AuthHeader: cur.AuthHeader, Enabled: enable,
+	})
 }
 
 func (m *mcpRun) delete(ctx context.Context) error {

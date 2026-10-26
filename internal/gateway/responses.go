@@ -513,8 +513,10 @@ func newResponsesUsage(u *tokenUsage) *responsesUsage {
 	if u == nil {
 		return nil
 	}
-	out := &responsesUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
-		TotalTokens: u.InputTokens + u.OutputTokens}
+	out := &responsesUsage{
+		InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
+		TotalTokens: u.InputTokens + u.OutputTokens,
+	}
 	out.InputTokensDetails.CachedTokens = u.cached()
 	out.InputTokensDetails.CacheWriteTokens = u.InputDetails.CacheWriteTokens
 	return out

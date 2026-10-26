@@ -49,7 +49,7 @@ jobs:
       - name: Lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.14
+          version: v2.15
 
       # The fastest way to find out that a platform-specific file does not
       # compile.

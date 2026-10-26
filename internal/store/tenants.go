@@ -73,8 +73,10 @@ var userColumns = userColumnsOf("")
 
 // userTargets points at the fields userColumnsOf fills, in its order.
 func userTargets(u *User) []any {
-	return []any{&u.ID, &u.OrgID, &u.Email, &u.Name, &u.ExternalID, &u.Role, &u.CreatedAt,
-		&u.DisabledAt}
+	return []any{
+		&u.ID, &u.OrgID, &u.Email, &u.Name, &u.ExternalID, &u.Role, &u.CreatedAt,
+		&u.DisabledAt,
+	}
 }
 
 func scanUser(r row) (User, error) {
@@ -114,8 +116,10 @@ func keyColumnsOf(table string) string {
 
 // keyTargets points at the fields keyColumnsOf fills, in its order.
 func keyTargets(k *KeyInfo) []any {
-	return []any{&k.ID, &k.OrgID, &k.ProjectID, &k.UserID, &k.Name, &k.Prefix, &k.Kind,
-		&k.CreatedAt, &k.ExpiresAt, &k.RevokedAt, &k.Pending}
+	return []any{
+		&k.ID, &k.OrgID, &k.ProjectID, &k.UserID, &k.Name, &k.Prefix, &k.Kind,
+		&k.CreatedAt, &k.ExpiresAt, &k.RevokedAt, &k.Pending,
+	}
 }
 
 // State is the one word a screen shows for a key at now: revoked, expired,
@@ -790,8 +794,10 @@ func (s *Store) lookupKey(ctx context.Context, where string, arg any) (*policy.R
 			scopeType *string
 			lim       policy.Limits
 		)
-		dest := append([]any{&key.ID, &key.OrgID, &key.ProjectID, &key.UserID, &key.Kind,
-			&expires, &revoked, &pending, &scopeType}, limitTargets(&lim)...)
+		dest := append([]any{
+			&key.ID, &key.OrgID, &key.ProjectID, &key.UserID, &key.Kind,
+			&expires, &revoked, &pending, &scopeType,
+		}, limitTargets(&lim)...)
 		if err := rows.Scan(dest...); err != nil {
 			return nil, err
 		}

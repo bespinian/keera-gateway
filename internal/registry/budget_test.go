@@ -199,8 +199,10 @@ func TestTallyCountsOnlyItsOwnMeter(t *testing.T) {
 	b := newBudgets(false)
 	now := time.Now()
 	budget := policy.Scope{Type: policy.ScopeRouter, ID: "org_1/safe/cap", Period: policy.PeriodDay}
-	requests := policy.Scope{Type: policy.ScopeRouter, ID: "org_1/safe/daily|requests",
-		Period: policy.PeriodDay, Meter: policy.MeterRequests, Quota: 10}
+	requests := policy.Scope{
+		Type: policy.ScopeRouter, ID: "org_1/safe/daily|requests",
+		Period: policy.PeriodDay, Meter: policy.MeterRequests, Quota: 10,
+	}
 	both := []policy.Scope{budget, requests}
 
 	b.Charge(both, 5_000, now)
@@ -221,8 +223,10 @@ func TestTallyCountsOnlyItsOwnMeter(t *testing.T) {
 func TestReconcileKeepsRequestsStillRunning(t *testing.T) {
 	b := newBudgets(false)
 	now := time.Now()
-	limit := []policy.Scope{{Type: policy.ScopeKey, ID: "key_1|requests",
-		Period: policy.PeriodDay, Meter: policy.MeterRequests, Quota: 10}}
+	limit := []policy.Scope{{
+		Type: policy.ScopeKey, ID: "key_1|requests",
+		Period: policy.PeriodDay, Meter: policy.MeterRequests, Quota: 10,
+	}}
 	spent := func() int64 { return b.Spent(policy.ScopeKey, "key_1|requests", policy.PeriodDay, now) }
 
 	b.StartRequest(limit, now)
@@ -238,14 +242,18 @@ func TestReconcileKeepsRequestsStillRunning(t *testing.T) {
 		t.Errorf("after one ended, %d requests counted, want 2", got)
 	}
 	// The database now has its row, and the other is still running.
-	b.reconcile([]store.SpendRow{{ScopeType: policy.ScopeKey, ScopeID: "key_1|requests",
-		Period: policy.PeriodDay, PeriodStart: policy.PeriodDay.Start(now), Micros: 1}})
+	b.reconcile([]store.SpendRow{{
+		ScopeType: policy.ScopeKey, ScopeID: "key_1|requests",
+		Period: policy.PeriodDay, PeriodStart: policy.PeriodDay.Start(now), Micros: 1,
+	}})
 	if got := spent(); got != 2 {
 		t.Errorf("after the row was read, %d requests counted, want 2", got)
 	}
 	b.EndRequest(limit, now)
-	b.reconcile([]store.SpendRow{{ScopeType: policy.ScopeKey, ScopeID: "key_1|requests",
-		Period: policy.PeriodDay, PeriodStart: policy.PeriodDay.Start(now), Micros: 2}})
+	b.reconcile([]store.SpendRow{{
+		ScopeType: policy.ScopeKey, ScopeID: "key_1|requests",
+		Period: policy.PeriodDay, PeriodStart: policy.PeriodDay.Start(now), Micros: 2,
+	}})
 	if got := spent(); got != 2 {
 		t.Errorf("once both rows were read, %d requests counted, want 2", got)
 	}
@@ -257,8 +265,10 @@ func TestARequestEndingInANewWindowLeavesItAlone(t *testing.T) {
 	b := newBudgets(false)
 	yesterday := time.Date(2026, 10, 22, 23, 59, 0, 0, time.UTC)
 	today := yesterday.Add(2 * time.Minute)
-	limit := []policy.Scope{{Type: policy.ScopeKey, ID: "key_1|requests",
-		Period: policy.PeriodDay, Meter: policy.MeterRequests, Quota: 10}}
+	limit := []policy.Scope{{
+		Type: policy.ScopeKey, ID: "key_1|requests",
+		Period: policy.PeriodDay, Meter: policy.MeterRequests, Quota: 10,
+	}}
 
 	b.StartRequest(limit, yesterday)
 	b.StartRequest(limit, today)

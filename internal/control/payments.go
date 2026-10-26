@@ -280,7 +280,8 @@ func (s *Server) createTopUp(w http.ResponseWriter, r *http.Request, p *authn.Pr
 
 // newPayment is a pending payment of micros, with its VAT and fee.
 func (pay *Payments) newPayment(orgID string, kind store.PaymentKind, micros int64,
-	actor string) store.Payment {
+	actor string,
+) store.Payment {
 	return store.Payment{
 		ID: id.New("pay"), OrgID: orgID, Kind: kind, AmountMicros: micros,
 		VATMicros: vatOn(micros, pay.VATBP), FeeMicros: feeOn(micros),
@@ -291,7 +292,8 @@ func (pay *Payments) newPayment(orgID string, kind store.PaymentKind, micros int
 // startTransaction creates the PostFinance transaction t for pm, and ties
 // the two together.
 func (s *Server) startTransaction(ctx context.Context, pm *store.Payment,
-	t payment.NewTransaction) (payment.Transaction, error) {
+	t payment.NewTransaction,
+) (payment.Transaction, error) {
 	tx, err := s.opts.Payments.Client.Create(ctx, t)
 	if err != nil {
 		return tx, err

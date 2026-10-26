@@ -22,7 +22,8 @@ import (
 // sessionQuery reads the narrowing every session report takes: the request
 // log's, plus a conversation key and a sort.
 func (s *Server) sessionQuery(w http.ResponseWriter, r *http.Request,
-	p *authn.Principal) (store.AgentSessionQuery, bool) {
+	p *authn.Principal,
+) (store.AgentSessionQuery, bool) {
 	rq, from, to, ok := s.requestQuery(w, r, p)
 	if !ok {
 		return store.AgentSessionQuery{}, false
@@ -179,12 +180,15 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request, p *authn.Princi
 // columns are for dividing spend by tasks and finding tasks that were not
 // worth their cost, so they include how each task ended.
 func (s *Server) sessionsCSV(w http.ResponseWriter, rows []store.AgentSession,
-	names groupLabels) {
+	names groupLabels,
+) {
 	cw := beginCSV(w, "keera-sessions-"+time.Now().Format("2006-01-02")+".csv")
-	_ = cw.Write([]string{"started", "ended", "minutes", "requests", "ok", "failed",
+	_ = cw.Write([]string{
+		"started", "ended", "minutes", "requests", "ok", "failed",
 		"refused", "interrupted", "models", "key", "key_id", "project", "user",
 		"input_tokens", "output_tokens", "cost",
-		"last_status", "last_error", "session_id", "named_by_client"})
+		"last_status", "last_error", "session_id", "named_by_client",
+	})
 	for _, a := range rows {
 		_ = cw.Write([]string{
 			a.StartedAt.Format(time.RFC3339), a.EndedAt.Format(time.RFC3339),

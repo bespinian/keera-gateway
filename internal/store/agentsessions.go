@@ -313,8 +313,10 @@ func (q AgentSessionQuery) args() []any {
 	if q.Holder != "" {
 		user = q.Holder
 	}
-	return []any{q.OrgID, nullableTime(q.From), nullableTime(q.To), q.Gap.Seconds(),
-		q.SessionKey, q.ProjectID, user, q.KeyID, q.Alias, q.Status, q.StatusClass}
+	return []any{
+		q.OrgID, nullableTime(q.From), nullableTime(q.To), q.Gap.Seconds(),
+		q.SessionKey, q.ProjectID, user, q.KeyID, q.Alias, q.Status, q.StatusClass,
+	}
 }
 
 func scanAgentSession(r row) (AgentSession, error) {
@@ -375,7 +377,8 @@ type AgentSessionTotals struct {
 // It ignores q's paging and sort, so the totals do not change as somebody
 // scrolls. That is why it walks the rows again rather than adding up the page.
 func (s *Store) AgentSessionSummary(ctx context.Context,
-	q AgentSessionQuery) (AgentSessionTotals, error) {
+	q AgentSessionQuery,
+) (AgentSessionTotals, error) {
 	q.setDefaults()
 	var t AgentSessionTotals
 	o := &t.Outcomes
@@ -412,7 +415,8 @@ func (s *Store) AgentSessionSummary(ctx context.Context,
 // Only the tenant, the holder, the outcome and the time bounds of q are read,
 // so the screen still offers the other values after one is picked.
 func (s *Store) AgentSessionFilters(ctx context.Context,
-	q AgentSessionQuery) (RequestFacets, error) {
+	q AgentSessionQuery,
+) (RequestFacets, error) {
 	q.setDefaults()
 	q.ReportScope = ReportScope{}
 	q.Status, q.StatusClass = 0, 0
@@ -431,7 +435,8 @@ func (s *Store) AgentSessionFilters(ctx context.Context,
 // The summary comes from the same query that lists sessions, so a session on
 // its own screen always matches its row in a list.
 func (s *Store) AgentSessionAt(ctx context.Context, orgID string, requestID int64,
-	gap time.Duration) (AgentSession, []Request, error) {
+	gap time.Duration,
+) (AgentSession, []Request, error) {
 	// The organisation is read back rather than filtered on, so a request of
 	// another tenant is simply not found, as with every other scoped read.
 	var (
@@ -477,7 +482,8 @@ func (s *Store) AgentSessionAt(ctx context.Context, orgID string, requestID int6
 // gap at or before it. It scans one conversation's rows, which is one small
 // index range.
 func (s *Store) sessionStart(ctx context.Context, orgID, key string, ts time.Time,
-	gap time.Duration) (time.Time, error) {
+	gap time.Duration,
+) (time.Time, error) {
 	var start time.Time
 	err := s.pool.QueryRow(ctx, `
 		WITH ev AS (
@@ -495,7 +501,8 @@ func (s *Store) sessionStart(ctx context.Context, orgID, key string, ts time.Tim
 //
 // Every row before start is excluded, so the session to keep is run 1.
 func (s *Store) agentSessionRequests(ctx context.Context, orgID, key string,
-	start time.Time, gap time.Duration) ([]Request, error) {
+	start time.Time, gap time.Duration,
+) ([]Request, error) {
 	return queryAll(ctx, s.pool, scanRequest, `
 		WITH ev AS (
 		    SELECT *, EXTRACT(EPOCH FROM (ts - lag(ts) OVER (ORDER BY ts, id))) AS gap

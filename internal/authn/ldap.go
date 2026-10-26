@@ -255,7 +255,8 @@ func (o *OIDC) Password() bool { return o.ldap != nil }
 // the sign-in with its error. That is where attempts are counted per account:
 // one account can be typed as several usernames.
 func (o *OIDC) Authenticate(_ context.Context, username, password string,
-	admit func(dn string) error) (Identity, error) {
+	admit func(dn string) error,
+) (Identity, error) {
 	d := o.ldap
 	username = strings.TrimSpace(username)
 	// An empty password is an unauthenticated bind, which a directory accepts

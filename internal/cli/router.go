@@ -42,6 +42,8 @@ type routerRun struct {
 	fallback     string
 	noFallback   bool
 	prompt       string
+	header       string
+	values       string
 }
 
 func routerCmd(ctx context.Context, args []string) error {
@@ -57,9 +59,9 @@ func routerCmd(ctx context.Context, args []string) error {
 		"the id of the route step to change; needed only when there is more than one")
 	fs.StringVar(&r.mode, "mode", "",
 		"what the route step chooses by: 'instruction' reads the request with a model; 'size' "+
-			"places it by how much text is in it; 'fallback', 'latency' and 'least-busy' try "+
-			"the destinations until one answers, in the order written, fastest first, or "+
-			"emptiest first (default: instruction)")
+			"places it by how much text is in it; 'header' by a header the client sends; "+
+			"'fallback', 'latency' and 'least-busy' try the destinations until one answers, "+
+			"in the order written, fastest first, or emptiest first (default: instruction)")
 	fs.StringVar(&r.model, "model", "", "the model that makes the decision - a fast local one, or a decision model")
 	fs.StringVar(&r.destinations, "destinations", "",
 		"comma-separated models the route step may choose between; on a fallback step, in the "+
@@ -69,10 +71,15 @@ func routerCmd(ctx context.Context, args []string) error {
 	// empty one, and on 'set' that is the difference between keeping the
 	// fallback and refusing what the step cannot place.
 	fs.StringVar(&r.fallback, "fallback", "",
-		"where a request goes when the decision cannot be made; must be one of the destinations")
+		"where a request goes when the decision cannot be made, or the header names no "+
+			"destination; must be one of the destinations")
 	fs.BoolVar(&r.noFallback, "no-fallback", false,
 		"refuse a request the route step cannot place, rather than sending it to a fallback")
 	fs.StringVar(&r.prompt, "prompt", "", "the instruction the deciding model is given; @path reads a file")
+	fs.StringVar(&r.header, "header", "", "the request header a header step chooses by, such as X-Keera-Route")
+	fs.StringVar(&r.values, "values", "",
+		"which value of the header sends a request where - 'cheap=keera-speed,hard=keera-frontier'; "+
+			"without --destinations, these models and the fallback are the destinations")
 	r.reword("set", "file", "a JSON file with the new steps; without it the steps are kept")
 	r.reword("set", "display-name", "the router's name for people; an empty one clears it")
 	r.reword("set", "description", "what this router is for; an empty one clears it")
@@ -85,7 +92,7 @@ func routerCmd(ctx context.Context, args []string) error {
 		return opposites("fallback", "no-fallback")
 	}
 	if !policy.RouteMode(r.mode).Valid() {
-		return fmt.Errorf("--mode is %q; use instruction, size, fallback, latency or "+
+		return fmt.Errorf("--mode is %q; use instruction, size, header, fallback, latency or "+
 			"least-busy (see: keera help router add)", r.mode)
 	}
 	if r.verb == "show" {
@@ -273,16 +280,22 @@ func (r *routerRun) applyRoute(s *policy.Step) error {
 	// control plane refuses, say, a fallback step that carries a deciding
 	// model.
 	if !s.Mode.Decides() {
-		s.Model, s.Prompt, s.Fallback = "", "", ""
+		s.Model, s.Prompt = "", ""
+	}
+	if !s.Mode.Chooses() {
+		s.Fallback = ""
 	}
 	switch {
 	case r.noFallback:
 		s.Fallback = ""
 	case r.fallback != "":
-		if !s.Mode.Decides() {
+		if !s.Mode.Chooses() {
 			return needsDecider("fallback", s.Mode)
 		}
 		s.Fallback = r.fallback
+	}
+	if err := r.applyHeader(s); err != nil {
+		return err
 	}
 	if !s.Mode.Sizes() {
 		s.Ceilings = nil
@@ -296,6 +309,46 @@ func (r *routerRun) applyRoute(s *policy.Step) error {
 			return err
 		}
 		s.Prompt = text
+	}
+	return nil
+}
+
+// applyHeader sets what a header step reads. Without --destinations, its
+// destinations are where its values send, and the fallback.
+func (r *routerRun) applyHeader(s *policy.Step) error {
+	if s.Mode != policy.RouteModeHeader {
+		for _, flag := range []string{"header", "values"} {
+			if given(r.fs, flag) {
+				return fmt.Errorf("--%s is for a route step that chooses by a header; "+
+					"use --mode header", flag)
+			}
+		}
+		s.Header, s.Values = "", nil
+		return nil
+	}
+	if r.header != "" {
+		s.Header = r.header
+	}
+	var order []string
+	if r.values != "" {
+		values, dests, err := parseValues(r.values)
+		if err != nil {
+			return err
+		}
+		s.Values, order = values, dests
+	} else {
+		for _, v := range slices.Sorted(maps.Keys(s.Values)) {
+			order = append(order, s.Values[v])
+		}
+	}
+	if r.destinations != "" || (r.values == "" && r.fallback == "" && !r.noFallback) {
+		return nil
+	}
+	s.Destinations = nil
+	for _, d := range append(order, s.Fallback) {
+		if d != "" && !slices.Contains(s.Destinations, d) {
+			s.Destinations = append(s.Destinations, d)
+		}
 	}
 	return nil
 }
@@ -442,6 +495,9 @@ func routeBranches(s *policy.Step) []branch {
 		if n, ok := s.Ceilings[d]; ok && n > 0 {
 			label += " (up to " + formatTokenCount(n) + " tokens)"
 		}
+		if values := policy.ValuesTo(s.Values, d); len(values) > 0 {
+			label += " (for " + strings.Join(values, ", ") + ")"
+		}
 		if next := s.Branches[d]; next != nil {
 			out = append(out, branch{label, stepTree(next)})
 			continue
@@ -497,6 +553,9 @@ func routeLine(s *policy.Step) string {
 			" when it cannot"
 	case s.Mode.Sizes():
 		return "by size"
+	case s.Mode == policy.RouteModeHeader:
+		return "by the header " + style.cmd(s.Header) + ", " + fallbackLabel(s.Fallback) +
+			" without a known value"
 	case s.Mode.Measures():
 		return "by " + cliOrdersBy(s.Mode)
 	default:
@@ -534,6 +593,8 @@ func cliOrdersBy(mode policy.RouteMode) string {
 		return "how many requests the gateway has in flight against each, emptiest first"
 	case policy.RouteModeSize:
 		return "how much text is in the request, against the ceiling on each"
+	case policy.RouteModeHeader:
+		return "the value of a header the client sends"
 	default:
 		return "the order they are given to --destinations"
 	}
@@ -560,7 +621,7 @@ func printRouterCheck(w *table, c control.RouterCheck) {
 func printRouteProbe(w *table, p gateway.RouteProbe) {
 	show(w, "route step", p.Step+" ("+string(p.Mode)+")")
 	showIfSet(w, "decides with", p.Model)
-	if p.Mode.Sizes() {
+	if p.Mode.Sizes() || p.Mode == policy.RouteModeHeader {
 		show(w, "places between", strings.Join(p.Destinations, ", "))
 	} else {
 		show(w, "offered", strings.Join(p.Destinations, ", "))
@@ -613,6 +674,15 @@ func printRouteChain(w *table, p gateway.RouteProbe) {
 	if p.Mode.Sizes() {
 		_, _ = fmt.Fprintln(w)
 		w.header("PLACED ON\tTAKES\tANSWERS\tTOOK\tNOTE")
+		for _, hop := range p.Chain {
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+				hop.Alias, hop.Reading, yesNo(hop.Answers), hopTook(hop), hop.Note)
+		}
+		return
+	}
+	if p.Mode == policy.RouteModeHeader {
+		_, _ = fmt.Fprintln(w)
+		w.header("PLACED ON\tFOR\tANSWERS\tTOOK\tNOTE")
 		for _, hop := range p.Chain {
 			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 				hop.Alias, hop.Reading, yesNo(hop.Answers), hopTook(hop), hop.Note)

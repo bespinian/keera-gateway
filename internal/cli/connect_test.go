@@ -54,7 +54,8 @@ func TestConnectOffersRouters(t *testing.T) {
 		"GET /v1/routers": map[string]any{"data": []map[string]any{
 			autoRouter,
 			{"alias": "safe", "display_name": "Safe", "start": map[string]any{
-				"id": "out", "kind": "model", "ref": "keera-code"}},
+				"id": "out", "kind": "model", "ref": "keera-code",
+			}},
 		}},
 	}))
 
@@ -100,14 +101,22 @@ func TestConnectConfiguresOnlyEnabledChatModels(t *testing.T) {
 // twoKeys is a developer with two keys: the first may call only keera-code, the
 // second only the router. A revoked key and a subscription key are skipped.
 var twoKeys = map[string]any{"keys": []map[string]any{
-	{"id": "key_old", "org_id": "org_1", "name": "old", "state": "revoked",
-		"allowed_models": []string{"keera-code", "auto"}},
-	{"id": "key_sub", "org_id": "org_1", "name": "plan", "state": "active",
-		"kind": "subscription", "allowed_models": []string{"claude-opus"}},
-	{"id": "key_1", "org_id": "org_1", "name": "laptop", "state": "active",
-		"prefix": "keera_sk_ab12", "allowed_models": []string{"keera-code"}},
-	{"id": "key_2", "org_id": "org_1", "name": "ci", "state": "active",
-		"allowed_models": []string{"auto"}},
+	{
+		"id": "key_old", "org_id": "org_1", "name": "old", "state": "revoked",
+		"allowed_models": []string{"keera-code", "auto"},
+	},
+	{
+		"id": "key_sub", "org_id": "org_1", "name": "plan", "state": "active",
+		"kind": "subscription", "allowed_models": []string{"claude-opus"},
+	},
+	{
+		"id": "key_1", "org_id": "org_1", "name": "laptop", "state": "active",
+		"prefix": "keera_sk_ab12", "allowed_models": []string{"keera-code"},
+	},
+	{
+		"id": "key_2", "org_id": "org_1", "name": "ci", "state": "active",
+		"allowed_models": []string{"auto"},
+	},
 }}
 
 // The config lists what the key may call, so the editor offers nothing that
@@ -154,8 +163,10 @@ func TestConnectRefusesAKeyThatMayCallNoChatModel(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, connectRoutes("https://keera.example.ch/api",
 		map[string]any{"GET /v1/access": map[string]any{"keys": []map[string]any{
-			{"id": "key_1", "org_id": "org_1", "name": "embed-only", "state": "active",
-				"allowed_models": []string{"keera-embed"}},
+			{
+				"id": "key_1", "org_id": "org_1", "name": "embed-only", "state": "active",
+				"allowed_models": []string{"keera-embed"},
+			},
 		}}}))
 
 	err := connectCmd(context.Background(), []string{"pi"})

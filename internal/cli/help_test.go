@@ -181,11 +181,17 @@ func TestTakeURL(t *testing.T) {
 		{[]string{"whoami"}, []string{"whoami"}, ""},
 		{[]string{"--url", "https://a.ch", "whoami"}, []string{"whoami"}, "https://a.ch"},
 		{[]string{"whoami", "--url=https://b.ch"}, []string{"whoami"}, "https://b.ch"},
-		{[]string{"--url", "keera.example.ch", "whoami"}, []string{"whoami"},
-			"https://keera.example.ch"},
+		{
+			[]string{"--url", "keera.example.ch", "whoami"},
+			[]string{"whoami"},
+			"https://keera.example.ch",
+		},
 		// Everything after -- belongs to the command being run in a sandbox.
-		{[]string{"sandbox", "ssh", "box", "--", "curl", "--url", "x"},
-			[]string{"sandbox", "ssh", "box", "--", "curl", "--url", "x"}, ""},
+		{
+			[]string{"sandbox", "ssh", "box", "--", "curl", "--url", "x"},
+			[]string{"sandbox", "ssh", "box", "--", "curl", "--url", "x"},
+			"",
+		},
 	}
 	for _, c := range cases {
 		urlFlag = ""

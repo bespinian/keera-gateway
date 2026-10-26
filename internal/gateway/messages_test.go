@@ -260,8 +260,10 @@ func TestDecodeIgnoresFieldsWithNoCounterpart(t *testing.T) {
 		]}]
 	}`)
 
-	for _, gone := range []string{"thinking", "context_management", "output_config",
-		"some_field_from_next_year"} {
+	for _, gone := range []string{
+		"thinking", "context_management", "output_config",
+		"some_field_from_next_year",
+	} {
 		if _, present := req[gone]; present {
 			t.Errorf("%q reached the inference plane; it has no OpenAI counterpart", gone)
 		}
@@ -527,32 +529,42 @@ func TestEncodeWordsAContextOverflowAsTheMessagesAPIDoes(t *testing.T) {
 	// the other sentence. A backend's own words for the same thing stop the
 	// session instead.
 	for _, tc := range []struct{ name, upstream, want string }{
-		{"vllm, prompt alone",
+		{
+			"vllm, prompt alone",
 			`{"error":{"message":"This model's maximum context length is 32768 tokens. ` +
 				`However, your request has 40000 input tokens. Please reduce the length of ` +
 				`the input messages.","type":"BadRequestError","code":400}}`,
-			"prompt is too long: 40000 tokens > 32768 maximum"},
-		{"vllm, with max_tokens",
+			"prompt is too long: 40000 tokens > 32768 maximum",
+		},
+		{
+			"vllm, with max_tokens",
 			`{"error":{"message":"'max_tokens' or 'max_completion_tokens' is too large: ` +
 				`32000. This model's maximum context length is 32768 tokens and your request ` +
 				`has 18000 input tokens (32000 > 32768 - 18000).","type":"BadRequestError"}}`,
 			"input length and `max_tokens` exceed context limit: 18000 + 32000 > 32768, " +
-				"decrease input length or `max_tokens` and try again"},
-		{"older vllm",
+				"decrease input length or `max_tokens` and try again",
+		},
+		{
+			"older vllm",
 			`{"message":"This model's maximum context length is 16384 tokens. However, you ` +
 				`requested 20000 tokens (4000 in the messages, 16000 in the completion)."}`,
 			"input length and `max_tokens` exceed context limit: 4000 + 16000 > 16384, " +
-				"decrease input length or `max_tokens` and try again"},
-		{"llama.cpp",
+				"decrease input length or `max_tokens` and try again",
+		},
+		{
+			"llama.cpp",
 			`{"error":{"code":400,"message":"the request exceeds the available context size, ` +
 				`try increasing it","type":"exceed_context_size_error","n_prompt_tokens":20000,` +
 				`"n_ctx":16384}}`,
-			"prompt is too long: 20000 tokens > 16384 maximum"},
-		{"older llama.cpp",
+			"prompt is too long: 20000 tokens > 16384 maximum",
+		},
+		{
+			"older llama.cpp",
 			`{"error":{"code":400,"message":"the request exceeds the available context size. ` +
 				`try increasing the context size or enable context shift"}}`,
 			"prompt is too long: the request exceeds the available context size. " +
-				"try increasing the context size or enable context shift"},
+				"try increasing the context size or enable context shift",
+		},
 	} {
 		body, status := anthropicShape{}.encode([]byte(tc.upstream), "keera-code", 400)
 		var out struct {

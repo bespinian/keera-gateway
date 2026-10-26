@@ -26,7 +26,8 @@ type deadScripter struct {
 // charge takes n units from one bucket.
 func charge(c interface {
 	ChargeAll([]Requirement, float64, time.Time)
-}, key string, perMinute int, n float64, now time.Time) {
+}, key string, perMinute int, n float64, now time.Time,
+) {
 	c.ChargeAll([]Requirement{{Key: key, PerMinute: perMinute}}, n, now)
 }
 

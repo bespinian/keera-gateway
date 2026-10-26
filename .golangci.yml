@@ -21,6 +21,7 @@ linters:
         linters:
           - errcheck
 
+# gofumpt is a stricter gofmt. `golangci-lint fmt` applies it.
 formatters:
   enable:
-    - gofmt
+    - gofumpt

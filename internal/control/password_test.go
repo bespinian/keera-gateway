@@ -20,8 +20,10 @@ import (
 func passwordServer(t *testing.T) http.Handler {
 	t.Helper()
 	alice := ldaptest.Person("alice", "alice@corp.example.ch", "5b0f4c2e-1d3a-4f6b-9c8d-7e6f5a4b3c2d")
-	dir := &ldaptest.Directory{Entries: []*ldap.Entry{alice},
-		Passwords: map[string]string{alice.DN: "right"}}
+	dir := &ldaptest.Directory{
+		Entries:   []*ldap.Entry{alice},
+		Passwords: map[string]string{alice.DN: "right"},
+	}
 	corp := ldaptest.New(t, ldaptest.Config("corp"), dir)
 	return New(nil, nil, nil, nil, Options{
 		OperatorKey: testOperatorKey, Providers: authn.Providers{corp},
@@ -108,8 +110,10 @@ func TestPasswordsAreThrottledPerAccountUnderAnyUsername(t *testing.T) {
 
 func TestAnUnusableEntryIsNotDescribedToThePerson(t *testing.T) {
 	carol := ldaptest.Person("carol", "", "11111111-2222-3333-4444-555555555555")
-	dir := &ldaptest.Directory{Entries: []*ldap.Entry{carol},
-		Passwords: map[string]string{carol.DN: "right"}}
+	dir := &ldaptest.Directory{
+		Entries:   []*ldap.Entry{carol},
+		Passwords: map[string]string{carol.DN: "right"},
+	}
 	corp := ldaptest.New(t, ldaptest.Config("corp"), dir)
 	h := New(nil, nil, nil, nil, Options{
 		OperatorKey: testOperatorKey, Providers: authn.Providers{corp},
@@ -144,8 +148,10 @@ func TestASignInNamesAProviderBesidePasskeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(nil, nil, nil, nil, Options{OperatorKey: testOperatorKey,
-		Providers: authn.Providers{corp}}, slog.New(slog.DiscardHandler))
+	s := New(nil, nil, nil, nil, Options{
+		OperatorKey: testOperatorKey,
+		Providers:   authn.Providers{corp},
+	}, slog.New(slog.DiscardHandler))
 	if p, err := s.providerFor(""); err != nil || p != corp {
 		t.Errorf("one directory: %v, %v; want it chosen", p, err)
 	}

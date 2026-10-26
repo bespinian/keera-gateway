@@ -216,9 +216,11 @@ func (c Config) servedOverHTTPS() bool {
 }
 
 func (c Config) validate() error {
-	for _, check := range []func() error{c.validateCredentials, c.validateLogging,
+	for _, check := range []func() error{
+		c.validateCredentials, c.validateLogging,
 		c.validateDBConns, c.validateRetention, c.validateSessionGap, c.Sandbox.validate, c.validateOIDC,
-		c.validateChatURL} {
+		c.validateChatURL,
+	} {
 		if err := check(); err != nil {
 			return err
 		}

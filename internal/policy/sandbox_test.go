@@ -119,13 +119,15 @@ func TestResolveSandboxIsRestrictOnly(t *testing.T) {
 		MaxSandboxes:         new(4),
 		MaxSandboxTTLSeconds: new(8 * 3600),
 		SandboxClasses:       []string{"small", "medium", "big"},
-		MaxSandboxCPU:        new(8000)}
+		MaxSandboxCPU:        new(8000),
+	}
 	project := &Limits{
 		// Every one of these asks for more than the organisation allowed.
 		MaxSandboxes:         new(99),
 		MaxSandboxTTLSeconds: new(720 * 3600),
 		SandboxClasses:       []string{"medium", "big", "enormous"},
-		MaxSandboxCPU:        new(64000)}
+		MaxSandboxCPU:        new(64000),
+	}
 
 	got := Resolve(Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"}, org, project, nil).Sandbox
 

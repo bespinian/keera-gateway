@@ -272,7 +272,8 @@ func (s *Server) enableUser(w http.ResponseWriter, r *http.Request, p *authn.Pri
 // userToAdminister reads a person, and checks the caller administers their
 // organisation.
 func (s *Server) userToAdminister(w http.ResponseWriter, r *http.Request, p *authn.Principal,
-	userID string) (store.User, bool) {
+	userID string,
+) (store.User, bool) {
 	target, err := s.st.UserByID(r.Context(), userID)
 	if err != nil {
 		s.fail(w, err)

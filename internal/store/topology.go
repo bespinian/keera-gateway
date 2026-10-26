@@ -38,8 +38,10 @@ var cellColumns = `count(*),
 	               FILTER (WHERE ttft_ms > 0)), 0)::bigint`
 
 func cellTargets(c *Cell) []any {
-	return []any{&c.Requests, &c.InputTokens, &c.OutputTokens, &c.CostMicros,
-		&c.Refused, &c.Failed, &c.TTFTMedianMS}
+	return []any{
+		&c.Requests, &c.InputTokens, &c.OutputTokens, &c.CostMicros,
+		&c.Refused, &c.Failed, &c.TTFTMedianMS,
+	}
 }
 
 // Flow is the traffic between one client and one model: an edge of the map.

@@ -21,22 +21,30 @@ func TestWriteEventsRollsUpSpendPerScope(t *testing.T) {
 		{Type: policy.ScopeKey, ID: f.keyID, Period: policy.PeriodMonth},
 	}
 	events := []Event{
-		{TS: now, OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID, Alias: "keera-code",
+		{
+			TS: now, OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID, Alias: "keera-code",
 			InputTokens: 1000, OutputTokens: 200, CostMicros: 1800, Status: 200,
 			Latency: 900 * time.Millisecond, TTFT: 120 * time.Millisecond,
-			Stream: true, Scopes: scopes},
-		{TS: now.Add(time.Minute), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Stream: true, Scopes: scopes,
+		},
+		{
+			TS: now.Add(time.Minute), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", InputTokens: 500, OutputTokens: 100, CostMicros: 900,
-			Status: 200, Latency: time.Second, Scopes: scopes},
+			Status: 200, Latency: time.Second, Scopes: scopes,
+		},
 		// A refusal: recorded, because it is the event a developer asks about,
 		// and charged nothing.
-		{TS: now.Add(2 * time.Minute), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
-			Alias: "keera-code", Status: 402, Latency: time.Millisecond, Scopes: scopes},
+		{
+			TS: now.Add(2 * time.Minute), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-code", Status: 402, Latency: time.Millisecond, Scopes: scopes,
+		},
 		// A refusal by a filter, which paid for the filter's own call. The
 		// budget charges it, so the report must show it too.
-		{TS: now.Add(3 * time.Minute), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+		{
+			TS: now.Add(3 * time.Minute), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", InputTokens: 50, OutputTokens: 5, CostMicros: 300,
-			Status: 403, Latency: time.Millisecond, Scopes: scopes},
+			Status: 403, Latency: time.Millisecond, Scopes: scopes,
+		},
 	}
 	if err := st.WriteEvents(ctx, events); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
@@ -63,8 +71,10 @@ func TestWriteEventsRollsUpSpendPerScope(t *testing.T) {
 
 	// The report counts as requests only what was served, but its cost is what
 	// the budget charged, refusals included.
-	buckets, err := st.Usage(ctx, UsageQuery{OrgID: f.orgID, From: now.Add(-time.Hour),
-		To: now.Add(time.Hour), GroupBy: "model"})
+	buckets, err := st.Usage(ctx, UsageQuery{
+		OrgID: f.orgID, From: now.Add(-time.Hour),
+		To: now.Add(time.Hour), GroupBy: "model",
+	})
 	if err != nil {
 		t.Fatalf("Usage: %v", err)
 	}
@@ -99,12 +109,18 @@ func TestWriteEventsKeepsSpendWindowsApartWithinOneBatch(t *testing.T) {
 
 	scopes := []policy.Scope{{Type: policy.ScopeOrg, ID: f.orgID, Period: policy.PeriodDay}}
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: lastNight, OrgID: f.orgID, Alias: "keera-code", CostMicros: 400,
-			Status: 200, Scopes: scopes},
-		{TS: thisMorning, OrgID: f.orgID, Alias: "keera-code", CostMicros: 700,
-			Status: 200, Scopes: scopes},
-		{TS: thisMorning.Add(time.Minute), OrgID: f.orgID, Alias: "keera-code",
-			CostMicros: 50, Status: 200, Scopes: scopes},
+		{
+			TS: lastNight, OrgID: f.orgID, Alias: "keera-code", CostMicros: 400,
+			Status: 200, Scopes: scopes,
+		},
+		{
+			TS: thisMorning, OrgID: f.orgID, Alias: "keera-code", CostMicros: 700,
+			Status: 200, Scopes: scopes,
+		},
+		{
+			TS: thisMorning.Add(time.Minute), OrgID: f.orgID, Alias: "keera-code",
+			CostMicros: 50, Status: 200, Scopes: scopes,
+		},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
@@ -174,14 +190,20 @@ func TestUsageGroupsByEveryDimensionThePanelOffers(t *testing.T) {
 	day := time.Date(2026, 9, 7, 10, 0, 0, 0, time.UTC)
 
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: day, OrgID: f.orgID, ProjectID: f.projectID, UserID: user.ID, KeyID: f.keyID,
-			Alias: "keera-code", CostMicros: 100, Status: 200},
-		{TS: day.AddDate(0, 0, 1), OrgID: f.orgID, ProjectID: f.projectID, UserID: user.ID,
-			KeyID: f.keyID, Alias: "keera-speed", CostMicros: 50, Status: 200},
+		{
+			TS: day, OrgID: f.orgID, ProjectID: f.projectID, UserID: user.ID, KeyID: f.keyID,
+			Alias: "keera-code", CostMicros: 100, Status: 200,
+		},
+		{
+			TS: day.AddDate(0, 0, 1), OrgID: f.orgID, ProjectID: f.projectID, UserID: user.ID,
+			KeyID: f.keyID, Alias: "keera-speed", CostMicros: 50, Status: 200,
+		},
 		// A mistyped model: refused before anything ran, so it is no model's
 		// usage, though it is still the project's and the key's request.
-		{TS: day, OrgID: f.orgID, ProjectID: f.projectID, UserID: user.ID, KeyID: f.keyID,
-			Alias: "keera-cdoe", Status: 404},
+		{
+			TS: day, OrgID: f.orgID, ProjectID: f.projectID, UserID: user.ID, KeyID: f.keyID,
+			Alias: "keera-cdoe", Status: 404,
+		},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
@@ -201,8 +223,10 @@ func TestUsageGroupsByEveryDimensionThePanelOffers(t *testing.T) {
 		{"nonsense", map[string]int64{"keera-code": 100, "keera-speed": 50}},
 	} {
 		t.Run(tt.groupBy, func(t *testing.T) {
-			buckets, err := st.Usage(ctx, UsageQuery{OrgID: f.orgID, From: from, To: to,
-				GroupBy: tt.groupBy})
+			buckets, err := st.Usage(ctx, UsageQuery{
+				OrgID: f.orgID, From: from, To: to,
+				GroupBy: tt.groupBy,
+			})
 			if err != nil {
 				t.Fatalf("Usage: %v", err)
 			}
@@ -225,8 +249,10 @@ func TestUsageGroupsByEveryDimensionThePanelOffers(t *testing.T) {
 	if _, err := st.CreateOrg(ctx, Org{ID: "org_2", Name: "Another Bank"}, OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
-	if err := st.WriteEvents(ctx, []Event{{TS: day, OrgID: "org_2", Alias: "keera-code",
-		CostMicros: 9999, Status: 200}}); err != nil {
+	if err := st.WriteEvents(ctx, []Event{{
+		TS: day, OrgID: "org_2", Alias: "keera-code",
+		CostMicros: 9999, Status: 200,
+	}}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
 	buckets, err := st.Usage(ctx, UsageQuery{OrgID: f.orgID, From: from, To: to, GroupBy: "org"})
@@ -270,20 +296,26 @@ func TestUsageChartDrawsTheBusiestGroupsAndTheRest(t *testing.T) {
 	var events []Event
 	for m := 1; m <= 7; m++ {
 		for i := range m {
-			events = append(events, Event{TS: day.AddDate(0, 0, i%2), OrgID: f.orgID,
-				KeyID: f.keyID, Alias: fmt.Sprintf("model-%d", m), Status: 200})
+			events = append(events, Event{
+				TS: day.AddDate(0, 0, i%2), OrgID: f.orgID,
+				KeyID: f.keyID, Alias: fmt.Sprintf("model-%d", m), Status: 200,
+			})
 		}
 	}
 	// A failed request is not served, so no line counts it.
-	events = append(events, Event{TS: day, OrgID: f.orgID, KeyID: f.keyID,
-		Alias: "model-7", Status: 502})
+	events = append(events, Event{
+		TS: day, OrgID: f.orgID, KeyID: f.keyID,
+		Alias: "model-7", Status: 502,
+	})
 	if err := st.WriteEvents(ctx, events); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
 
 	from, to := day.Add(-time.Hour), day.AddDate(0, 0, 2)
-	c, err := st.UsageChart(ctx, UsageQuery{OrgID: f.orgID, From: from, To: to,
-		GroupBy: "model"})
+	c, err := st.UsageChart(ctx, UsageQuery{
+		OrgID: f.orgID, From: from, To: to,
+		GroupBy: "model",
+	})
 	if err != nil {
 		t.Fatalf("UsageChart: %v", err)
 	}
@@ -311,8 +343,10 @@ func TestUsageChartDrawsTheBusiestGroupsAndTheRest(t *testing.T) {
 	}
 
 	// By day, a line per day would be one point each, so it is one line.
-	c, err = st.UsageChart(ctx, UsageQuery{OrgID: f.orgID, From: from, To: to,
-		GroupBy: "day"})
+	c, err = st.UsageChart(ctx, UsageQuery{
+		OrgID: f.orgID, From: from, To: to,
+		GroupBy: "day",
+	})
 	if err != nil {
 		t.Fatalf("UsageChart by day: %v", err)
 	}
@@ -327,10 +361,14 @@ func TestOverviewPlotsEveryBucketInTheWindow(t *testing.T) {
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
 
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now, OrgID: f.orgID, Alias: "keera-code", InputTokens: 10, OutputTokens: 5,
-			CostMicros: 100, Status: 200, TTFT: 100 * time.Millisecond},
-		{TS: now, OrgID: f.orgID, Alias: "keera-code", InputTokens: 10, OutputTokens: 5,
-			CostMicros: 100, Status: 200, TTFT: 300 * time.Millisecond},
+		{
+			TS: now, OrgID: f.orgID, Alias: "keera-code", InputTokens: 10, OutputTokens: 5,
+			CostMicros: 100, Status: 200, TTFT: 100 * time.Millisecond,
+		},
+		{
+			TS: now, OrgID: f.orgID, Alias: "keera-code", InputTokens: 10, OutputTokens: 5,
+			CostMicros: 100, Status: 200, TTFT: 300 * time.Millisecond,
+		},
 		{TS: now, OrgID: f.orgID, Alias: "keera-code", Status: 429},
 		// A 413 is a refusal too, as the request log counts it.
 		{TS: now, OrgID: f.orgID, Alias: "keera-code", Status: 413},
@@ -427,12 +465,16 @@ func TestKeySummariesReportsLastUseAndWhatWasServed(t *testing.T) {
 		t.Fatalf("PutGuardrail: %v", err)
 	}
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now.Add(-2 * time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
-			CostMicros: 700, Status: 200},
+		{
+			TS: now.Add(-2 * time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
+			CostMicros: 700, Status: 200,
+		},
 		// A refusal is the most recent use of the key, and "when was this last
 		// used" is a question about being presented at all.
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
-			Status: 429},
+		{
+			TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
+			Status: 429,
+		},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
@@ -485,7 +527,8 @@ func TestProjectSummariesReadsTheOpenBudgetWindow(t *testing.T) {
 	}
 	// Today's spend, and yesterday's, which the day must not count.
 	for _, ts := range []time.Time{now, now.AddDate(0, 0, -1)} {
-		if err := st.WriteEvents(ctx, []Event{{TS: ts, OrgID: f.orgID, ProjectID: f.projectID,
+		if err := st.WriteEvents(ctx, []Event{{
+			TS: ts, OrgID: f.orgID, ProjectID: f.projectID,
 			Alias: "keera-code", CostMicros: 4_000_000, Status: 200,
 			Scopes: []policy.Scope{
 				{Type: policy.ScopeProject, ID: f.projectID, Period: policy.PeriodMonth},
@@ -514,8 +557,10 @@ func TestProjectSummariesReadsTheOpenBudgetWindow(t *testing.T) {
 	past := now.Add(-time.Hour)
 	for _, k := range []KeyInfo{
 		{ID: "key_pending", OrgID: f.orgID, ProjectID: f.projectID, Name: "pending"},
-		{ID: "key_expired", OrgID: f.orgID, ProjectID: f.projectID, Name: "expired",
-			Prefix: "keera_sk_exp", ExpiresAt: &past},
+		{
+			ID: "key_expired", OrgID: f.orgID, ProjectID: f.projectID, Name: "expired",
+			Prefix: "keera_sk_exp", ExpiresAt: &past,
+		},
 	} {
 		hash := []byte(nil)
 		if k.Prefix != "" {
@@ -792,8 +837,10 @@ func TestASubscriptionKeyKeepsItsKindAndItsPlanUsage(t *testing.T) {
 	f := newFixture(t, st, ctx)
 	now := time.Now().UTC().Truncate(time.Second)
 	hash := []byte("hash-of-keera_sk_plan-32-bytes!!!")
-	if _, err := st.CreateKey(ctx, KeyInfo{ID: "key_sub", OrgID: f.orgID, Name: "claude-code",
-		Prefix: "keera_sk_pla", Kind: policy.KeySubscription}, hash); err != nil {
+	if _, err := st.CreateKey(ctx, KeyInfo{
+		ID: "key_sub", OrgID: f.orgID, Name: "claude-code",
+		Prefix: "keera_sk_pla", Kind: policy.KeySubscription,
+	}, hash); err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
 	res, err := st.LookupKey(ctx, hash)
@@ -807,10 +854,14 @@ func TestASubscriptionKeyKeepsItsKindAndItsPlanUsage(t *testing.T) {
 	// The newer reading arrives first, as it can from another replica, and the
 	// older one must not replace it.
 	for _, batch := range [][]Event{
-		{{TS: now, OrgID: f.orgID, KeyID: "key_sub", Alias: "claude", Status: 200,
-			ListCostMicros: 390, Plan: plan(0.4, now)}},
-		{{TS: now.Add(-time.Minute), OrgID: f.orgID, KeyID: "key_sub", Alias: "claude",
-			Status: 200, ListCostMicros: 10, Plan: plan(0.7, now.Add(-time.Minute))}},
+		{{
+			TS: now, OrgID: f.orgID, KeyID: "key_sub", Alias: "claude", Status: 200,
+			ListCostMicros: 390, Plan: plan(0.4, now),
+		}},
+		{{
+			TS: now.Add(-time.Minute), OrgID: f.orgID, KeyID: "key_sub", Alias: "claude",
+			Status: 200, ListCostMicros: 10, Plan: plan(0.7, now.Add(-time.Minute)),
+		}},
 	} {
 		if err := st.WriteEvents(ctx, batch); err != nil {
 			t.Fatalf("WriteEvents: %v", err)
@@ -872,18 +923,24 @@ func TestOneEventPostgresRefusesDoesNotLoseTheBatch(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 	now := time.Now().UTC()
-	bill := []policy.BillLine{{Alias: "keera-code", Provider: "anthropic",
+	bill := []policy.BillLine{{
+		Alias: "keera-code", Provider: "anthropic",
 		BackendModel: "claude-opus-5", InputTokens: 10, Micros: 100,
-		CreditMicros: 80}}
+		CreditMicros: 80,
+	}}
 
 	err := st.WriteEvents(ctx, []Event{
 		{TS: now, OrgID: f.orgID, Alias: "keera-code", Status: 200, Bills: bill},
 		// What a client put in its 'model' field.
 		{TS: now, OrgID: f.orgID, Alias: "a\x00b\xff", Error: "bad\x00", Status: 404},
 		// Refused by a check constraint, whatever its text.
-		{TS: now, OrgID: f.orgID, Alias: "keera-code", Status: 200, Bills: bill,
-			FilterRuns: []FilterRun{{Filter: "redact", Mode: policy.FilterModeRewrite,
-				Outcome: "nonsense"}}},
+		{
+			TS: now, OrgID: f.orgID, Alias: "keera-code", Status: 200, Bills: bill,
+			FilterRuns: []FilterRun{{
+				Filter: "redact", Mode: policy.FilterModeRewrite,
+				Outcome: "nonsense",
+			}},
+		},
 	})
 	lost, ok := errors.AsType[*LostEvents](err)
 	if !ok || lost.N != 1 {

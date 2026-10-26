@@ -99,8 +99,11 @@ func TestDisplayName(t *testing.T) {
 		want   string
 	}{
 		{"the name claim", map[string]any{"name": " Ada Lovelace ", "given_name": "A"}, "Ada Lovelace"},
-		{"given and family names", map[string]any{"given_name": "Ada", "family_name": "Lovelace"},
-			"Ada Lovelace"},
+		{
+			"given and family names",
+			map[string]any{"given_name": "Ada", "family_name": "Lovelace"},
+			"Ada Lovelace",
+		},
 		{"only a given name", map[string]any{"given_name": "Ada"}, "Ada"},
 		{"none", map[string]any{}, ""},
 	}

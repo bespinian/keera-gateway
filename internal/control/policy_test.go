@@ -94,8 +94,10 @@ func TestCountProblem(t *testing.T) {
 		{"two budgets per month", budgets(policy.Budget{BudgetMicros: 1},
 			policy.Budget{BudgetMicros: 2, Period: policy.PeriodMonth}), "two budgets reset per month"},
 		{"a budget of nothing", budgets(policy.Budget{}), "positive 'budget_micros'"},
-		{"a budget per minute", budgets(policy.Budget{BudgetMicros: 1, Period: policy.PeriodMinute}),
-			"use day or month"},
+		{
+			"a budget per minute", budgets(policy.Budget{BudgetMicros: 1, Period: policy.PeriodMinute}),
+			"use day or month",
+		},
 	} {
 		got := countProblem(&tc.lim)
 		if tc.want == "" && got != "" || !strings.Contains(got, tc.want) {

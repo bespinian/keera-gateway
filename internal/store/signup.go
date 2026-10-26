@@ -35,8 +35,10 @@ const signupColumns = `token_hash, provider, external_id, email, signups.name, r
 	refresh_token, COALESCE(invited_org, ''), redirect_to`
 
 func signupTargets(su *Signup) []any {
-	return []any{&su.TokenHash, &su.Provider, &su.ExternalID, &su.Email,
-		&su.Name, &su.Role, &su.RefreshToken, &su.InvitedOrg, &su.RedirectTo}
+	return []any{
+		&su.TokenHash, &su.Provider, &su.ExternalID, &su.Email,
+		&su.Name, &su.Role, &su.RefreshToken, &su.InvitedOrg, &su.RedirectTo,
+	}
 }
 
 func scanSignup(r row) (Signup, error) {
@@ -90,7 +92,8 @@ func takeSignup(ctx context.Context, tx pgx.Tx, hash []byte) (Signup, error) {
 // name already taken leaves the sign-up for another try, and two tabs cannot
 // each create one.
 func (s *Store) SignUp(ctx context.Context, hash []byte, o Org, tmpl OrgTemplate) (
-	Signup, Org, User, error) {
+	Signup, Org, User, error,
+) {
 	var (
 		su Signup
 		u  User

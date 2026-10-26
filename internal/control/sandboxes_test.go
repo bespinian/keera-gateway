@@ -513,9 +513,11 @@ func (stubDriver) Name() string { return "stub" }
 func (stubDriver) Capabilities() sandbox.Capabilities {
 	return sandbox.Capabilities{Isolation: policy.IsolationVM, Tiers: policy.Isolations}
 }
+
 func (stubDriver) Create(_ context.Context, spec sandbox.Spec) (sandbox.Status, error) {
 	return sandbox.Status{Ref: spec.Ref, State: policy.SandboxReady, Address: "10.0.0.1"}, nil
 }
+
 func (stubDriver) Status(context.Context, sandbox.Ref) (sandbox.Status, error) {
 	return sandbox.Status{}, sandbox.ErrNotFound
 }

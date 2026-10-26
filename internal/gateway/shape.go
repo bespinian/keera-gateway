@@ -26,11 +26,15 @@ var (
 	embeddingSurface  = surface{kind: policy.KindEmbedding, path: "/embeddings", shape: openAIShape{}}
 	// messagesSurface is the Anthropic-shaped `/v1/messages`: the same models
 	// and guardrails as chatSurface, in another format.
-	messagesSurface = surface{kind: policy.KindChat, path: "/chat/completions",
-		shape: anthropicShape{}, dialect: anthropicDialect{}}
+	messagesSurface = surface{
+		kind: policy.KindChat, path: "/chat/completions",
+		shape: anthropicShape{}, dialect: anthropicDialect{},
+	}
 	// responsesSurface is OpenAI's `/v1/responses`, the same again.
-	responsesSurface = surface{kind: policy.KindChat, path: "/chat/completions",
-		shape: responsesShape{}, dialect: responsesDialect{}}
+	responsesSurface = surface{
+		kind: policy.KindChat, path: "/chat/completions",
+		shape: responsesShape{}, dialect: responsesDialect{},
+	}
 )
 
 // What a shape answers when a backend's success cannot be translated: one it

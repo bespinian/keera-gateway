@@ -19,7 +19,8 @@ func TestRetentionDeletesPastTheWindowAndNothingInsideIt(t *testing.T) {
 	// its spend window is not the open one this test checks survives.
 	old, recent := now.AddDate(0, 0, -400), now
 	for _, ts := range []time.Time{old, recent} {
-		if err := st.WriteEvents(ctx, []Event{{TS: ts, OrgID: f.orgID, Alias: "keera-code",
+		if err := st.WriteEvents(ctx, []Event{{
+			TS: ts, OrgID: f.orgID, Alias: "keera-code",
 			CostMicros: 100, Status: 200,
 			Scopes: []policy.Scope{{Type: policy.ScopeOrg, ID: f.orgID, Period: policy.PeriodMonth}},
 		}}); err != nil {
@@ -128,7 +129,8 @@ func TestRetentionKeepsTheOpenMonthWhenItBeganBeforeTheCutoff(t *testing.T) {
 		time.Date(2026, 3, 2, 9, 0, 0, 0, time.UTC),  // this month, before the cutoff
 		now,
 	} {
-		if err := st.WriteEvents(ctx, []Event{{TS: ts, OrgID: f.orgID, Alias: "keera-code",
+		if err := st.WriteEvents(ctx, []Event{{
+			TS: ts, OrgID: f.orgID, Alias: "keera-code",
 			CostMicros: 100, Status: 200,
 			Scopes: []policy.Scope{
 				{Type: policy.ScopeOrg, ID: f.orgID, Period: policy.PeriodMonth},
@@ -178,8 +180,10 @@ func TestEndedSandboxesAndKeysGoOnceTheirUsageHasGone(t *testing.T) {
 
 	key := func(id, ended string) {
 		t.Helper()
-		if _, err := st.CreateKey(ctx, KeyInfo{ID: id, OrgID: f.orgID, ProjectID: f.projectID,
-			Name: id, Prefix: id}, []byte("hash-of-"+id)); err != nil {
+		if _, err := st.CreateKey(ctx, KeyInfo{
+			ID: id, OrgID: f.orgID, ProjectID: f.projectID,
+			Name: id, Prefix: id,
+		}, []byte("hash-of-"+id)); err != nil {
 			t.Fatalf("CreateKey %s: %v", id, err)
 		}
 		if ended == "" {

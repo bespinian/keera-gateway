@@ -143,27 +143,35 @@ func TestNoRouteLetsOneTenantReachAnother(t *testing.T) {
 	if _, err := st.AddUser(ctx, "user_a", "org_a", "ada@example.ch", "", "member"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.CreateKey(ctx, store.KeyInfo{ID: "key_a", OrgID: "org_a", ProjectID: "project_a",
-		UserID: "user_a", Name: "ada's laptop", Prefix: "keera_sk_a"},
+	if _, err := st.CreateKey(ctx, store.KeyInfo{
+		ID: "key_a", OrgID: "org_a", ProjectID: "project_a",
+		UserID: "user_a", Name: "ada's laptop", Prefix: "keera_sk_a",
+	},
 		[]byte("hash-of-key_a-is-32-bytes-long!!")); err != nil {
 		t.Fatal(err)
 	}
-	class := policy.SandboxClass{OrgID: "org_a", Name: "standard", Image: "example/sandbox:1",
+	class := policy.SandboxClass{
+		OrgID: "org_a", Name: "standard", Image: "example/sandbox:1",
 		Isolation: policy.IsolationIsolated, CPU: 1000, Memory: 1024, Disk: 1024,
-		DefaultTTLSeconds: 3600, MaxTTLSeconds: 3600}
-	if err := st.CreatePayment(ctx, store.Payment{ID: "pay_a", OrgID: "org_a", Kind: store.PaymentTopUp,
-		AmountMicros: 10_000_000, Actor: "ada@example.ch"}); err != nil {
+		DefaultTTLSeconds: 3600, MaxTTLSeconds: 3600,
+	}
+	if err := st.CreatePayment(ctx, store.Payment{
+		ID: "pay_a", OrgID: "org_a", Kind: store.PaymentTopUp,
+		AmountMicros: 10_000_000, Actor: "ada@example.ch",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.UpsertSandboxClass(ctx, &class); err != nil {
 		t.Fatal(err)
 	}
 	expires := time.Now().Add(time.Hour)
-	if _, err := st.CreateSandbox(ctx, store.Sandbox{ID: "sbx_a", OrgID: "org_a", ProjectID: "project_a",
+	if _, err := st.CreateSandbox(ctx, store.Sandbox{
+		ID: "sbx_a", OrgID: "org_a", ProjectID: "project_a",
 		UserID: "user_a", Owner: "ada@example.ch", Name: "desk", Class: "standard",
 		Purpose: policy.PurposeEngineer, State: policy.SandboxReady, Image: "example/sandbox:1",
 		Isolation: policy.IsolationIsolated, CPU: 1000, Memory: 1024, Disk: 1024,
-		KeyID: "key_a", ExpiresAt: &expires}); err != nil {
+		KeyID: "key_a", ExpiresAt: &expires,
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -185,8 +193,10 @@ func TestNoRouteLetsOneTenantReachAnother(t *testing.T) {
 		OperatorKey: testOperatorKey,
 		Sandboxes:   sandbox.NewManager(st, stubDriver{}, sandbox.ManagerOptions{}),
 		// Nothing listens there: a refused request never reaches it.
-		Payments: &Payments{Client: payment.New(payment.Settings{URL: "http://127.0.0.1:1",
-			SpaceID: 1, UserID: "1", AuthKey: []byte("key")})},
+		Payments: &Payments{Client: payment.New(payment.Settings{
+			URL:     "http://127.0.0.1:1",
+			SpaceID: 1, UserID: "1", AuthKey: []byte("key"),
+		})},
 	}, slog.New(slog.DiscardHandler))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)

@@ -296,7 +296,8 @@ type outcomeTally struct {
 // can go on.
 func (s *Server) sendRequests(ctx context.Context, w http.ResponseWriter,
 	rc *http.ResponseController, rq *store.RequestQuery, cur *liveCursor,
-	names *groupLabels, tally *outcomeTally, since string) bool {
+	names *groupLabels, tally *outcomeTally, since string,
+) bool {
 	now := time.Now()
 	cur.settle(now)
 	rows, err := s.st.Requests(ctx, cur.query(*rq))
@@ -345,7 +346,8 @@ func (s *Server) sendRequests(ctx context.Context, w http.ResponseWriter,
 // the tally and only grows. The rows past it are counted again each time,
 // because a late commit can still add to them.
 func (s *Server) countOutcomes(ctx context.Context, rq store.RequestQuery, settled int64,
-	tally *outcomeTally, since string) (store.RequestOutcomes, error) {
+	tally *outcomeTally, since string,
+) (store.RequestOutcomes, error) {
 	q := store.RequestQuery{
 		OrgID: rq.OrgID, ReportScope: rq.ReportScope, Holder: rq.Holder,
 		Status: rq.Status, StatusClass: rq.StatusClass, RequestID: rq.RequestID,

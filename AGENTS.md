@@ -77,7 +77,8 @@ Run `make check` before handing work back.
 
 ## Conventions
 
-- Format with `gofmt`. Standard library first, no extra dependencies unless asked.
+- Format with `golangci-lint fmt`, which runs gofumpt; `make lint` checks it.
+  Standard library first, no extra dependencies unless asked.
 - Comments explain why something is the way it is, not what the code does.
 - Tests live beside the code. Tests that need Postgres or Redis skip without
   `KEERA_TEST_DATABASE_URL` / `KEERA_TEST_REDIS_URL`.

@@ -52,6 +52,8 @@ import {
   modeOf,
   modeName,
   decides,
+  chooses,
+  valuesFor,
   checkReport,
   tokens,
 } from "./route-step.js";
@@ -696,16 +698,16 @@ function outgoing(env, step) {
     );
   } else if (step.kind === "route") {
     for (const dest of step.destinations || []) {
-      // A size step's ceilings decide which branch a request takes.
+      // A size step's ceilings, or a header step's values, decide which
+      // branch a request takes.
       const ceiling = modeOf(step) === "size" && (step.ceilings || {})[dest];
-      branches.push(
-        branch(
-          env,
-          ceiling ? `${dest} ≤ ${tokens(ceiling)}` : dest,
-          branchSlot(step, dest),
-          { dest },
-        ),
-      );
+      const values = modeOf(step) === "header" ? valuesFor(step, dest) : [];
+      const label = ceiling
+        ? `${dest} ≤ ${tokens(ceiling)}`
+        : values.length
+          ? `${dest} = ${values.join(", ")}`
+          : dest;
+      branches.push(branch(env, label, branchSlot(step, dest), { dest }));
     }
   }
   if (!branches.length) return null;
@@ -775,6 +777,9 @@ function nodeName(step) {
       return step.budget_micros > 0 ? budgetShort(step) : "Not set";
     case "route": {
       const n = (step.destinations || []).length;
+      if (modeOf(step) === "header") {
+        return h("span", {}, "By ", h("span", { class: "mono" }, step.header));
+      }
       return decides(step)
         ? h("span", {}, "Decided by ", h("span", { class: "mono" }, step.model))
         : `${n} ${plural(n, "destination")}`;
@@ -799,7 +804,7 @@ function nodeMeta(env, step) {
     if (f) bits = modePills(f);
   } else if (step.kind === "route") {
     bits = [pill(modeName(modeOf(step)), decides(step) ? "accent" : "")];
-    if (decides(step) && !step.fallback) {
+    if (chooses(step) && !step.fallback) {
       bits.push(pill("Refuses if undecided", "warn"));
     }
   } else if (step.kind === "model") {

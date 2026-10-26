@@ -110,8 +110,10 @@ func TestToolCallsAreWrittenAndRead(t *testing.T) {
 			TS: ts, OrgID: "org_1", ProjectID: "project_1", KeyID: "key_1", Latency: 40 * time.Millisecond,
 			SessionKey: session, CostMicros: cost,
 			Scopes: []policy.Scope{{Type: policy.ScopeOrg, ID: "org_1", Period: policy.PeriodMonth}},
-			FilterRuns: []FilterRun{{Filter: "redact", Mode: policy.FilterModePattern,
-				Outcome: FilterPass}},
+			FilterRuns: []FilterRun{{
+				Filter: "redact", Mode: policy.FilterModePattern,
+				Outcome: FilterPass,
+			}},
 			Tool: &ToolCall{Server: "github", Tool: tool, Outcome: outcome, ArgBytes: 10, ResultBytes: 20},
 		}
 	}

@@ -45,20 +45,32 @@ func TestAProviderKeySettingThatCannotWorkStopsTheStart(t *testing.T) {
 		env  map[string]string
 		want string
 	}{
-		{"misspelt provider", map[string]string{"KEERA_PROVIDER_ANTROPIC_API_KEY": "sk"},
-			"KEERA_PROVIDER_ANTROPIC_API_KEY"},
-		{"discount, which is no setting", map[string]string{"KEERA_PROVIDER_OPENAI_API_KEY": "sk",
-			"KEERA_PROVIDER_OPENAI_DISCOUNT": "10"}, "KEERA_PROVIDER_OPENAI_DISCOUNT"},
+		{
+			"misspelt provider",
+			map[string]string{"KEERA_PROVIDER_ANTROPIC_API_KEY": "sk"},
+			"KEERA_PROVIDER_ANTROPIC_API_KEY",
+		},
+		{"discount, which is no setting", map[string]string{
+			"KEERA_PROVIDER_OPENAI_API_KEY":  "sk",
+			"KEERA_PROVIDER_OPENAI_DISCOUNT": "10",
+		}, "KEERA_PROVIDER_OPENAI_DISCOUNT"},
 		{"product id without a key", map[string]string{
-			"KEERA_PROVIDER_INFOMANIAK_PRODUCT_ID": "1"}, "KEERA_PROVIDER_INFOMANIAK_API_KEY"},
+			"KEERA_PROVIDER_INFOMANIAK_PRODUCT_ID": "1",
+		}, "KEERA_PROVIDER_INFOMANIAK_API_KEY"},
 		{"Infomaniak without a product id", map[string]string{
-			"KEERA_PROVIDER_INFOMANIAK_API_KEY": "sk"}, "KEERA_PROVIDER_INFOMANIAK_PRODUCT_ID"},
-		{"product id where none is needed", map[string]string{
-			"KEERA_PROVIDER_OPENAI_API_KEY": "sk", "KEERA_PROVIDER_OPENAI_PRODUCT_ID": "1"},
-			"does nothing"},
+			"KEERA_PROVIDER_INFOMANIAK_API_KEY": "sk",
+		}, "KEERA_PROVIDER_INFOMANIAK_PRODUCT_ID"},
+		{
+			"product id where none is needed",
+			map[string]string{
+				"KEERA_PROVIDER_OPENAI_API_KEY": "sk", "KEERA_PROVIDER_OPENAI_PRODUCT_ID": "1",
+			},
+			"does nothing",
+		},
 		{"product id that is no path segment", map[string]string{
 			"KEERA_PROVIDER_INFOMANIAK_API_KEY":    "sk",
-			"KEERA_PROVIDER_INFOMANIAK_PRODUCT_ID": "1/../2"}, "letters, digits"},
+			"KEERA_PROVIDER_INFOMANIAK_PRODUCT_ID": "1/../2",
+		}, "letters, digits"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

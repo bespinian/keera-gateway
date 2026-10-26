@@ -140,7 +140,8 @@ func TestDeletingAnOrgTakesItsFiltersWithIt(t *testing.T) {
 // filterTraffic is a week of one organisation's filtered requests: two projects,
 // one filter, and every outcome it has.
 func filterTraffic(t *testing.T, st *Store, ctx context.Context, f fixture,
-	now time.Time) {
+	now time.Time,
+) {
 	t.Helper()
 	if _, err := st.CreateProject(ctx, Project{ID: "project_2", OrgID: f.orgID, Name: "Retail Lending"}); err != nil {
 		t.Fatalf("CreateProject: %v", err)
@@ -153,7 +154,8 @@ func filterTraffic(t *testing.T, st *Store, ctx context.Context, f fixture,
 		}
 	}
 	event := func(offset time.Duration, projectID string, status int, cost int64,
-		runs ...FilterRun) Event {
+		runs ...FilterRun,
+	) Event {
 		return Event{
 			TS: now.Add(offset), OrgID: f.orgID, ProjectID: projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: status, CostMicros: cost,
@@ -388,10 +390,14 @@ func TestRetentionTakesTheFilterLogWithIt(t *testing.T) {
 		LatencyMS: 100, CostMicros: 300, Segments: 1, Changed: 1,
 	}}
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: old, OrgID: f.orgID, Alias: "keera-code", Status: 200, CostMicros: 10,
-			FilterRuns: runs},
-		{TS: recent, OrgID: f.orgID, Alias: "keera-code", Status: 200, CostMicros: 10,
-			FilterRuns: runs},
+		{
+			TS: old, OrgID: f.orgID, Alias: "keera-code", Status: 200, CostMicros: 10,
+			FilterRuns: runs,
+		},
+		{
+			TS: recent, OrgID: f.orgID, Alias: "keera-code", Status: 200, CostMicros: 10,
+			FilterRuns: runs,
+		},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}

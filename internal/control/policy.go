@@ -19,7 +19,8 @@ import (
 // or with admin change it. Another tenant's scope answers 404, not 403, so ids
 // cannot be probed.
 func (s *Server) guardrailScope(w http.ResponseWriter, r *http.Request, p *authn.Principal,
-	admin bool) (scope policy.ScopeType, scopeID, orgID, projectID string, ok bool) {
+	admin bool,
+) (scope policy.ScopeType, scopeID, orgID, projectID string, ok bool) {
 	scope, scopeID = policy.ScopeType(r.PathValue("scope")), r.PathValue("id")
 	switch scope {
 	case policy.ScopeOrg, policy.ScopeProject, policy.ScopeKey:
@@ -200,7 +201,8 @@ func (s *Server) scopeChain(ctx context.Context, scope policy.ScopeType, scopeID
 // effective reads every level above a scope and combines them. orgID and
 // projectID come from scopeChain.
 func (s *Server) effective(ctx context.Context, scope policy.ScopeType,
-	scopeID, orgID, projectID string) (Effective, error) {
+	scopeID, orgID, projectID string,
+) (Effective, error) {
 	org, project, err := s.chainLimits(ctx, orgID, projectID)
 	if err != nil {
 		return Effective{}, err

@@ -18,7 +18,8 @@ type Session struct {
 // CreateSession stores a session under the hash of its cookie value, and
 // notes that its person signed in.
 func (s *Store) CreateSession(ctx context.Context, hash []byte, userID, csrf string,
-	expires time.Time) error {
+	expires time.Time,
+) error {
 	_, err := s.pool.Exec(ctx, `WITH signed_in AS (
 			UPDATE users SET signed_in_at = now() WHERE id = $2)
 		INSERT INTO sessions (id, user_id, csrf, expires_at)
@@ -107,8 +108,10 @@ func (s *Store) moveSignIn(ctx context.Context, table string, hash []byte, userI
 // more, so a directory credential does not outlive the accounts it was kept
 // for. Turned on again, the person signs in again, which stores a new one.
 func (s *Store) PurgeExpired(ctx context.Context) error {
-	for _, table := range []string{"sessions", "login_flows", "cli_codes", "cli_tokens",
-		"passkey_links", "passkey_challenges", "signups"} {
+	for _, table := range []string{
+		"sessions", "login_flows", "cli_codes", "cli_tokens",
+		"passkey_links", "passkey_challenges", "signups",
+	} {
 		if _, err := s.pool.Exec(ctx,
 			"DELETE FROM "+table+" WHERE expires_at < now()"); err != nil {
 			return err
@@ -214,7 +217,8 @@ type Membership struct {
 // first. With invitations, the rows other organisations made for email and
 // nobody has taken yet are listed too; disabled ones are no invitation.
 func (s *Store) Memberships(ctx context.Context, externalID, email string,
-	invitations bool) ([]Membership, error) {
+	invitations bool,
+) ([]Membership, error) {
 	return queryAll(ctx, s.pool, func(r row) (Membership, error) {
 		var m Membership
 		err := r.Scan(&m.UserID, &m.OrgID, &m.OrgName, &m.Role, &m.Invited, &m.Disabled)

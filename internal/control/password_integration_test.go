@@ -36,8 +36,10 @@ func newPasswordEnv(t *testing.T) *passwordEnv {
 	}
 	alice := ldaptest.Person("alice", "alice@corp.example.ch", aliceSubject,
 		"cn=keera-admins,ou=groups,dc=corp,dc=example,dc=ch")
-	dir := &ldaptest.Directory{Entries: []*ldap.Entry{alice},
-		Passwords: map[string]string{alice.DN: "right"}}
+	dir := &ldaptest.Directory{
+		Entries:   []*ldap.Entry{alice},
+		Passwords: map[string]string{alice.DN: "right"},
+	}
 	cfg := ldaptest.Config("corp")
 	cfg.Mapping.AdminGroups = []string{"CN=keera-admins,OU=groups,DC=corp,DC=example,DC=ch"}
 	box, err := secret.New("a-secret-key-long-enough-to-be-real")

@@ -43,8 +43,10 @@ func platformServer(ctx context.Context, t *testing.T, st *store.Store) *Server 
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(st, platformRegistry(ctx, t, st), nil, nil, Options{OperatorKey: testOperatorKey,
-		Secrets: box, Platform: testPlatform}, slog.New(slog.DiscardHandler))
+	return New(st, platformRegistry(ctx, t, st), nil, nil, Options{
+		OperatorKey: testOperatorKey,
+		Secrets:     box, Platform: testPlatform,
+	}, slog.New(slog.DiscardHandler))
 }
 
 const haiku = `{"provider":"anthropic","backend_model":"claude-haiku-4-5",
@@ -92,9 +94,11 @@ func TestAModelOnTheDeploymentsKeyTakesNoKeyAndListPrices(t *testing.T) {
 func TestAnUnpricedModelIsNotShownOnTheDeploymentsKey(t *testing.T) {
 	st, ctx := routerStore(t)
 	s := platformServer(ctx, t, st)
-	if err := st.UpsertModel(ctx, policy.Model{OrgID: "org_1", Alias: "old", Kind: policy.KindChat,
+	if err := st.UpsertModel(ctx, policy.Model{
+		OrgID: "org_1", Alias: "old", Kind: policy.KindChat,
 		Provider: "anthropic", BackendModel: "claude-from-the-past", Location: "usa",
-		Backends: []string{"https://proxy.example/v1"}, Enabled: true}, store.ReplaceCredential([]byte("sealed"))); err != nil {
+		Backends: []string{"https://proxy.example/v1"}, Enabled: true,
+	}, store.ReplaceCredential([]byte("sealed"))); err != nil {
 		t.Fatal(err)
 	}
 	w := invoke(s.listModels, admin("org_1"), http.MethodGet, "/v1/models", "")
@@ -118,9 +122,11 @@ func TestAnUnpricedModelIsNotShownOnTheDeploymentsKey(t *testing.T) {
 func TestSavingAModelOnTheDeploymentsKeyRemovesItsOwn(t *testing.T) {
 	st, ctx := routerStore(t)
 	s := platformServer(ctx, t, st)
-	if err := st.UpsertModel(ctx, policy.Model{OrgID: "org_1", Alias: "fast", Kind: policy.KindChat,
+	if err := st.UpsertModel(ctx, policy.Model{
+		OrgID: "org_1", Alias: "fast", Kind: policy.KindChat,
 		Provider: "anthropic", BackendModel: "claude-haiku-4-5", Location: "usa",
-		Backends: []string{"https://proxy.example/v1"}, Enabled: true}, store.ReplaceCredential([]byte("sealed"))); err != nil {
+		Backends: []string{"https://proxy.example/v1"}, Enabled: true,
+	}, store.ReplaceCredential([]byte("sealed"))); err != nil {
 		t.Fatal(err)
 	}
 	if w := invoke(s.putModel, admin("org_1"), http.MethodPut, "/v1/models/fast", haiku); w.Code != http.StatusOK {
@@ -159,13 +165,17 @@ func TestAdministratorsReadOnlyTheirOwnBill(t *testing.T) {
 	}
 	s := platformServer(ctx, t, st)
 	sept := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
-	line := policy.BillLine{Alias: "fast", Provider: "anthropic", BackendModel: "claude-haiku-4-5",
-		InputTokens: 1000, OutputTokens: 100, Micros: 1500}
+	line := policy.BillLine{
+		Alias: "fast", Provider: "anthropic", BackendModel: "claude-haiku-4-5",
+		InputTokens: 1000, OutputTokens: 100, Micros: 1500,
+	}
 	events := []store.Event{
 		{TS: sept, OrgID: "org_1", Alias: "fast", Status: 200, Bills: []policy.BillLine{line, line}},
 		{TS: sept, OrgID: "org_2", Alias: "fast", Status: 200, Bills: []policy.BillLine{line}},
-		{TS: sept.AddDate(0, 1, 0), OrgID: "org_1", Alias: "fast", Status: 200,
-			Bills: []policy.BillLine{line}},
+		{
+			TS: sept.AddDate(0, 1, 0), OrgID: "org_1", Alias: "fast", Status: 200,
+			Bills: []policy.BillLine{line},
+		},
 	}
 	if err := st.WriteEvents(ctx, events); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
