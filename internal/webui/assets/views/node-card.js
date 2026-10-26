@@ -3,9 +3,10 @@
 
 import { h, icon, icons } from "../ui.js";
 
-/** nodeCard is one step or block. With onOpen the card opens on a click or
- *  Enter. It is a div acting as a button, so the buttons in its head can be
- *  real ones. */
+/** nodeCard is one step or block. glyph is an icon's path, or an element
+ *  such as a provider's mark. With onOpen the card opens on a click or Enter.
+ *  It is a div acting as a button, so the buttons in its head can be real
+ *  ones. */
 export function nodeCard({
   kind,
   glyph,
@@ -41,7 +42,7 @@ export function nodeCard({
     h(
       "div",
       { class: "pl-node-head" },
-      icon(glyph),
+      typeof glyph === "string" ? icon(glyph) : glyph,
       h("span", { class: "pl-node-kind" }, label),
       h("div", { class: "spacer" }),
       buttons,

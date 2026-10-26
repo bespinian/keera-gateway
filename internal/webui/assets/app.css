@@ -1276,6 +1276,15 @@ button.pl-node-empty:hover {
   width: 14px;
   height: 14px;
 }
+/* A provider's mark keeps its proportions, as beside a name. */
+.pl-node-head > .provider-mark,
+.pl-end > .provider-mark {
+  width: auto;
+}
+.pl-node-head > .provider-mark-wide,
+.pl-end > .provider-mark-wide {
+  height: 10px;
+}
 .pl-end-refuse {
   background: var(--bad-soft);
   color: var(--bad);

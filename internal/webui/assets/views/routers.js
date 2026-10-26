@@ -9,6 +9,7 @@ import {
   h,
   icon,
   icons,
+  providerMark,
   iconButton,
   pill,
   rowLink,
@@ -649,13 +650,19 @@ function renderSlot(env, slot, end) {
   });
 }
 
+// modelGlyph is a model's provider's mark, or the plain model icon for a
+// self-hosted model or a provider this build has no mark for.
+function modelGlyph(m) {
+  return (m && m.provider && providerMark(m.provider)) || icon(icons.models);
+}
+
 // endChip is a route step's destination with no steps of its own.
 function endChip(env, dest) {
   const m = env.models.find((x) => x.alias === dest);
   return h(
     "div",
     { class: "pl-end" },
-    icon(icons.models),
+    modelGlyph(m),
     h("span", { class: "mono" }, dest),
     m && m.location
       ? h("span", { class: "faint" }, locationName(m.location))
@@ -744,7 +751,10 @@ function renderNode(env, step, slot) {
     passes(step.kind) && !step.next ? "" : env.problems.get(step.id);
   return nodeCard({
     kind: step.kind,
-    glyph: KIND_ICONS[step.kind] || icons.more,
+    glyph:
+      step.kind === "model"
+        ? modelGlyph(env.models.find((x) => x.alias === step.ref))
+        : KIND_ICONS[step.kind] || icons.more,
     label: KINDS[step.kind] || step.kind,
     name: nodeName(step),
     meta: nodeMeta(env, step),
