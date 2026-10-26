@@ -20,6 +20,15 @@ import { firstRun, firstRunDue, memberRun, memberRunDue } from "./firstrun.js";
 import { openFailed } from "./logfilters.js";
 import { orgNameOf } from "./orgs.js";
 
+// catalogue is the hosted providers, whose models the getting-started overview
+// names. Without them it names only the providers.
+function catalogue() {
+  return api
+    .providers()
+    .then((r) => r.data || [])
+    .catch(() => []);
+}
+
 export async function dashboardView(ctx) {
   const since = currentRange();
 
@@ -34,10 +43,11 @@ export async function dashboardView(ctx) {
       ctx.setTitle("Getting started");
       const askCredit =
         ctx.state.me.payments && ctx.orgID && !setup.credits && !setup.invoiced;
-      const credit = askCredit
-        ? await api.creditAccount(ctx.orgID).catch(() => null)
-        : null;
-      return firstRun(ctx, setup, credit);
+      const [credit, providers] = await Promise.all([
+        askCredit ? api.creditAccount(ctx.orgID).catch(() => null) : null,
+        catalogue(),
+      ]);
+      return firstRun(ctx, setup, credit, providers);
     }
   } else {
     // A member's guide follows their own keys, not the organisation's.
@@ -45,7 +55,7 @@ export async function dashboardView(ctx) {
     if (access) ctx.setAccess(access);
     if (memberRunDue(ctx, access)) {
       ctx.setTitle("Getting started");
-      return memberRun(ctx, access);
+      return memberRun(ctx, access, await catalogue());
     }
   }
   ctx.setTitle("Dashboard");

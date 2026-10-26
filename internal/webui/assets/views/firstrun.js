@@ -3,10 +3,22 @@
 // card payments, until the organisation has had credit. A member gets a
 // shorter guide, until one of their keys has made a request.
 
-import { h, icon, icons, pill, isAdmin, docsURL } from "../ui.js";
+import {
+  h,
+  svg,
+  icon,
+  icons,
+  pill,
+  isAdmin,
+  docsURL,
+  brandMark,
+  providerMark,
+  clientMark,
+} from "../ui.js";
 import { addCredit } from "./billing.js";
 import { openConnectClient, usableKeys } from "./connect.js";
 import { activateKey, confirmRotate, openIssueKey } from "./keys.js";
+import { providerName } from "./models.js";
 import { newOrg, orgNameOf } from "./orgs.js";
 
 /** The sidebar uses this too, to name the screen. */
@@ -20,7 +32,7 @@ export function firstRunDue(ctx, setup) {
   );
 }
 
-export function firstRun(ctx, setup, credit) {
+export function firstRun(ctx, setup, credit, providers) {
   const operator = ctx.state.me.unrestricted;
   const admin = isAdmin(ctx);
 
@@ -128,7 +140,7 @@ export function firstRun(ctx, setup, credit) {
     by: "An administrator",
   });
 
-  return stepList(ctx, steps);
+  return stepList(ctx, steps, providers);
 }
 
 export function memberRunDue(ctx, access) {
@@ -143,7 +155,7 @@ export function memberRunDue(ctx, access) {
 
 /** An administrator issues the key, so the first step is to get its secret:
  *  by activating the key, or rotating one already active. */
-export function memberRun(ctx, access) {
+export function memberRun(ctx, access, providers) {
   const keys = usableKeys(access);
   const key = keys[0];
   const pending = (access.keys || []).find((k) => k.state === "pending");
@@ -185,7 +197,7 @@ export function memberRun(ctx, access) {
         : null,
     },
   ];
-  return stepList(ctx, steps);
+  return stepList(ctx, steps, providers);
 }
 
 /** For a member with no key to activate: an active key whose secret they may
@@ -221,7 +233,7 @@ function getKeyStep(keys, key, ctx) {
   };
 }
 
-function stepList(ctx, steps) {
+function stepList(ctx, steps, providers) {
   const nextIndex = steps.findIndex((s) => !s.done && !s.skipped);
   const button = (a, primary) =>
     h(
@@ -279,14 +291,80 @@ function stepList(ctx, steps) {
       );
     }),
   );
+  return h("div", {}, overview(ctx, providers), list);
+}
+
+// The tools a developer connects, by their marks in ui.js.
+const flowTools = [
+  ["Claude Code", () => providerMark("anthropic")],
+  ["OpenAI SDK", () => providerMark("openai")],
+  ["OpenCode", () => clientMark("opencode")],
+  // Keera Chat carries the same mark as the gateway.
+  ["Keera Chat", () => brandMark(18)],
+];
+
+// Some of the providers in internal/catalog/providers.go: two frontier labs
+// and two in Switzerland.
+const flowProviders = ["anthropic", "openai", "infomaniak", "cscs"];
+
+const flowChecks = [
+  ["API keys", icons.keys],
+  ["Guardrails", icons.gate],
+  ["Filters", icons.filters],
+  ["Usage", icons.usage],
+];
+
+/** overview shows what the steps below set up: tools on the left send their
+ *  requests through the gateway to the providers' models on the right. Each
+ *  provider is shown by its logo and one of its models from the catalogue in
+ *  providers, or by its name when that is empty. */
+function overview(ctx, providers) {
+  // A long model name is cut short on a narrow screen.
+  const item = (mark, label) =>
+    h("div", { class: "flow-item" }, mark, h("span", { title: label }, label));
+  // The catalogue lists each provider's lead model first.
+  const example = (name) =>
+    (((providers || []).find((p) => p.name === name) || {}).models || [])[0];
   return h(
-    "div",
-    {},
-    list,
+    "figure",
+    { class: "flow" },
+    h("div", { class: "flow-head" }, "Your tools"),
+    h("div", { class: "flow-head flow-head-end" }, "Models"),
     h(
-      "p",
-      { class: "hint steps-docs" },
-      "Need more help? Read the ",
+      "div",
+      { class: "flow-list flow-tools" },
+      flowTools.map(([label, mark]) => item(mark(), label)),
+    ),
+    flowLines(flowTools.length, false),
+    h(
+      "div",
+      { class: "flow-gateway" },
+      brandMark(40),
+      h("strong", {}, "Keera Gateway"),
+      h(
+        "ul",
+        {},
+        flowChecks.map(([label, path]) => h("li", {}, icon(path), label)),
+      ),
+    ),
+    flowLines(flowProviders.length, true),
+    h(
+      "div",
+      { class: "flow-list flow-models" },
+      flowProviders.map((p) => {
+        const m = example(p);
+        return item(
+          providerMark(p),
+          m ? m.display_name || m.id : providerName(p),
+        );
+      }),
+    ),
+    h(
+      "figcaption",
+      { class: "hint" },
+      "Every request goes through the gateway. It checks the key and the " +
+        "guardrails, runs the filters, then passes the request on to a model " +
+        "and records the cost. Need more help? Read the ",
       h(
         "a",
         { href: docsURL(ctx), target: "_blank", rel: "noopener" },
@@ -294,5 +372,31 @@ function stepList(ctx, steps) {
       ),
       ".",
     ),
+  );
+}
+
+/** flowLines joins n rows of equal height to the gateway's edge. It stretches
+ *  to the rows' height, so the strokes keep their width by not scaling. */
+function flowLines(n, out) {
+  const height = n * 10;
+  const mid = height / 2;
+  return svg(
+    "svg",
+    {
+      class: "flow-lines",
+      viewBox: `0 0 100 ${height}`,
+      preserveAspectRatio: "none",
+      "aria-hidden": "true",
+    },
+    Array.from({ length: n }, (_, i) => {
+      const y = i * 10 + 5;
+      // The lines meet the gateway close together, not in one point.
+      const g = mid + (y - mid) * 0.3;
+      const [a, b] = out ? [g, y] : [y, g];
+      return svg("path", {
+        d: `M0 ${a} C50 ${a} 50 ${b} 100 ${b}`,
+        "vector-effect": "non-scaling-stroke",
+      });
+    }),
   );
 }

@@ -882,7 +882,7 @@ const PROVIDER_NAMES = {
 };
 
 // An unknown provider shows its configured key.
-function providerName(name) {
+export function providerName(name) {
   return PROVIDER_NAMES[name] || name || "";
 }
 

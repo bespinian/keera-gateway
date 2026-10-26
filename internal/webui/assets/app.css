@@ -2933,8 +2933,167 @@ a.pill-button:hover {
   }
 }
 
-/* Under the first-run checklist: where to read on. */
-.steps-docs {
-  margin-top: 28px;
+/* Above the first-run checklist: tools, the gateway and models, joined by
+   lines. Both lists come before the gateway in the row, so the lines are drawn
+   from the lists' rows to its edges. */
+.flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 56px auto 56px minmax(0, 1fr);
+  row-gap: 10px;
+  margin: 0 0 28px;
+  padding: 18px 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.flow-head {
+  grid-row: 1;
+  grid-column: 1;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.flow-head-end {
+  grid-column: 5;
+}
+/* Rows of equal height with no gap between them: the lines end at fixed
+   fractions of the list's height, so each must meet the middle of a row. */
+.flow-list {
+  grid-row: 2;
+  display: grid;
+  grid-auto-rows: 1fr;
+}
+.flow-tools {
+  grid-column: 1;
+}
+.flow-models {
+  grid-column: 5;
+}
+.flow-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  margin: 4px 0;
+  padding: 8px 11px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+.flow-item > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.flow-item > .provider-mark {
+  height: 16px;
+}
+.flow-item > .provider-mark-wide {
+  height: 11px;
+}
+.flow-item > .brand-mark {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+}
+.flow-lines {
+  grid-row: 2;
+  display: block;
+  align-self: stretch;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+}
+.flow-gateway {
+  grid-row: 2;
+  grid-column: 3;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 18px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+}
+.flow-gateway > strong {
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.flow-gateway ul {
+  display: grid;
+  gap: 5px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.flow-gateway li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.flow-gateway li svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--accent);
+}
+.flow figcaption {
+  grid-row: 3;
+  grid-column: 1 / -1;
+  margin-top: 6px;
   text-align: center;
+}
+
+/* Too narrow for three columns: the parts stack, and the lines go. */
+@media (max-width: 616px) {
+  .flow {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 16px;
+  }
+  .flow > * {
+    grid-row: auto;
+    grid-column: 1;
+  }
+  .flow-lines {
+    display: none;
+  }
+  .flow-head {
+    order: 1;
+  }
+  .flow-tools {
+    order: 2;
+  }
+  .flow-gateway {
+    order: 3;
+    align-self: stretch;
+  }
+  .flow-head-end {
+    order: 4;
+  }
+  .flow-models {
+    order: 5;
+  }
+  .flow figcaption {
+    order: 6;
+  }
+  .flow-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .flow-item {
+    margin: 0;
+  }
 }
