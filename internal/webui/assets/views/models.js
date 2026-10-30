@@ -863,6 +863,7 @@ const PROVIDER_NAMES = {
   anthropic: "Anthropic",
   openai: "OpenAI",
   google: "Google",
+  mistral: "Mistral",
   infomaniak: "Infomaniak",
   "stepping-stone": "stepping stone",
   phoeniqs: "Phoeniqs",
@@ -1176,7 +1177,7 @@ function editModel(ctx, existing, providers, pick) {
         h(
           "datalist",
           { id: "model-locations" },
-          ["onprem", "ch", "usa"].map((l) =>
+          ["onprem", "ch", "eu", "usa"].map((l) =>
             h("option", { value: l }, locationName(l)),
           ),
         ),

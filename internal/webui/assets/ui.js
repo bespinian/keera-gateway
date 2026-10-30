@@ -175,7 +175,7 @@ export function releaseDay(day) {
 }
 
 export function locationName(loc) {
-  const names = { ch: "Switzerland", usa: "USA", onprem: "On-prem" };
+  const names = { ch: "Switzerland", eu: "EU", usa: "USA", onprem: "On-prem" };
   if (!loc) return "-";
   return names[loc] || loc.toUpperCase();
 }
@@ -388,6 +388,17 @@ const providerMarks = {
     ],
   },
   google: googleMark,
+  mistral: {
+    viewBox: "0 0 7 5",
+    // The pixel M, one shade per row, lightest on top as in its colours.
+    layers: [
+      { opacity: 0.4, path: "M1 0h1v1H1zM5 0h1v1H5z" },
+      { opacity: 0.55, path: "M1 1h2v1H1zM4 1h2v1H4z" },
+      { opacity: 0.7, path: "M1 2h5v1H1z" },
+      { opacity: 0.85, path: "M1 3h1v1H1zM3 3h1v1H3zM5 3h1v1H5z" },
+      { opacity: 1, path: "M0 4h3v1H0zM4 4h3v1H4z" },
+    ],
+  },
   infomaniak: {
     viewBox: "0 0 24 24",
     // A filled tile with the letter cut out: how the logo looks in one colour.

@@ -53,8 +53,8 @@ remote endpoint without any developer changing anything.
 - `max_context_tokens` is shown to clients on `/api/v1/models`, sizes a filter's or a
   route step's own model, and bounds every request. See
   [Requests too long for the model](#requests-too-long-for-the-model).
-- `location` says where the model runs, and so where prompts go: `ch` or `usa`
-  for a hosted provider, `onprem` for your own inference plane. A provider fills
+- `location` says where the model runs, and so where prompts go: `ch`, `eu` or
+  `usa` for a hosted provider, `onprem` for your own inference plane. A provider fills
   it in. Without one, a backend inside your network - a service name, a private
   address or the loopback - is `onprem`, and a backend on the internet must say
   where it is. Clients see it on `/api/v1/models`.

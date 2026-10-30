@@ -67,8 +67,8 @@ type ProviderModel struct {
 //
 // Prices are micro-CHF per million tokens, at list price; an entry can
 // override them. Prices listed in USD are converted at 0.96 CHF per USD.
-// Last checked against each pricing page on 2026-10-08, and Google's on
-// 2026-10-29.
+// Last checked against each pricing page on 2026-10-08, Google's on
+// 2026-10-29 and Mistral's on 2026-10-30.
 //
 // Release dates come from each maker's announcement. An FP8 build takes the
 // date of its base model. Retired models are dropped before they retire.
@@ -418,6 +418,63 @@ var providers = []Provider{{
 		InputMicrosPerMTok: 96_000, OutputMicrosPerMTok: 384_000,
 		CachedInputMicrosPerMTok: 9_600,
 		Description:              "small and fast - short, simple tasks; replaced by Gemini 3.5 Flash-Lite",
+	}},
+}, {
+	Name:    "mistral",
+	Summary: "Mistral's own models, on Mistral's API in the EU.",
+	// Mistral publishes no price for a cache write.
+	Endpoint:    "https://api.mistral.ai/v1",
+	CachedInput: true,
+	Location:    "eu",
+	Kinds:       []policy.Kind{policy.KindChat},
+	Models: []ProviderModel{{
+		ID: "mistral-large-4", DisplayName: "Mistral Large 4",
+		MaxContext: 1_000_000, ReleaseDate: "2026-10-06",
+		InputMicrosPerMTok: 672_000, OutputMicrosPerMTok: 2_016_000,
+		CachedInputMicrosPerMTok: 67_200,
+		Description:              "very large, in preview - hard coding, agent and reasoning work, with images",
+	}, {
+		ID: "mistral-medium-3-5", DisplayName: "Mistral Medium 3.5",
+		MaxContext: 262_144, ReleaseDate: "2026-04-28",
+		InputMicrosPerMTok: 1_440_000, OutputMicrosPerMTok: 7_200_000,
+		CachedInputMicrosPerMTok: 144_000,
+		Description:              "mid-size, with reasoning - coding and agent work",
+	}, {
+		ID: "mistral-small-2603", DisplayName: "Mistral Small 4",
+		MaxContext: 262_144, ReleaseDate: "2026-03-16",
+		InputMicrosPerMTok: 144_000, OutputMicrosPerMTok: 576_000,
+		CachedInputMicrosPerMTok: 14_400,
+		Description:              "small and fast, with reasoning - everyday chat, coding and agent tasks",
+	}, {
+		ID: "codestral-2508", DisplayName: "Codestral 25.08",
+		MaxContext: 128_000, ReleaseDate: "2025-07-30",
+		InputMicrosPerMTok: 288_000, OutputMicrosPerMTok: 864_000,
+		CachedInputMicrosPerMTok: 28_800,
+		Description:              "small, made for code - quick code generation",
+	}, {
+		ID: "mistral-large-2512", DisplayName: "Mistral Large 3",
+		MaxContext: 262_144, ReleaseDate: "2025-12-02",
+		InputMicrosPerMTok: 480_000, OutputMicrosPerMTok: 1_440_000,
+		CachedInputMicrosPerMTok: 48_000,
+		Description:              "large, no reasoning step - general chat and documents; replaced by Mistral Large 4",
+	}, {
+		ID: "ministral-14b-2512", DisplayName: "Ministral 3 14B",
+		MaxContext: 262_144, ReleaseDate: "2025-12-02",
+		InputMicrosPerMTok: 192_000, OutputMicrosPerMTok: 192_000,
+		CachedInputMicrosPerMTok: 19_200,
+		Description:              "small - simple chat, text and image tasks",
+	}, {
+		ID: "ministral-8b-2512", DisplayName: "Ministral 3 8B",
+		MaxContext: 262_144, ReleaseDate: "2025-12-02",
+		InputMicrosPerMTok: 144_000, OutputMicrosPerMTok: 144_000,
+		CachedInputMicrosPerMTok: 14_400,
+		Description:              "very small - short, high-volume tasks",
+	}, {
+		ID: "ministral-3b-2512", DisplayName: "Ministral 3 3B",
+		MaxContext: 262_144, ReleaseDate: "2025-12-02",
+		InputMicrosPerMTok: 96_000, OutputMicrosPerMTok: 96_000,
+		CachedInputMicrosPerMTok: 9_600,
+		Description:              "tiny - classification, extraction and other simple tasks",
 	}},
 }, {
 	Name:    "infomaniak",
