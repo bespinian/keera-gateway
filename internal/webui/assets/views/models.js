@@ -862,6 +862,7 @@ function kindName(kind) {
 const PROVIDER_NAMES = {
   anthropic: "Anthropic",
   openai: "OpenAI",
+  google: "Google",
   infomaniak: "Infomaniak",
   "stepping-stone": "stepping stone",
   phoeniqs: "Phoeniqs",

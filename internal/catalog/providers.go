@@ -67,7 +67,8 @@ type ProviderModel struct {
 //
 // Prices are micro-CHF per million tokens, at list price; an entry can
 // override them. Prices listed in USD are converted at 0.96 CHF per USD.
-// Last checked against each pricing page on 2026-10-08.
+// Last checked against each pricing page on 2026-10-08, and Google's on
+// 2026-10-29.
 //
 // Release dates come from each maker's announcement. An FP8 build takes the
 // date of its base model. Retired models are dropped before they retire.
@@ -341,6 +342,82 @@ var providers = []Provider{{
 		InputMicrosPerMTok: 144_000, OutputMicrosPerMTok: 576_000,
 		CachedInputMicrosPerMTok: 72_000,
 		Description:              "small and fast, no reasoning step - short, simple tasks",
+	}},
+}, {
+	Name:    "google",
+	Summary: "Google's own Gemini models, on the Gemini API.",
+	// The Gemini API's OpenAI-compatible surface. Gemini caches prompts
+	// without charging for the write. Gemini 4 Argon's prices double on
+	// 2026-12-01, and Gemini 3.8 and 3.6 Flash's on 2027-01-01.
+	Endpoint:    "https://generativelanguage.googleapis.com/v1beta/openai",
+	CachedInput: true,
+	Location:    "usa",
+	Kinds:       []policy.Kind{policy.KindChat},
+	Models: []ProviderModel{{
+		ID: "gemini-4-argon", DisplayName: "Gemini 4 Argon",
+		MaxContext: 1_048_576, ReleaseDate: "2026-10-13",
+		InputMicrosPerMTok: 1_920_000, OutputMicrosPerMTok: 9_600_000,
+		CachedInputMicrosPerMTok: 96_000,
+		Description:              "flagship - hard coding, agent and science work",
+	}, {
+		ID: "gemini-3.8-flash", DisplayName: "Gemini 3.8 Flash",
+		MaxContext: 1_048_576, ReleaseDate: "2026-09-02",
+		InputMicrosPerMTok: 720_000, OutputMicrosPerMTok: 3_600_000,
+		CachedInputMicrosPerMTok: 72_000,
+		Description:              "mid-size and quick - long-running coding and agent tasks",
+	}, {
+		ID: "gemini-3.5-flash-lite", DisplayName: "Gemini 3.5 Flash-Lite",
+		MaxContext: 1_048_576, ReleaseDate: "2026-07-21",
+		InputMicrosPerMTok: 288_000, OutputMicrosPerMTok: 2_400_000,
+		CachedInputMicrosPerMTok: 28_800,
+		Description:              "small and fast - high-volume agent tasks, translation and data processing",
+	}, {
+		ID: "gemini-3.1-pro-preview", DisplayName: "Gemini 3.1 Pro Preview",
+		MaxContext: 1_048_576, ReleaseDate: "2026-02-19",
+		InputMicrosPerMTok: 1_920_000, OutputMicrosPerMTok: 11_520_000,
+		CachedInputMicrosPerMTok: 192_000,
+		// Google charges more for a prompt over 200k tokens.
+		LongPrompt: &policy.PriceTier{
+			AboveTokens:        200_000,
+			InputMicrosPerMTok: 3_840_000, OutputMicrosPerMTok: 17_280_000,
+			CachedInputMicrosPerMTok: 384_000,
+		},
+		Description: "large, in preview - hard coding and agent work",
+	}, {
+		ID: "gemini-3.6-flash", DisplayName: "Gemini 3.6 Flash",
+		MaxContext: 1_048_576, ReleaseDate: "2026-07-21",
+		InputMicrosPerMTok: 720_000, OutputMicrosPerMTok: 3_600_000,
+		CachedInputMicrosPerMTok: 72_000,
+		Description:              "mid-size and quick - everyday agent tasks; replaced by Gemini 3.8 Flash",
+	}, {
+		ID: "gemini-3.1-flash-lite", DisplayName: "Gemini 3.1 Flash-Lite",
+		MaxContext: 1_048_576, ReleaseDate: "2026-05-07",
+		InputMicrosPerMTok: 240_000, OutputMicrosPerMTok: 1_440_000,
+		CachedInputMicrosPerMTok: 24_000,
+		Description:              "small and fast - simple, high-volume tasks; replaced by Gemini 3.5 Flash-Lite",
+	}, {
+		ID: "gemini-2.5-pro", DisplayName: "Gemini 2.5 Pro",
+		MaxContext: 1_048_576, ReleaseDate: "2025-06-17",
+		InputMicrosPerMTok: 1_200_000, OutputMicrosPerMTok: 9_600_000,
+		CachedInputMicrosPerMTok: 120_000,
+		LongPrompt: &policy.PriceTier{
+			AboveTokens:        200_000,
+			InputMicrosPerMTok: 2_400_000, OutputMicrosPerMTok: 14_400_000,
+			CachedInputMicrosPerMTok: 240_000,
+		},
+		Description: "large and slow - coding and hard reasoning; replaced by Gemini 3.1 Pro Preview",
+	}, {
+		ID: "gemini-2.5-flash", DisplayName: "Gemini 2.5 Flash",
+		MaxContext: 1_048_576, ReleaseDate: "2025-06-17",
+		InputMicrosPerMTok: 288_000, OutputMicrosPerMTok: 2_400_000,
+		CachedInputMicrosPerMTok: 28_800,
+		Description:              "mid-size and quick - everyday questions; replaced by Gemini 3.8 Flash",
+	}, {
+		ID: "gemini-2.5-flash-lite", DisplayName: "Gemini 2.5 Flash-Lite",
+		MaxContext: 1_048_576, ReleaseDate: "2025-07-22",
+		InputMicrosPerMTok: 96_000, OutputMicrosPerMTok: 384_000,
+		CachedInputMicrosPerMTok: 9_600,
+		Description:              "small and fast - short, simple tasks; replaced by Gemini 3.5 Flash-Lite",
 	}},
 }, {
 	Name:    "infomaniak",

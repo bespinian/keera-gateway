@@ -341,6 +341,12 @@ export const icons = {
     "M17 5.5c-3 0-3 6.5-3.5 6.5M17 18.5c-3 0-3-6.5-3.5-6.5",
 };
 
+// Google is both a provider of models and of sign-in.
+const googleMark = {
+  viewBox: "0 0 24 24",
+  path: "M6 12a6 6 0 0 0 11.659 2H12v-4h9.805v4H21.8c-.927 4.564-4.962 8-9.8 8c-5.523 0-10-4.477-10-10S6.477 2 12 2a9.99 9.99 0 0 1 8.282 4.393l-3.278 2.295A6 6 0 0 0 6 12",
+};
+
 /** providerMarks are the hosted providers' logos as path data, drawn in
  *  currentColor to follow the theme. `wide` draws a mark about twice as wide
  *  as tall smaller. `layers` replaces `path` for a mark with several shades:
@@ -381,6 +387,7 @@ const providerMarks = {
       },
     ],
   },
+  google: googleMark,
   infomaniak: {
     viewBox: "0 0 24 24",
     // A filled tile with the letter cut out: how the logo looks in one colour.
@@ -433,10 +440,7 @@ function drawMark(mark) {
  *  the names an operator picks in KEERA_OIDC_PROVIDERS. idpAliases maps other
  *  obvious spellings of each vendor to them. */
 const idpMarks = {
-  google: {
-    viewBox: "0 0 24 24",
-    path: "M12.24 10.285V14.4h6.806c-.275 1.765-2.056 5.174-6.806 5.174-4.095 0-7.439-3.389-7.439-7.574s3.344-7.574 7.439-7.574c2.33 0 3.891.989 4.785 1.849l3.254-3.138C18.189 1.186 15.479 0 12.24 0c-6.635 0-12 5.365-12 12s5.365 12 12 12c6.926 0 11.52-4.869 11.52-11.726 0-.788-.085-1.39-.189-1.989H12.24z",
-  },
+  google: googleMark,
   microsoft: {
     viewBox: "0 0 23 23",
     path: "M0 0h11v11H0zM12 0h11v11H12zM0 12h11v11H0zM12 12h11v11H12z",

@@ -1,6 +1,6 @@
 # Hosted models
 
-A hosted model runs outside your infrastructure: at Anthropic, OpenAI,
+A hosted model runs outside your infrastructure: at Anthropic, OpenAI, Google,
 Infomaniak, stepping stone, Phoeniqs, CSCS, or any other endpoint that speaks
 the OpenAI API.
 
@@ -14,7 +14,8 @@ how to keep it contained.
 
 Infomaniak, stepping stone, Phoeniqs and CSCS serve open-weight models from
 their own data centres in Switzerland, so those prompts stay under Swiss law. Prompts to
-Anthropic and OpenAI do not. Everything below applies to all of them.
+Anthropic, OpenAI and Google go to the USA.
+Everything below applies to all of them.
 
 ## Why offer one at all
 
@@ -54,7 +55,7 @@ write your own, as here.
 window, the prices (input, output, cached input, cache write, and the dearer
 ones for a long prompt where the provider charges more), a display name, a
 description, the release date and the location. The providers are `anthropic`, `openai`,
-`infomaniak`, `stepping-stone`, `phoeniqs` and `cscs`; `keera model catalogue`
+`google`, `infomaniak`, `stepping-stone`, `phoeniqs` and `cscs`; `keera model catalogue`
 lists them with their models. For a `backend_model` not in that table, the entry
 must set `input_micros_per_mtok` and `output_micros_per_mtok` itself. A model
 the table names without a date, such as `claude-haiku-4-5`, may also be named by
@@ -62,7 +63,7 @@ its dated id, `claude-haiku-4-5-20251001`.
 
 The [location](gateway.md#the-alias-is-the-api-contract) is where the provider
 serves its models: `ch` for Infomaniak, stepping stone, Phoeniqs and CSCS, `usa`
-for Anthropic and OpenAI.
+for Anthropic, OpenAI and Google.
 
 The entry always wins over the catalogue. So you can point
 `provider: anthropic` at a corporate egress proxy or a sovereign endpoint, or
@@ -160,9 +161,9 @@ prices go stale; see [billing.md](billing.md#keep-in-mind).
 
 ### Cached input
 
-Anthropic and OpenAI charge less for a prompt they have already read, from a
-fortieth to half of the input price, and report how much of the prompt that was.
-OpenAI counts it as part of the prompt. Anthropic counts it separately, and the
+Anthropic, OpenAI and Google charge less for a prompt they have already
+read, from a fortieth to half of the input price, and report how much of
+the prompt that was. OpenAI and Google count it as part of the prompt. Anthropic counts it separately, and the
 gateway adds it back, so a row's input is always the whole prompt. The gateway
 charges the cached part at the cached rate, so a row's cost matches the
 provider's console.
@@ -206,8 +207,8 @@ keera model set keera-frontier --price-cache-write 5
 ### Long prompts
 
 Some models cost more per token when the prompt is long. `claude-haiku-5-5`
-costs five times as much once the prompt is over 100,000 tokens, and most of
-OpenAI's models cost more over 272,000. The prompt
+costs five times as much once the prompt is over 100,000 tokens, most of
+OpenAI's models cost more over 272,000, and Google's Pro models over 200,000. The prompt
 counts every input token, cached or not, as the provider counts it. The table
 holds both sets of prices for such a model, and the gateway charges the whole
 request at the dearer ones past the threshold: input, cached input, cache write
