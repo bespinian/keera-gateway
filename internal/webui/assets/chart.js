@@ -160,8 +160,12 @@ function frame(times, maxY, W, H, { bucket, tip, describe }) {
           h("div", { class: "t" }, bucketLabel(at, bucket, true)),
           ...describe(i),
         );
-        const frac = x(i) / W;
-        tip.style.left = `calc(${(frac * 100).toFixed(2)}% - ${frac > 0.6 ? 150 : -12}px)`;
+        // The tip sits right of the cursor, or left of it where it would not
+        // fit, measured as its width follows the labels.
+        const tw = tip.offsetWidth;
+        let left = x(i) + 12;
+        if (left + tw > W) left = Math.max(0, x(i) - 12 - tw);
+        tip.style.left = `${left.toFixed(1)}px`;
         tip.style.top = "6px";
       },
       onMouseleave: () => {
