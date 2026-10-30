@@ -6,7 +6,7 @@ FROM docker.io/library/python:3.14-slim
 # The CPU build of torch, to skip 3 GB of CUDA libraries the model does not
 # need.
 RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
-    torch==2.14.1+cpu "laya[serve]==0.4.12"
+    torch==2.15.0+cpu "laya[serve]==0.4.17"
 
 ENV HF_HOME=/root/.cache/huggingface \
     LAYA_DEVICE=cpu \
