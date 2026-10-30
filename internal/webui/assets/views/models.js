@@ -442,19 +442,19 @@ export async function catalogueView(ctx) {
       tile: (r) => catalogueTile(ctx, r),
       choices: [
         {
+          label: "Locations",
+          options: [...new Set(providers.map((p) => p.location))]
+            .filter(Boolean)
+            .map((l) => ({ value: l, label: locationName(l) })),
+          test: (r, v) => r.p.location === v,
+        },
+        {
           label: "Providers",
           options: providers.map((p) => ({
             value: p.name,
             label: providerName(p.name),
           })),
           test: (r, v) => r.p.name === v,
-        },
-        {
-          label: "Locations",
-          options: [...new Set(providers.map((p) => p.location))]
-            .filter(Boolean)
-            .map((l) => ({ value: l, label: locationName(l) })),
-          test: (r, v) => r.p.location === v,
         },
         {
           label: "Kinds",
