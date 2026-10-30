@@ -14,14 +14,9 @@ import (
 // auth.Prefix because this token is for the control plane, not inference.
 const CLITokenPrefix = "keera_cli_"
 
-const (
-	// CLITokenTTL is a month, since signing in again costs a browser window.
-	// The directory is still asked again meanwhile.
-	CLITokenTTL = 30 * 24 * time.Hour
-	// CLICodeTTL bounds the hop from the browser to the loopback listener.
-	// People often leave a consent screen open.
-	CLICodeTTL = 5 * time.Minute
-)
+// CLICodeTTL bounds the hop from the browser to the loopback listener.
+// People often leave a consent screen open.
+const CLICodeTTL = 5 * time.Minute
 
 // newSecret mints a token and its hash. Only the hash is stored, so a database
 // dump holds no working credentials.

@@ -520,12 +520,15 @@ func actorOf(user store.User) *authn.Principal {
 }
 
 func (s *Server) startSession(w http.ResponseWriter, r *http.Request, user store.User) error {
-	token, hash, csrf := authn.NewSession()
-	expires := time.Now().Add(authn.SessionTTL)
-	if err := s.st.CreateSession(r.Context(), hash, user.ID, csrf, expires); err != nil {
+	ttl, err := s.signInTTL(r, user)
+	if err != nil {
 		return err
 	}
-	http.SetCookie(w, s.cookie(sessionCookie, token, "/", int(authn.SessionTTL.Seconds()),
+	token, hash, csrf := authn.NewSession()
+	if err := s.st.CreateSession(r.Context(), hash, user.ID, csrf, time.Now().Add(ttl)); err != nil {
+		return err
+	}
+	http.SetCookie(w, s.cookie(sessionCookie, token, "/", int(ttl.Seconds()),
 		http.SameSiteLaxMode))
 	http.SetCookie(w, s.rememberOrg(user.OrgID))
 	return nil

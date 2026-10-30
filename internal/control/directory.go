@@ -12,8 +12,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// A role comes from the directory at sign-in, but a session lasts 12 hours and
-// a `keera login` token 30 days. So the gateway keeps the refresh token each
+// A role comes from the directory at sign-in, but a session or a `keera login`
+// token lasts 30 days. So the gateway keeps the refresh token each
 // sign-in returns and asks the directory again every
 // authn.DirectoryCheckEvery. Someone removed from it loses access then, and a
 // changed group changes their role.

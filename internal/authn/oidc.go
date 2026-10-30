@@ -548,7 +548,14 @@ func stringsClaim(claims map[string]any, key string) []string {
 	}
 }
 
-const SessionTTL = 12 * time.Hour
+// SignInTTL is how long a browser session or a `keera login` token lasts: a
+// month, since signing in again costs a browser window. The directory is still
+// asked again meanwhile.
+const SignInTTL = 30 * 24 * time.Hour
+
+// ShortSignInTTL is how long a sign-in lasts when the directory cannot be
+// asked again, so a removed person loses access within a working day.
+const ShortSignInTTL = 12 * time.Hour
 
 // FlowTTL bounds how long a login may sit half-finished.
 const FlowTTL = 15 * time.Minute

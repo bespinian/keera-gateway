@@ -278,8 +278,8 @@ administrator sets every address, as on Entra. `SIGNUP` is not allowed either.
 **Asking again.** There is no refresh token, so every 15 minutes the service
 account reads the person again by their subject, which survives a rename or a
 move to another OU. If the entry is gone, no longer matches the user filter, or
-is a disabled Active Directory account, their sign-ins end. A `keera login`
-token lasts 30 days, as with a refresh token. See
+is a disabled Active Directory account, their sign-ins end. A sign-in lasts
+30 days, as with a refresh token. See
 [Asking the directory again](#asking-the-directory-again).
 
 **Wrong passwords.** A wrong password, an unknown username and a locked
@@ -562,8 +562,9 @@ session cookie becomes `Secure` without another setting.
 
 ## Asking the directory again
 
-A session lasts 12 hours and a `keera login` token 30 days. So Keera does not
-only read the directory at sign-in: it keeps the refresh token the sign-in
+A sign-in lasts 30 days, in the browser and with `keera login`. A sign-in to
+the panel with the operator key lasts 12 hours, since no directory checks it.
+So Keera does not only read the directory at sign-in: it keeps the refresh token the sign-in
 returns, encrypted with `KEERA_SECRET_KEY`, and spends it every 15 minutes while
 the person is active.
 
@@ -583,7 +584,8 @@ is what gets a refresh token from most providers. On Google it asks for offline
 access instead, as Google expects. GitHub [works
 differently](#github), and so does [LDAP](#ldap-and-active-directory). If your provider refuses `offline_access`,
 set the scopes without it. Without a refresh token, the directory is only read
-at sign-in, and a `keera login` token lasts 12 hours instead of 30 days.
+at sign-in, and a sign-in lasts 12 hours instead of 30 days, in the browser
+and with `keera login`.
 
 The refresh token is deleted once the person is disabled or removed in every
 organisation they were in.

@@ -192,7 +192,7 @@ func (s *Server) cliToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token, hash := authn.NewCLIToken()
-	ttl, err := s.cliTokenTTL(r, user)
+	ttl, err := s.signInTTL(r, user)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -215,18 +215,23 @@ func (s *Server) cliToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// cliTokenTTL is how long a new command-line token lasts. A month relies on
-// asking the directory again meanwhile. A directory account without a refresh
-// token cannot be asked, so its token lasts as long as a browser session.
-func (s *Server) cliTokenTTL(r *http.Request, user store.User) (time.Duration, error) {
+// signInTTL is how long a new session or command-line token lasts. A month
+// relies on asking the directory again meanwhile. A directory account without
+// a refresh token cannot be asked, so its sign-in is short, as is the operator
+// key's.
+func (s *Server) signInTTL(r *http.Request, user store.User) (time.Duration, error) {
+	if user.ExternalID == operatorKeyExternalID {
+		// Its cookie is as good as the operator key, which no directory checks.
+		return authn.ShortSignInTTL, nil
+	}
 	if s.directoryOf(user) == nil {
-		return authn.CLITokenTTL, nil
+		return authn.SignInTTL, nil
 	}
 	linked, err := s.st.HasRefreshToken(r.Context(), user.ExternalID)
 	if err != nil || linked {
-		return authn.CLITokenTTL, err
+		return authn.SignInTTL, err
 	}
-	return authn.SessionTTL, nil
+	return authn.ShortSignInTTL, nil
 }
 
 // cliPrincipal resolves a command-line token sent as a bearer credential.

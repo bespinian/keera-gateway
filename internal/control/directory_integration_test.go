@@ -69,7 +69,7 @@ func signedInThroughADirectory(t *testing.T, refreshToken string) directorySetup
 		}
 	}
 	token, hash := authn.NewCLIToken()
-	if err := st.CreateCLIToken(ctx, hash, user.ID, time.Now().Add(authn.CLITokenTTL)); err != nil {
+	if err := st.CreateCLIToken(ctx, hash, user.ID, time.Now().Add(authn.SignInTTL)); err != nil {
 		t.Fatalf("creating the token: %v", err)
 	}
 	return directorySetup{srv: srv, ts: ts, st: st, idp: idp, user: user, token: token}
@@ -207,23 +207,42 @@ func TestATokenNoKeyOpensEndsTheSignIn(t *testing.T) {
 	}
 }
 
-func TestATerminalTokenIsShortWithoutARefreshToken(t *testing.T) {
+func TestASignInIsShortWhereNoDirectoryChecksIt(t *testing.T) {
 	for _, tc := range []struct {
 		refreshToken string
 		want         time.Duration
 	}{
-		{"rt-1", authn.CLITokenTTL},
-		{"", authn.SessionTTL},
+		{"rt-1", authn.SignInTTL},
+		{"", authn.ShortSignInTTL},
 	} {
 		d := signedInThroughADirectory(t, tc.refreshToken)
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
-		got, err := d.srv.cliTokenTTL(req, d.user)
+		got, err := d.srv.signInTTL(req, d.user)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if got != tc.want {
 			t.Errorf("refresh token %q: ttl = %v, want %v", tc.refreshToken, got, tc.want)
 		}
+
+		// The browser follows the same rule.
+		w := httptest.NewRecorder()
+		if err := d.srv.startSession(w, req, d.user); err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range w.Result().Cookies() {
+			if c.Name == sessionCookie && c.MaxAge != int(tc.want.Seconds()) {
+				t.Errorf("refresh token %q: session cookie max-age = %d, want %d",
+					tc.refreshToken, c.MaxAge, int(tc.want.Seconds()))
+			}
+		}
+	}
+
+	d := signedInThroughADirectory(t, "")
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	got, err := d.srv.signInTTL(req, store.User{ExternalID: operatorKeyExternalID})
+	if err != nil || got != authn.ShortSignInTTL {
+		t.Errorf("operator key: ttl = %v, %v, want %v", got, err, authn.ShortSignInTTL)
 	}
 }
 
