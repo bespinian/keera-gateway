@@ -38,8 +38,18 @@ func (s *Store) RecordDirectoryCheck(ctx context.Context, externalID string, sea
 		VALUES ($1, $2, now())
 		ON CONFLICT (external_id) DO UPDATE
 		SET refresh_token = COALESCE(EXCLUDED.refresh_token, identities.refresh_token),
-			directory_checked_at = now()`, externalID, sealed)
+			directory_checked_at = now(), directory_failing_since = NULL`, externalID, sealed)
 	return err
+}
+
+// RecordDirectoryFailure notes that the directory could not be asked about an
+// identity, and returns when it first failed since it last answered.
+func (s *Store) RecordDirectoryFailure(ctx context.Context, externalID string) (time.Time, error) {
+	var since time.Time
+	err := s.pool.QueryRow(ctx, `UPDATE identities
+		SET directory_failing_since = COALESCE(directory_failing_since, now())
+		WHERE external_id = $1 RETURNING directory_failing_since`, externalID).Scan(&since)
+	return since, notFound(err)
 }
 
 // ClaimDirectoryCheck takes the next due check of an identity's directory and
@@ -64,7 +74,8 @@ func (s *Store) ClaimDirectoryCheck(ctx context.Context, externalID string,
 // every organisation, when its directory no longer vouches for it.
 func (s *Store) EndDirectoryLink(ctx context.Context, externalID string) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "UPDATE identities SET refresh_token = NULL WHERE external_id = $1",
+		if _, err := tx.Exec(ctx, `UPDATE identities SET refresh_token = NULL, directory_failing_since = NULL
+			WHERE external_id = $1`,
 			externalID); err != nil {
 			return err
 		}

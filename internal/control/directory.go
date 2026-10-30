@@ -58,6 +58,7 @@ func (s *Server) rememberDirectory(r *http.Request, user store.User, sealed []by
 // the directory no longer vouches for them, after ending all their sign-ins.
 // A provider that cannot be reached keeps the person signed in: signing
 // everybody out during an outage would be worse, and the next check asks again.
+// After authn.ShortSignInTTL of failing, though, it counts as a refusal.
 func (s *Server) checkDirectory(r *http.Request, user store.User, d store.Directory) (store.User, bool) {
 	now := time.Now()
 	if !d.Due(now, authn.DirectoryCheckEvery) {
@@ -128,9 +129,15 @@ func (s *Server) checkDirectory(r *http.Request, user store.User, d store.Direct
 // the person stays signed in.
 func (s *Server) directoryFailed(r *http.Request, user store.User, err error) bool {
 	if !errors.Is(err, authn.ErrDirectoryRefused) {
-		s.log.Warn("could not ask the directory again; keeping the sign-in",
-			"user", user.ID, "error", err)
-		return true
+		since, serr := s.st.RecordDirectoryFailure(r.Context(), user.ExternalID)
+		if serr != nil || time.Since(since) < authn.ShortSignInTTL {
+			s.log.Warn("could not ask the directory again; keeping the sign-in",
+				"user", user.ID, "error", err)
+			return true
+		}
+		// Such as an expired client secret, which no outage explains.
+		err = fmt.Errorf("%w: it has not answered since %s: %w",
+			authn.ErrDirectoryRefused, since.UTC().Format(time.RFC3339), err)
 	}
 	if err := s.st.EndDirectoryLink(r.Context(), user.ExternalID); err != nil {
 		s.log.Error("ending the sign-ins of someone the directory refused",

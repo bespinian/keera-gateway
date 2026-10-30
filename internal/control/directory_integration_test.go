@@ -189,6 +189,42 @@ func TestADirectoryOutageKeepsPeopleSignedIn(t *testing.T) {
 	if got := asToken(t, d.ts, d.token, nil); got != http.StatusOK {
 		t.Errorf("status = %d, want 200 while the directory is down", got)
 	}
+
+	// An answer forgets the outage, so the next one counts from zero.
+	d.makeDue(t)
+	d.idp.FailRefresh = false
+	if got := asToken(t, d.ts, d.token, nil); got != http.StatusOK {
+		t.Fatalf("status = %d, want 200 once the directory answers", got)
+	}
+	var failing *time.Time
+	if err := d.st.Pool().QueryRow(context.Background(),
+		"SELECT directory_failing_since FROM identities WHERE external_id = $1",
+		d.user.ExternalID).Scan(&failing); err != nil {
+		t.Fatal(err)
+	}
+	if failing != nil {
+		t.Errorf("directory_failing_since = %v after an answer, want null", failing)
+	}
+}
+
+// Otherwise a directory that never comes back, such as one whose client secret
+// expired, would leave month-long sign-ins unchecked.
+func TestADirectoryThatStaysDownEndsTheSignIn(t *testing.T) {
+	d := signedInThroughADirectory(t, "rt-1")
+	d.makeDue(t)
+	d.idp.FailRefresh = true
+	if _, err := d.st.Pool().Exec(context.Background(),
+		"UPDATE identities SET directory_failing_since = now() - interval '13 hours' WHERE external_id = $1",
+		d.user.ExternalID); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := asToken(t, d.ts, d.token, nil); got != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 after 13 hours without an answer", got)
+	}
+	if linked, _ := d.st.HasRefreshToken(context.Background(), d.user.ExternalID); linked {
+		t.Error("the refresh token is still stored")
+	}
 }
 
 // Kept, a sign-in whose token no key opens would never be checked again,

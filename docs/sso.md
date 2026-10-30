@@ -574,7 +574,11 @@ the person is active.
 - If it answers, the role and the name are applied again, as at sign-in, in
   every organisation the person is in.
 - If it cannot be reached, the person stays signed in, and the next request asks
-  again 15 minutes later.
+  again 15 minutes later. After 12 hours without an answer, their sign-ins end,
+  as if it had refused. An outage that long is rare. A directory that never
+  answers again, such as after its client secret expired, would otherwise
+  leave a month of sign-ins unchecked. The log says why: look for "has not
+  answered since".
 - If the stored refresh token cannot be decrypted, usually because
   `KEERA_SECRET_KEY` [changed](install.md#changing-the-secret-key), the person is
   signed out, as if the directory had refused. Signing in again stores a new one.
