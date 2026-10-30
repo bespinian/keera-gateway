@@ -65,10 +65,10 @@ type ProviderModel struct {
 
 // providers is the built-in table.
 //
-// Prices are micro-CHF per million tokens, at list price; an entry can
-// override them. Prices listed in USD are converted at 0.96 CHF per USD.
-// Last checked against each pricing page on 2026-10-08, Google's on
-// 2026-10-29 and Mistral's on 2026-10-30.
+// Prices are micro-CHF per million tokens, at list price unless a provider
+// says otherwise; an entry can override them. Prices listed in USD are
+// converted at 0.96 CHF per USD. Last checked against each pricing page on
+// 2026-10-30, Google's on 2026-10-29.
 //
 // Release dates come from each maker's announcement. An FP8 build takes the
 // date of its base model. Retired models are dropped before they retire.
@@ -412,12 +412,6 @@ var providers = []Provider{{
 		InputMicrosPerMTok: 288_000, OutputMicrosPerMTok: 2_400_000,
 		CachedInputMicrosPerMTok: 28_800,
 		Description:              "mid-size and quick - everyday questions; replaced by Gemini 3.8 Flash",
-	}, {
-		ID: "gemini-2.5-flash-lite", DisplayName: "Gemini 2.5 Flash-Lite",
-		MaxContext: 1_048_576, ReleaseDate: "2025-07-22",
-		InputMicrosPerMTok: 96_000, OutputMicrosPerMTok: 384_000,
-		CachedInputMicrosPerMTok: 9_600,
-		Description:              "small and fast - short, simple tasks; replaced by Gemini 3.5 Flash-Lite",
 	}},
 }, {
 	Name:    "mistral",
@@ -485,6 +479,7 @@ var providers = []Provider{{
 	Location:       "ch",
 	Kinds:          []policy.Kind{policy.KindChat},
 	// Ids are the upstream names, capitals and all, as the endpoint expects.
+	// Prices are Infomaniak's list price times 1.12, on purpose.
 	Models: []ProviderModel{{
 		ID: "Qwen/Qwen3.5-397B-A17B-FP8", DisplayName: "Qwen3.5 397B A17B FP8",
 		MaxContext: 200_000, ReleaseDate: "2026-02-16",
@@ -512,7 +507,7 @@ var providers = []Provider{{
 		Description: "mid-size and quick - documents, chatbots and ordinary code",
 	}, {
 		ID: "Qwen/Qwen3.8-27B-FP8", DisplayName: "Qwen3.8 27B FP8",
-		MaxContext: 256_000, ReleaseDate: "2026-08-14",
+		MaxContext: 100_000, ReleaseDate: "2026-08-14",
 		InputMicrosPerMTok: 448_000, OutputMicrosPerMTok: 3_360_000,
 		Description: "small but strong for its size - ordinary code and questions",
 	}, {
@@ -522,78 +517,92 @@ var providers = []Provider{{
 		Description: "small and quick - chatbots, short edits and everyday questions",
 	}},
 }, {
-	Name:     "stepping-stone",
-	Summary:  "Open-weight models, served in Switzerland.",
-	Endpoint: "https://llm.stoney-cloud.com/v1",
-	Location: "ch",
-	Kinds:    []policy.Kind{policy.KindChat},
+	Name:        "stepping-stone",
+	Summary:     "Open-weight models, served in Switzerland.",
+	Endpoint:    "https://llm.stoney-cloud.com/v1",
+	CachedInput: true,
+	Location:    "ch",
+	Kinds:       []policy.Kind{policy.KindChat},
 	// Ids are the upstream names, capitals and all. The Nemotron id is spelled
 	// as stepping stone's documentation spells it.
 	Models: []ProviderModel{{
 		ID: "MiniMaxAI/MiniMax-M2.5", DisplayName: "MiniMax M2.5",
 		MaxContext: 192_000, ReleaseDate: "2026-02-12",
 		InputMicrosPerMTok: 1_940_000, OutputMicrosPerMTok: 9_700_000,
-		Description: "large - long coding and agent tasks with many steps",
+		CachedInputMicrosPerMTok: 291_000,
+		Description:              "large - long coding and agent tasks with many steps",
 	}, {
 		ID: "NVIDIA/NVIDIA-Nemotron-3-Super-120B-A12B", DisplayName: "Nemotron 3 Super",
 		MaxContext: 128_000, ReleaseDate: "2026-03-11",
 		InputMicrosPerMTok: 2_000_000, OutputMicrosPerMTok: 5_000_000,
-		Description: "large reasoning model - hard problems",
+		CachedInputMicrosPerMTok: 300_000,
+		Description:              "large reasoning model - hard problems",
 	}, {
 		ID: "deepseek-ai/DeepSeek-V4-Flash-0731", DisplayName: "DeepSeek V4 Flash",
 		MaxContext: 512_000, ReleaseDate: "2026-07-31",
 		InputMicrosPerMTok: 450_000, OutputMicrosPerMTok: 1_800_000,
-		Description: "mid-size and quick - large codebases and long documents",
+		CachedInputMicrosPerMTok: 67_500,
+		Description:              "mid-size and quick - large codebases and long documents",
 	}, {
 		ID: "Qwen/Qwen3-Coder-Next", DisplayName: "Qwen3 Coder Next",
 		MaxContext: 256_000, ReleaseDate: "2026-02-03",
 		InputMicrosPerMTok: 340_000, OutputMicrosPerMTok: 1_700_000,
-		Description: "made for code - edits, code questions and agent tool calls",
+		CachedInputMicrosPerMTok: 37_500,
+		Description:              "made for code - edits, code questions and agent tool calls",
 	}, {
 		ID: "zai-org/GLM-5.3-Flash", DisplayName: "GLM-5.3 Flash",
 		MaxContext: 256_000, ReleaseDate: "2026-08-26",
 		InputMicrosPerMTok: 300_000, OutputMicrosPerMTok: 1_500_000,
-		Description: "mid-size, quick all-rounder - code, reasoning and tool use",
+		CachedInputMicrosPerMTok: 45_000,
+		Description:              "mid-size, quick all-rounder - code, reasoning and tool use",
 	}, {
 		ID: "openai/gpt-oss-120b", DisplayName: "gpt-oss-120b",
 		MaxContext: 128_000, ReleaseDate: "2025-08-05",
 		InputMicrosPerMTok: 400_000, OutputMicrosPerMTok: 1_600_000,
-		Description: "mid-size, reasons before it answers - everyday work and tool use",
+		CachedInputMicrosPerMTok: 60_000,
+		Description:              "mid-size, reasons before it answers - everyday work and tool use",
 	}, {
 		ID: "Qwen/Qwen3.8-27B", DisplayName: "Qwen3.8 27B",
 		MaxContext: 256_000, ReleaseDate: "2026-08-14",
 		InputMicrosPerMTok: 250_000, OutputMicrosPerMTok: 1_500_000,
-		Description: "small but strong for its size - ordinary code and questions",
+		CachedInputMicrosPerMTok: 51_000,
+		Description:              "small but strong for its size - ordinary code and questions",
 	}, {
 		ID: "google/gemma-4-31B-it", DisplayName: "Gemma 4 31B",
 		MaxContext: 160_000, ReleaseDate: "2026-04-02",
 		InputMicrosPerMTok: 250_000, OutputMicrosPerMTok: 1_000_000,
-		Description: "mid-size and quick - documents, chatbots and ordinary code",
+		CachedInputMicrosPerMTok: 37_500,
+		Description:              "mid-size and quick - documents, chatbots and ordinary code",
 	}, {
 		ID: "Qwen/Qwen3.5-35B-A3B-FP8", DisplayName: "Qwen3.5 35B A3B FP8",
 		MaxContext: 128_000, ReleaseDate: "2026-02-24",
 		InputMicrosPerMTok: 170_000, OutputMicrosPerMTok: 1_000_000,
-		Description: "small and fast, light on reasoning - high-volume, simple tasks",
+		CachedInputMicrosPerMTok: 25_500,
+		Description:              "small and fast, light on reasoning - high-volume, simple tasks",
 	}, {
 		ID: "apertus-ai/Apertus-v1.5-8B", DisplayName: "Apertus v1.5 8B",
 		MaxContext: 128_000, ReleaseDate: "2026-07-24",
 		InputMicrosPerMTok: 20_000, OutputMicrosPerMTok: 100_000,
-		Description: "small, open training data - simple tasks",
+		CachedInputMicrosPerMTok: 3_000,
+		Description:              "small, open training data - simple tasks",
 	}, {
 		ID: "allenai/olmOCR-2-7B", DisplayName: "olmOCR 2",
 		MaxContext: 8_000, ReleaseDate: "2025-10-22",
 		InputMicrosPerMTok: 60_000, OutputMicrosPerMTok: 290_000,
-		Description: "OCR - turns images of pages into text; not for chat or code",
+		CachedInputMicrosPerMTok: 9_000,
+		Description:              "OCR - turns images of pages into text; not for chat or code",
 	}, {
 		ID: "lightonai/LightOnOCR-2-1B", DisplayName: "LightOnOCR 2",
 		MaxContext: 16_000, ReleaseDate: "2026-01-19",
 		InputMicrosPerMTok: 20_000, OutputMicrosPerMTok: 60_000,
-		Description: "small, fast OCR - turns images of pages into text; not for chat or code",
+		CachedInputMicrosPerMTok: 3_000,
+		Description:              "small, fast OCR - turns images of pages into text; not for chat or code",
 	}, {
 		ID: "opendatalab/MinerU2.5-2509-1.2B", DisplayName: "MinerU 2.5",
 		MaxContext: 16_000, ReleaseDate: "2025-09-19",
 		InputMicrosPerMTok: 20_000, OutputMicrosPerMTok: 60_000,
-		Description: "document parsing - turns images of pages into text, tables and formulas; not for chat",
+		CachedInputMicrosPerMTok: 3_000,
+		Description:              "document parsing - turns images of pages into text, tables and formulas; not for chat",
 	}},
 }, {
 	Name:     "phoeniqs",
@@ -607,7 +616,7 @@ var providers = []Provider{{
 	// MinerU2.5-Pro-2605 for inference-miner-u25.
 	Models: []ProviderModel{{
 		ID: "inference-glm5", DisplayName: "GLM-5",
-		MaxContext: 131_072, ReleaseDate: "2026-08-28",
+		MaxContext: 131_072, ReleaseDate: "2026-06-16",
 		InputMicrosPerMTok: 1_077_000, OutputMicrosPerMTok: 3_386_000,
 		Description: "large - long agent sessions, hard code and terminal work",
 	}, {
@@ -692,63 +701,72 @@ var providers = []Provider{{
 		Description: "document parsing - turns images of pages into text, tables and formulas; not for chat",
 	}},
 }, {
-	Name:     "cscs",
-	Summary:  "Open-weight models at the Swiss National Supercomputing Centre.",
-	Endpoint: "https://api.inference.cscs.ch/v1",
-	Location: "ch",
-	Kinds:    []policy.Kind{policy.KindChat},
+	Name:        "cscs",
+	Summary:     "Open-weight models at the Swiss National Supercomputing Centre.",
+	Endpoint:    "https://api.inference.cscs.ch/v1",
+	CachedInput: true,
+	Location:    "ch",
+	Kinds:       []policy.Kind{policy.KindChat},
 	// Ids are the upstream names, capitals and all. A -thinking id is the same
 	// weights with reasoning on and tool calls off, so it keeps the date.
+	// CSCS retires GLM-5.2, Kimi K2.7 Code and Nemotron 3 Super on 2026-11-16.
 	Models: []ProviderModel{{
 		ID: "moonshotai/Kimi-K2.7-Code", DisplayName: "Kimi K2.7 Code",
 		MaxContext: 262_144, ReleaseDate: "2026-06-12",
-		InputMicrosPerMTok: 1_300_000, OutputMicrosPerMTok: 6_050_000,
-		Description: "made for code - long agent sessions over many files; reads images",
+		InputMicrosPerMTok: 640_000, OutputMicrosPerMTok: 6_050_000,
+		CachedInputMicrosPerMTok: 127_200,
+		Description:              "made for code - long agent sessions over many files; reads images",
+	}, {
+		// CSCS does not publish its context window; it is the same base model
+		// as GLM-5.2, so it takes GLM-5.2's.
+		ID: "zai-org/GLM-5.3", DisplayName: "GLM-5.3",
+		MaxContext: 976_000, ReleaseDate: "2026-08-14",
+		InputMicrosPerMTok: 181_100, OutputMicrosPerMTok: 6_642_000,
+		CachedInputMicrosPerMTok: 31_500,
+		Description:              "large - hard coding, agent and security work over very long inputs",
 	}, {
 		ID: "zai-org/GLM-5.2", DisplayName: "GLM-5.2",
-		MaxContext: 976_000, ReleaseDate: "2026-08-28",
-		InputMicrosPerMTok: 6_360_000, OutputMicrosPerMTok: 27_310_000,
-		Description: "large and costly all-rounder - very long inputs",
+		MaxContext: 976_000, ReleaseDate: "2026-06-16",
+		InputMicrosPerMTok: 1_056_700, OutputMicrosPerMTok: 27_310_000,
+		CachedInputMicrosPerMTok: 215_700,
+		Description:              "large and costly all-rounder - very long inputs; replaced by GLM-5.3",
 	}, {
+		// CSCS gives no cache discount here: a cached token costs the input price.
 		ID: "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16", DisplayName: "Nemotron 3 Super BF16",
 		MaxContext: 262_144, ReleaseDate: "2026-03-11",
-		InputMicrosPerMTok: 300_000, OutputMicrosPerMTok: 1_490_000,
-		Description: "large reasoning model, quick - hard questions and tool use",
+		InputMicrosPerMTok: 303_800, OutputMicrosPerMTok: 1_494_400,
+		CachedInputMicrosPerMTok: 303_800,
+		Description:              "large reasoning model, quick - hard questions and tool use",
 	}, {
 		ID: "google/gemma-4-31B-it", DisplayName: "Gemma 4 31B",
 		MaxContext: 262_144, ReleaseDate: "2026-04-02",
-		InputMicrosPerMTok: 60_000, OutputMicrosPerMTok: 420_000,
-		Description: "mid-size and quick, reads images - documents, chatbots and ordinary code",
+		InputMicrosPerMTok: 68_000, OutputMicrosPerMTok: 420_000,
+		CachedInputMicrosPerMTok: 13_600,
+		Description:              "mid-size and quick, reads images - documents, chatbots and ordinary code",
 	}, {
 		ID: "swiss-ai/Apertus-v1.5-70B", DisplayName: "Apertus v1.5 70B",
 		MaxContext: 262_144, ReleaseDate: "2026-07-24",
-		InputMicrosPerMTok: 60_000, OutputMicrosPerMTok: 400_000,
-		Description: "mid-size, open training data - work that must be auditable",
+		InputMicrosPerMTok: 194_600, OutputMicrosPerMTok: 392_800,
+		CachedInputMicrosPerMTok: 19_500,
+		Description:              "mid-size, open training data - work that must be auditable",
 	}, {
 		ID: "swiss-ai/Apertus-v1.5-70B-thinking", DisplayName: "Apertus v1.5 70B Thinking",
 		MaxContext: 262_144, ReleaseDate: "2026-07-24",
-		InputMicrosPerMTok: 60_000, OutputMicrosPerMTok: 400_000,
-		Description: "mid-size, open training data, reasons first, no tool calls - hard questions",
+		InputMicrosPerMTok: 194_600, OutputMicrosPerMTok: 392_800,
+		CachedInputMicrosPerMTok: 19_500,
+		Description:              "mid-size, open training data, reasons first, no tool calls - hard questions",
 	}, {
 		ID: "swiss-ai/Apertus-v1.5-8B", DisplayName: "Apertus v1.5 8B",
 		MaxContext: 262_144, ReleaseDate: "2026-07-24",
-		InputMicrosPerMTok: 10_000, OutputMicrosPerMTok: 40_000,
-		Description: "small, open training data - simple tasks",
+		InputMicrosPerMTok: 18_500, OutputMicrosPerMTok: 40_400,
+		CachedInputMicrosPerMTok: 1_900,
+		Description:              "small, open training data - simple tasks",
 	}, {
 		ID: "swiss-ai/Apertus-v1.5-8B-thinking", DisplayName: "Apertus v1.5 8B Thinking",
 		MaxContext: 262_144, ReleaseDate: "2026-07-24",
-		InputMicrosPerMTok: 10_000, OutputMicrosPerMTok: 40_000,
-		Description: "small, open training data, reasons first, no tool calls - simple questions",
-	}, {
-		ID: "swiss-ai/Apertus-70B-Instruct-2509", DisplayName: "Apertus 70B",
-		MaxContext: 64_000, ReleaseDate: "2025-09-02",
-		InputMicrosPerMTok: 60_000, OutputMicrosPerMTok: 400_000,
-		Description: "mid-size, open training data, weaker at tool use; replaced by Apertus v1.5 70B",
-	}, {
-		ID: "swiss-ai/Apertus-8B-Instruct-2509", DisplayName: "Apertus 8B",
-		MaxContext: 32_768, ReleaseDate: "2025-09-02",
-		InputMicrosPerMTok: 10_000, OutputMicrosPerMTok: 40_000,
-		Description: "small, open training data; replaced by Apertus v1.5 8B",
+		InputMicrosPerMTok: 18_500, OutputMicrosPerMTok: 40_400,
+		CachedInputMicrosPerMTok: 1_900,
+		Description:              "small, open training data, reasons first, no tool calls - simple questions",
 	}},
 }}
 

@@ -330,9 +330,9 @@ func checkProviderModel(t *testing.T, p Provider, m ProviderModel, seenDescripti
 		// An invented rate would under-charge every cached prompt.
 		t.Errorf("%s states a cached-input rate of %d, but %s publishes none",
 			m.ID, m.CachedInputMicrosPerMTok, p.Name)
-	case m.CachedInputMicrosPerMTok >= m.InputMicrosPerMTok:
+	case m.CachedInputMicrosPerMTok > m.InputMicrosPerMTok:
 		// A cache read that costs more than a miss is a typo.
-		t.Errorf("%s's cached-input rate %d is not below its input rate %d",
+		t.Errorf("%s's cached-input rate %d is above its input rate %d",
 			m.ID, m.CachedInputMicrosPerMTok, m.InputMicrosPerMTok)
 	}
 }

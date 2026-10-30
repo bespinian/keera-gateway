@@ -925,7 +925,7 @@ func TestBackendModelFlagBringsTheNewModelsValues(t *testing.T) {
 		Alias: "keera-coder", Kind: policy.KindChat, Provider: "stepping-stone",
 		Backends: []string{"https://llm.stoney-cloud.com/v1"}, BackendModel: "Qwen/Qwen3-Coder-Next",
 		DisplayName: "Qwen3 Coder Next", Description: "made for code", InputMicrosPerMTok: 340_000, OutputMicrosPerMTok: 1_700_000,
-		CachedInputMicrosPerMTok: 51_000, MaxContext: 256_000, ReleaseDate: "2026-02-03",
+		CachedInputMicrosPerMTok: 37_500, MaxContext: 256_000, ReleaseDate: "2026-02-03",
 		Location: "ch", Enabled: true,
 	})
 	f := &modelFlags{
@@ -937,7 +937,7 @@ func TestBackendModelFlagBringsTheNewModelsValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.InputMicrosPerMTok != 400_000 || got.OutputMicrosPerMTok != 1_600_000 ||
-		got.CachedInputMicrosPerMTok != 0 || got.MaxContext != 128_000 ||
+		got.CachedInputMicrosPerMTok != 60_000 || got.MaxContext != 128_000 ||
 		got.ReleaseDate != "2025-08-05" || got.Description == "made for code" ||
 		got.DisplayName != "gpt-oss-120b" {
 		t.Errorf("the old model's values were kept: %+v", got)
