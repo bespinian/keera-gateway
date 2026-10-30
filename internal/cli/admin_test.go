@@ -623,7 +623,7 @@ func TestModelAddFillsInTheProviderDefaults(t *testing.T) {
 	if got := body["backends"].([]any); len(got) != 1 || got[0] != "https://api.anthropic.com/v1" {
 		t.Errorf("backends = %v", got)
 	}
-	if body["input_micros_per_mtok"] != float64(4_600_000) {
+	if body["input_micros_per_mtok"] != float64(4_800_000) {
 		t.Errorf("input price = %v, want the provider's", body["input_micros_per_mtok"])
 	}
 	if body["max_context_tokens"] != float64(1_000_000) {
@@ -771,7 +771,7 @@ func TestModelApplyUpsertsEveryModelInTheFile(t *testing.T) {
 	if got := f.request("PUT", "/v1/models/keera-speed").body["backend_model"]; got != "qwen3-8b" {
 		t.Errorf("backend_model = %v, want the file's", got)
 	}
-	if got := f.request("PUT", "/v1/models/keera-frontier").body["input_micros_per_mtok"]; got != float64(4_600_000) {
+	if got := f.request("PUT", "/v1/models/keera-frontier").body["input_micros_per_mtok"]; got != float64(4_800_000) {
 		t.Errorf("the provider's price was not applied: %v", got)
 	}
 }

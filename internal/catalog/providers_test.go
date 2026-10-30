@@ -642,7 +642,7 @@ models:
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if p := models[0].InputMicrosPerMTok; p != 920_000 {
+	if p := models[0].InputMicrosPerMTok; p != 960_000 {
 		t.Errorf("input price = %d, want claude-haiku-4-5's", p)
 	}
 }
