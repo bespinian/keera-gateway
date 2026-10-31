@@ -688,9 +688,9 @@ function palette() {
     accent: v("--accent", "#1657c8"),
     good: v("--good", "#1c7a4d"),
     warn: v("--warn", "#9a5b00"),
-    warnSoft: v("--warn-soft", "#fbf0dd"),
+    surface3: v("--surface-3", "#eff1f4"),
     bad: v("--bad", "#a92a20"),
-    // For clients: accent is the gateway's, good and warn the boundary's.
+    // For clients: accent is the gateway's, good the network's.
     series: v("--s4", "#7b3fa0"),
     font:
       (document.body && getComputedStyle(document.body).fontFamily) ||
@@ -724,8 +724,9 @@ function bands(g, scene, c) {
   if (!hostedOnly) g.fillText("YOUR NETWORK", 6, 16);
   if (!scene.outside.length) return;
 
-  // Tinted, so "not your network" reads before any word does.
-  g.fillStyle = c.warnSoft;
+  // Tinted, so "not your network" reads before any word does. Grey, not
+  // amber: a hosted model is a choice, not a fault.
+  g.fillStyle = c.surface3;
   roundRect(
     g,
     2,
@@ -739,14 +740,14 @@ function bands(g, scene, c) {
   g.save();
   g.setLineDash([7, 6]);
   g.lineWidth = 1.5;
-  g.strokeStyle = c.warn;
+  g.strokeStyle = c.faint;
   g.beginPath();
   g.moveTo(4, geo.lineY);
   g.lineTo(geo.width - 4, geo.lineY);
   g.stroke();
   g.restore();
 
-  g.fillStyle = c.warn;
+  g.fillStyle = c.muted;
   g.fillText("LEAVES YOUR NETWORK", 6, geo.lineY + 26);
 }
 
@@ -758,28 +759,19 @@ function lines(g, scene, c, hover) {
     ...boxes(scene).map((n) => (n.kind === "gateway" ? 0 : n.cell.requests)),
   );
   for (const n of scene.clients) {
-    link(g, legOne(n, scene.gateway), n, scene, c, hover, max, false);
+    link(g, legOne(n, scene.gateway), n, scene, c, hover, max);
   }
   for (const n of [...scene.inside, ...scene.outside]) {
-    link(
-      g,
-      legTwo(scene.gateway, n),
-      n,
-      scene,
-      c,
-      hover,
-      max,
-      n.hosting === "external",
-    );
+    link(g, legTwo(scene.gateway, n), n, scene, c, hover, max);
   }
 }
 
-function link(g, path, node, scene, c, hover, max, external) {
+function link(g, path, node, scene, c, hover, max) {
   const lit = related(node, hover, scene);
   g.save();
   g.lineWidth = 0.8 + 2.6 * Math.sqrt(node.cell.requests / max || 0);
-  g.strokeStyle = external ? c.warn : c.line;
-  g.globalAlpha = hover ? (lit ? 1 : 0.15) : external ? 0.5 : 0.4;
+  g.strokeStyle = c.line;
+  g.globalAlpha = hover ? (lit ? 1 : 0.15) : 0.4;
   g.beginPath();
   g.moveTo(path.x1, path.y1);
   g.bezierCurveTo(path.cx1, path.cy1, path.cx2, path.cy2, path.x2, path.y2);
@@ -810,9 +802,6 @@ function related(node, hover, scene) {
 }
 
 function box(g, n, c, hover, face) {
-  // A model of unknown hosting is marked like an outside one: this screen must
-  // never wrongly promise that traffic stays.
-  const unsure = n.kind === "model" && n.hosting !== "internal";
   const dim = hover && hover !== n ? 0.55 : 1;
   g.save();
   g.globalAlpha = dim;
@@ -827,7 +816,7 @@ function box(g, n, c, hover, face) {
   }
 
   g.fillStyle = n.kind === "gateway" ? c.surface2 : c.surface;
-  g.strokeStyle = hover === n ? face.tone : unsure ? c.warn : c.border;
+  g.strokeStyle = hover === n ? face.tone : c.border;
   g.lineWidth = hover === n || n.kind === "gateway" ? 1.6 : 1;
   roundRect(g, n.x, n.y, n.w, n.h, 10);
   g.fill();
@@ -923,13 +912,18 @@ function modelFace(n, c) {
     value: ms(n.cell.ttft_median_ms),
     unit: n.cell.ttft_median_ms ? "to first token" : "nothing in this period",
     note: where + " · " + compact(n.cell.requests) + " req",
-    tone:
-      n.hosting === "external"
-        ? c.warn
-        : n.hosting === "internal"
-          ? c.good
-          : c.faint,
+    tone: modelTone(n, c),
   };
+}
+
+/** modelTone colours a model by how it is doing, not by where it runs: the
+ *  bands already say that. A few failures are noise, so only a share counts. */
+function modelTone(n, c) {
+  if (!n.folded && !n.enabled) return c.faint;
+  const share = n.cell.requests ? n.cell.failed / n.cell.requests : 0;
+  if (share >= 0.5) return c.bad;
+  if (share >= 0.05) return c.warn;
+  return c.good;
 }
 
 /** drawPacket colours a request by its outcome: each row is already a
@@ -1202,11 +1196,15 @@ function modelReport(ctx, scene) {
           label: "Prompts",
           sortKey: (m) => m.hosting,
           cell: (m) =>
-            m.hosting === "external"
-              ? h("span", { class: "pill pill-warn" }, "Leave your network")
-              : m.hosting === "internal"
-                ? h("span", { class: "pill pill-good" }, "Stay in your network")
-                : h("span", { class: "pill" }, "Unknown"),
+            h(
+              "span",
+              { class: "pill" },
+              m.hosting === "external"
+                ? "Leave your network"
+                : m.hosting === "internal"
+                  ? "Stay in your network"
+                  : "Unknown",
+            ),
         },
         {
           label: "Served by",
