@@ -32,7 +32,6 @@ import {
   formModal,
   capitalise,
 } from "../ui.js";
-import { orgNameOf } from "./orgs.js";
 import { oldestProject } from "./projects.js";
 
 // showFinished survives a reload but not leaving the screen.
@@ -264,9 +263,7 @@ function classCard(ctx, classes, driver) {
   return h(
     "div",
     { class: "stack", style: { gap: "10px" } },
-    sectionHead("Classes", `the machines ${orgNameOf(ctx)} offers`, {
-      margin: "0",
-    }),
+    sectionHead("Classes", null, { margin: "0" }),
     canEdit && classes.length
       ? h(
           "div",

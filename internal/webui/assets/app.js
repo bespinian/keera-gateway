@@ -44,7 +44,7 @@ import { requestsView } from "./views/requests.js";
 import { mapView } from "./views/map.js";
 import { sessionsView, sessionDetailView } from "./views/sessions.js";
 import { peopleView } from "./views/people.js";
-import { orgsView, chooseOrg } from "./views/orgs.js";
+import { orgsView, chooseOrg, orgNameOf } from "./views/orgs.js";
 import { billingView } from "./views/billing.js";
 import {
   projectDetailView,
@@ -564,7 +564,7 @@ function renderShell() {
             { class: "account-name" },
             state.me.email ? personName(state.me) : "Operator key",
           ),
-          h("span", { class: "account-role" }, state.me.role),
+          h("span", { class: "account-org" }, accountOrg()),
         ),
         h("span", { class: "nav-text account-more" }, icon(icons.more)),
       ),
@@ -656,10 +656,14 @@ function topbar() {
         ),
       ),
     );
-  } else if (state.me.org_name) {
-    bar.append(h("span", { class: "pill" }, state.me.org_name));
   }
   return bar;
+}
+
+/** accountOrg names the organisation in view, under the reader's name. */
+function accountOrg() {
+  if (!state.orgID && state.me.unrestricted) return "All organisations";
+  return orgNameOf({ state, orgID: state.orgID }, state.orgID, { start: true });
 }
 
 function setTitle(title, sub) {
