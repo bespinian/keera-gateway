@@ -51,7 +51,7 @@ export async function projectsView(ctx) {
     // every request, so a member may read them.
     busyButton(
       { title: "Guardrails that apply to every project" },
-      [icon(icons.sliders), "Organisation guardrails"],
+      [icon(icons.shield), "Organisation guardrails"],
       () =>
         openGuardrails(ctx, {
           scope: "org",

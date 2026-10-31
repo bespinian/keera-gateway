@@ -329,7 +329,7 @@ export async function catalogueView(ctx) {
               "Ollama or Keera Engine",
             onClick: () => editModel(ctx, null, providers, null),
           },
-          icon(icons.selfHosted),
+          icon(icons.plus),
           "Self-hosted model",
         )
       : null,

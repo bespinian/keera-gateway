@@ -2807,20 +2807,21 @@ a.pill-button:hover {
   gap: 3px;
   margin: 0;
 }
+/* A value too long for beside its label, such as the models folded
+   together, goes under it and wraps. */
 .map-tip dl > div {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
+  gap: 1px 8px;
 }
 .map-tip dt {
-  flex: 1;
-  min-width: 0;
   color: var(--muted);
 }
 .map-tip dd {
-  margin: 0;
-  text-align: right;
-  white-space: nowrap;
+  margin: 0 0 0 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .map-warn {

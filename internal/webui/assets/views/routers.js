@@ -9,7 +9,6 @@ import {
   icon,
   icons,
   providerMark,
-  iconButton,
   pill,
   rowLink,
   compact,
@@ -413,18 +412,25 @@ export async function routerDetailView(ctx) {
             )
           : null,
         saved && canEdit
-          ? iconButton(icons.trash, "Delete this router", () =>
-              confirm({
-                title: `Delete ${alias}?`,
-                body: DELETE_WARNING,
-                confirmLabel: "Delete router",
-                danger: true,
-                onConfirm: async () => {
-                  await api.deleteRouter(ctx.orgID, alias);
-                  toast(`${alias} deleted`, "good");
-                  ctx.navigate("/routers");
-                },
-              }),
+          ? h(
+              "button",
+              {
+                class: "btn btn-danger",
+                title: "Delete this router",
+                onClick: () =>
+                  confirm({
+                    title: `Delete ${alias}?`,
+                    body: DELETE_WARNING,
+                    confirmLabel: "Delete router",
+                    danger: true,
+                    onConfirm: async () => {
+                      await api.deleteRouter(ctx.orgID, alias);
+                      toast(`${alias} deleted`, "good");
+                      ctx.navigate("/routers");
+                    },
+                  }),
+              },
+              "Delete",
             )
           : null,
       ],

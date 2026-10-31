@@ -1047,7 +1047,8 @@ function showTip(tip, canvas, n) {
   const right = n.x + n.w + 12;
   const flip = right + 236 > holder.clientWidth;
   tip.style.left = (flip ? Math.max(8, n.x - 248) : right) + "px";
-  tip.style.top = Math.max(8, Math.min(n.y, canvas.clientHeight - 200)) + "px";
+  const bottom = canvas.clientHeight - tip.offsetHeight - 8;
+  tip.style.top = Math.max(8, Math.min(n.y, bottom)) + "px";
 }
 
 /** watch turns the live request log into packets: a packet here is a row on

@@ -19,7 +19,6 @@ import {
   moneyStat,
   ms,
   dateTime,
-  icon,
   icons,
   aliasProblem,
   takenProblem,
@@ -473,14 +472,10 @@ export async function filterDetailView(ctx) {
             )
           : null,
         f && canEdit
-          ? busyButton(
-              { title: "Edit this filter" },
-              [icon(icons.pencil), "Edit"],
-              async () => {
-                const r = await api.models(ctx.orgID);
-                editFilter(ctx, f, (r.data || []).filter(canRun));
-              },
-            )
+          ? busyButton({ title: "Edit this filter" }, "Edit", async () => {
+              const r = await api.models(ctx.orgID);
+              editFilter(ctx, f, (r.data || []).filter(canRun));
+            })
           : null,
       ],
     ),

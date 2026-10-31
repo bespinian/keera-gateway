@@ -307,7 +307,7 @@ const flowProviders = ["anthropic", "openai", "infomaniak", "cscs"];
 
 const flowChecks = [
   ["API keys", icons.keys],
-  ["Guardrails", icons.gate],
+  ["Guardrails", icons.shield],
   ["Filters", icons.filters],
   ["Usage", icons.usage],
 ];

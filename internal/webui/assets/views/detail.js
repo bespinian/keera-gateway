@@ -107,7 +107,7 @@ export async function projectDetailView(ctx) {
     actions: [
       busyButton(
         { title: "Guardrails for this project's keys" },
-        [icon(icons.sliders), canEdit ? "Guardrails" : "View guardrails"],
+        [icon(icons.shield), canEdit ? "Guardrails" : "View guardrails"],
         () => openProject(ctx, project, models, orgID, orgName, canEdit),
       ),
       canEdit
@@ -118,7 +118,6 @@ export async function projectDetailView(ctx) {
               title: "Edit this project",
               onClick: () => editProject(ctx, project),
             },
-            icon(icons.pencil),
             "Edit",
           )
         : null,
@@ -131,7 +130,6 @@ export async function projectDetailView(ctx) {
               onClick: () =>
                 deleteProject(ctx, project, () => ctx.navigate("/projects")),
             },
-            icon(icons.trash),
             "Delete",
           )
         : null,
@@ -243,7 +241,7 @@ export async function keyDetailView(ctx) {
     actions: [
       busyButton(
         { title: "Guardrails for this key" },
-        [icon(icons.sliders), canEdit ? "Guardrails" : "View guardrails"],
+        [icon(icons.shield), canEdit ? "Guardrails" : "View guardrails"],
         () => openKey(ctx, key, models, project ? project.name : "", canEdit),
       ),
       canRevoke(ctx, key)
@@ -254,7 +252,6 @@ export async function keyDetailView(ctx) {
               title: "Rename this key",
               onClick: () => renameKey(ctx, key),
             },
-            icon(icons.pencil),
             "Rename",
           )
         : null,
@@ -403,9 +400,7 @@ export async function modelDetailView(ctx) {
               "aria-label": canEdit ? "Edit model" : null,
               onClick: () => openModel(ctx, model),
             },
-            canEdit
-              ? [icon(icons.pencil), "Edit"]
-              : [icon(icons.models), "View model"],
+            canEdit ? "Edit" : "View model",
           ),
           canEdit
             ? h(
@@ -416,7 +411,6 @@ export async function modelDetailView(ctx) {
                   onClick: () =>
                     deleteModel(ctx, model, () => ctx.navigate("/models")),
                 },
-                icon(icons.trash),
                 "Delete",
               )
             : null,
@@ -556,8 +550,7 @@ export async function userDetailView(ctx) {
                   title: "Edit this user's role",
                   onClick: () => changeRole(ctx, user),
                 },
-                icon(icons.pencil),
-                "Role",
+                "Edit role",
               )
             : null,
           user.disabled_at

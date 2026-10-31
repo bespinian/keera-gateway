@@ -60,7 +60,7 @@ export async function passkeySetupView(root, token, onDone) {
       class: "btn btn-primary",
       type: "submit",
     },
-    icon(icons.passkey),
+    icon(icons.plus),
     "Add passkey",
   );
   const submit = async (e) => {
@@ -160,7 +160,7 @@ export function managePasskeys() {
       h(
         "button",
         { class: "btn btn-primary", onClick: add },
-        icon(icons.passkey),
+        icon(icons.plus),
         "Add passkey",
       ),
     ],

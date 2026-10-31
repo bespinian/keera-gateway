@@ -854,7 +854,7 @@ function accountMenu(anchor) {
         onClick: cycleTheme,
       },
       me.chat_url
-        ? { label: "Keera Chat", icon: icons.external, href: me.chat_url }
+        ? { label: "Keera Chat", icon: icons.chat, href: me.chat_url }
         : null,
       { label: "Documentation", icon: icons.docs, href: docsURL({ state }) },
       { separator: true },

@@ -275,6 +275,8 @@ export const icons = {
   check: "M20 6L9 17l-5-5",
   playground:
     "M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8z",
+  // Keera Chat: two bubbles, a conversation, apart from the playground's one.
+  chat: "M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2zM18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1",
   send: "M22 2L11 13M22 2l-7 20-4-9-9-4z",
   stop: "M7 7h10v10H7z",
   trash:
@@ -283,6 +285,8 @@ export const icons = {
   pencil: "M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z",
   sliders:
     "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
+  // Guardrails, the same shield Keera Chat shows.
+  shield: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM9 12l2 2 4-4",
   // A terminal window, with the prompt clear of its frame.
   connect:
     "M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" +
@@ -330,6 +334,8 @@ export const icons = {
   collapse: "M11 17l-5-5 5-5M18 17l-5-5 5-5",
   expand: "M13 17l5-5-5-5M6 17l5-5-5-5",
   back: "M19 12H5M12 19l-7-7 7-7",
+  up: "M12 19V5M5 12l7-7 7 7",
+  down: "M12 5v14M19 12l-7 7-7-7",
   access:
     "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8z",
   // Two people, apart from the one of My access.
@@ -339,10 +345,10 @@ export const icons = {
   // A request and its response. Not rows, which are the table toggle, and
   // not a warning triangle: most requests on this screen worked.
   requests: "M8 3L4 7l4 4M4 7h16M16 21l4-4-4-4M20 17H4",
-  // Rows with a brace: many calls that are one task.
+  // A calendar with a span: a task is the calls an agent made in one stretch.
   sessions:
-    "M6 4c-1.6 0-2 1-2 2v4c0 1-.4 2-2 2 1.6 0 2 1 2 2v4c0 1 .4 2 2 2" +
-    "M10 8h11M10 12h11M10 16h11",
+    "M8 2v4M16 2v4M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" +
+    "M3 10h18M7 16h10M9.5 13.5L7 16l2.5 2.5M14.5 13.5L17 16l-2.5 2.5",
   // Traffic from the left passes through one point to the right.
   map:
     "M3 6a2 2 0 1 0 4 0a2 2 0 1 0-4 0M3 18a2 2 0 1 0 4 0a2 2 0 1 0-4 0" +
@@ -873,7 +879,13 @@ export function busyButton(props, label, run) {
 }
 
 /** iconButton shows only an icon. title is its tooltip and, unless label is
- *  given, what a screen reader reads. */
+ *  given, what a screen reader reads.
+ *
+ *  A row's edit, delete, download, copy and move buttons are icons alone:
+ *  they scan well down a column, and everyone knows these icons. Every other
+ *  action is a word. Above a list or on a detail screen, actions are words
+ *  too; only a button that creates something has an icon, the plus, and
+ *  Guardrails its shield, as it opens a feature of its own. */
 export function iconButton(
   glyph,
   title,

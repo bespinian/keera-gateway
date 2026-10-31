@@ -230,28 +230,14 @@ export function routeFields(models, step) {
             ? pill("Tried first", "good")
             : h("span", { class: "faint" }, "if the ones above fail"),
           h("div", { class: "spacer" }),
-          h(
-            "button",
-            {
-              class: "btn btn-sm",
-              type: "button",
-              title: "Try this one earlier",
-              disabled: i === 0,
-              onClick: () => move(i, -1),
-            },
-            "↑",
-          ),
-          h(
-            "button",
-            {
-              class: "btn btn-sm",
-              type: "button",
-              title: "Try this one later",
-              disabled: i === picked.length - 1,
-              onClick: () => move(i, 1),
-            },
-            "↓",
-          ),
+          iconButton(icons.up, "Try this one earlier", () => move(i, -1), {
+            type: "button",
+            disabled: i === 0,
+          }),
+          iconButton(icons.down, "Try this one later", () => move(i, 1), {
+            type: "button",
+            disabled: i === picked.length - 1,
+          }),
         ),
       ),
     );
