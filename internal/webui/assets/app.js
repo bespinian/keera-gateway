@@ -480,7 +480,7 @@ function moreItem() {
         renderRoute();
       },
     },
-    icon(advancedShown() ? icons.collapse : icons.plus),
+    icon(advancedShown() ? icons.collapse : icons.expand),
     h("span", { class: "nav-text" }, label),
   );
 }
@@ -562,6 +562,7 @@ function renderShell() {
       "div",
       { class: "sidebar-foot" },
       collapseButton,
+      h("hr", { class: "sidebar-rule" }),
       h(
         "button",
         {

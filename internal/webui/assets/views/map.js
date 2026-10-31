@@ -151,16 +151,21 @@ function sceneFrom(data) {
     enabled: m.enabled,
     kindName: m.kind || "",
   }));
+  // The line only means something with models on both sides. With none in
+  // the network, hosted models take the upper band and the line goes.
+  const split = models.some((m) => m.hosting !== "external");
   const inside = fold(
-    models.filter((m) => m.hosting !== "external"),
+    split ? models.filter((m) => m.hosting !== "external") : models,
     MAX_MODELS,
     "model",
   );
-  const outside = fold(
-    models.filter((m) => m.hosting === "external"),
-    MAX_MODELS,
-    "model",
-  );
+  const outside = split
+    ? fold(
+        models.filter((m) => m.hosting === "external"),
+        MAX_MODELS,
+        "model",
+      )
+    : [];
 
   const gateway = {
     kind: "gateway",
@@ -267,14 +272,11 @@ function hostOf(url) {
 
 /** describe is the picture in one sentence, for screen readers. */
 function describe(scene) {
-  const folded = scene.outside.find((m) => m.folded);
-  const out =
-    scene.outside.filter((m) => !m.folded).length +
-    (folded ? folded.rest.length : 0);
+  const out = scene.models.filter((m) => m.hosting === "external").length;
   return (
     scene.clients.length +
     " client types calling this gateway, " +
-    scene.inside.length +
+    (scene.models.length - out) +
     " models inside your network and " +
     out +
     " at external providers. " +
@@ -286,8 +288,9 @@ function describe(scene) {
 /** tokenShare is the share of tokens that left the network. */
 function tokenShare(scene) {
   let outside = 0;
-  for (const m of scene.outside)
-    outside += m.cell.input_tokens + m.cell.output_tokens;
+  for (const m of scene.models)
+    if (m.hosting === "external")
+      outside += m.cell.input_tokens + m.cell.output_tokens;
   const total = scene.total.input_tokens + scene.total.output_tokens;
   if (!total) return 0;
   return Math.round((outside / total) * 100);
@@ -715,7 +718,10 @@ function bands(g, scene, c) {
   g.textBaseline = "alphabetic";
   g.font = "600 11px " + c.font;
   g.fillStyle = c.muted;
-  g.fillText("YOUR NETWORK", 6, 16);
+  // Hosted models alone in the band are not in the network.
+  const hostedOnly =
+    scene.inside.length && scene.inside.every((m) => m.hosting === "external");
+  if (!hostedOnly) g.fillText("YOUR NETWORK", 6, 16);
   if (!scene.outside.length) return;
 
   // Tinted, so "not your network" reads before any word does.

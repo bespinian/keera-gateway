@@ -243,7 +243,10 @@ export const icons = {
   // A folder, not people: a project holds keys and their guardrails.
   projects:
     "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z",
-  keys: "M21 2l-2 2m-7.6 7.6a5 5 0 1 1-7.1 7.1 5 5 0 0 1 7.1-7.1zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3",
+  // A house key: a round head with a hole, and a blade with teeth.
+  keys:
+    "M10.7 10.47L16.95 4.22h2.83v2.83l-1.06 1.06.35 1.77-1.77-.35.71 2.12" +
+    "-2.12-.71.71 2.12-2.13-.71-.94.95A6 6 0 1 1 10.7 10.47zM7.4 16.6h.01",
   models: "M12 2l9 5v10l-9 5-9-5V7zM3.3 7L12 12l8.7-5M12 12v10",
   // Where a model runs: a rack for a self-hosted URL, a cloud for a hosted
   // provider with no logo.
@@ -280,13 +283,14 @@ export const icons = {
   pencil: "M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z",
   sliders:
     "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
+  // A terminal window, with the prompt clear of its frame.
   connect:
-    "M4 17l5-5-5-5M12 19h8M3 3h18a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z",
+    "M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" +
+    "M6.5 9l3 3-3 3M12.5 15h5",
   terminal: "M4 17l6-6-6-6M12 19h8",
   download: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3",
-  // A funnel with a shield: the guardrail that rewrites rather than refuses.
-  filters:
-    "M21 4H3l7 8.5V19l4 2v-8.5zM17 3l3.5 1.4v3c0 2.2-1.4 4.2-3.5 5-2.1-.8-3.5-2.8-3.5-5v-3z",
+  // A plain funnel: with a shield added it blurred at sidebar size.
+  filters: "M22 3H2l8 9.46V19l4 2v-8.54z",
   // The three filter modes. Rewriting: a pencil over lines of text.
   rewrite:
     "M4 7h8M4 12h5M4 17h10" +
@@ -298,9 +302,10 @@ export const icons = {
   // Brackets, for a rule. Unlike the two marks above, no model is involved.
   pattern: "M8 5H5v14h3M16 5h3v14h-3M10 9.5h4M10 14.5h4",
   // One request in, one of several models out: a router, and its route steps.
-  route: "M4 6h5l4 6h7M20 12l-3-3m3 3l-3 3M9 6l4 12h7",
+  route:
+    "M3 12h4c3.5 0 4.5-7 9-7h5M3 12h4c3.5 0 4.5 7 9 7h5M18 2l3 3-3 3M18 16l3 3-3 3",
   // A plug: the socket an agent's tools come through.
-  mcp: "M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4",
+  mcp: "M9 2v5M15 2v5M4 7h16v4a6 6 0 0 1-6 6h-4a6 6 0 0 1-6-6zM12 17v5",
   // The route modes. Instruction: a model reading text, with a spark.
   instruction:
     "M4 6h11M4 11h7M4 16h5" +
@@ -323,22 +328,27 @@ export const icons = {
     "M21 8v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8M3 8l2-4h14l2 4zM3 8h18" +
     "M12 11v3l2 1.5",
   collapse: "M11 17l-5-5 5-5M18 17l-5-5 5-5",
+  expand: "M13 17l5-5-5-5M6 17l5-5-5-5",
   back: "M19 12H5M12 19l-7-7 7-7",
   access:
     "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8z",
+  // Two people, apart from the one of My access.
   people:
-    "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0M16 11l2 2 4-4",
-  // Rows, not a warning triangle: most requests on this screen worked.
-  requests: "M3 6h.01M3 12h.01M3 18h.01M8 6h13M8 12h13M8 18h13",
-  // The request log's rows with a brace: many calls that are one task.
+    "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0" +
+    "M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75",
+  // A request and its response. Not rows, which are the table toggle, and
+  // not a warning triangle: most requests on this screen worked.
+  requests: "M8 3L4 7l4 4M4 7h16M16 21l4-4-4-4M20 17H4",
+  // Rows with a brace: many calls that are one task.
   sessions:
     "M6 4c-1.6 0-2 1-2 2v4c0 1-.4 2-2 2 1.6 0 2 1 2 2v4c0 1 .4 2 2 2" +
     "M10 8h11M10 12h11M10 16h11",
   // Traffic from the left passes through one point to the right.
   map:
-    "M4 5.5h3M4 18.5h3M17 5.5h3M17 18.5h3M10.5 12h3" +
-    "M7 5.5c3 0 3 6.5 3.5 6.5M7 18.5c3 0 3-6.5 3.5-6.5" +
-    "M17 5.5c-3 0-3 6.5-3.5 6.5M17 18.5c-3 0-3-6.5-3.5-6.5",
+    "M3 6a2 2 0 1 0 4 0a2 2 0 1 0-4 0M3 18a2 2 0 1 0 4 0a2 2 0 1 0-4 0" +
+    "M10 12a2 2 0 1 0 4 0a2 2 0 1 0-4 0" +
+    "M17 6a2 2 0 1 0 4 0a2 2 0 1 0-4 0M17 18a2 2 0 1 0 4 0a2 2 0 1 0-4 0" +
+    "M6.6 7.3l3.8 3.4M6.6 16.7l3.8-3.4M17.4 7.3l-3.8 3.4M17.4 16.7l-3.8-3.4",
 };
 
 // Google is both a provider of models and of sign-in.

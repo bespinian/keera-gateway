@@ -68,7 +68,7 @@ type ProviderModel struct {
 // Prices are micro-CHF per million tokens, at list price unless a provider
 // says otherwise; an entry can override them. Prices listed in USD are
 // converted at 0.96 CHF per USD. Last checked against each pricing page on
-// 2026-10-30, Google's on 2026-10-29.
+// 2026-10-31.
 //
 // Release dates come from each maker's announcement. An FP8 build takes the
 // date of its base model. Retired models are dropped before they retire.
@@ -167,7 +167,9 @@ var providers = []Provider{{
 	Kinds:       []policy.Kind{policy.KindChat},
 	// Past 272k input tokens, OpenAI's newer models cost twice as much for
 	// input and 1.5 times for output. From gpt-5.6 on, a cache write costs a
-	// quarter more than input; before, the same.
+	// quarter more than input; before, the same. OpenAI retires GPT-4o, GPT-4o
+	// mini, GPT-4.1 and GPT-4.1 mini on 2027-01-14, and GPT-5.1 and GPT-5.4
+	// nano on 2027-04-01.
 	Models: []ProviderModel{{
 		ID: "gpt-6-astra", DisplayName: "GPT-6 Astra",
 		MaxContext: 1_050_000, ReleaseDate: "2026-09-03",
@@ -305,7 +307,7 @@ var providers = []Provider{{
 		MaxContext: 400_000, ReleaseDate: "2026-03-17",
 		InputMicrosPerMTok: 192_000, OutputMicrosPerMTok: 1_200_000,
 		CachedInputMicrosPerMTok: 19_200,
-		Description:              "tiny and fast - short, simple, high-volume tasks",
+		Description:              "tiny and fast - short, simple, high-volume tasks; replaced by GPT-6 Luna",
 	}, {
 		ID: "gpt-5.2", DisplayName: "GPT-5.2",
 		MaxContext: 400_000, ReleaseDate: "2025-12-11",
@@ -317,38 +319,39 @@ var providers = []Provider{{
 		MaxContext: 400_000, ReleaseDate: "2025-11-13",
 		InputMicrosPerMTok: 1_200_000, OutputMicrosPerMTok: 9_600_000,
 		CachedInputMicrosPerMTok: 120_000,
-		Description:              "large and slow - reasons at length before it answers",
+		Description:              "large and slow - reasons at length before it answers; replaced by GPT-6 Sol",
 	}, {
 		ID: "gpt-4.1", DisplayName: "GPT-4.1",
 		MaxContext: 1_047_576, ReleaseDate: "2025-04-14",
 		InputMicrosPerMTok: 1_920_000, OutputMicrosPerMTok: 7_680_000,
 		CachedInputMicrosPerMTok: 480_000,
-		Description:              "mid-size and quick, no reasoning step - long documents",
+		Description:              "mid-size and quick, no reasoning step - long documents; replaced by GPT-6 Luna",
 	}, {
 		ID: "gpt-4.1-mini", DisplayName: "GPT-4.1 mini",
 		MaxContext: 1_047_576, ReleaseDate: "2025-04-14",
 		InputMicrosPerMTok: 384_000, OutputMicrosPerMTok: 1_536_000,
 		CachedInputMicrosPerMTok: 96_000,
-		Description:              "small and quick, no reasoning step - long documents",
+		Description:              "small and quick, no reasoning step - long documents; replaced by GPT-6 Luna",
 	}, {
 		ID: "gpt-4o", DisplayName: "GPT-4o",
 		MaxContext: 128_000, ReleaseDate: "2024-05-13",
 		InputMicrosPerMTok: 2_400_000, OutputMicrosPerMTok: 9_600_000,
 		CachedInputMicrosPerMTok: 1_200_000,
-		Description:              "mid-size and quick, no reasoning step - ordinary chat",
+		Description:              "mid-size and quick, no reasoning step - ordinary chat; replaced by GPT-6 Luna",
 	}, {
 		ID: "gpt-4o-mini", DisplayName: "GPT-4o mini",
 		MaxContext: 128_000, ReleaseDate: "2024-07-18",
 		InputMicrosPerMTok: 144_000, OutputMicrosPerMTok: 576_000,
 		CachedInputMicrosPerMTok: 72_000,
-		Description:              "small and fast, no reasoning step - short, simple tasks",
+		Description:              "small and fast, no reasoning step - short, simple tasks; replaced by GPT-6 Luna",
 	}},
 }, {
 	Name:    "google",
 	Summary: "Google's own Gemini models, on the Gemini API.",
 	// The Gemini API's OpenAI-compatible surface. Gemini caches prompts
 	// without charging for the write. Gemini 4 Argon's prices double on
-	// 2026-12-01, and Gemini 3.8 and 3.6 Flash's on 2027-01-01.
+	// 2026-12-01, and Gemini 3.8 and 3.6 Flash's on 2027-01-01. Google
+	// retires Gemini 3.1 Flash-Lite on 2027-05-07.
 	Endpoint:    "https://generativelanguage.googleapis.com/v1beta/openai",
 	CachedInput: true,
 	Location:    "usa",
@@ -415,8 +418,9 @@ var providers = []Provider{{
 	}},
 }, {
 	Name:    "mistral",
-	Summary: "Mistral's own models, on Mistral's API in the EU.",
-	// Mistral publishes no price for a cache write.
+	Summary: "Mistral's own models and some open-weight ones, on Mistral's API in the EU.",
+	// Mistral publishes no price for a cache write. It retires Medium 3.5 and
+	// Large 3 on 2027-04-30.
 	Endpoint:    "https://api.mistral.ai/v1",
 	CachedInput: true,
 	Location:    "eu",
@@ -432,7 +436,7 @@ var providers = []Provider{{
 		MaxContext: 262_144, ReleaseDate: "2026-04-28",
 		InputMicrosPerMTok: 1_440_000, OutputMicrosPerMTok: 7_200_000,
 		CachedInputMicrosPerMTok: 144_000,
-		Description:              "mid-size, with reasoning - coding and agent work",
+		Description:              "mid-size, with reasoning - coding and agent work; replaced by Mistral Large 4",
 	}, {
 		ID: "mistral-small-2603", DisplayName: "Mistral Small 4",
 		MaxContext: 262_144, ReleaseDate: "2026-03-16",
@@ -445,6 +449,24 @@ var providers = []Provider{{
 		InputMicrosPerMTok: 288_000, OutputMicrosPerMTok: 864_000,
 		CachedInputMicrosPerMTok: 28_800,
 		Description:              "small, made for code - quick code generation",
+	}, {
+		ID: "zai-glm-5-3", DisplayName: "GLM-5.3",
+		MaxContext: 1_000_000, ReleaseDate: "2026-08-14",
+		InputMicrosPerMTok: 1_344_000, OutputMicrosPerMTok: 4_224_000,
+		CachedInputMicrosPerMTok: 134_400,
+		Description:              "large - hard coding, agent and security work over very long inputs",
+	}, {
+		ID: "zai-glm-5-3-flash", DisplayName: "GLM-5.3 Flash",
+		MaxContext: 1_000_000, ReleaseDate: "2026-08-26",
+		InputMicrosPerMTok: 144_000, OutputMicrosPerMTok: 480_000,
+		CachedInputMicrosPerMTok: 28_800,
+		Description:              "mid-size, quick all-rounder - code, reasoning and tool use",
+	}, {
+		ID: "deepseek-v4-1-flash-1017", DisplayName: "DeepSeek V4.1 Flash",
+		MaxContext: 1_000_000, ReleaseDate: "2026-10-17",
+		InputMicrosPerMTok: 288_000, OutputMicrosPerMTok: 1_152_000,
+		CachedInputMicrosPerMTok: 6_720,
+		Description:              "large and quick, in preview - large codebases and long documents",
 	}, {
 		ID: "mistral-large-2512", DisplayName: "Mistral Large 3",
 		MaxContext: 262_144, ReleaseDate: "2025-12-02",
@@ -527,7 +549,7 @@ var providers = []Provider{{
 	// as stepping stone's documentation spells it.
 	Models: []ProviderModel{{
 		ID: "MiniMaxAI/MiniMax-M2.5", DisplayName: "MiniMax M2.5",
-		MaxContext: 192_000, ReleaseDate: "2026-02-12",
+		MaxContext: 196_608, ReleaseDate: "2026-02-12",
 		InputMicrosPerMTok: 1_940_000, OutputMicrosPerMTok: 9_700_000,
 		CachedInputMicrosPerMTok: 291_000,
 		Description:              "large - long coding and agent tasks with many steps",
@@ -709,34 +731,22 @@ var providers = []Provider{{
 	Kinds:       []policy.Kind{policy.KindChat},
 	// Ids are the upstream names, capitals and all. A -thinking id is the same
 	// weights with reasoning on and tool calls off, so it keeps the date.
-	// CSCS retires GLM-5.2, Kimi K2.7 Code and Nemotron 3 Super on 2026-11-16.
 	Models: []ProviderModel{{
-		ID: "moonshotai/Kimi-K2.7-Code", DisplayName: "Kimi K2.7 Code",
-		MaxContext: 262_144, ReleaseDate: "2026-06-12",
-		InputMicrosPerMTok: 640_000, OutputMicrosPerMTok: 6_050_000,
-		CachedInputMicrosPerMTok: 127_200,
-		Description:              "made for code - long agent sessions over many files; reads images",
-	}, {
-		// CSCS does not publish its context window; it is the same base model
-		// as GLM-5.2, so it takes GLM-5.2's.
+		// CSCS does not publish its context window; it takes the one CSCS gave
+		// GLM-5.2, the same base model.
 		ID: "zai-org/GLM-5.3", DisplayName: "GLM-5.3",
 		MaxContext: 976_000, ReleaseDate: "2026-08-14",
 		InputMicrosPerMTok: 181_100, OutputMicrosPerMTok: 6_642_000,
 		CachedInputMicrosPerMTok: 31_500,
 		Description:              "large - hard coding, agent and security work over very long inputs",
 	}, {
-		ID: "zai-org/GLM-5.2", DisplayName: "GLM-5.2",
-		MaxContext: 976_000, ReleaseDate: "2026-06-16",
-		InputMicrosPerMTok: 1_056_700, OutputMicrosPerMTok: 27_310_000,
-		CachedInputMicrosPerMTok: 215_700,
-		Description:              "large and costly all-rounder - very long inputs; replaced by GLM-5.3",
-	}, {
-		// CSCS gives no cache discount here: a cached token costs the input price.
-		ID: "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16", DisplayName: "Nemotron 3 Super BF16",
-		MaxContext: 262_144, ReleaseDate: "2026-03-11",
-		InputMicrosPerMTok: 303_800, OutputMicrosPerMTok: 1_494_400,
-		CachedInputMicrosPerMTok: 303_800,
-		Description:              "large reasoning model, quick - hard questions and tool use",
+		// CSCS does not publish its context window; it takes the one CSCS
+		// serves its other models with, the least any provider gives it.
+		ID: "zai-org/GLM-5.3-Flash", DisplayName: "GLM-5.3 Flash",
+		MaxContext: 262_144, ReleaseDate: "2026-08-26",
+		InputMicrosPerMTok: 74_700, OutputMicrosPerMTok: 1_822_500,
+		CachedInputMicrosPerMTok: 16_200,
+		Description:              "mid-size, quick all-rounder - code, reasoning and tool use",
 	}, {
 		ID: "google/gemma-4-31B-it", DisplayName: "Gemma 4 31B",
 		MaxContext: 262_144, ReleaseDate: "2026-04-02",

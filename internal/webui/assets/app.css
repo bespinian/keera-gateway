@@ -366,9 +366,15 @@ code,
 }
 
 .nav-collapse {
+  padding: 5px 10px;
   color: var(--faint);
+  font-size: 12.5px;
 }
+/* The margin keeps the smaller icon centred under the others. */
 .nav-collapse svg {
+  width: 14px;
+  height: 14px;
+  margin: 0 1px;
   transition: transform 0.14s ease;
 }
 
@@ -376,13 +382,18 @@ code,
   margin-top: auto;
   padding-top: 16px;
 }
+/* Sets the account apart from the navigation, as in Keera Chat. */
+.sidebar-rule {
+  margin: 8px 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
 
 .account {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
-  margin-top: 8px;
   padding: 7px 8px;
   border: 0;
   border-radius: var(--radius-sm);
@@ -2732,6 +2743,9 @@ a.pill-button:hover {
   .nav-collapsed .nav-item {
     justify-content: center;
     padding: 8px 0;
+  }
+  .nav-collapsed .nav-collapse {
+    padding: 6px 0;
   }
   .nav-collapsed .nav-collapse svg {
     transform: rotate(180deg);
