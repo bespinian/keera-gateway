@@ -501,7 +501,7 @@ function markHome() {
 
 function renderShell() {
   outlet = h("div", { class: "content" });
-  topbarHost = h("div");
+  topbarHost = h("div", { class: "topbar-host" });
 
   collapseButton = h(
     "button",

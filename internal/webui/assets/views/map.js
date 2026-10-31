@@ -675,14 +675,14 @@ function palette() {
   const cs = getComputedStyle(document.documentElement);
   const v = (name, fallback) => cs.getPropertyValue(name).trim() || fallback;
   return {
-    text: v("--text", "#17171a"),
-    muted: v("--muted", "#6b6a66"),
-    faint: v("--faint", "#93918b"),
-    border: v("--border", "#e4e2dd"),
-    strong: v("--border-strong", "#d2cfc8"),
+    text: v("--text", "#15171c"),
+    muted: v("--muted", "#636975"),
+    faint: v("--faint", "#8b919c"),
+    border: v("--border", "#e3e5e9"),
+    line: v("--line", "#d0d1d2"),
     surface: v("--surface", "#ffffff"),
-    surface2: v("--surface-2", "#fafaf9"),
-    accent: v("--accent", "#1f5bc8"),
+    surface2: v("--surface-2", "#f9fafb"),
+    accent: v("--accent", "#1657c8"),
     good: v("--good", "#1c7a4d"),
     warn: v("--warn", "#9a5b00"),
     warnSoft: v("--warn-soft", "#fbf0dd"),
@@ -772,7 +772,7 @@ function link(g, path, node, scene, c, hover, max, external) {
   const lit = related(node, hover, scene);
   g.save();
   g.lineWidth = 0.8 + 2.6 * Math.sqrt(node.cell.requests / max || 0);
-  g.strokeStyle = external ? c.warn : c.strong;
+  g.strokeStyle = external ? c.warn : c.line;
   g.globalAlpha = hover ? (lit ? 1 : 0.15) : external ? 0.5 : 0.4;
   g.beginPath();
   g.moveTo(path.x1, path.y1);

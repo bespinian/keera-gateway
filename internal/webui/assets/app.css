@@ -1,5 +1,6 @@
 /* Keera Gateway control panel.
-   One stylesheet, no build step. Tokens first, then layout, then components. */
+   One stylesheet, no build step. Tokens first, then layout, then components.
+   The colours are shared with Keera Chat; change them in both. */
 
 /* Space Grotesk is for titles and big figures; it is too wide for dense
    tables. The CSP allows fonts only from this origin. */
@@ -14,17 +15,20 @@
 :root {
   /* For native parts the tokens cannot reach, like scrollbars. */
   color-scheme: light;
-  --bg: #f7f7f5;
+  /* Cool greys, to sit with the docs' white pages and the blue-black dark
+     theme. */
+  --bg: #f6f7f9;
   --surface: #ffffff;
-  --surface-2: #fafaf9;
-  --surface-3: #f1f0ed;
-  --border: #e4e2dd;
-  --border-strong: #d2cfc8;
-  --text: #17171a;
-  --muted: #6b6a66;
-  --faint: #93918b;
-  --accent: #1f5bc8;
-  --accent-soft: #e8effc;
+  --surface-2: #f9fafb;
+  --surface-3: #eff1f4;
+  /* Translucent, so lines stay soft on glass as well as on a card. */
+  --border: rgb(16 24 40 / 10%);
+  --border-strong: rgb(16 24 40 / 18%);
+  --text: #15171c;
+  --muted: #636975;
+  --faint: #8b919c;
+  --accent: #1657c8;
+  --accent-soft: #e7eefb;
   --accent-fg: #ffffff;
   --good: #1c7a4d;
   --good-soft: #e6f4ec;
@@ -32,15 +36,26 @@
   --warn-soft: #fbf0dd;
   --bad: #a92a20;
   --bad-soft: #fbeae8;
-  --s1: #1f5bc8;
+  --s1: #1657c8;
   --s2: #1c7a4d;
   --s3: #9a5b00;
   --s4: #7b3fa0;
   --s5: #0e6d7c;
   --s6: #a92a20;
-  --shadow: 0 1px 2px rgb(23 23 26 / 6%), 0 8px 24px -12px rgb(23 23 26 / 18%);
-  --radius: 10px;
-  --radius-sm: 7px;
+  --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 8px 24px -12px rgb(16 24 40 / 18%);
+  --shadow-lg:
+    0 1px 2px rgb(16 24 40 / 8%), 0 18px 48px -12px rgb(16 24 40 / 28%);
+  /* Frosted glass, as in the docs' theme: what floats over the page lets it
+     show through, blurred. */
+  --glass: color-mix(in srgb, var(--surface) 72%, transparent);
+  --glass-bg: color-mix(in srgb, var(--bg) 72%, transparent);
+  --veil: color-mix(in srgb, var(--bg) 55%, transparent);
+  --blur: blur(8px) saturate(160%);
+  /* Solid, for drawn lines that cross: translucent ones would darken where
+     they meet. */
+  --line: #d0d1d2;
+  --radius: 12px;
+  --radius-sm: 8px;
   /* Scales the whole panel; viewport-height rules below divide by it. */
   --ui-scale: 1.1;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
@@ -53,31 +68,34 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #121215;
-    --surface: #1a1a1e;
-    --surface-2: #1f1f24;
-    --surface-3: #26262c;
-    --border: #2b2b32;
-    --border-strong: #3a3a43;
-    --text: #ececef;
-    --muted: #9c9ba4;
-    --faint: #74737c;
-    --accent: #7ea8ff;
-    --accent-soft: #1a2440;
-    --accent-fg: #0d1322;
+    /* The docs' dark ground: near-black with a touch of blue. */
+    --bg: #0b0e13;
+    --surface: #161a22;
+    --surface-2: #1a1e27;
+    --surface-3: #222731;
+    --border: rgb(220 228 255 / 12%);
+    --border-strong: rgb(220 228 255 / 20%);
+    --text: #f8f9fb;
+    --muted: #b6bcc6;
+    --faint: #8b919e;
+    --accent: #6ea8ff;
+    --accent-soft: #172440;
+    --accent-fg: #0b1220;
     --good: #57cb90;
-    --good-soft: #16281f;
+    --good-soft: #13271e;
     --warn: #dfa445;
-    --warn-soft: #2a2113;
+    --warn-soft: #29200f;
     --bad: #ef7b70;
-    --bad-soft: #2c1917;
-    --s1: #7ea8ff;
+    --bad-soft: #2b1818;
+    --s1: #6ea8ff;
     --s2: #57cb90;
     --s3: #dfa445;
     --s4: #c193da;
     --s5: #58c2d2;
     --s6: #ef7b70;
     --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 10px 30px -14px rgb(0 0 0 / 70%);
+    --shadow-lg: 0 1px 2px rgb(0 0 0 / 50%), 0 24px 60px -12px rgb(0 0 0 / 80%);
+    --line: #40444a;
   }
 }
 
@@ -86,31 +104,34 @@
    before the first paint. */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #121215;
-  --surface: #1a1a1e;
-  --surface-2: #1f1f24;
-  --surface-3: #26262c;
-  --border: #2b2b32;
-  --border-strong: #3a3a43;
-  --text: #ececef;
-  --muted: #9c9ba4;
-  --faint: #74737c;
-  --accent: #7ea8ff;
-  --accent-soft: #1a2440;
-  --accent-fg: #0d1322;
+  /* The docs' dark ground: near-black with a touch of blue. */
+  --bg: #0b0e13;
+  --surface: #161a22;
+  --surface-2: #1a1e27;
+  --surface-3: #222731;
+  --border: rgb(220 228 255 / 12%);
+  --border-strong: rgb(220 228 255 / 20%);
+  --text: #f8f9fb;
+  --muted: #b6bcc6;
+  --faint: #8b919e;
+  --accent: #6ea8ff;
+  --accent-soft: #172440;
+  --accent-fg: #0b1220;
   --good: #57cb90;
-  --good-soft: #16281f;
+  --good-soft: #13271e;
   --warn: #dfa445;
-  --warn-soft: #2a2113;
+  --warn-soft: #29200f;
   --bad: #ef7b70;
-  --bad-soft: #2c1917;
-  --s1: #7ea8ff;
+  --bad-soft: #2b1818;
+  --s1: #6ea8ff;
   --s2: #57cb90;
   --s3: #dfa445;
   --s4: #c193da;
   --s5: #58c2d2;
   --s6: #ef7b70;
   --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 10px 30px -14px rgb(0 0 0 / 70%);
+  --shadow-lg: 0 1px 2px rgb(0 0 0 / 50%), 0 24px 60px -12px rgb(0 0 0 / 80%);
+  --line: #40444a;
 }
 
 * {
@@ -215,22 +236,27 @@ code,
    itself instead of stretching the page. */
 .shell {
   display: grid;
-  grid-template-columns: 232px 1fr;
+  grid-template-columns: 240px 1fr;
   height: calc(100vh / var(--ui-scale));
   transition: grid-template-columns 0.14s ease;
 }
 
+/* Floats beside the page, as the docs' navigation does. */
 .sidebar {
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-  padding: 18px 12px;
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  margin: 8px 0 8px 8px;
+  padding: 16px 10px;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  position: sticky;
-  top: 0;
-  height: calc(100vh / var(--ui-scale));
+  height: calc(100vh / var(--ui-scale) - 16px);
   overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 /* The space below is a margin, not padding, so the hover pill stays even. */
@@ -252,7 +278,7 @@ code,
 }
 
 .brand:hover {
-  background: var(--surface-3);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   text-decoration: none;
 }
 
@@ -293,11 +319,12 @@ code,
   padding: 7px 10px;
   border-radius: var(--radius-sm);
   color: var(--muted);
-  font-weight: 500;
   cursor: pointer;
   border: 0;
   background: none;
   font: inherit;
+  font-family: var(--display);
+  font-weight: 500;
   width: 100%;
   text-align: left;
   transition:
@@ -305,13 +332,12 @@ code,
     color 0.12s;
 }
 .nav-item:hover {
-  background: var(--surface-3);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   color: var(--text);
   text-decoration: none;
 }
 .nav-item[aria-current="page"] {
-  position: relative;
-  background: var(--accent-soft);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--accent);
   font-weight: 600;
 }
@@ -320,16 +346,6 @@ code,
   color: var(--accent);
   font-weight: 600;
   box-shadow: inset 0 0 0 1.5px var(--accent);
-}
-.nav-item[aria-current="page"]::before {
-  content: "";
-  position: absolute;
-  left: -12px;
-  top: 7px;
-  bottom: 7px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--accent);
 }
 .nav-item svg {
   width: 16px;
@@ -378,7 +394,7 @@ code,
 }
 .account:hover,
 .account[aria-expanded="true"] {
-  background: var(--surface-3);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 .account-more svg {
   display: block;
@@ -423,23 +439,48 @@ code,
   text-transform: capitalize;
 }
 
+/* Every view scrolls here, under the topbar, so the sidebar stays put and
+   the topbar's glass has something to blur. */
 .main {
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 
+/* Out of the layout, so the topbar sticks to the scrolling .main. */
+.topbar-host {
+  display: contents;
+}
+
+/* The page's own colour and no edge, as in Keera Chat: a band would end
+   oddly beside the floating sidebar. The edge shows once content scrolls
+   under it. */
 .topbar {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 16px 28px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  border-bottom: 1px solid transparent;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
   position: sticky;
   top: 0;
   z-index: 20;
+}
+@supports (animation-timeline: scroll()) {
+  .topbar {
+    animation: topbar-edge linear both;
+    animation-timeline: scroll(nearest block);
+    animation-range: 0 24px;
+  }
+}
+@keyframes topbar-edge {
+  to {
+    border-bottom-color: var(--border);
+  }
 }
 .page-sub {
   color: var(--muted);
@@ -447,14 +488,10 @@ code,
   margin-top: 2px;
 }
 
-/* Every view scrolls here, so the sidebar and topbar stay put. Its definite
-   height lets the playground transcript scroll instead of growing the page. */
 .content {
   padding: 24px 28px 64px;
   width: 100%;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
+  flex: 1 0 auto;
 }
 
 .btn {
@@ -508,7 +545,7 @@ code,
   color: var(--muted);
 }
 .btn-quiet:hover:not(:disabled) {
-  background: var(--surface-3);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
   color: var(--text);
 }
 .btn-sm {
@@ -587,7 +624,9 @@ code,
     padding: 4px;
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
-    background: var(--surface);
+    background: var(--glass);
+    -webkit-backdrop-filter: var(--blur);
+    backdrop-filter: var(--blur);
     color: var(--text);
     box-shadow: var(--shadow);
   }
@@ -984,7 +1023,7 @@ tr.row-new > td:first-child {
 .pl-canvas {
   overflow-x: auto;
   padding: 4px 2px 8px;
-  --pl-line: var(--border-strong);
+  --pl-line: var(--line);
 }
 .pl-chain {
   display: flex;
@@ -1871,7 +1910,9 @@ a.pill-button:hover {
 .chart-tip {
   position: absolute;
   pointer-events: none;
-  background: var(--surface);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow);
@@ -1993,11 +2034,13 @@ a.pill-button:hover {
   opacity: 0.5;
 }
 
-/* The transcript scrolls, not the page, so the composer stays reachable. No
-   bottom padding: it would add a second, nested scrollbar. */
+/* The transcript scrolls, not the page, so the composer stays reachable:
+   the content takes exactly the height below the topbar. */
 .content:has(> .chat) {
   display: flex;
   flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
   padding-bottom: 24px;
 }
 
@@ -2278,7 +2321,9 @@ a.pill-button:hover {
   position: fixed;
   inset: 0;
   z-index: 100;
-  background: rgb(10 10 12 / 45%);
+  background: var(--veil);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
   display: grid;
   place-items: center;
   padding: 20px;
@@ -2293,8 +2338,8 @@ a.pill-button:hover {
 .modal {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: var(--shadow);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
   width: min(520px, 100%);
   max-height: calc(88vh / var(--ui-scale));
   display: flex;
@@ -2338,7 +2383,7 @@ a.pill-button:hover {
   gap: 8px;
   justify-content: flex-end;
   background: var(--surface-2);
-  border-radius: 0 0 12px 12px;
+  border-radius: 0 0 16px 16px;
 }
 
 .toasts {
@@ -2351,7 +2396,9 @@ a.pill-button:hover {
   max-width: 380px;
 }
 .toast {
-  background: var(--surface);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
   border: 1px solid var(--border-strong);
   border-left: 3px solid var(--accent);
   border-radius: var(--radius-sm);
@@ -2378,8 +2425,10 @@ a.pill-button:hover {
   padding: 5px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  box-shadow: var(--shadow-lg);
   animation: rise 0.1s ease-out;
 }
 .menu-item {
@@ -2398,7 +2447,7 @@ a.pill-button:hover {
 }
 .menu-item:hover,
 .menu-item:focus-visible {
-  background: var(--surface-3);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
   outline: none;
   text-decoration: none;
 }
@@ -2651,10 +2700,10 @@ a.pill-button:hover {
 
 @media (min-width: 991px) {
   .shell.nav-collapsed {
-    grid-template-columns: 60px 1fr;
+    grid-template-columns: 68px 1fr;
   }
   .nav-collapsed .sidebar {
-    padding: 18px 10px;
+    padding: 16px 10px;
   }
   .nav-collapsed .nav-text {
     display: none;
@@ -2676,9 +2725,6 @@ a.pill-button:hover {
   .nav-collapsed .nav-item {
     justify-content: center;
     padding: 8px 0;
-  }
-  .nav-collapsed .nav-item[aria-current="page"]::before {
-    left: -10px;
   }
   .nav-collapsed .nav-collapse svg {
     transform: rotate(180deg);
@@ -2722,7 +2768,9 @@ a.pill-button:hover {
   z-index: 2;
   width: 236px;
   pointer-events: none;
-  background: var(--surface);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow);
@@ -2764,7 +2812,7 @@ a.pill-button:hover {
     grid-template-rows: minmax(0, 1fr);
   }
   /* The drawer, off the left edge until opened. Its height is set like the
-     sticky sidebar's, as the page is zoomed by --ui-scale and a viewport
+     sidebar's, as the page is zoomed by --ui-scale and a viewport
      unit is not. */
   .sidebar {
     position: fixed;
@@ -2772,9 +2820,9 @@ a.pill-button:hover {
     left: 0;
     z-index: 60;
     width: min(264px, 82vw);
-    height: calc(100vh / var(--ui-scale));
-    box-shadow: var(--shadow);
-    transform: translateX(-101%);
+    height: calc(100vh / var(--ui-scale) - 16px);
+    box-shadow: var(--shadow-lg);
+    transform: translateX(calc(-100% - 16px));
     /* So the keyboard cannot tab into a closed drawer. */
     visibility: hidden;
     transition:
@@ -2793,7 +2841,9 @@ a.pill-button:hover {
     z-index: 50;
     width: calc(100vw / var(--ui-scale));
     height: calc(100vh / var(--ui-scale));
-    background: rgb(23 23 26 / 42%);
+    background: var(--veil);
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.18s ease;
@@ -2941,7 +2991,7 @@ a.pill-button:hover {
   height: 100%;
   overflow: visible;
   fill: none;
-  stroke: var(--border-strong);
+  stroke: var(--line);
   stroke-width: 1.5;
 }
 .flow-gateway {

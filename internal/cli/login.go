@@ -365,7 +365,7 @@ func waitForCallback(ctx context.Context, ln net.Listener, state string) (string
 // the gateway.
 func finishInBrowser(w http.ResponseWriter, status int, message string) {
 	// The panel's --bad for anything that went wrong, its --text otherwise.
-	colour := "#ececef"
+	colour := "#f8f9fb"
 	if status != http.StatusOK {
 		colour = "#ef7b70"
 	}
@@ -378,18 +378,18 @@ func finishInBrowser(w http.ResponseWriter, status int, message string) {
   :root { color-scheme: dark }
   body {
     margin: 0; min-height: 100vh; display: grid; place-items: center;
-    padding: 2rem; background: #121215; color: #ececef;
+    padding: 2rem; background: #0b0e13; color: #f8f9fb;
     font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto,
       "Helvetica Neue", Arial, sans-serif;
   }
   main {
-    max-width: 28rem; padding: 2rem 2.25rem; border-radius: 10px;
-    background: #1a1a1e; border: 1px solid #2b2b32;
+    max-width: 28rem; padding: 2rem 2.25rem; border-radius: 12px;
+    background: #161a22; border: 1px solid #2e333d;
     box-shadow: 0 1px 2px rgb(0 0 0 / 40%%), 0 10px 30px -14px rgb(0 0 0 / 70%%);
   }
   h1 {
     margin: 0 0 0.75rem; font-size: 0.8125rem; font-weight: 600;
-    letter-spacing: 0.08em; text-transform: uppercase; color: #9c9ba4;
+    letter-spacing: 0.08em; text-transform: uppercase; color: #b6bcc6;
   }
   p { margin: 0; color: %s }
 </style></head>
