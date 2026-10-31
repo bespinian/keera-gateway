@@ -425,9 +425,31 @@ document.addEventListener("keydown", (e) => {
 
 // Same breakpoint as the stylesheet, so the drawer is not left open behind a
 // sidebar that shows anyway.
-matchMedia("(min-width: 991px)").addEventListener("change", (e) => {
+const wide = matchMedia("(min-width: 991px)");
+wide.addEventListener("change", (e) => {
   if (e.matches) closeDrawer();
+  placeListActions();
 });
+
+/* On a wide screen a list's buttons sit in the topbar, beside the title. A
+ * comment keeps their place in the screen for when the window narrows. */
+let listActions = null;
+
+function adoptListActions() {
+  const node = outlet.querySelector(".list-actions");
+  if (!node) return;
+  const home = document.createComment("list actions");
+  node.before(home);
+  listActions = { node, home };
+  placeListActions();
+}
+
+function placeListActions() {
+  const slot = document.getElementById("page-actions");
+  if (!listActions || !slot) return;
+  if (wide.matches) slot.append(listActions.node);
+  else listActions.home.after(listActions.node);
+}
 
 /** moreItem shows or hides the screens this deployment does not use yet. It
  *  names them rather than saying "More", so someone new can tell whether they
@@ -614,6 +636,7 @@ function topbar() {
       h("div", { class: "page-sub", id: "page-sub" }, ""),
     ),
     h("div", { class: "spacer" }),
+    h("div", { class: "topbar-actions", id: "page-actions" }),
   );
 
   // An operator sees any organisation from one session. Someone in several
@@ -737,6 +760,7 @@ async function renderRoute() {
   if (!route.parent && location.pathname !== route.path) {
     history.replaceState({}, "", route.path);
   }
+  listActions = null;
   renderTopbar();
   setTitle(route.label, "");
   replace(
@@ -786,6 +810,7 @@ async function renderRoute() {
         : await route.view(ctx);
     if (gen !== rendering) return;
     replace(outlet, limitedNotice(), view);
+    adoptListActions();
   } catch (err) {
     if (gen !== rendering) return;
     if (err instanceof ApiError && err.status === 401) {

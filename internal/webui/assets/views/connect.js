@@ -97,8 +97,7 @@ export async function clientsView(ctx) {
 
   const canAdd = keys.length > 0 && catalogue.length > 0;
   const head = listHead(
-    "The clients that called the gateway with your keys, and which key " +
-      "each one used. A client shows here after its first request.",
+    null,
     [rangePicker(ctx, since)],
     canAdd && {
       label: "Connect client",
@@ -162,7 +161,14 @@ export async function clientsView(ctx) {
     },
   );
 
-  return h("div", { class: "stack" }, head, list);
+  const note = h(
+    "div",
+    { class: "hint", style: { marginTop: "14px" } },
+    "The clients that called the gateway with your keys, and which key " +
+      "each one used. A client shows here after its first request.",
+  );
+
+  return h("div", { class: "stack" }, head, list, note);
 }
 
 /** openConnectClient opens Connect client from another screen. Without a key

@@ -46,11 +46,7 @@ export async function projectsView(ctx) {
   const orgName = orgNameOf(ctx, orgID);
 
   const head = listHead(
-    canEdit
-      ? "A project's guardrails apply to every key in it. They can narrow what " +
-          "the organisation allows, never widen it."
-      : "A project's guardrails apply to every key in it. Open a project to see " +
-          "them. An administrator sets them.",
+    null,
     // The organisation's guardrails cap every project and its prompt reaches
     // every request, so a member may read them.
     busyButton(
@@ -209,7 +205,17 @@ export async function projectsView(ctx) {
     },
   );
 
-  return h("div", {}, head, rows);
+  const note = h(
+    "div",
+    { class: "hint", style: { marginTop: "14px" } },
+    canEdit
+      ? "A project's guardrails apply to every key in it. They can narrow what " +
+          "the organisation allows, never widen it."
+      : "A project's guardrails apply to every key in it. Open a project to see " +
+          "them. An administrator sets them.",
+  );
+
+  return h("div", {}, head, rows, note);
 }
 
 function projectFields(project) {

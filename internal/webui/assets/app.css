@@ -481,6 +481,10 @@ code,
     border-bottom-color: var(--border);
   }
 }
+/* A list's buttons, moved here on a wide screen. */
+.topbar-actions {
+  display: contents;
+}
 .page-sub {
   color: var(--muted);
   font-size: 12.5px;
@@ -943,6 +947,10 @@ input[type="checkbox"]:disabled {
   display: grid;
   gap: 10px;
   margin-bottom: 16px;
+}
+/* A list's head without an intro, once its buttons moved to the topbar. */
+.detail-head:empty {
+  display: none;
 }
 
 /* The only thing on a detail screen that names its list. */

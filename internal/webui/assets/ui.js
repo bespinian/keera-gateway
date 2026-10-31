@@ -910,7 +910,7 @@ export function listHead(intro, controls, add) {
     intro ? h("div", { class: "muted" }, intro) : null,
     h(
       "div",
-      { class: "row", style: { flexWrap: "wrap" } },
+      { class: "row list-actions", style: { flexWrap: "wrap" } },
       h("div", { class: "spacer" }),
       controls,
       add
