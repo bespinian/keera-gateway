@@ -230,8 +230,6 @@ export const api = {
   // From the control plane, so the panel and `keera connect` agree.
   connect: () => get("/v1/connect"),
   renderConnect: (models) => request("POST", "/v1/connect/render", { models }),
-  // Which clients called with the reader's own keys in the window.
-  clients: (since) => get("/v1/clients" + query({ since })),
 
   // `stats` adds how fast each model answered in the window.
   models: (orgID, { stats, since } = {}) =>

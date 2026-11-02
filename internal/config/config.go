@@ -108,7 +108,7 @@ type Config struct {
 	// UI serves the control panel from the listener's root.
 	UI bool
 	// PublicURL is the gateway's origin as a browser sees it, for the
-	// redirect after sign-out, "My clients" and the panel link in a refusal.
+	// redirect after sign-out, Connect client and the panel link in a refusal.
 	// Empty uses the Host header for the first two and leaves the link out.
 	PublicURL string
 	// ChatURL is Keera Chat's origin. A sign-in started there may hand back

@@ -36,7 +36,6 @@ import { routersView, routerDetailView } from "./views/routers.js";
 import { sandboxesView } from "./views/sandboxes.js";
 import { mcpView } from "./views/mcp.js";
 import { playgroundView } from "./views/playground.js";
-import { clientsView } from "./views/connect.js";
 import { accessView } from "./views/access.js";
 import { usageView } from "./views/usage.js";
 import { auditView } from "./views/audit.js";
@@ -82,13 +81,6 @@ const routes = [
     icon: "access",
     view: accessView,
   },
-  {
-    path: "/clients",
-    group: "You",
-    label: "My clients",
-    icon: "connect",
-    view: clientsView,
-  },
   // The playground tests the path an editor takes.
   {
     path: "/playground",
@@ -99,24 +91,6 @@ const routes = [
   },
 
   // Usage is here because it is the organisation's spend, not the reader's.
-  {
-    path: "/projects",
-    group: "Organisation",
-    label: "Projects",
-    icon: "projects",
-    view: projectsView,
-    perOrg: "Projects",
-    detail: { label: "Project", view: projectDetailView },
-  },
-  {
-    path: "/keys",
-    group: "Organisation",
-    label: "API keys",
-    icon: "keys",
-    view: keysView,
-    perOrg: "API keys",
-    detail: { label: "API key", view: keyDetailView },
-  },
   {
     path: "/models",
     group: "Organisation",
@@ -135,6 +109,15 @@ const routes = [
     icon: "models",
     view: catalogueView,
     under: "/models",
+  },
+  {
+    path: "/keys",
+    group: "Organisation",
+    label: "API keys",
+    icon: "keys",
+    view: keysView,
+    perOrg: "API keys",
+    detail: { label: "API key", view: keyDetailView },
   },
   // Filters are among a router's building blocks, so they come after it.
   {
@@ -188,6 +171,15 @@ const routes = [
     // Not shown at all without a driver.
     needs: "sandboxes",
     about: "Short-lived machines for agents and engineers.",
+  },
+  {
+    path: "/projects",
+    group: "Organisation",
+    label: "Projects",
+    icon: "projects",
+    view: projectsView,
+    perOrg: "Projects",
+    detail: { label: "Project", view: projectDetailView },
   },
   {
     path: "/usage",

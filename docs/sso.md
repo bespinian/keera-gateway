@@ -549,8 +549,7 @@ that address exactly, with the same one-time code and proof key as for the
 command line. Unset, only loopback addresses are allowed, which is enough for a
 Keera Chat on `http://127.0.0.1` during development.
 
-Keera Chat's requests show as **Keera Chat** under **My clients** and on the
-map, and the panel's account menu links to it.
+Keera Chat's requests show as **Keera Chat** on the map, and the panel's account menu links to it.
 
 ## Moving off localhost
 

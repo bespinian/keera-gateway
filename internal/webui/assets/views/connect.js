@@ -1,6 +1,5 @@
-// My clients: the coding agents that call the gateway with the reader's keys,
-// and how to add one. Connect client fills in the key's models, so what is
-// copied works as is.
+// Connect client: how to set up a coding agent with one of the reader's keys.
+// It fills in the key's models, so what is copied works as is.
 
 import { api, chatTargets } from "../api.js";
 import {
@@ -10,20 +9,11 @@ import {
   go,
   compact,
   isAdmin,
-  table,
-  rowLink,
-  num,
-  plural,
-  ago,
-  dateTime,
   toast,
   modeTiles,
   modal,
   clientMark,
   providerMark,
-  currentRange,
-  rangePicker,
-  listHead,
   code,
   remembered,
   remember,
@@ -81,98 +71,8 @@ export function usableKeys(a) {
   );
 }
 
-export async function clientsView(ctx) {
-  const since = currentRange();
-  // Only the reader's own keys: the setup is for their machine.
-  const [catalogue, a, res] = await Promise.all([
-    loadClients(),
-    api.access(),
-    api.clients(since),
-  ]);
-  const used = res.data || [];
-  const keys = usableKeys(a);
-  ctx.setSubtitle(
-    `${used.length} ${plural(used.length, "client")} called with your keys`,
-  );
-
-  const canAdd = keys.length > 0 && catalogue.length > 0;
-  const head = listHead(
-    null,
-    [rangePicker(ctx, since)],
-    canAdd && {
-      label: "Connect client",
-      onClick: (e) => addClient(ctx, catalogue, keys, e.currentTarget),
-    },
-  );
-
-  const list = table(
-    [
-      {
-        label: "Client",
-        sortKey: (c) => c.label,
-        cell: (c) =>
-          h(
-            "span",
-            { class: c.client ? null : "muted" },
-            h("strong", {}, c.label),
-          ),
-      },
-      {
-        label: "Keys",
-        cell: (c) =>
-          c.keys.flatMap((k, i) => [
-            i ? ", " : "",
-            rowLink(
-              ctx,
-              "/keys/" + encodeURIComponent(k.id),
-              k.name || k.id,
-              `${num(k.requests)} ${plural(k.requests, "request")}, ` +
-                `last ${ago(k.last_used_at)}`,
-            ),
-          ]),
-      },
-      {
-        label: "Requests",
-        num: true,
-        shrink: true,
-        sortKey: (c) => c.requests,
-        sortDir: "desc",
-        cell: (c) => num(c.requests),
-      },
-      {
-        label: "Last used",
-        shrink: true,
-        sortKey: (c) => c.last_used_at,
-        sortDir: "desc",
-        cell: (c) =>
-          h("span", { title: dateTime(c.last_used_at) }, ago(c.last_used_at)),
-      },
-    ],
-    used,
-    {
-      emptyTitle: "No client has called in this window",
-      emptyBody: canAdd
-        ? "Use Connect client to set one up."
-        : [
-            "You need an ",
-            h("a", { href: "/keys", onClick: go(ctx, "/keys") }, "API key"),
-            " to set one up.",
-          ],
-    },
-  );
-
-  const note = h(
-    "div",
-    { class: "hint", style: { marginTop: "14px" } },
-    "The clients that called the gateway with your keys, and which key " +
-      "each one used. A client shows here after its first request.",
-  );
-
-  return h("div", { class: "stack" }, head, list, note);
-}
-
-/** openConnectClient opens Connect client from another screen. Without a key
- *  or client to offer, it goes to My clients, which says why. created is a
+/** openConnectClient opens Connect client. Without a key to offer, it goes to
+ *  My access, which says why. created is a
  *  key whose secret was just shown. It resolves to whether the dialog
  *  opened. */
 export async function openConnectClient(ctx, button, created = null) {
@@ -194,7 +94,8 @@ export async function openConnectClient(ctx, button, created = null) {
       toast("This key can set up no client here.", "bad");
       return false;
     }
-    ctx.navigate("/clients");
+    if (!keys.length) ctx.navigate("/access");
+    else toast("No client can be set up here.", "bad");
     return false;
   }
   return addClient(ctx, catalogue, keys, button, created && created.key);

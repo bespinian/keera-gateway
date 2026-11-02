@@ -51,15 +51,15 @@ sandbox classes new organisations start with, and the
 
 ### Worth setting on any real deployment
 
-| Variable                 | Default     | What it is                                                                                                                                                                                                                                       |
-| ------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `KEERA_METRICS_TOKEN`    | unset       | Reads `/metrics` and nothing else. Must differ from the operator key.                                                                                                                                                                            |
-| `KEERA_PUBLIC_URL`       | Host header | The gateway's address as a browser sees it. Used for the sign-out redirect, by **My clients**, and for the panel link in a refusal. Unset, or with `KEERA_UI=false`, a refusal has no link. Required with single sign-on, passkeys and payments. |
-| `KEERA_MODELS_FILE`      | unset       | The models each new organisation starts with. See [Template files](gateway.md#template-files).                                                                                                                                                   |
-| `KEERA_USAGE_RETENTION`  | for ever    | How long the request log, ended sandboxes and ended keys are kept. See [Retention and sizing](#retention-and-sizing).                                                                                                                            |
-| `KEERA_AUDIT_RETENTION`  | for ever    | How long audit entries are kept.                                                                                                                                                                                                                 |
-| `KEERA_UPSTREAM_DENY`    | see below   | Addresses the gateway never connects to. See [Where the gateway may connect](#where-the-gateway-may-connect).                                                                                                                                    |
-| `KEERA_UPSTREAM_PRIVATE` | `all`       | Host names inside the network that organisations may reach. Required with sign-up. See [Where the gateway may connect](#where-the-gateway-may-connect).                                                                                          |
+| Variable                 | Default     | What it is                                                                                                                                                                                                                                           |
+| ------------------------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `KEERA_METRICS_TOKEN`    | unset       | Reads `/metrics` and nothing else. Must differ from the operator key.                                                                                                                                                                                |
+| `KEERA_PUBLIC_URL`       | Host header | The gateway's address as a browser sees it. Used for the sign-out redirect, by **Connect client**, and for the panel link in a refusal. Unset, or with `KEERA_UI=false`, a refusal has no link. Required with single sign-on, passkeys and payments. |
+| `KEERA_MODELS_FILE`      | unset       | The models each new organisation starts with. See [Template files](gateway.md#template-files).                                                                                                                                                       |
+| `KEERA_USAGE_RETENTION`  | for ever    | How long the request log, ended sandboxes and ended keys are kept. See [Retention and sizing](#retention-and-sizing).                                                                                                                                |
+| `KEERA_AUDIT_RETENTION`  | for ever    | How long audit entries are kept.                                                                                                                                                                                                                     |
+| `KEERA_UPSTREAM_DENY`    | see below   | Addresses the gateway never connects to. See [Where the gateway may connect](#where-the-gateway-may-connect).                                                                                                                                        |
+| `KEERA_UPSTREAM_PRIVATE` | `all`       | Host names inside the network that organisations may reach. Required with sign-up. See [Where the gateway may connect](#where-the-gateway-may-connect).                                                                                              |
 
 ### Everything else
 
@@ -372,7 +372,7 @@ stays. Billing rows and payments are never deleted ([billing.md](billing.md)).
 
 - **Usage totals and charts over more than two days** read `usage_daily`, so
   they reach back to the start, whatever `KEERA_USAGE_RETENTION` is. They count
-  whole UTC days. So do the totals on the keys screen and **My clients**.
+  whole UTC days. So do the totals on the keys screen.
 - **Everything else reads `usage_events`**, so it reaches back only as far as
   `KEERA_USAGE_RETENTION`. That is windows of two days or less, the request log,
   sessions, the map, first-token times, and the model, router, filter and tool

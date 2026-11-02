@@ -455,7 +455,7 @@ func TestMetricsWithNoScrapeTokenStaysOperatorOnly(t *testing.T) {
 	}
 }
 
-// The panel's My clients screen and `keera connect` both render the client
+// The panel's Connect client dialog and `keera connect` both render the client
 // catalogue, so it carries the templates and the gateway address, and no
 // credential.
 func TestConnectServesTheClientCatalogueAndTheGatewayAddress(t *testing.T) {

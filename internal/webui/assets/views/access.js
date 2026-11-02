@@ -1,6 +1,6 @@
-// My access: the developer's own keys, budgets, refusals and models. It shows
-// only the reader's own keys, even for an admin. Revoking is the one write,
-// so a leaked key can be stopped at once.
+// My access: the developer's own keys, budgets, refusals and models, and how
+// to connect a client with them. It shows only the reader's own keys, even for
+// an admin. Revoking is the one write, so a leaked key can be stopped at once.
 
 import { api } from "../api.js";
 import {
@@ -17,6 +17,7 @@ import {
   sectionHead,
   dash,
   banner,
+  listHead,
 } from "../ui.js";
 import { oneLine, statusMeaning } from "../status.js";
 import {
@@ -26,7 +27,7 @@ import {
   prefixOf,
   statePill,
 } from "./keys.js";
-import { noKey } from "./connect.js";
+import { noKey, openConnectClient, usableKeys } from "./connect.js";
 import { budgetUse } from "./limits.js";
 
 // Each level as the developer would name it.
@@ -53,6 +54,14 @@ export async function accessView(ctx) {
   ctx.setSubtitle(summary(live));
 
   const wrap = h("div", {});
+  if (usableKeys(a).length) {
+    wrap.append(
+      listHead(null, null, {
+        label: "Connect client",
+        onClick: (e) => openConnectClient(ctx, e.currentTarget),
+      }),
+    );
+  }
 
   // A recent refusal is why people open this screen, so it comes first.
   const recent = refusals.filter(
@@ -71,7 +80,7 @@ export async function accessView(ctx) {
     );
   }
 
-  // The same card as on My clients and in the playground.
+  // The same card as in the playground.
   if (!keys.length) wrap.append(noKey(ctx, a));
 
   // Revoked keys are hidden by default. The box resets on each visit.

@@ -1263,7 +1263,7 @@ function clientReport(scene) {
         { class: "card" },
         empty(
           "Nothing has called in this period",
-          "Connect an editor under My clients. It shows here after its " +
+          "Connect an editor under My access. It shows here after its " +
             "first request.",
         ),
       ),
