@@ -1,6 +1,7 @@
 package control
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -121,8 +122,10 @@ type Effective struct {
 	Levels []EffectiveLevel `json:"levels"`
 	// AllowedModels nil means every enabled model. An empty list means none.
 	AllowedModels []string `json:"allowed_models"`
-	SystemPrompt  string   `json:"system_prompt,omitempty"`
-	Filters       []string `json:"filters,omitempty"`
+	// AllowedLocations nil means models may run anywhere.
+	AllowedLocations []string `json:"allowed_locations"`
+	SystemPrompt     string   `json:"system_prompt,omitempty"`
+	Filters          []string `json:"filters,omitempty"`
 	// AllowedTools nil means every tool of every MCP server.
 	AllowedTools []string       `json:"allowed_tools"`
 	Scopes       []policy.Scope `json:"scopes"`
@@ -194,12 +197,13 @@ func (s *Server) effective(ctx context.Context, scope policy.ScopeType,
 
 	out := Effective{
 		Type: scope, ID: scopeID,
-		Levels:        []EffectiveLevel{s.effectiveLevel(ctx, policy.ScopeOrg, orgID, org)},
-		AllowedModels: res.AllowedModels,
-		SystemPrompt:  res.SystemPrompt,
-		Filters:       res.Filters,
-		AllowedTools:  res.AllowedTools,
-		Scopes:        res.Scopes,
+		Levels:           []EffectiveLevel{s.effectiveLevel(ctx, policy.ScopeOrg, orgID, org)},
+		AllowedModels:    res.AllowedModels,
+		AllowedLocations: res.AllowedLocations,
+		SystemPrompt:     res.SystemPrompt,
+		Filters:          res.Filters,
+		AllowedTools:     res.AllowedTools,
+		Scopes:           res.Scopes,
 	}
 	if project != nil {
 		out.Levels = append(out.Levels, s.effectiveLevel(ctx, policy.ScopeProject, projectID, *project))
@@ -216,6 +220,82 @@ func (s *Server) effectiveLevel(ctx context.Context, t policy.ScopeType, id stri
 ) EffectiveLevel {
 	name, _ := s.st.ScopeName(ctx, t, id)
 	return EffectiveLevel{Type: t, ID: id, Name: name, Limits: lim}
+}
+
+// locationProblem says what is wrong with a guardrail's locations, or "". It
+// writes them as models name theirs, once each.
+func locationProblem(lim *policy.Limits) string {
+	if lim.AllowedLocations == nil {
+		return ""
+	}
+	out := []string{}
+	for _, loc := range lim.AllowedLocations {
+		loc = strings.ToLower(strings.TrimSpace(loc))
+		if !policy.ValidLocation(loc) {
+			return "'" + loc + "' is not a location; name one as models do, such as ch, eu, " +
+				"usa or onprem"
+		}
+		if !slices.Contains(out, loc) {
+			out = append(out, loc)
+		}
+	}
+	lim.AllowedLocations = out
+	return ""
+}
+
+// checkFilterLocations refuses a guardrail whose locations leave out the model
+// of a filter the scope runs. A filter reads requests before anything is
+// redacted, so the gateway would refuse every request rather than send it
+// there. Saying so now beats finding out from the refusals.
+func (s *Server) checkFilterLocations(w http.ResponseWriter, r *http.Request,
+	scope policy.ScopeType, scopeID, orgID, projectID string, lim policy.Limits,
+) bool {
+	if lim.AllowedLocations == nil {
+		return true
+	}
+	org, project, err := s.chainLimits(r.Context(), orgID, projectID)
+	if err != nil {
+		s.fail(w, err)
+		return false
+	}
+	var own *policy.Limits
+	switch scope {
+	case policy.ScopeOrg:
+		org, project = lim, nil
+	case policy.ScopeProject:
+		project = &lim
+	default:
+		own = &lim
+	}
+	key := policy.Key{ID: scopeID, OrgID: orgID, ProjectID: projectID}
+	res := policy.Resolve(key, &org, project, own)
+	var outside []string
+	for _, alias := range res.Filters {
+		f, err := s.st.Filter(r.Context(), orgID, alias)
+		if errors.Is(err, store.ErrNotFound) || (err == nil && !f.UsesModel()) {
+			continue
+		}
+		if err != nil {
+			s.fail(w, err)
+			return false
+		}
+		m, err := s.st.Model(r.Context(), orgID, f.Model)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			s.fail(w, err)
+			return false
+		}
+		if err != nil || !res.AllowsLocation(m.Location) {
+			outside = append(outside, "'"+alias+"' (on "+f.Model+", in "+cmp.Or(m.Location, "no known location")+")")
+		}
+	}
+	if len(outside) == 0 {
+		return true
+	}
+	conflict(w, "filter_location_not_allowed", "these locations leave out the model of "+
+		strings.Join(outside, ", ")+", which this scope runs. A filter reads a request before "+
+		"anything is redacted from it, so every request would be refused rather than sent "+
+		"there. Point the filter at a model inside the locations, or allow its location")
+	return false
 }
 
 // countProblem says what is wrong with a guardrail's rate limits and budgets,
@@ -251,7 +331,7 @@ func countProblem(lim *policy.Limits) string {
 }
 
 func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	scope, scopeID, owner, _, ok := s.guardrailScope(w, r, p, true)
+	scope, scopeID, owner, projectID, ok := s.guardrailScope(w, r, p, true)
 	if !ok {
 		return
 	}
@@ -261,6 +341,10 @@ func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.
 		return
 	}
 	if msg := countProblem(&lim); msg != "" {
+		badRequest(w, msg)
+		return
+	}
+	if msg := locationProblem(&lim); msg != "" {
 		badRequest(w, msg)
 		return
 	}
@@ -278,7 +362,8 @@ func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.
 	}
 	defer unlock()
 	if !s.checkGuardrailFilters(w, r, owner, &lim) || !s.checkAllowList(w, r, scope, owner, &lim) ||
-		!s.checkAllowedTools(w, r, owner, &lim) {
+		!s.checkAllowedTools(w, r, owner, &lim) ||
+		!s.checkFilterLocations(w, r, scope, scopeID, owner, projectID, lim) {
 		return
 	}
 	if err := s.st.PutGuardrail(r.Context(), scope, scopeID, lim); err != nil {

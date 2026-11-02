@@ -18,6 +18,8 @@ import (
 type guardrailFlags struct {
 	models         string
 	noModels       bool
+	locations      string
+	noLocations    bool
 	requests       int64
 	tokens         int64
 	per            string
@@ -35,6 +37,10 @@ func registerGuardrailFlags(fs *flag.FlagSet) *guardrailFlags {
 	f := &guardrailFlags{}
 	fs.StringVar(&f.models, "models", "", "comma-separated models this scope may use")
 	fs.BoolVar(&f.noModels, "no-models", false, "stop this scope limiting the models; an outer level still does")
+	fs.StringVar(&f.locations, "locations", "",
+		"comma-separated places this scope's models may run, such as ch,onprem")
+	fs.BoolVar(&f.noLocations, "no-locations", false,
+		"stop this scope limiting where models run; an outer level still does")
 	fs.Int64Var(&f.requests, "requests", -1, "requests per --per (0 clears it)")
 	fs.Int64Var(&f.tokens, "tokens", -1, "tokens per --per (0 clears it)")
 	fs.StringVar(&f.per, "per", "",
@@ -57,6 +63,9 @@ func registerGuardrailFlags(fs *flag.FlagSet) *guardrailFlags {
 // apply leaves fields alone whose flags were not given.
 func (f *guardrailFlags) apply(lim *policy.Limits) error {
 	if err := setList(&lim.AllowedModels, "models", f.models, f.noModels); err != nil {
+		return err
+	}
+	if err := setList(&lim.AllowedLocations, "locations", f.locations, f.noLocations); err != nil {
 		return err
 	}
 	if err := f.applyRate(lim); err != nil {
@@ -313,6 +322,7 @@ var effectiveParts = []struct {
 	print func(*table, control.Effective)
 }{
 	{"models", printEffectiveModels},
+	{"locations", printEffectiveLocations},
 	{"rates", printEffectiveRates},
 	{"spend", printEffectiveSpend},
 	{"prompt", printEffectivePrompt},
@@ -350,6 +360,12 @@ func printEffectiveModels(w *table, eff control.Effective) {
 	showSet(w, "models", "(every enabled model)", eff.AllowedModels != nil,
 		strings.Join(eff.AllowedModels, ","),
 		narrowedBy(eff, func(l policy.Limits) bool { return l.AllowedModels != nil }))
+}
+
+func printEffectiveLocations(w *table, eff control.Effective) {
+	showSet(w, "locations", "(anywhere)", eff.AllowedLocations != nil,
+		strings.Join(eff.AllowedLocations, ","),
+		narrowedBy(eff, func(l policy.Limits) bool { return l.AllowedLocations != nil }))
 }
 
 // Rate limits and budgets do not merge, since every one must hold, so each is
@@ -471,6 +487,7 @@ const notSet = "(not set here)"
 // what applies.
 func printLimits(w *table, lim policy.Limits) {
 	show(w, "models", joinedOr(lim.AllowedModels, notSet))
+	show(w, "locations", joinedOr(lim.AllowedLocations, notSet))
 	showEach(w, "rate limit", ratesOf(lim))
 	showEach(w, "budget", budgetsOf(lim))
 	if len(lim.Filters) == 0 {

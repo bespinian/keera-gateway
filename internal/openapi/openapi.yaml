@@ -1976,7 +1976,8 @@ paths:
           description: |
             An organisation's allow-list leaves out a model that one of its
             filters or routers runs on (`filter_model_not_allowed`,
-            `router_model_not_allowed`).
+            `router_model_not_allowed`), or the locations leave out the model
+            of a filter the scope runs (`filter_location_not_allowed`).
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
   /control/v1/guardrails/{scope}/{id}/effective:
@@ -5024,7 +5025,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Refused by a filter (`filter_refused`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
+          description: Refused by a filter (`filter_refused`), by a filter whose model runs outside the locations the key's guardrails allow (`location_not_allowed`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
           content:
             application/json:
               schema:
@@ -5228,7 +5229,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Refused by a filter (`filter_refused`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
+          description: Refused by a filter (`filter_refused`), by a filter whose model runs outside the locations the key's guardrails allow (`location_not_allowed`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
           content:
             application/json:
               schema:
@@ -5422,7 +5423,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Refused by a filter (`filter_refused`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
+          description: Refused by a filter (`filter_refused`), by a filter whose model runs outside the locations the key's guardrails allow (`location_not_allowed`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
           content:
             application/json:
               schema:
@@ -5625,7 +5626,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Refused by a filter (`filter_refused`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
+          description: Refused by a filter (`filter_refused`), by a filter whose model runs outside the locations the key's guardrails allow (`location_not_allowed`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
           content:
             application/json:
               schema:
@@ -5828,7 +5829,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Refused by a filter (`filter_refused`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
+          description: Refused by a filter (`filter_refused`), by a filter whose model runs outside the locations the key's guardrails allow (`location_not_allowed`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
           content:
             application/json:
               schema:
@@ -6067,7 +6068,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Refused by a filter (`filter_refused`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
+          description: Refused by a filter (`filter_refused`), by a filter whose model runs outside the locations the key's guardrails allow (`location_not_allowed`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
           content:
             application/json:
               schema:
@@ -6405,7 +6406,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Refused by a filter (`filter_refused`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
+          description: Refused by a filter (`filter_refused`), by a filter whose model runs outside the locations the key's guardrails allow (`location_not_allowed`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
           content:
             application/json:
               schema:
@@ -7424,6 +7425,11 @@ components:
           items:
             type: string
           description: Model aliases this scope may use.
+        allowed_locations:
+          type: [array, "null"]
+          items:
+            type: string
+          description: Where the models this scope may use run, such as `ch`, `eu`, `usa` or `onprem`. It applies on top of `allowed_models`, to every model a router may reach and to the models of the filters the scope runs. null is anywhere; an empty list is nowhere. See https://docs.keera.ch/manage/guardrails/#models-by-location.
         rate_limits:
           type: [array, "null"]
           description: At most one per period.
@@ -7546,6 +7552,11 @@ components:
           items:
             type: string
           description: null is every enabled model. An empty list is none.
+        allowed_locations:
+          type: [array, "null"]
+          items:
+            type: string
+          description: null is anywhere. An empty list is nowhere.
         system_prompt:
           type: string
           description: Every level's prompt joined, outermost first.

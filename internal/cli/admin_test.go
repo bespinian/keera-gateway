@@ -1979,3 +1979,23 @@ func TestEffectiveBudgetsNameTheirLevel(t *testing.T) {
 		}
 	}
 }
+
+func TestGuardrailSetLocationsKeepsTheModels(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/guardrails/org/org_1": map[string]any{"allowed_models": []string{"keera-speed"}},
+		"PUT /v1/guardrails/org/org_1": map[string]any{},
+	})
+	if err := Run(context.Background(), []string{
+		"guardrail", "set", "org", "org_1", "--locations", "ch, onprem",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := f.request("PUT", "/v1/guardrails/org/org_1").body
+	locs, _ := body["allowed_locations"].([]any)
+	models, _ := body["allowed_models"].([]any)
+	if len(locs) != 2 || locs[0] != "ch" || locs[1] != "onprem" ||
+		len(models) != 1 || models[0] != "keera-speed" {
+		t.Errorf("sent %v", body)
+	}
+}

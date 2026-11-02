@@ -499,13 +499,20 @@ var commands = []command{
 			{
 				name: "set", args: "<scope> [<id>]", summary: "change what a scope may do",
 				flags: []string{
-					"models", "no-models", "requests", "tokens", "per", "budget", "period",
-					"system-prompt", "no-system-prompt", "filters", "no-filters", "tools", "no-tools",
-					"json",
+					"models", "no-models", "locations", "no-locations", "requests", "tokens", "per",
+					"budget", "period", "system-prompt", "no-system-prompt", "filters", "no-filters",
+					"tools", "no-tools", "json",
 				},
+				prose: "--locations allows models by where they run instead of by name, such as " +
+					"ch for Switzerland, eu for the European Union or onprem for models the " +
+					"deployment serves itself. It " +
+					"also holds for every model a router may reach and for the models of the " +
+					"filters the scope runs. 'keera model list' shows each model's location.",
 				examples: []string{
 					"keera guardrail set project payments --models keera-speed --requests 120 \\\n" +
 						"    --budget 500 --period month",
+					"keera guardrail set project payments --locations ch,onprem",
+					"keera guardrail set org --locations ch,eu,onprem",
 				},
 			},
 		},

@@ -244,6 +244,18 @@ func (p Router) Reaches() []string {
 	return out
 }
 
+// ReadsWith lists every model that may read a request through the router:
+// those it may send to, and those its route steps decide with.
+func (p Router) ReadsWith() []string {
+	out := p.Reaches()
+	for _, rt := range p.Routes() {
+		if m := rt.ReadsWith(); m != "" && !slices.Contains(out, m) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // Problem says what is wrong with the router, or "".
 func (p Router) Problem(refs RouterRefs) string {
 	if !ValidAlias(p.Alias) {

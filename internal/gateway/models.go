@@ -68,7 +68,7 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, p := range s.src.Routers(res.Key.OrgID) {
-		if res.MayCallRouter(p.Alias) {
+		if res.MayCallRouter(p, s.modelOf(res.Key.OrgID)) {
 			out = append(out, s.routerEntryOf(p))
 		}
 	}
@@ -101,6 +101,11 @@ func (s *Server) getModel(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// modelOf looks up an organisation's models by alias.
+func (s *Server) modelOf(orgID string) func(string) (policy.Model, bool) {
+	return func(alias string) (policy.Model, bool) { return s.src.Model(orgID, alias) }
+}
+
 // named is a model or router named by a request's 'model' field.
 type named struct {
 	model  policy.Model
@@ -128,7 +133,7 @@ func (s *Server) callable(res *policy.Resolved, alias string, kind policy.Kind) 
 	if kind != "" && kind != policy.KindChat {
 		return named{}, false
 	}
-	if p, found := s.src.Router(res.Key.OrgID, alias); found && res.MayCallRouter(alias) {
+	if p, found := s.src.Router(res.Key.OrgID, alias); found && res.MayCallRouter(p, s.modelOf(res.Key.OrgID)) {
 		return named{router: p}, true
 	}
 	return named{}, false

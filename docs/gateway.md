@@ -343,6 +343,32 @@ month it is counted in Postgres like spend. A request counts once it is let thro
 when it ends. `GET /control/v1/guardrails/{scope}/{id}/effective` returns every
 level's guardrails and the combined answer.
 
+### Allowing models by location
+
+A guardrail can allow models by where they run instead of by name:
+`allowed_locations`, such as `["ch", "onprem"]`. It uses each model's
+[`location`](#the-alias-is-the-api-contract), so a model added later is allowed
+or not by where it runs. It narrows like the model list, and both apply when a
+level sets both.
+
+A location limit is about where prompts go, so it covers every model that
+reads one:
+
+- **The model a key names.** One elsewhere is not listed and answers
+  `404 model_not_found`.
+- **Every model a router may reach.** That is each destination and each model
+  a route step decides with. A router with one of them elsewhere is not listed
+  either, even when the model list allows it.
+- **The models of the filters that run.** A filter reads the request before
+  anything is redacted. If one runs elsewhere, the request is refused with
+  `403 location_not_allowed` rather than sent there. Saving a guardrail whose
+  locations leave out such a filter is refused with a 409
+  `filter_location_not_allowed`. On the organisation, a filter or route step on
+  a model elsewhere is refused with a 400 `model_not_allowed`, like one off its
+  allow-list.
+
+A model without a location counts as elsewhere.
+
 ## Keys and projects
 
 How to create projects and issue, activate, rotate and revoke keys:
@@ -451,7 +477,8 @@ rules. Most are about the model that a `rewrite` or `gate` filter, or an
 
 **Which model.** A chat model, or a
 [decision model](#decision-models) for a gate or a route step. It must be on
-the organisation's allow-list, if it has one. Otherwise the filter or router is
+the organisation's allow-list, if it has one, and in its
+[locations](#allowing-models-by-location). Otherwise the filter or router is
 refused with a 400 `model_not_allowed`. Narrowing the allow-list so that the
 model drops off is refused with a 409 `filter_model_not_allowed` or
 `router_model_not_allowed`. Move the filter or route step to an allowed model

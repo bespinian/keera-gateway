@@ -542,6 +542,9 @@ func validName(s string, maxLen int) bool {
 // inherits.
 type Limits struct {
 	AllowedModels []string `json:"allowed_models"`
+	// AllowedLocations lists where models may run, such as ch or onprem, so
+	// prompts stay there. It applies on top of AllowedModels.
+	AllowedLocations []string `json:"allowed_locations"`
 	// RateLimits and Budgets hold at most one per period.
 	RateLimits []RateLimit `json:"rate_limits,omitempty"`
 	Budgets    []Budget    `json:"budgets,omitempty"`
@@ -704,6 +707,8 @@ type Resolved struct {
 	Key Key
 	// AllowedModels nil means every enabled model of the organisation.
 	AllowedModels []string
+	// AllowedLocations nil means models may run anywhere.
+	AllowedLocations []string
 	// SystemPrompt is every level's prompt joined, outermost first.
 	SystemPrompt string
 	// Filters are every level's filters in run order, without repeats. They
@@ -724,17 +729,40 @@ func (r *Resolved) allowsModel(alias string) bool {
 	return r.AllowedModels == nil || slices.Contains(r.AllowedModels, alias)
 }
 
+// AllowsLocation reports whether a model running at loc may read the key's
+// requests.
+func (r *Resolved) AllowsLocation(loc string) bool {
+	return r.AllowedLocations == nil || slices.Contains(r.AllowedLocations, loc)
+}
+
 // MayUse reports whether the key may call m. A subscription model takes only a
 // subscription key, because only its requests carry the caller's sign-in.
 func (r *Resolved) MayUse(m Model) bool {
-	return r.Key.Subscription() == m.Subscription && r.allowsModel(m.Alias)
+	return r.Key.Subscription() == m.Subscription && r.allowsModel(m.Alias) &&
+		r.AllowsLocation(m.Location)
 }
 
 // MayCallRouter reports whether the key may name the router. Allowing a router
 // allows where it sends. A subscription key may call none, since a router
 // would put it on models the organisation pays for.
-func (r *Resolved) MayCallRouter(alias string) bool {
-	return r.allowsModel(alias) && !r.Key.Subscription()
+//
+// Under a location limit, every model the router may send to or decide with
+// must run in an allowed location: the prompt reaches all of them. find looks
+// a model up by alias; one it cannot find counts as outside.
+func (r *Resolved) MayCallRouter(p Router, find func(alias string) (Model, bool)) bool {
+	if !r.allowsModel(p.Alias) || r.Key.Subscription() {
+		return false
+	}
+	if r.AllowedLocations == nil {
+		return true
+	}
+	for _, alias := range p.ReadsWith() {
+		m, ok := find(alias)
+		if !ok || !r.AllowsLocation(m.Location) {
+			return false
+		}
+	}
+	return true
 }
 
 // Resolve combines the guardrails of a key's org, project and the key itself.
@@ -787,6 +815,7 @@ func Resolve(key Key, org, project, own *Limits) *Resolved {
 // narrow applies one level's limits.
 func (r *Resolved) narrow(lim *Limits) {
 	r.AllowedModels = intersect(r.AllowedModels, lim.AllowedModels)
+	r.AllowedLocations = intersect(r.AllowedLocations, lim.AllowedLocations)
 	r.SystemPrompt = JoinPrompts(r.SystemPrompt, deref(lim.SystemPrompt))
 	r.Filters = appendFilters(r.Filters, lim.Filters)
 	r.AllowedTools = intersectTools(r.AllowedTools, lim.AllowedTools)

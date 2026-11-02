@@ -549,6 +549,9 @@ func addStrings(d *treeDoc, v any) {
 // call is refused, or "".
 func (x *mcpExchange) admit(argBytes int) (held int64, why string) {
 	now := time.Now()
+	if why := x.s.filterOutside(x.res, x.res.Filters); why != "" {
+		return 0, why
+	}
 	if ref, ok := x.s.checkRates(x.res.Scopes, now); !ok {
 		return 0, ref.msg
 	}

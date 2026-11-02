@@ -144,7 +144,11 @@ func (s *Server) accessKeys(r *http.Request, orgID, orgName string, keys []store
 	if err != nil {
 		return nil, err
 	}
-	models, err := s.callable(r, orgID)
+	models, err := s.st.ListModels(r.Context(), orgID)
+	if err != nil {
+		return nil, err
+	}
+	routers, err := s.st.ListRouters(r.Context(), orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +172,7 @@ func (s *Server) accessKeys(r *http.Request, orgID, orgName string, keys []store
 			State:       k.State(now),
 			// Resolved to real names, so the screen lists what the key can
 			// call instead of "no restriction".
-			AllowedModels: allowedModels(resolved, models),
+			AllowedModels: allowedModels(resolved, models, routers),
 			Scopes: s.scopeStates(resolved, orgName, projectNames, k.Name, now,
 				map[policy.ScopeType]scopeSays{
 					policy.ScopeOrg:     saysOf(orgLimits),
@@ -183,20 +187,6 @@ func (s *Server) accessKeys(r *http.Request, orgID, orgName string, keys []store
 // callable is every name a client may put in the model field: the
 // organisation's models and routers. Without routers, a key whose allow-list
 // names only one would look like it may call nothing.
-func (s *Server) callable(r *http.Request, orgID string) ([]policy.Model, error) {
-	models, err := s.st.ListModels(r.Context(), orgID)
-	if err != nil {
-		return nil, err
-	}
-	routers, err := s.st.ListRouters(r.Context(), orgID)
-	if err != nil {
-		return nil, err
-	}
-	for _, p := range routers {
-		models = append(models, policy.Model{Alias: p.Alias, Enabled: true})
-	}
-	return models, nil
-}
 
 // scopeSays is what one level adds to a request: its instruction and
 // filters. Both add up down the chain, so they are reported per level.
@@ -296,13 +286,29 @@ func (s *Server) levelState(res *policy.Resolved, sc policy.Scope, orgName strin
 }
 
 // allowedModels is what a key may actually call: the enabled models its
-// kind reaches and its allow-list permits.
-func allowedModels(res *policy.Resolved, models []policy.Model) []string {
+// kind reaches and its guardrails permit, then the routers.
+func allowedModels(res *policy.Resolved, models []policy.Model, routers []policy.Router) []string {
 	out := []string{}
 	for _, m := range models {
 		if m.Enabled && res.MayUse(m) {
 			out = append(out, m.Alias)
 		}
 	}
+	for _, p := range routers {
+		if res.MayCallRouter(p, modelFinder(models)) {
+			out = append(out, p.Alias)
+		}
+	}
 	return out
+}
+
+// modelFinder looks models up by alias, as MayCallRouter asks.
+func modelFinder(models []policy.Model) func(string) (policy.Model, bool) {
+	return func(alias string) (policy.Model, bool) {
+		i := slices.IndexFunc(models, func(m policy.Model) bool { return m.Alias == alias })
+		if i < 0 {
+			return policy.Model{}, false
+		}
+		return models[i], true
+	}
 }

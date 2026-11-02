@@ -17,9 +17,10 @@ import {
   modeTiles,
   showError,
   banner,
+  locationName,
 } from "../ui.js";
 import { orgNameOf } from "./orgs.js";
-import { reaches } from "./router-tree.js";
+import { reaches, steps } from "./router-tree.js";
 import { modePills } from "./filters.js";
 import { nodeCard, headButton, removeButton, emptyCard } from "./node-card.js";
 import {
@@ -106,6 +107,7 @@ export async function openGuardrails(
         kind: "chat",
         router: true,
         destinations: reaches(p),
+        readers: readers(p),
       })),
     ),
     filters,
@@ -116,6 +118,33 @@ export async function openGuardrails(
   };
   if (canEdit) render(ctx, args);
   else renderReadOnly(ctx, args);
+}
+
+/** readers is every model a request through the router may reach: where it
+ *  sends, and the models its route steps decide with. A location limit holds
+ *  for all of them, as the server's does. */
+function readers(router) {
+  const out = reaches(router);
+  for (const s of steps(router.start)) {
+    if (s.kind === "route" && s.model && !out.includes(s.model)) {
+      out.push(s.model);
+    }
+  }
+  return out;
+}
+
+/** inLocations says whether m, a model or a router, runs only in locs. */
+function inLocations(m, locs, models) {
+  if (!m) return false;
+  if (!m.router) return locs.includes(m.location);
+  return m.readers.every((a) => {
+    const x = models.find((y) => y.alias === a && !y.router);
+    return !!x && locs.includes(x.location);
+  });
+}
+
+function locationsName(locs) {
+  return locs.length ? "In " + locs.map(locationName).join(", ") : "Nowhere";
 }
 
 /** Separate from openGuardrails so a caller that has the chain does not
@@ -141,6 +170,7 @@ export async function ceilingsFor(
 // The fields the blocks set. Any others must survive a save.
 const OWNED_HERE = new Set([
   "allowed_models",
+  "allowed_locations",
   "rate_limits",
   "budgets",
   "system_prompt",
@@ -196,7 +226,7 @@ const KINDS = [
     value: "models",
     icon: icons.models,
     name: "Models",
-    what: "Allow only some of the models and routers.",
+    what: "Allow only some models and routers, by name or by where they run.",
   },
   {
     value: "tools",
@@ -218,6 +248,9 @@ function draftOf(lim) {
     system_prompt: lim.system_prompt || null,
     filters: [...(lim.filters || [])],
     allowed_models: lim.allowed_models ? [...lim.allowed_models] : null,
+    allowed_locations: lim.allowed_locations
+      ? [...lim.allowed_locations]
+      : null,
     allowed_tools: lim.allowed_tools ? [...lim.allowed_tools] : null,
   };
 }
@@ -242,7 +275,7 @@ function blocksOf(d) {
     })),
     d.system_prompt !== null ? { kind: "system_prompt" } : null,
     ...d.filters.map((alias, index) => ({ kind: "filter", alias, index })),
-    d.allowed_models ? { kind: "models" } : null,
+    d.allowed_models || d.allowed_locations ? { kind: "models" } : null,
     d.allowed_tools ? { kind: "tools" } : null,
   ].filter(Boolean);
 }
@@ -268,7 +301,7 @@ function addable(env) {
       case "filter":
         return env.filters.some((f) => !d.filters.includes(f.alias));
       case "models":
-        return !d.allowed_models;
+        return !d.allowed_models && !d.allowed_locations;
       case "tools":
         return !d.allowed_tools;
     }
@@ -353,7 +386,9 @@ function render(
       fieldsHost.replaceChildren(built.el);
       fieldsHost.style.marginTop = b ? "" : "14px";
       read = built.read;
-      const first = fieldsHost.querySelector("input, select, textarea");
+      const first = [
+        ...fieldsHost.querySelectorAll("button.tile, input, select, textarea"),
+      ].find((el) => !el.closest("[hidden]"));
       if (first) first.focus();
     };
     const picker = b ? null : modeTiles(addable(env), null, choose);
@@ -452,6 +487,7 @@ function saved(lim, env) {
   if (d.system_prompt) out.system_prompt = d.system_prompt;
   if (d.filters.length) out.filters = d.filters;
   if (d.allowed_models) out.allowed_models = d.allowed_models;
+  if (d.allowed_locations) out.allowed_locations = d.allowed_locations;
   if (d.allowed_tools) out.allowed_tools = d.allowed_tools;
   return out;
 }
@@ -475,7 +511,9 @@ function put(d, kind, b, v) {
       else d.filters.push(v);
       return;
     case "models":
-      d.allowed_models = v;
+      // One or the other, as the form picks.
+      d.allowed_models = v.models;
+      d.allowed_locations = v.locations;
       return;
     case "tools":
       d.allowed_tools = v;
@@ -498,6 +536,7 @@ function take(d, b) {
       return;
     case "models":
       d.allowed_models = null;
+      d.allowed_locations = null;
       return;
     case "tools":
       d.allowed_tools = null;
@@ -548,7 +587,9 @@ function blockName(env, b) {
     case "filter":
       return h("span", { class: "mono" }, b.alias);
     case "models":
-      return listName(d.allowed_models, "model");
+      return d.allowed_locations
+        ? locationsName(d.allowed_locations)
+        : listName(d.allowed_models, "model");
     case "tools":
       return listName(d.allowed_tools, "tool");
   }
@@ -570,10 +611,19 @@ function blockMeta(env, b) {
     const n = env.draft.filters.length;
     if (n > 1)
       bits.push(h("span", { class: "faint small" }, `${b.index + 1} of ${n}`));
+  } else if (b.kind === "models" && env.draft.allowed_locations) {
+    const locs = env.draft.allowed_locations;
+    if (
+      !env.models.some((m) => !m.router && inLocations(m, locs, env.models))
+    ) {
+      bits = [pill("Nothing is served", "bad")];
+    } else if (locs.some((l) => !locationAbove(env.ceilings, l))) {
+      bits = [pill("Some blocked above", "warn")];
+    }
   } else if (b.kind === "models") {
     const list = env.draft.allowed_models;
     if (!list.length) bits = [pill("Nothing is served", "bad")];
-    else if (list.some((a) => !allowedAbove(env.ceilings, a))) {
+    else if (list.some((a) => !allowedAbove(env.ceilings, a, env.models))) {
       bits = [pill("Some blocked above", "warn")];
     }
   } else if (b.kind === "tools" && !env.draft.allowed_tools.length) {
@@ -674,55 +724,41 @@ function blockFields(env, kind, b) {
     };
   }
   if (kind === "models") {
-    // An alias with no box here, such as a disabled model, is kept: nobody
-    // unticked it.
-    const had = d.allowed_models;
-    const boxes = env.models.map((m) =>
-      h(
-        "label",
-        { class: "row-tight", style: { padding: "3px 0" } },
-        h("input", {
-          type: "checkbox",
-          value: m.alias,
-          checked: had ? had.includes(m.alias) : true,
-        }),
-        h("span", { class: "mono" }, m.alias),
-        m.router
-          ? // A router grants every model its steps may send to.
-            h(
-              "span",
-              {
-                class: "pill pill-accent",
-                title:
-                  "Router. Allowing it allows the models it picks from: " +
-                  (m.destinations.join(", ") || "none"),
-              },
-              "router",
-            )
-          : h("span", { class: "faint small" }, m.kind),
-        allowedAbove(env.ceilings, m.alias)
-          ? null
-          : h("span", { class: "pill pill-warn" }, "Blocked above"),
-      ),
-    );
+    const named = modelBoxes(env);
+    const placed = locationBoxes(env);
+    // A new block asks how to allow models; an existing one shows its own.
+    let chosen = b ? (d.allowed_locations ? "locations" : "names") : null;
+    const panes = { names: named.el, locations: placed.el };
+    const sync = () => {
+      for (const [k, el] of Object.entries(panes)) el.hidden = k !== chosen;
+    };
+    const picker = modeTiles(MODEL_MODES, chosen, (value) => {
+      chosen = value;
+      sync();
+      const first = panes[value].querySelector("input");
+      if (first) first.focus();
+    });
+    if (chosen) picker.choose(chosen);
+    else sync();
     return {
-      el: field(
-        "Models and routers this scope may reach",
-        boxes.length
-          ? h("div", {}, boxes)
-          : h("span", { class: "faint" }, `${env.orgName} has no models.`),
-        "Without this block, every model of the organisation is allowed. " +
-          "Removing one takes effect on the next request.",
+      el: h(
+        "div",
+        {},
+        h(
+          "div",
+          { class: "field" },
+          h("label", {}, "Allow models"),
+          picker.tiles,
+          picker.chosenRow,
+        ),
+        named.el,
+        placed.el,
       ),
       read: () => {
-        const shown = new Set(env.models.map((m) => m.alias));
-        return [
-          ...boxes
-            .map((l) => l.querySelector("input"))
-            .filter((i) => i.checked)
-            .map((i) => i.value),
-          ...(had || []).filter((a) => !shown.has(a)),
-        ];
+        if (!chosen) throw new Error("Choose how to allow models.");
+        return chosen === "names"
+          ? { models: named.read(), locations: null }
+          : { models: null, locations: placed.read() };
       },
     };
   }
@@ -746,6 +782,136 @@ function blockFields(env, kind, b) {
         .split(",")
         .map((t) => t.trim())
         .filter(Boolean),
+  };
+}
+
+const MODEL_MODES = [
+  {
+    value: "names",
+    icon: icons.models,
+    name: "By name",
+    what: "Tick the models and routers this scope may reach.",
+  },
+  {
+    value: "locations",
+    icon: icons.map,
+    name: "By location",
+    what: "Allow every model that runs in the places you pick.",
+  },
+];
+
+/** modelBoxes picks models and routers by name. */
+function modelBoxes(env) {
+  // An alias with no box here, such as a disabled model, is kept: nobody
+  // unticked it.
+  const had = env.draft.allowed_models;
+  const boxes = env.models.map((m) =>
+    h(
+      "label",
+      { class: "row-tight", style: { padding: "3px 0" } },
+      h("input", {
+        type: "checkbox",
+        value: m.alias,
+        checked: had ? had.includes(m.alias) : true,
+      }),
+      h("span", { class: "mono" }, m.alias),
+      m.router
+        ? // A router grants every model its steps may send to.
+          h(
+            "span",
+            {
+              class: "pill pill-accent",
+              title:
+                "Router. Allowing it allows the models it picks from: " +
+                (m.destinations.join(", ") || "none"),
+            },
+            "router",
+          )
+        : h("span", { class: "faint small" }, m.kind),
+      allowedAbove(env.ceilings, m.alias, env.models)
+        ? null
+        : h("span", { class: "pill pill-warn" }, "Blocked above"),
+    ),
+  );
+  return {
+    el: field(
+      "Models and routers this scope may reach",
+      boxes.length
+        ? h("div", {}, boxes)
+        : h("span", { class: "faint" }, `${env.orgName} has no models.`),
+      "Without this block, every model of the organisation is allowed. " +
+        "Removing one takes effect on the next request.",
+    ),
+    read: () => {
+      const shown = new Set(env.models.map((m) => m.alias));
+      return [
+        ...boxes
+          .map((l) => l.querySelector("input"))
+          .filter((i) => i.checked)
+          .map((i) => i.value),
+        ...(had || []).filter((a) => !shown.has(a)),
+      ];
+    },
+  };
+}
+
+// Always offered, even before the organisation has a model there, in this
+// order. Any other location a model has follows.
+const LOCATION_ORDER = ["onprem", "ch", "eu", "usa"];
+
+/** locationBoxes picks the places models may run. */
+function locationBoxes(env) {
+  const had = env.draft.allowed_locations;
+  const counts = new Map();
+  for (const m of env.models) {
+    if (!m.router && m.location) {
+      counts.set(m.location, (counts.get(m.location) || 0) + 1);
+    }
+  }
+  for (const loc of [...LOCATION_ORDER, ...(had || [])]) {
+    if (!counts.has(loc)) counts.set(loc, 0);
+  }
+  const rank = (l) => {
+    const i = LOCATION_ORDER.indexOf(l);
+    return i < 0 ? LOCATION_ORDER.length : i;
+  };
+  const locs = [...counts.keys()].sort(
+    (a, b) => rank(a) - rank(b) || a.localeCompare(b),
+  );
+  const boxes = locs.map((loc) => {
+    const n = counts.get(loc);
+    return h(
+      "label",
+      { class: "row-tight", style: { padding: "3px 0" } },
+      h("input", {
+        type: "checkbox",
+        value: loc,
+        checked: had ? had.includes(loc) : false,
+      }),
+      h("span", {}, locationName(loc)),
+      h(
+        "span",
+        { class: "faint small" },
+        n ? `${n} ${plural(n, "model")}` : "no model yet",
+      ),
+      locationAbove(env.ceilings, loc)
+        ? null
+        : h("span", { class: "pill pill-warn" }, "Blocked above"),
+    );
+  });
+  return {
+    el: field(
+      "Where models may run",
+      h("div", {}, boxes),
+      "Models elsewhere are not served, and neither are routers that may " +
+        "reach one. The filters this scope runs must run here too, or its " +
+        "requests are refused.",
+    ),
+    read: () =>
+      boxes
+        .map((l) => l.querySelector("input"))
+        .filter((i) => i.checked)
+        .map((i) => i.value),
   };
 }
 
@@ -836,19 +1002,28 @@ function toolsValue(levels) {
   );
 }
 
-/** A level that names no allow-list restricts nothing. */
-function effectiveModels(levels, models) {
-  let allowed = null;
+/** narrowed intersects the lists levels set under key. A level that sets
+ *  none restricts nothing, so null is no limit. */
+function narrowed(levels, key) {
+  let out = null;
   for (const lv of levels) {
-    const list = lv.limits && lv.limits.allowed_models;
+    const list = lv.limits && lv.limits[key];
     if (!list) continue;
-    allowed =
-      allowed === null ? list.slice() : allowed.filter((a) => list.includes(a));
+    out = out === null ? list.slice() : out.filter((a) => list.includes(a));
   }
-  const catalogue = models.map((m) => m.alias);
-  return allowed === null
-    ? catalogue
-    : catalogue.filter((a) => allowed.includes(a));
+  return out;
+}
+
+function effectiveModels(levels, models) {
+  const allowed = narrowed(levels, "allowed_models");
+  const locs = narrowed(levels, "allowed_locations");
+  return models
+    .filter(
+      (m) =>
+        (allowed === null || allowed.includes(m.alias)) &&
+        (locs === null || inLocations(m, locs, models)),
+    )
+    .map((m) => m.alias);
 }
 
 function modelsValue(levels, models, orgName) {
@@ -872,9 +1047,16 @@ function modelsValue(levels, models, orgName) {
 /** Names the levels that removed models, so a short list reads as someone's
  *  decision. */
 function narrowedBy(levels) {
-  const said = levels.filter((lv) => lv.limits && lv.limits.allowed_models);
+  const said = levels.filter(
+    (lv) =>
+      lv.limits && (lv.limits.allowed_models || lv.limits.allowed_locations),
+  );
   if (!said.length) return "Every model the organisation has.";
-  return `Narrowed by ${said.map((lv) => lv.label).join(", then ")}.`;
+  const locs = narrowed(levels, "allowed_locations");
+  return (
+    `Narrowed by ${said.map((lv) => lv.label).join(", then ")}.` +
+    (locs ? ` Only models running ${locationsName(locs).toLowerCase()}.` : "")
+  );
 }
 
 /** levelsValue lists each level's limits as texts reads them, with the level
@@ -1008,6 +1190,9 @@ function describe(lim) {
     const n = lim.allowed_models.length;
     bits.push(n ? `${n} ${plural(n, "model")}` : "no model");
   }
+  if (lim.allowed_locations) {
+    bits.push(`models ${locationsName(lim.allowed_locations).toLowerCase()}`);
+  }
   for (const rl of lim.rate_limits || []) bits.push(...rateShort(rl));
   for (const b of lim.budgets || []) bits.push(budgetText(b));
   if (lim.system_prompt) bits.push("a system prompt");
@@ -1040,12 +1225,25 @@ function ceilingsOf(ceilings, texts) {
   );
 }
 
-function allowedAbove(ceilings, alias) {
+/** allowedAbove says whether every level above lets alias through, by name
+ *  and by location. models finds where it runs. */
+function allowedAbove(ceilings, alias, models) {
+  const m = models.find((x) => x.alias === alias);
   return ceilings.every(
     (c) =>
       !c.limits ||
-      !c.limits.allowed_models ||
-      c.limits.allowed_models.includes(alias),
+      ((!c.limits.allowed_models || c.limits.allowed_models.includes(alias)) &&
+        (!c.limits.allowed_locations ||
+          inLocations(m, c.limits.allowed_locations, models))),
+  );
+}
+
+function locationAbove(ceilings, loc) {
+  return ceilings.every(
+    (c) =>
+      !c.limits ||
+      !c.limits.allowed_locations ||
+      c.limits.allowed_locations.includes(loc),
   );
 }
 
@@ -1053,6 +1251,7 @@ function hasAny(lim) {
   return !!(
     lim &&
     (lim.allowed_models ||
+      lim.allowed_locations ||
       (lim.rate_limits || []).length ||
       (lim.budgets || []).length ||
       lim.system_prompt ||
@@ -1068,12 +1267,23 @@ export function summarise(lim) {
 }
 
 export function modelsCell(lim) {
-  if (!lim || !lim.allowed_models) return h("span", { class: "muted" }, "All");
-  return h(
-    "div",
-    { class: "wrap-chips" },
-    lim.allowed_models.length
-      ? lim.allowed_models.map((m) => pill(m, "accent"))
-      : pill("None", "bad"),
-  );
+  if (!lim || (!lim.allowed_models && !lim.allowed_locations)) {
+    return h("span", { class: "muted" }, "All");
+  }
+  const pills = [];
+  if (lim.allowed_models) {
+    pills.push(
+      ...(lim.allowed_models.length
+        ? lim.allowed_models.map((m) => pill(m, "accent"))
+        : [pill("None", "bad")]),
+    );
+  }
+  if (lim.allowed_locations) {
+    pills.push(
+      lim.allowed_locations.length
+        ? pill(locationsName(lim.allowed_locations))
+        : pill("Nowhere", "bad"),
+    );
+  }
+  return h("div", { class: "wrap-chips" }, pills);
 }

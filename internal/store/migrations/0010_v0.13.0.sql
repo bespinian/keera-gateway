@@ -28,3 +28,6 @@ ALTER TABLE models DROP CONSTRAINT models_kind_check,
     ADD CONSTRAINT models_kind_check
         CHECK (kind IN ('chat', 'completion', 'embedding', 'rerank', 'decision'));
 
+-- Where a scope's models may run, such as ch or onprem, so prompts stay there.
+-- NULL inherits, like allowed_models; an empty list allows nothing.
+ALTER TABLE guardrails ADD COLUMN allowed_locations text[];

@@ -462,6 +462,10 @@ func (s *Server) admit(c *call, b *body) bool {
 }
 
 func (s *Server) admitted(c *call, b *body) bool {
+	if why := s.filterOutside(c.res, s.callFilters(c)); why != "" {
+		s.refuse(c, locationRefusal(why))
+		return false
+	}
 	if ref, ok := s.checkRates(c.res.Scopes, c.now); !ok {
 		s.refuse(c, ref)
 		return false

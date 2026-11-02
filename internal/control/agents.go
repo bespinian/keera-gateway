@@ -367,7 +367,7 @@ func catalogueOf(projectID string, projects []store.Project, res *policy.Resolve
 	}
 	// A router is named and allowed like a model.
 	for _, r := range routers {
-		if res.MayCallRouter(r.Alias) {
+		if res.MayCallRouter(r, modelFinder(catalogue)) {
 			out.Models = append(out.Models, serviceModel{Alias: r.Alias, Kind: "router"})
 		}
 	}

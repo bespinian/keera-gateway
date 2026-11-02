@@ -2,7 +2,6 @@ package control
 
 import (
 	"cmp"
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -233,27 +232,26 @@ func (s *Server) checkReaderModel(w http.ResponseWriter, r *http.Request, orgID,
 		badRequest(w, subscriptionReader(alias, rd.name))
 		return false
 	}
-	allowed, err := s.orgAllowsModel(r.Context(), orgID, alias)
+	lim, err := s.storedLimits(r.Context(), policy.ScopeOrg, orgID)
 	if err != nil {
 		s.fail(w, err)
 		return false
 	}
-	if !allowed {
+	switch {
+	case lim.AllowedModels != nil && !slices.Contains(lim.AllowedModels, alias):
 		httpx.WriteError(w, http.StatusBadRequest, "invalid_request_error", "model_not_allowed",
 			readerModelRefusal(rd.name, alias, m))
 		return false
+	case lim.AllowedLocations != nil && !slices.Contains(lim.AllowedLocations, m.Location):
+		httpx.WriteError(w, http.StatusBadRequest, "invalid_request_error", "model_not_allowed",
+			"'"+alias+"' runs in "+cmp.Or(m.Location, "no known location")+", but this "+
+				"organisation allows only models in "+strings.Join(lim.AllowedLocations, ", ")+
+				". A "+rd.name+" reads a request before anything is redacted from it, so it "+
+				"would send every request it covers there in full. Name a model in one of "+
+				"those locations")
+		return false
 	}
 	return true
-}
-
-// orgAllowsModel reports whether an organisation's allow-list permits a
-// model. No list at all allows every model.
-func (s *Server) orgAllowsModel(ctx context.Context, orgID, alias string) (bool, error) {
-	lim, err := s.storedLimits(ctx, policy.ScopeOrg, orgID)
-	if err != nil {
-		return false, err
-	}
-	return lim.AllowedModels == nil || slices.Contains(lim.AllowedModels, alias), nil
 }
 
 // readerModelRefusal says why a filter or route step may not run on a model

@@ -46,9 +46,9 @@ func TestAccessSaysTheOperatorKeyIsNobody(t *testing.T) {
 
 func TestAllowedModelsIsWhatTheKeyCanActuallyCall(t *testing.T) {
 	models := []policy.Model{
-		{Alias: "keera-code", Enabled: true},
-		{Alias: "keera-frontier", Enabled: true},
-		{Alias: "keera-retired"}, // disabled
+		{Alias: "keera-code", Enabled: true, Location: "ch"},
+		{Alias: "keera-frontier", Enabled: true, Location: "usa"},
+		{Alias: "keera-retired", Location: "ch"}, // disabled
 	}
 	tests := []struct {
 		name  string
@@ -72,11 +72,16 @@ func TestAllowedModelsIsWhatTheKeyCanActuallyCall(t *testing.T) {
 			limit: &policy.Limits{AllowedModels: []string{}},
 			want:  []string{},
 		},
+		{
+			name:  "a location narrows it",
+			limit: &policy.Limits{AllowedLocations: []string{"ch"}},
+			want:  []string{"keera-code"},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			res := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, tc.limit, nil, nil)
-			if got := allowedModels(res, models); !slices.Equal(got, tc.want) {
+			if got := allowedModels(res, models, nil); !slices.Equal(got, tc.want) {
 				t.Errorf("allowedModels = %v, want %v", got, tc.want)
 			}
 		})

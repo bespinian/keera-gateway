@@ -29,6 +29,7 @@ import {
   formModal,
   rangeOf,
   busyButton,
+  locationName,
 } from "../ui.js";
 import { openGuardrails, ceilingsFor, summarise } from "./guardrails.js";
 import { budgetText } from "./limits.js";
@@ -211,6 +212,14 @@ export async function keysView(ctx) {
           const bits = summarise(k.limits || {});
           for (const b of (k.limits && k.limits.budgets) || []) {
             bits.push(budgetText(b));
+          }
+          if (k.limits && k.limits.allowed_locations) {
+            const locs = k.limits.allowed_locations;
+            bits.unshift(
+              locs.length
+                ? `models in ${locs.map(locationName).join(", ")}`
+                : "No location",
+            );
           }
           if (k.limits && k.limits.allowed_models) {
             const n = k.limits.allowed_models.length;

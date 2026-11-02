@@ -151,13 +151,59 @@ func TestAllowsModel(t *testing.T) {
 }
 
 func TestMayCallRouter(t *testing.T) {
+	none := func(string) (Model, bool) { return Model{}, false }
+	auto, other := Router{Alias: "auto"}, Router{Alias: "other"}
 	restricted := &Resolved{AllowedModels: []string{"auto"}}
-	if !restricted.MayCallRouter("auto") || restricted.MayCallRouter("other") {
+	if !restricted.MayCallRouter(auto, none) || restricted.MayCallRouter(other, none) {
 		t.Error("a router must follow the allow-list like a model")
 	}
 	subscription := &Resolved{Key: Key{Kind: KeySubscription}}
-	if subscription.MayCallRouter("auto") {
+	if subscription.MayCallRouter(auto, none) {
 		t.Error("a subscription key must reach no router, even with no allow-list")
+	}
+}
+
+// A location limit keeps prompts in place, so it holds for each model a
+// router may send to or decide with, and narrows from level to level.
+func TestALocationLimitCoversEveryModelARouterReaches(t *testing.T) {
+	models := map[string]Model{
+		"local":  {Alias: "local", Location: LocationOnPrem},
+		"swiss":  {Alias: "swiss", Location: "ch"},
+		"claude": {Alias: "claude", Location: "usa"},
+	}
+	find := func(alias string) (Model, bool) { m, ok := models[alias]; return m, ok }
+	route := func(decider string, to ...string) Router {
+		return Router{Alias: "auto", Start: &Step{
+			ID: "r", Kind: StepRoute, Model: decider, Destinations: to,
+		}}
+	}
+
+	res := Resolve(Key{ID: "k", OrgID: "o", ProjectID: "p"},
+		&Limits{AllowedLocations: []string{"ch", "onprem", "eu"}},
+		&Limits{AllowedLocations: []string{"ch", "onprem"}}, nil)
+	if !slices.Equal(res.AllowedLocations, []string{"ch", "onprem"}) {
+		t.Fatalf("locations = %v, want the project's narrower list", res.AllowedLocations)
+	}
+	if !res.MayUse(models["swiss"]) || !res.MayUse(models["local"]) || res.MayUse(models["claude"]) {
+		t.Error("a model must follow the location limit")
+	}
+	if res.MayUse(Model{Alias: "unknown"}) {
+		t.Error("a model with no location must count as outside")
+	}
+	if !res.MayCallRouter(route("local", "local", "swiss"), find) {
+		t.Error("a router that stays inside was refused")
+	}
+	if res.MayCallRouter(route("local", "local", "claude"), find) {
+		t.Error("a router that may send to the USA was allowed")
+	}
+	if res.MayCallRouter(route("claude", "local", "swiss"), find) {
+		t.Error("a router that decides with a model in the USA was allowed")
+	}
+	if res.MayCallRouter(route("local", "local", "gone"), find) {
+		t.Error("a router that sends to a model that cannot be found was allowed")
+	}
+	if !(&Resolved{}).MayCallRouter(route("claude", "claude"), find) {
+		t.Error("without a location limit, a router may send anywhere")
 	}
 }
 

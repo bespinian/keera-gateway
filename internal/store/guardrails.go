@@ -13,6 +13,7 @@ import (
 // and limitValues writes them. A new limit needs an entry here and in both.
 var limitFields = []string{
 	"allowed_models", "rate_limits", "budgets", "system_prompt", "filters", "allowed_tools",
+	"allowed_locations",
 }
 
 // limitColumns is a guardrail row as policy.Limits holds it, from a table
@@ -44,7 +45,7 @@ var copyKeyGuardrailSQL = `INSERT INTO guardrails (scope_type, scope_id, ` +
 func limitTargets(lim *policy.Limits) []any {
 	return []any{
 		&lim.AllowedModels, &lim.RateLimits, &lim.Budgets, &lim.SystemPrompt, &lim.Filters,
-		&lim.AllowedTools,
+		&lim.AllowedTools, &lim.AllowedLocations,
 	}
 }
 
@@ -52,7 +53,7 @@ func limitTargets(lim *policy.Limits) []any {
 func limitValues(lim policy.Limits) []any {
 	return []any{
 		lim.AllowedModels, jsonList(lim.RateLimits), jsonList(lim.Budgets),
-		lim.SystemPrompt, lim.Filters, lim.AllowedTools,
+		lim.SystemPrompt, lim.Filters, lim.AllowedTools, lim.AllowedLocations,
 	}
 }
 

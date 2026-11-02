@@ -3,7 +3,6 @@ package control
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -91,12 +90,17 @@ func TestAnAdministratorDrawsARouter(t *testing.T) {
 
 	// A key's own screens, the playground among them, offer what it may name,
 	// routers included.
-	callable, err := tn.srv.callable(httptest.NewRequest("GET", "/", nil).WithContext(tn.ctx), "org_a")
+	models, err := tn.srv.st.ListModels(tn.ctx, "org_a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.ContainsFunc(callable, func(m policy.Model) bool { return m.Alias == "safe" }) {
-		t.Errorf("callable = %+v, which leaves out the router", callable)
+	routers, err := tn.srv.st.ListRouters(tn.ctx, "org_a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_a"}, nil, nil, nil)
+	if callable := allowedModels(res, models, routers); !slices.Contains(callable, "safe") {
+		t.Errorf("callable = %v, which leaves out the router", callable)
 	}
 }
 
