@@ -85,6 +85,10 @@ var isolationCases = map[string]isolationCase{
 	"GET /v1/billing/payments":              {"/v1/billing/payments?org_id=org_a", ""},
 	"GET /v1/billing/payments/{id}/receipt": {"/v1/billing/payments/pay_a/receipt", ""},
 	"POST /v1/billing/grants":               {"/v1/billing/grants", `{"org_id":"org_a","amount_micros":10000000}`},
+	"GET /v1/billing/charges":               {"/v1/billing/charges?org_id=org_a", ""},
+	"POST /v1/billing/charges":              {"/v1/billing/charges", `{"org_id":"org_a","name":"x","amount_micros":10000000,"every":"month"}`},
+	"DELETE /v1/billing/charges/{id}":       {"/v1/billing/charges/charge_a", ""},
+	"POST /v1/billing/charges/{id}/pay":     {"/v1/billing/charges/charge_a/pay", ""},
 	"GET /v1/audit":                         {"/v1/audit?org_id=org_a", ""},
 	"GET /v1/requests":                      {"/v1/requests?org_id=org_a", ""},
 	"GET /v1/requests/stream":               {"/v1/requests/stream?org_id=org_a", ""},
@@ -170,6 +174,12 @@ func TestNoRouteLetsOneTenantReachAnother(t *testing.T) {
 	if err := st.CreatePayment(ctx, store.Payment{
 		ID: "pay_a", OrgID: "org_a", Kind: store.PaymentTopUp,
 		AmountMicros: 10_000_000, Actor: "ada@example.ch",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateCharge(ctx, store.RecurringCharge{
+		ID: "charge_a", OrgID: "org_a", Name: "Dedicated model", AmountMicros: 10_000_000,
+		Every: "month", StartsOn: "2026-11-01", Actor: "operator",
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/store"
@@ -26,6 +27,9 @@ type billingRun struct {
 	note     string
 	limit    int
 	output   string
+	name     string
+	every    string
+	start    string
 }
 
 func billingCmd(ctx context.Context, args []string) error {
@@ -34,10 +38,15 @@ func billingCmd(ctx context.Context, args []string) error {
 	// every time rather than trust the chosen one.
 	r.reword("grant", "org", "organisation, by name or id (required)")
 	r.reword("invoiced", "org", "organisation, by name or id (required)")
+	r.reword("charge", "org", "organisation, by name or id (required)")
 	r.fs.StringVar(&r.month, "month", "", "the month to bill, as YYYY-MM (default: this month)")
 	r.fs.Float64Var(&r.amount, "amount", 0, "an amount in CHF, such as 100")
 	r.reword("topup", "amount", "an amount in CHF, such as 100 (required)")
 	r.reword("grant", "amount", "an amount in CHF, such as 100 (required)")
+	r.reword("charge", "amount", "the price of each period in CHF, without VAT, such as 500 (required)")
+	r.fs.StringVar(&r.name, "name", "", "what the charge pays for, shown on the payment page and the receipt (required)")
+	r.fs.StringVar(&r.every, "every", "", "month or year (required)")
+	r.fs.StringVar(&r.start, "start", "", "the day the first period starts, as YYYY-MM-DD (default: today)")
 	r.fs.Float64Var(&r.below, "below", 0, "the balance in CHF that starts an automatic top-up")
 	r.fs.BoolVar(&r.off, "off", false, "turn the automatic top-up off")
 	r.reword("invoiced", "off", "make it pay in advance again")
@@ -68,6 +77,14 @@ func billingCmd(ctx context.Context, args []string) error {
 		return r.payments(ctx)
 	case "receipt":
 		return r.receipt(ctx)
+	case "charges":
+		return r.charges(ctx)
+	case "charge":
+		return r.addCharge(ctx)
+	case "end-charge":
+		return r.endCharge(ctx)
+	case "pay-charge":
+		return r.payCharge(ctx)
 	default:
 		return r.report(ctx)
 	}
@@ -134,9 +151,10 @@ func printBilling(w *table, res billingResponse) {
 }
 
 type creditResponse struct {
-	Payments bool                `json:"payments"`
-	Account  store.CreditAccount `json:"account"`
-	Recent   []store.Payment     `json:"recent"`
+	Payments bool                    `json:"payments"`
+	Account  store.CreditAccount     `json:"account"`
+	Recent   []store.Payment         `json:"recent"`
+	Charges  []store.RecurringCharge `json:"charges"`
 }
 
 // confirmForget asks first because PostFinance forgets the card too, so it
@@ -148,6 +166,10 @@ func (r *billingRun) confirmForget(ctx context.Context, orgID string) error {
 	}
 	if res.Account.Card == nil {
 		return errors.New("there is no saved card to forget")
+	}
+	if len(res.Charges) > 0 {
+		return errors.New("the card pays this organisation's recurring charges, so it cannot " +
+			"be forgotten; 'keera billing topup --save-card' replaces it with another")
 	}
 	lines := []string{"  PostFinance forgets it too, so it cannot be put back"}
 	if res.Account.TopUpMicros > 0 {
@@ -207,6 +229,10 @@ func printCredit(w *table, res creditResponse) {
 	if a.TopUpError != "" {
 		show(w, "last top-up failed", style.warn(a.TopUpError))
 	}
+	if len(res.Charges) > 0 {
+		_, _ = fmt.Fprintln(w)
+		printCharges(w, res.Charges, a.Card != nil, nil)
+	}
 	if len(res.Recent) > 0 {
 		_, _ = fmt.Fprintln(w)
 		printPayments(w, res.Recent, nil)
@@ -229,8 +255,153 @@ func printPayments(w *table, list []store.Payment, orgNames map[string]string) {
 			_, _ = fmt.Fprintf(w, "%s\t", labelled(orgNames, p.OrgID))
 		}
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.ID, p.CreatedAt.Local().Format("2006-01-02 15:04"),
-			p.Kind, policy.FormatMoney(p.AmountMicros), policy.FormatMoney(p.VATMicros), policy.FormatMoney(p.FeeMicros), p.State, p.Actor, dash(p.Note))
+			p.Kind, policy.FormatMoney(p.AmountMicros), policy.FormatMoney(p.VATMicros), policy.FormatMoney(p.FeeMicros), p.State, p.Actor, dash(paymentNote(p)))
 	}
+}
+
+// paymentNote is what a charge paid for, and why a payment failed or a grant
+// was made.
+func paymentNote(p store.Payment) string {
+	if p.Kind != store.PaymentCharge || p.PeriodStart == nil || p.PeriodEnd == nil {
+		return p.Note
+	}
+	what := p.Item + ", " + p.PeriodStart.UTC().Format(time.DateOnly) + " to " +
+		p.PeriodEnd.UTC().AddDate(0, 0, -1).Format(time.DateOnly)
+	if p.Note != "" {
+		what += ": " + p.Note
+	}
+	return what
+}
+
+// printCharges adds an organisation column when orgNames is set. hasCard
+// says whether the organisation has a card to charge, and is ignored with
+// orgNames.
+func printCharges(w *table, list []store.RecurringCharge, hasCard bool, orgNames map[string]string) {
+	if len(list) == 0 {
+		printNone(w, "recurring charges", "")
+		return
+	}
+	head := "ID\tNAME\tAMOUNT\tEVERY\tNEXT\tSTATE"
+	if orgNames != nil {
+		head = "ORG\t" + head
+	}
+	w.header(head)
+	now := time.Now()
+	for _, c := range list {
+		if orgNames != nil {
+			_, _ = fmt.Fprintf(w, "%s\t", labelled(orgNames, c.OrgID))
+		}
+		state := "charged to the saved card then"
+		switch {
+		case c.Error != "":
+			state = style.warn("the card was declined: " + c.Error)
+		case orgNames == nil && !hasCard && now.Before(c.DueAt):
+			state = style.warn("no saved card: pay it before then")
+		case orgNames == nil && !hasCard:
+			state = style.warn("due, and no saved card: calls are refused")
+		case now.After(c.DueAt):
+			state = "due"
+		}
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", c.ID, c.Name,
+			policy.FormatMoney(c.AmountMicros), c.Every, c.DueAt.UTC().Format(time.DateOnly), state)
+	}
+}
+
+func (r *billingRun) charges(ctx context.Context) error {
+	org, err := orgIfGiven(ctx, r.c, r.org)
+	if err != nil {
+		return err
+	}
+	q := url.Values{}
+	setIfGiven(q, map[string]string{"org_id": org})
+	charges, err := list[store.RecurringCharge](ctx, r.c, "/v1/billing/charges?"+q.Encode())
+	if err != nil {
+		return err
+	}
+	if r.asJSON {
+		return out(true, charges, nil)
+	}
+	// One organisation's charges say whether its card can pay them.
+	if org != "" || !spansOrgs(charges, func(c store.RecurringCharge) string { return c.OrgID }) {
+		hasCard := true
+		if len(charges) > 0 {
+			res, err := r.creditAccount(ctx, charges[0].OrgID)
+			if err != nil {
+				return err
+			}
+			hasCard = res.Account.Card != nil
+		}
+		return out(false, charges, func(w *table) { printCharges(w, charges, hasCard, nil) })
+	}
+	orgs, err := list[store.Org](ctx, r.c, "/v1/orgs")
+	if err != nil {
+		return err
+	}
+	names := make(map[string]string, len(orgs))
+	for _, o := range orgs {
+		names[o.ID] = o.Name
+	}
+	return out(false, charges, func(w *table) { printCharges(w, charges, false, names) })
+}
+
+func (r *billingRun) addCharge(ctx context.Context) error {
+	switch {
+	case r.orgFlag == "":
+		return errors.New("--org is required: the organisation to charge")
+	case r.name == "":
+		return errors.New("--name is required: it says what the charge pays for")
+	case r.every == "":
+		return errors.New("--every is required: month or year")
+	}
+	amount, err := r.amountMicros()
+	if err != nil {
+		return err
+	}
+	orgID, err := resolveOrg(ctx, r.c, r.orgFlag)
+	if err != nil {
+		return err
+	}
+	body := map[string]any{
+		"org_id": orgID, "name": r.name, "amount_micros": amount, "every": r.every,
+	}
+	if r.start != "" {
+		body["starts_on"] = r.start
+	}
+	return doOut(ctx, r.c, "POST", "/v1/billing/charges", body, r.asJSON,
+		func(w *table, c store.RecurringCharge) {
+			_, _ = fmt.Fprintf(w, "%s is charged %s every %s from %s, plus VAT and a transaction fee.\n",
+				c.OrgID, policy.FormatMoney(c.AmountMicros), c.Every, c.StartsOn)
+			_, _ = fmt.Fprintln(w, "Without a saved card, its calls are refused from that day "+
+				"until an administrator pays.")
+		})
+}
+
+func (r *billingRun) endCharge(ctx context.Context) error {
+	return doOut(ctx, r.c, "DELETE", "/v1/billing/charges/"+url.PathEscape(r.fs.Arg(0)), nil,
+		r.asJSON, func(w *table, _ map[string]any) {
+			_, _ = fmt.Fprintln(w, "The charge has ended: no further period is charged.")
+		})
+}
+
+func (r *billingRun) payCharge(ctx context.Context) error {
+	var res struct {
+		Payment store.Payment `json:"payment"`
+		URL     string        `json:"url"`
+	}
+	if err := r.c.do(ctx, "POST", "/v1/billing/charges/"+url.PathEscape(r.fs.Arg(0))+"/pay",
+		nil, &res); err != nil {
+		return err
+	}
+	if r.asJSON {
+		return out(true, res, nil)
+	}
+	pm := res.Payment
+	fmt.Fprintf(os.Stderr, "Pay %s: %s, %s VAT and a %s transaction fee, on PostFinance "+
+		"Checkout. The card is saved for the periods after:\n",
+		policy.FormatMoney(pm.AmountMicros+pm.VATMicros+pm.FeeMicros), paymentNote(pm),
+		policy.FormatMoney(pm.VATMicros), policy.FormatMoney(pm.FeeMicros))
+	fmt.Println(res.URL)
+	return nil
 }
 
 func (r *billingRun) amountMicros() (int64, error) {
@@ -367,7 +538,7 @@ func (r *billingRun) payments(ctx context.Context) error {
 		return err
 	}
 	var names map[string]string
-	if r.org == "" && !r.asJSON && spansOrgs(payments) {
+	if r.org == "" && !r.asJSON && spansOrgs(payments, func(p store.Payment) string { return p.OrgID }) {
 		orgs, err := list[store.Org](ctx, r.c, "/v1/orgs")
 		if err != nil {
 			return err
@@ -413,9 +584,10 @@ func receiptName(h http.Header) string {
 	return name
 }
 
-func spansOrgs(list []store.Payment) bool {
-	for _, p := range list {
-		if p.OrgID != list[0].OrgID {
+// spansOrgs reports whether list holds rows of more than one organisation.
+func spansOrgs[T any](list []T, orgOf func(T) string) bool {
+	for _, v := range list {
+		if orgOf(v) != orgOf(list[0]) {
 			return true
 		}
 	}

@@ -409,6 +409,10 @@ type Setup struct {
 	// Invoiced says the organisation is billed by invoice, so it needs no
 	// credit. Always false across every organisation.
 	Invoiced bool `json:"invoiced"`
+	// ChargeDueAt is when the first recurring charge no saved card can pay
+	// falls due, after which every call is refused. Absent without one, and
+	// across every organisation.
+	ChargeDueAt *time.Time `json:"charge_due_at,omitempty"`
 }
 
 // SetupState counts the objects a first run has to create. An empty orgID
@@ -428,10 +432,13 @@ func (s *Store) SetupState(ctx context.Context, orgID string) (Setup, error) {
 		(SELECT count(*) FROM mcp_servers WHERE $1 = '' OR org_id = $1),
 		(SELECT count(*) FROM payments WHERE ($1 = '' OR org_id = $1)
 			AND state = 'paid' AND micros > 0),
-		EXISTS (SELECT 1 FROM credit_accounts WHERE org_id = $1 AND invoiced)`, orgID,
+		EXISTS (SELECT 1 FROM credit_accounts WHERE org_id = $1 AND invoiced),
+		(SELECT min(`+chargeDue+`) FROM recurring_charges c
+		 LEFT JOIN credit_accounts a ON a.org_id = c.org_id
+		 WHERE c.org_id = $1 AND (a.card_token IS NULL OR c.error IS NOT NULL))`, orgID,
 	).Scan(&st.Orgs, &st.Keys, &st.Models, &st.Requests,
 		&st.Filters, &st.Routers, &st.MCPServers, &st.Credits,
-		&st.Invoiced)
+		&st.Invoiced, &st.ChargeDueAt)
 	return st, err
 }
 

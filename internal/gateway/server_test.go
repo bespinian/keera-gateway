@@ -106,6 +106,8 @@ type fakeBudgets struct {
 	err error
 	// creditErr is what HoldCredit answers, and credited what was taken.
 	creditErr error
+	// chargeErr is what ChargesPaid answers.
+	chargeErr error
 	mu        sync.Mutex
 	charged   int64
 	credited  int64
@@ -140,6 +142,8 @@ func (f *fakeBudgets) HoldCredit(_ string, micros int64) (int64, error) {
 	f.mostHeld = max(f.mostHeld, f.held)
 	return micros, nil
 }
+
+func (f *fakeBudgets) ChargesPaid(string, time.Time) error { return f.chargeErr }
 
 func (f *fakeBudgets) ReleaseCredit(_ string, micros int64) {
 	f.mu.Lock()

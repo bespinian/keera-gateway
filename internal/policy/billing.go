@@ -1,5 +1,7 @@
 package policy
 
+import "time"
+
 // Currency is what every price, budget, bill and credit is in.
 const Currency = "CHF"
 
@@ -70,4 +72,16 @@ func (e *ErrNoCredit) Error() string {
 	}
 	return "your organisation has used up its credit (balance " +
 		FormatMoney(e.BalanceMicros) + "); an administrator can add credit under Billing"
+}
+
+// ErrChargeDue refuses every call of an organisation with a recurring charge
+// due that the saved card cannot pay: there is no card, or it was declined.
+type ErrChargeDue struct {
+	Since time.Time
+}
+
+func (e *ErrChargeDue) Error() string {
+	return "your organisation has a recurring charge due since " +
+		e.Since.UTC().Format(time.DateOnly) + " that no saved card can pay; an administrator " +
+		"can pay it and save a card under Billing"
 }

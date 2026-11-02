@@ -138,6 +138,29 @@ func TestAnOrganisationWithoutCreditIsRefused(t *testing.T) {
 	}
 }
 
+// A charge no card can pay stops the organisation from the moment it is due,
+// even one billed by invoice.
+func TestADueChargeRefusesFromItsDueDate(t *testing.T) {
+	due := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
+	b := newBudgets(true)
+	b.reconcileCredit([]store.CreditRow{
+		{OrgID: "org_a", Invoiced: true, ChargeDueAt: due},
+		{OrgID: "org_b", BalanceMicros: 5_000_000},
+	})
+	if err := b.ChargesPaid("org_a", due.Add(-time.Second)); err != nil {
+		t.Errorf("refused before the charge was due: %v", err)
+	}
+	if _, ok := errors.AsType[*policy.ErrChargeDue](b.ChargesPaid("org_a", due)); !ok {
+		t.Error("let in with a charge due")
+	}
+	if err := b.ChargesPaid("org_b", due); err != nil {
+		t.Errorf("an organisation without charges was refused: %v", err)
+	}
+	if err := newBudgets(false).ChargesPaid("org_a", due); err != nil {
+		t.Errorf("refused without payments: %v", err)
+	}
+}
+
 func TestWithoutPaymentsCreditIsNotChecked(t *testing.T) {
 	b := newBudgets(false)
 	b.ChargeCredit("org_a", 1_000_000)

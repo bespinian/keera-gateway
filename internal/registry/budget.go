@@ -41,6 +41,9 @@ type Budgets struct {
 type credit struct {
 	balance  int64
 	invoiced bool
+	// chargeDue is when a recurring charge no saved card can pay fell due,
+	// or zero.
+	chargeDue time.Time
 }
 
 func newBudgets(prepaid bool) *Budgets {
@@ -218,6 +221,21 @@ func (b *Budgets) HoldCredit(orgID string, micros int64) (int64, error) {
 	return max(micros, 0), nil
 }
 
+// ChargesPaid refuses every call of an organisation once a recurring charge is
+// due that no saved card can pay. Without payments there are no charges.
+func (b *Budgets) ChargesPaid(orgID string, now time.Time) error {
+	if !b.prepaid {
+		return nil
+	}
+	b.mu.RLock()
+	due := b.credit[orgID].chargeDue
+	b.mu.RUnlock()
+	if due.IsZero() || now.Before(due) {
+		return nil
+	}
+	return &policy.ErrChargeDue{Since: due}
+}
+
 // ReleaseCredit gives back what HoldCredit held, once the request has been
 // charged what it really used.
 func (b *Budgets) ReleaseCredit(orgID string, micros int64) {
@@ -249,7 +267,7 @@ func (b *Budgets) ChargeCredit(orgID string, micros int64) {
 func (b *Budgets) reconcileCredit(rows []store.CreditRow) {
 	next := make(map[string]credit, len(rows))
 	for _, r := range rows {
-		next[r.OrgID] = credit{balance: r.BalanceMicros, invoiced: r.Invoiced}
+		next[r.OrgID] = credit{balance: r.BalanceMicros, invoiced: r.Invoiced, chargeDue: r.ChargeDueAt}
 	}
 	b.mu.Lock()
 	b.credit = next

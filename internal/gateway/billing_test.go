@@ -121,6 +121,25 @@ func TestCreditDoesNotStopTheOrganisationsOwnModels(t *testing.T) {
 	}
 }
 
+// A recurring charge pays for the organisation's use of the deployment, so
+// while one is due and no card can pay it, its own models stop too.
+func TestADueChargeStopsEveryModel(t *testing.T) {
+	h := filterHarness(t, redactor, nil)
+	h.budgets.chargeErr = &policy.ErrChargeDue{Since: time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)}
+	resp := h.post(t, "/v1/chat/completions",
+		`{"model":"keera-code","messages":[{"role":"user","content":"hunter2"}]}`)
+	if resp.StatusCode != http.StatusPaymentRequired {
+		t.Fatalf("status = %d, want 402", resp.StatusCode)
+	}
+	var envelope struct {
+		Error struct{ Message, Code string } `json:"error"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&envelope)
+	if envelope.Error.Code != "charge_due" || !strings.Contains(envelope.Error.Message, "2026-12-01") {
+		t.Errorf("error = %+v", envelope.Error)
+	}
+}
+
 // A router with one destination never asks its model, so that model being on
 // the deployment's key costs nothing and needs no credit.
 func TestCreditDoesNotStopARouterWhoseModelIsNeverAsked(t *testing.T) {

@@ -304,6 +304,10 @@ func (s *Server) mux() *httpx.Mux {
 	route("GET /v1/billing/payments", s.listPayments)
 	route("GET /v1/billing/payments/{id}/receipt", s.paymentReceipt)
 	route("POST /v1/billing/grants", s.grantCredit)
+	route("GET /v1/billing/charges", s.listCharges)
+	route("POST /v1/billing/charges", s.createCharge)
+	route("DELETE /v1/billing/charges/{id}", s.deleteCharge)
+	route("POST /v1/billing/charges/{id}/pay", s.payCharge)
 	route("GET /v1/audit", s.audit)
 	route("GET /v1/requests", s.requests)
 	// The request log grouped into tasks. A session is named by the id of any

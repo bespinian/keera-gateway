@@ -74,17 +74,31 @@ type CreditRow struct {
 	OrgID         string
 	BalanceMicros int64
 	Invoiced      bool
+	// ChargeDueAt is when the first recurring charge the saved card cannot
+	// pay falls due: there is no card, or it was declined. From then on,
+	// every call is refused. Zero when there is none.
+	ChargeDueAt time.Time
 }
 
 // LoadCredit reads every organisation's balance. An organisation without a
-// row has none.
+// row has none. Creating a recurring charge creates the row.
 func (s *Store) LoadCredit(ctx context.Context) ([]CreditRow, error) {
-	return queryAll(ctx, s.pool, scanCreditRow, `SELECT org_id, balance_micros, invoiced FROM credit_accounts`)
+	return queryAll(ctx, s.pool, scanCreditRow, `
+		SELECT a.org_id, a.balance_micros, a.invoiced,
+		       (SELECT min(`+chargeDue+`) FROM recurring_charges c
+		        WHERE c.org_id = a.org_id AND (a.card_token IS NULL OR c.error IS NOT NULL))
+		FROM credit_accounts a`)
 }
 
 func scanCreditRow(r row) (CreditRow, error) {
-	var c CreditRow
-	err := r.Scan(&c.OrgID, &c.BalanceMicros, &c.Invoiced)
+	var (
+		c   CreditRow
+		due *time.Time
+	)
+	err := r.Scan(&c.OrgID, &c.BalanceMicros, &c.Invoiced, &due)
+	if due != nil {
+		c.ChargeDueAt = *due
+	}
 	return c, err
 }
 
@@ -164,6 +178,10 @@ const (
 	PaymentTopUp PaymentKind = "topup"
 	PaymentAuto  PaymentKind = "auto"
 	PaymentGrant PaymentKind = "grant"
+	// PaymentCharge pays one period of a recurring charge. It adds no
+	// credit. SaveCard tells the two ways apart: an administrator paid it on
+	// the payment page, saving the card, or else the saved card was charged.
+	PaymentCharge PaymentKind = "charge"
 )
 
 // PaymentState is how far a payment got.
@@ -192,38 +210,51 @@ type Payment struct {
 	Actor         string     `json:"actor"`
 	Note          string     `json:"note,omitempty"`
 	SettledAt     *time.Time `json:"settled_at,omitempty"`
+	// A charge's: the recurring charge, its name, and the period it pays.
+	ChargeID    string     `json:"charge_id,omitempty"`
+	Item        string     `json:"item,omitempty"`
+	PeriodStart *time.Time `json:"period_start,omitempty"`
+	PeriodEnd   *time.Time `json:"period_end,omitempty"`
 }
 
 const paymentColumns = `id, org_id, ts, kind, micros, vat_micros, fee_micros, state, save_card,
-	transaction_id, actor, note, settled_at`
+	transaction_id, actor, note, settled_at, charge_id, item, period_start, period_end`
 
 func scanPayment(r row) (Payment, error) {
 	var (
-		p    Payment
-		tx   *int64
-		note *string
+		p                  Payment
+		tx                 *int64
+		note, charge, item *string
 	)
 	err := r.Scan(&p.ID, &p.OrgID, &p.CreatedAt, &p.Kind, &p.AmountMicros, &p.VATMicros, &p.FeeMicros, &p.State,
-		&p.SaveCard, &tx, &p.Actor, &note, &p.SettledAt)
+		&p.SaveCard, &tx, &p.Actor, &note, &p.SettledAt, &charge, &item, &p.PeriodStart, &p.PeriodEnd)
 	if tx != nil {
 		p.TransactionID = *tx
 	}
-	if note != nil {
-		p.Note = *note
-	}
+	p.Note, p.ChargeID, p.Item = deref(note), deref(charge), deref(item)
 	return p, err
 }
 
-// ErrTopUpUnderway means another automatic top-up for the organisation is
-// still pending.
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// ErrTopUpUnderway means another automatic top-up for the organisation, or
+// another charge of the saved card for the same recurring charge, is still
+// pending.
 var ErrTopUpUnderway = errors.New("store: an automatic top-up is under way")
 
 // CreatePayment records a payment that has not been paid yet.
 func (s *Store) CreatePayment(ctx context.Context, p Payment) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO payments (id, org_id, kind, micros, vat_micros,
-		fee_micros, state, save_card, actor) VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8)`,
-		p.ID, p.OrgID, p.Kind, p.AmountMicros, p.VATMicros, p.FeeMicros, p.SaveCard, p.Actor)
-	if uniqueOn(err, "payments_one_auto_idx") {
+		fee_micros, state, save_card, actor, charge_id, item, period_start, period_end)
+		VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8,$9,$10,$11,$12)`,
+		p.ID, p.OrgID, p.Kind, p.AmountMicros, p.VATMicros, p.FeeMicros, p.SaveCard, p.Actor,
+		nullable(p.ChargeID), nullable(p.Item), p.PeriodStart, p.PeriodEnd)
+	if uniqueOn(err, "payments_one_auto_idx") || uniqueOn(err, "payments_one_charge_idx") {
 		return ErrTopUpUnderway
 	}
 	return err
@@ -286,12 +317,15 @@ type Settled struct {
 	OldToken int64
 	// Lifted is set when the payment lifted the organisation's limit.
 	Lifted bool
+	// Twice is set when a charge paid a period that was paid already, so
+	// the operator can refund one.
+	Twice bool
 }
 
-// Settle ends a pending payment. A paid one adds its credit, saves its card,
-// clears a failed top-up and lifts the organisation's limit; a failed
-// automatic top-up stops the next. A failed payment that is paid after all is
-// credited too.
+// Settle ends a pending payment. A paid one adds its credit or pays its
+// period, saves its card, clears failed top-ups and charges, and lifts the
+// organisation's limit; a failed charge of the saved card stops the next. A
+// failed payment that is paid after all is credited too.
 func (s *Store) Settle(ctx context.Context, paymentID string, how Settlement) (Settled, error) {
 	state := PaymentFailed
 	if how.Paid {
@@ -312,7 +346,11 @@ func (s *Store) Settle(ctx context.Context, paymentID string, how Settlement) (S
 		out.Payment, out.Ended = p, true
 		switch {
 		case how.Paid:
-			if err := addCredit(ctx, tx, p.OrgID, p.AmountMicros); err != nil {
+			if p.Kind == PaymentCharge {
+				if out.Twice, err = payPeriod(ctx, tx, p); err != nil {
+					return err
+				}
+			} else if err := addCredit(ctx, tx, p.OrgID, p.AmountMicros); err != nil {
 				return err
 			}
 			// Paying once lifts the limit. A grant does not: it is not the
@@ -323,9 +361,15 @@ func (s *Store) Settle(ctx context.Context, paymentID string, how Settlement) (S
 				return err
 			}
 			out.Lifted = tag.RowsAffected() > 0
+			if _, err := tx.Exec(ctx, `UPDATE recurring_charges SET error = NULL
+				WHERE org_id = $1`, p.OrgID); err != nil {
+				return err
+			}
+			// A charge's payment may be the account's first.
 			var old *int64
-			if err := tx.QueryRow(ctx, `UPDATE credit_accounts SET topup_error = NULL
-				WHERE org_id = $1 RETURNING card_token`, p.OrgID).Scan(&old); err != nil {
+			if err := tx.QueryRow(ctx, `INSERT INTO credit_accounts (org_id) VALUES ($1)
+				ON CONFLICT (org_id) DO UPDATE SET topup_error = NULL
+				RETURNING card_token`, p.OrgID).Scan(&old); err != nil {
 				return err
 			}
 			if how.Card != nil && how.Token != 0 {
@@ -341,6 +385,11 @@ func (s *Store) Settle(ctx context.Context, paymentID string, how Settlement) (S
 		case p.Kind == PaymentAuto && !how.Retry:
 			if _, err := tx.Exec(ctx, `UPDATE credit_accounts SET topup_error = $2
 				WHERE org_id = $1`, p.OrgID, how.Note); err != nil {
+				return err
+			}
+		case p.Kind == PaymentCharge && !p.SaveCard && !how.Retry:
+			if _, err := tx.Exec(ctx, `UPDATE recurring_charges SET error = $2
+				WHERE id = $1`, p.ChargeID, how.Note); err != nil {
 				return err
 			}
 		}
@@ -389,10 +438,11 @@ func (s *Store) PendingPaymentsOf(ctx context.Context, orgID string, since time.
 }
 
 // PendingPayments lists the payments still pending that started between
-// since and before, oldest first, and every automatic top-up still pending
-// from before that.
+// since and before, oldest first, and every charge of a saved card still
+// pending from before that.
 func (s *Store) PendingPayments(ctx context.Context, since, before time.Time, limit int) ([]Payment, error) {
 	return queryAll(ctx, s.pool, scanPayment, `SELECT `+paymentColumns+` FROM payments
-		WHERE state = 'pending' AND ts < $2 AND (ts >= $1 OR kind = 'auto')
+		WHERE state = 'pending' AND ts < $2
+		  AND (ts >= $1 OR kind = 'auto' OR (kind = 'charge' AND NOT save_card))
 		ORDER BY ts LIMIT $3`, since, before, limit)
 }

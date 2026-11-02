@@ -462,6 +462,17 @@ func (s *Server) admit(c *call, b *body) bool {
 }
 
 func (s *Server) admitted(c *call, b *body) bool {
+	// Every call, whichever model: the charge pays for the organisation's
+	// use of the deployment, not for one model.
+	if err := s.budgets.ChargesPaid(c.res.Key.OrgID, c.now); err != nil {
+		s.refuse(c, refusal{
+			status: http.StatusPaymentRequired,
+			typ:    "insufficient_quota", code: "charge_due",
+			msg:    err.Error(),
+			advise: true,
+		})
+		return false
+	}
 	if why := s.filterOutside(c.res, s.callFilters(c)); why != "" {
 		s.refuse(c, locationRefusal(why))
 		return false

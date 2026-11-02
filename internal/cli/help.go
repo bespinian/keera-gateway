@@ -724,7 +724,8 @@ var commands = []command{
 				summary: "remove the saved card, which stops the automatic top-up",
 				flags:   []string{"yes", "json"},
 				prose: "The card is removed here and at PostFinance. 'keera billing topup " +
-					"--save-card' saves a new one.",
+					"--save-card' saves a new one. An organisation with recurring charges " +
+					"keeps its card.",
 			},
 			{
 				name: "payments", summary: "the payments, newest first",
@@ -748,6 +749,41 @@ var commands = []command{
 					"--amount takes credit away. --note is required: it says why, and is shown to " +
 					"the organisation.",
 				examples: []string{`keera billing grant --org "Example Bank" --amount 50 --note "trial"`},
+			},
+			{
+				name: "charges", summary: "the recurring charges, the first due first",
+				flags: []string{"json"},
+				prose: "A recurring charge is a fee an operator charges every month or year, " +
+					"such as for a dedicated model. Each period is charged to the saved card " +
+					"when it starts. While one is due that no saved card can pay, every call " +
+					"is refused. See https://docs.keera.ch/manage/billing/#recurring-charges.",
+			},
+			{
+				name: "charge", summary: "charge an organisation every month or year (operators)",
+				flags: []string{"org", "name", "amount", "every", "start", "json"},
+				prose: "VAT and a transaction fee are added on top, and nothing is credited. " +
+					"Without a saved card, the organisation's calls are refused from the first " +
+					"day until an administrator pays. A later --start gives it time to.",
+				examples: []string{
+					`keera billing charge --org "Example Bank" --name "Dedicated model" --amount 2000 --every month`,
+					`keera billing charge --org "Example Bank" --name "Support" --amount 12000 --every year --start 2027-01-01`,
+				},
+			},
+			{
+				name: "end-charge", args: "<charge>",
+				summary: "stop a recurring charge (operators)",
+				flags:   []string{"json"},
+				prose: "No further period is charged, and one not paid yet is no longer due. " +
+					"Its payments are kept.",
+			},
+			{
+				name: "pay-charge", args: "<charge>",
+				summary: "pay a recurring charge now and save the card: prints the payment page to open",
+				flags:   []string{"json"},
+				prose: "Pays the first period not paid yet. It is how an organisation without " +
+					"a card, or whose card was declined, saves one. With a card that works, the " +
+					"next period is charged to it when it starts.",
+				examples: []string{"keera billing pay-charge charge_06c1k2rt8g3m4n5p6q7r8s9t0v"},
 			},
 			{
 				name:    "invoiced",

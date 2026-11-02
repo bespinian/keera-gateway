@@ -85,6 +85,11 @@ func (s *Server) creditAccount(w http.ResponseWriter, r *http.Request, p *authn.
 		s.fail(w, err)
 		return
 	}
+	charges, err := s.st.ListCharges(r.Context(), orgID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"payments":         true,
 		"vat_bp":           pay.VATBP,
@@ -95,6 +100,7 @@ func (s *Server) creditAccount(w http.ResponseWriter, r *http.Request, p *authn.
 		"topup_max_micros": maxTopUp,
 		"account":          a,
 		"recent":           list,
+		"charges":          charges,
 	})
 }
 
@@ -194,7 +200,8 @@ func checkAmount(micros int64) string {
 }
 
 // forgetCard removes the saved card, here and at PostFinance. The automatic
-// top-up stops with it.
+// top-up stops with it. An organisation with recurring charges keeps its card:
+// paying with another one replaces it.
 func (s *Server) forgetCard(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	pay := s.payments(w)
 	if pay == nil {
@@ -202,6 +209,17 @@ func (s *Server) forgetCard(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	}
 	orgID, ok := s.adminOrg(w, r, p)
 	if !ok {
+		return
+	}
+	charges, err := s.st.ListCharges(r.Context(), orgID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if len(charges) > 0 {
+		conflict(w, "card_required", "this organisation has recurring charges, which are "+
+			"charged to the saved card, so it cannot be forgotten. Paying with another card "+
+			"and saving it replaces it. See https://docs.keera.ch/manage/billing/#recurring-charges")
 		return
 	}
 	token, err := s.st.ForgetCard(r.Context(), orgID)
@@ -248,6 +266,15 @@ func (s *Server) createTopUp(w http.ResponseWriter, r *http.Request, p *authn.Pr
 	}
 	pm := pay.newPayment(orgID, store.PaymentTopUp, in.AmountMicros, p.Actor())
 	pm.SaveCard = in.SaveCard
+	s.payOnPage(w, r, p, pm, "billing.topup")
+}
+
+// payOnPage starts a payment the person makes on the payment page, and
+// answers that page's address.
+func (s *Server) payOnPage(w http.ResponseWriter, r *http.Request, p *authn.Principal,
+	pm store.Payment, action string,
+) {
+	pay := s.opts.Payments
 	if err := s.st.CreatePayment(r.Context(), pm); err != nil {
 		s.fail(w, err)
 		return
@@ -255,7 +282,7 @@ func (s *Server) createTopUp(w http.ResponseWriter, r *http.Request, p *authn.Pr
 	t := transactionFor(pm, p.Email, pay.VATBP)
 	back := s.opts.PublicURL + "/billing?payment=" + pm.ID
 	t.SuccessURL, t.FailedURL = back, back
-	if in.SaveCard {
+	if pm.SaveCard {
 		t.TokenizationMode = payment.SaveCard
 	}
 	tx, err := s.startTransaction(r.Context(), &pm, t)
@@ -270,8 +297,9 @@ func (s *Server) createTopUp(w http.ResponseWriter, r *http.Request, p *authn.Pr
 			"PostFinance Checkout could not start the payment; nothing was charged. Try again in a moment")
 		return
 	}
-	s.auditf(r, p, orgID, "billing.topup", "payment", pm.ID, map[string]any{
+	s.auditf(r, p, pm.OrgID, action, "payment", pm.ID, map[string]any{
 		"micros": pm.AmountMicros, "fee_micros": pm.FeeMicros, "save_card": pm.SaveCard,
+		"charge_id": pm.ChargeID,
 	})
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"payment": pm, "url": page})
 }
@@ -317,6 +345,9 @@ func transactionFor(pm store.Payment, email string, vatBP int64) payment.NewTran
 		Name: "Keera credit", Quantity: 1, Type: "PRODUCT",
 		AmountIncludingTax: payment.Amount(pm.AmountMicros + pm.VATMicros),
 		UniqueID:           "credit", SKU: "keera-credit",
+	}
+	if pm.Kind == store.PaymentCharge {
+		item.Name, item.UniqueID, item.SKU = lineItemName(pm), "charge", "keera-charge"
 	}
 	if vatBP > 0 {
 		item.Taxes = []payment.Tax{{Rate: payment.Percent(vatBP), Title: "VAT"}}
@@ -526,7 +557,7 @@ func (s *Server) settleWith(ctx context.Context, pm store.Payment, tx payment.Tr
 		how.Paid = true
 		if pm.SaveCard && tx.TokenID() == 0 {
 			// Paid with a method PostFinance cannot charge again by itself.
-			how.Note = "paid, but this payment method cannot be saved for automatic top-ups"
+			how.Note = "paid, but this payment method cannot be saved to be charged again"
 		}
 		if pm.SaveCard && tx.TokenID() != 0 {
 			card, err := pay.Client.Card(ctx, tx.TokenID())
@@ -549,6 +580,11 @@ func (s *Server) settleWith(ctx context.Context, pm store.Payment, tx payment.Tr
 		return err
 	}
 	settled := done.Payment
+	if done.Twice {
+		s.log.Error("a recurring charge was paid twice for the same period; refund one in "+
+			"PostFinance Checkout", "payment", settled.ID, "charge", settled.ChargeID,
+			"transaction", settled.TransactionID)
+	}
 	if done.OldToken != 0 {
 		s.deleteToken(ctx, pay, done.OldToken)
 	}
@@ -588,8 +624,9 @@ func (s *Server) refreshCredit(ctx context.Context) {
 // are looked at.
 const paymentsEvery = 30 * time.Second
 
-// RunPayments charges the saved cards of accounts that ran low, and settles
-// payments whose webhook never came, until ctx ends. Replicas take turns, so
+// RunPayments charges the saved cards of accounts that ran low and of
+// recurring charges that are due, and settles payments whose webhook never
+// came, until ctx ends. Replicas take turns, so
 // one looks each round. A payment is credited once, whether the webhook or this
 // check gets there first.
 func (s *Server) RunPayments(ctx context.Context) {
@@ -610,6 +647,7 @@ func (s *Server) RunPayments(ctx context.Context) {
 				continue
 			}
 			s.topUpDue(ctx)
+			s.chargesDue(ctx)
 			s.settlePending(ctx, time.Now())
 		}
 	}
@@ -628,21 +666,28 @@ func (s *Server) topUpDue(ctx context.Context) {
 
 // autoTopUp charges an account's saved card its top-up.
 func (s *Server) autoTopUp(ctx context.Context, a store.CreditAccount) {
+	pm := s.opts.Payments.newPayment(a.OrgID, store.PaymentAuto, a.TopUpMicros, "automatic top-up")
+	s.chargeCard(ctx, pm, a.CardToken)
+}
+
+// chargeCard charges a saved card, with nobody on the payment page: an
+// automatic top-up, or a recurring charge.
+func (s *Server) chargeCard(ctx context.Context, pm store.Payment, token int64) {
 	pay := s.opts.Payments
-	pm := pay.newPayment(a.OrgID, store.PaymentAuto, a.TopUpMicros, "automatic top-up")
 	switch err := s.st.CreatePayment(ctx, pm); {
 	case errors.Is(err, store.ErrTopUpUnderway):
 		return
 	case err != nil:
-		s.log.Warn("starting an automatic top-up failed", "org_id", a.OrgID, "error", err)
+		s.log.Warn("starting a charge of a saved card failed", "org_id", pm.OrgID,
+			"kind", pm.Kind, "error", err)
 		return
 	}
 	t := transactionFor(pm, "", pay.VATBP)
-	t.Token, t.CustomersPresence = a.CardToken, "NOT_PRESENT"
+	t.Token, t.CustomersPresence = token, "NOT_PRESENT"
 	tx, err := s.startTransaction(ctx, &pm, t)
 	if err != nil {
-		s.log.Warn("an automatic top-up could not start; it is tried again", "org_id", a.OrgID,
-			"error", err)
+		s.log.Warn("a charge of a saved card could not start; it is tried again",
+			"org_id", pm.OrgID, "kind", pm.Kind, "error", err)
 		_ = s.settleFailed(ctx, pm, "PostFinance Checkout could not be reached", true)
 		return
 	}
@@ -650,27 +695,30 @@ func (s *Server) autoTopUp(ctx context.Context, a store.CreditAccount) {
 	if refused, ok := errors.AsType[*payment.Error](err); ok && refused.Status/100 == 4 {
 		// PostFinance refused to charge the card at all, so nothing was
 		// charged, and trying again would be refused again.
-		s.log.Warn("PostFinance refused an automatic top-up", "org_id", a.OrgID, "error", err)
+		s.log.Warn("PostFinance refused to charge a saved card", "org_id", pm.OrgID,
+			"kind", pm.Kind, "error", err)
 		if err := s.settleFailed(ctx, pm, "PostFinance refused to charge the saved card", false); err != nil {
-			s.log.Warn("settling an automatic top-up failed", "payment", pm.ID, "error", err)
+			s.log.Warn("settling a charge of a saved card failed", "payment", pm.ID, "error", err)
 		}
 		return
 	}
 	if err != nil {
 		// The charge may have gone through all the same: the transaction is
 		// read again until it ends.
-		s.log.Warn("an automatic top-up has no answer yet", "org_id", a.OrgID, "error", err)
+		s.log.Warn("a charge of a saved card has no answer yet", "org_id", pm.OrgID,
+			"kind", pm.Kind, "error", err)
 		return
 	}
 	if err := s.settleWith(ctx, pm, charged); err != nil {
-		s.log.Warn("settling an automatic top-up failed", "payment", pm.ID, "error", err)
+		s.log.Warn("settling a charge of a saved card failed", "payment", pm.ID, "error", err)
 	}
 }
 
 // How long a payment may stay pending. One never tied to a transaction was
-// interrupted. A top-up is looked up for a day; after that only its webhook
-// settles it, so one paid late is still credited. An automatic top-up still
-// pending after a day stops, and says so, because it blocks the next.
+// interrupted. A payment on the payment page is looked up for a day; after
+// that only its webhook settles it, so one paid late is still credited. A
+// charge of a saved card still pending after a day stops, and says so,
+// because it blocks the next.
 const (
 	settleAfter = time.Minute
 	unstarted   = 10 * time.Minute
@@ -699,8 +747,9 @@ func (s *Server) settlePending(ctx context.Context, now time.Time) {
 			continue
 		}
 		if !tx.Paid() && !tx.Failed() && age > lookUpFor {
-			s.log.Error("an automatic top-up has not ended after a day; no other is tried "+
-				"until an administrator acts", "payment", pm.ID, "transaction", tx.ID, "state", tx.State)
+			s.log.Error("a charge of a saved card has not ended after a day; no other is tried "+
+				"until an administrator acts", "payment", pm.ID, "kind", pm.Kind,
+				"transaction", tx.ID, "state", tx.State)
 			if err := s.settleFailed(ctx, pm, "it did not end within a day; look up "+
 				"transaction "+strconv.FormatInt(tx.ID, 10)+" in PostFinance Checkout", false); err != nil {
 				s.log.Warn("settling a payment failed", "payment", pm.ID, "error", err)
@@ -713,13 +762,17 @@ func (s *Server) settlePending(ctx context.Context, now time.Time) {
 	}
 }
 
-// settleFailed ends a payment as failed. A failed automatic top-up stops the
-// next until someone acts, unless retry says the card was not at fault. The
-// balance stays as it was, so the gateway has nothing to read again.
+// settleFailed ends a payment as failed. A failed charge of a saved card stops
+// the next until someone acts, unless retry says the card was not at fault.
+// The balance stays as it was, but a recurring charge the card could not pay
+// stops the organisation, so the gateway reads that again.
 func (s *Server) settleFailed(ctx context.Context, pm store.Payment, note string, retry bool) error {
 	done, err := s.st.Settle(ctx, pm.ID, store.Settlement{Note: note, Retry: retry})
 	if err == nil && done.Ended {
 		s.auditPayment(ctx, done.Payment)
+		if pm.Kind == store.PaymentCharge {
+			s.refreshCredit(ctx)
+		}
 	}
 	return err
 }

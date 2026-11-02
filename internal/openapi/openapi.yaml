@@ -4178,6 +4178,11 @@ paths:
                     items:
                       $ref: "#/components/schemas/Payment"
                     description: The latest 20 payments, newest first.
+                  charges:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RecurringCharge"
+                    description: The organisation's recurring charges, the first due first.
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -4240,7 +4245,7 @@ paths:
       tags:
         - billing
       summary: Remove the saved card
-      description: Here and at PostFinance. The automatic top-up stops with it. Administrators only.
+      description: Here and at PostFinance. The automatic top-up stops with it. Administrators only. An organisation with recurring charges keeps its card; paying with another card and saving it replaces it.
       parameters:
         - $ref: "#/components/parameters/OrgID"
       responses:
@@ -4265,6 +4270,12 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          description: The organisation has recurring charges, which need the card. The code is `card_required`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "501":
           $ref: "#/components/responses/Disabled"
   /control/v1/billing/topups:
@@ -4473,6 +4484,187 @@ paths:
                 $ref: "#/components/schemas/Error"
         "501":
           $ref: "#/components/responses/Disabled"
+  /control/v1/billing/charges:
+    get:
+      operationId: listCharges
+      tags:
+        - billing
+      summary: List recurring charges
+      description: The first due first. Administrators only; an operator without `org_id` sees every organisation's. See https://docs.keera.ch/manage/billing/#recurring-charges.
+      parameters:
+        - $ref: "#/components/parameters/OrgID"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RecurringCharge"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "501":
+          $ref: "#/components/responses/Disabled"
+    post:
+      operationId: createCharge
+      tags:
+        - billing
+      summary: Add a recurring charge
+      description: "Charges the organisation's saved card every month or year, such as for a dedicated model. VAT and a transaction fee come on top, and nothing is credited. While a period is due that no saved card can pay, every call of the organisation is refused with `402 charge_due`. Operators only."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - org_id
+                - name
+                - amount_micros
+                - every
+              properties:
+                org_id:
+                  type: string
+                  description: The organisation to charge.
+                name:
+                  type: string
+                  maxLength: 100
+                  description: What it pays for, on the payment page and the receipt.
+                amount_micros:
+                  type: integer
+                  format: int64
+                  description: Each period's price without VAT, from CHF 1 to CHF 100,000, in whole centimes.
+                every:
+                  type: string
+                  enum:
+                    - month
+                    - year
+                starts_on:
+                  type: string
+                  format: date
+                  description: The day the first period starts, in UTC. Today or later. Default today.
+              additionalProperties: false
+      responses:
+        "201":
+          description: Added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecurringCharge"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          description: The body is too large.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "501":
+          $ref: "#/components/responses/Disabled"
+  /control/v1/billing/charges/{id}:
+    delete:
+      operationId: deleteCharge
+      tags:
+        - billing
+      summary: Remove a recurring charge
+      description: No further period is charged, and one not paid by then is no longer due. Its payments are kept. Operators only.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The charge id.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - id
+                  - deleted
+                properties:
+                  id:
+                    type: string
+                  deleted:
+                    type: boolean
+                    const: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "501":
+          $ref: "#/components/responses/Disabled"
+  /control/v1/billing/charges/{id}/pay:
+    post:
+      operationId: payCharge
+      tags:
+        - billing
+      summary: Pay a recurring charge
+      description: Starts a payment of the charge's first unpaid period, and answers the payment page to send the person to. The card is saved for the periods after. Allowed while the period is due, or while there is no saved card. Administrators only.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The charge id.
+          schema:
+            type: string
+      responses:
+        "201":
+          description: Started
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - payment
+                  - url
+                properties:
+                  payment:
+                    $ref: "#/components/schemas/Payment"
+                    description: The pending payment. Its `created_at` is not filled in.
+                  url:
+                    type: string
+                    format: uri
+                    description: PostFinance Checkout's payment page.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Nothing is due yet, and the saved card pays the next period when it starts. The code is `nothing_due`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "501":
+          $ref: "#/components/responses/Disabled"
+        "502":
+          description: PostFinance Checkout could not start the payment. Nothing was charged. The code is `payment_unavailable`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /control/billing/postfinance:
     post:
       operationId: postFinanceWebhook
@@ -5019,7 +5211,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "402":
-          description: "A budget is spent (`budget_exceeded`), or the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`). Not 429: it does not lift by waiting."
+          description: "A budget is spent (`budget_exceeded`), the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`), or a recurring charge is due that no saved card can pay (`charge_due`). Not 429: it does not lift by waiting."
           content:
             application/json:
               schema:
@@ -5223,7 +5415,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "402":
-          description: "A budget is spent (`budget_exceeded`), or the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`). Not 429: it does not lift by waiting."
+          description: "A budget is spent (`budget_exceeded`), the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`), or a recurring charge is due that no saved card can pay (`charge_due`). Not 429: it does not lift by waiting."
           content:
             application/json:
               schema:
@@ -5417,7 +5609,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "402":
-          description: "A budget is spent (`budget_exceeded`), or the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`). Not 429: it does not lift by waiting."
+          description: "A budget is spent (`budget_exceeded`), the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`), or a recurring charge is due that no saved card can pay (`charge_due`). Not 429: it does not lift by waiting."
           content:
             application/json:
               schema:
@@ -5620,7 +5812,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "402":
-          description: "A budget is spent (`budget_exceeded`), or the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`). Not 429: it does not lift by waiting."
+          description: "A budget is spent (`budget_exceeded`), the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`), or a recurring charge is due that no saved card can pay (`charge_due`). Not 429: it does not lift by waiting."
           content:
             application/json:
               schema:
@@ -5823,7 +6015,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "402":
-          description: "A budget is spent (`budget_exceeded`), or the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`). Not 429: it does not lift by waiting."
+          description: "A budget is spent (`budget_exceeded`), the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`), or a recurring charge is due that no saved card can pay (`charge_due`). Not 429: it does not lift by waiting."
           content:
             application/json:
               schema:
@@ -6062,7 +6254,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "402":
-          description: "A budget is spent (`budget_exceeded`), or the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`). Not 429: it does not lift by waiting."
+          description: "A budget is spent (`budget_exceeded`), the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`), or a recurring charge is due that no saved card can pay (`charge_due`). Not 429: it does not lift by waiting."
           content:
             application/json:
               schema:
@@ -6400,7 +6592,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "402":
-          description: "A budget is spent (`budget_exceeded`), or the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`). Not 429: it does not lift by waiting."
+          description: "A budget is spent (`budget_exceeded`), the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`), or a recurring charge is due that no saved card can pay (`charge_due`). Not 429: it does not lift by waiting."
           content:
             application/json:
               schema:
@@ -8779,6 +8971,10 @@ components:
         invoiced:
           type: boolean
           description: Billed by invoice. Always false across every organisation.
+        charge_due_at:
+          type: string
+          format: date-time
+          description: When the first recurring charge that no saved card can pay falls due. From then on, every call is refused. Absent without one, and across every organisation.
     UsageBucket:
       type: object
       description: One row of a usage report.
@@ -9498,7 +9694,7 @@ components:
           description: Billed by invoice, so no credit is needed.
     Payment:
       type: object
-      description: Money into a credit account.
+      description: Money into a credit account, or a period of a recurring charge.
       required:
         - id
         - org_id
@@ -9523,11 +9719,12 @@ components:
             - topup
             - auto
             - grant
-          description: A payment by card, an automatic top-up, or a grant.
+            - charge
+          description: A payment by card, an automatic top-up, a grant, or a period of a recurring charge, which adds no credit.
         amount_micros:
           type: integer
           format: int64
-          description: The credit. Below 0 on a grant that takes some away.
+          description: The credit, or a charge's price. Below 0 on a grant that takes some away.
         vat_micros:
           type: integer
           format: int64
@@ -9554,6 +9751,74 @@ components:
           type: string
           description: Why a grant was made, or why a payment failed.
         settled_at:
+          type: string
+          format: date-time
+        charge_id:
+          type: string
+          description: A charge's recurring charge.
+        item:
+          type: string
+          description: A charge's name when it was paid.
+        period_start:
+          type: string
+          format: date-time
+          description: When the period a charge pays starts.
+        period_end:
+          type: string
+          format: date-time
+          description: When it ends, and the next starts.
+    RecurringCharge:
+      type: object
+      description: A fee charged to the saved card every month or year. See https://docs.keera.ch/manage/billing/#recurring-charges.
+      required:
+        - id
+        - org_id
+        - name
+        - amount_micros
+        - every
+        - starts_on
+        - paid_periods
+        - due_at
+        - due_until
+        - actor
+        - created_at
+      properties:
+        id:
+          type: string
+        org_id:
+          type: string
+        name:
+          type: string
+        amount_micros:
+          type: integer
+          format: int64
+          description: Each period's price without VAT and fee.
+        every:
+          type: string
+          enum:
+            - month
+            - year
+        starts_on:
+          type: string
+          format: date
+          description: The day the first period starts, in UTC.
+        paid_periods:
+          type: integer
+        due_at:
+          type: string
+          format: date-time
+          description: When the first unpaid period starts. The saved card is charged then.
+        due_until:
+          type: string
+          format: date-time
+          description: When that period ends.
+        error:
+          type: string
+          description: Why charging the saved card failed. It is not tried again until a payment goes through.
+        actor:
+          type: string
+          description: The operator who added it.
+        created_at:
           type: string
           format: date-time
     InferenceModel:

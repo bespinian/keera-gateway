@@ -1980,6 +1980,57 @@ func TestEffectiveBudgetsNameTheirLevel(t *testing.T) {
 	}
 }
 
+func TestBillingChargeNamesTheOrganisationAndThePeriod(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"POST /v1/billing/charges": map[string]any{
+			"id": "charge_1", "org_id": "org_1", "name": "Dedicated model",
+			"amount_micros": 2_000_000_000, "every": "month", "starts_on": "2027-01-01",
+		},
+		"DELETE /v1/billing/charges/charge_1": map[string]any{"id": "charge_1", "deleted": true},
+	})
+	if err := Run(context.Background(), []string{
+		"billing", "charge", "--name", "Dedicated model",
+		"--amount", "2000", "--every", "month",
+	}); err == nil {
+		t.Error("a charge without --org was sent")
+	}
+	if err := Run(context.Background(), []string{
+		"billing", "charge", "--org", "Example Bank",
+		"--name", "Dedicated model", "--amount", "2000", "--every", "month", "--start", "2027-01-01",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := f.request("POST", "/v1/billing/charges").body
+	if body["org_id"] != "org_1" || body["amount_micros"] != float64(2_000_000_000) ||
+		body["every"] != "month" || body["starts_on"] != "2027-01-01" || body["name"] != "Dedicated model" {
+		t.Errorf("body = %v", body)
+	}
+	if err := Run(context.Background(), []string{"billing", "end-charge", "charge_1"}); err != nil {
+		t.Fatal(err)
+	}
+	f.request("DELETE", "/v1/billing/charges/charge_1")
+}
+
+// The card pays the recurring charges, so the CLI does not offer to forget it.
+func TestBillingForgetCardKeepsTheCardOfRecurringCharges(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/billing/account": map[string]any{"payments": true, "account": map[string]any{
+			"org_id": "org_1", "card": map[string]any{"label": "Visa 4242"},
+		}, "charges": []map[string]any{{"id": "charge_1", "org_id": "org_1"}}},
+		"DELETE /v1/billing/account/card": nil,
+	})
+	t.Setenv("KEERA_ORG", "org_1")
+	if err := Run(context.Background(), []string{"billing", "forget-card"}); err == nil ||
+		!strings.Contains(err.Error(), "recurring charges") {
+		t.Errorf("err = %v", err)
+	}
+	if f.called("DELETE", "/v1/billing/account/card") {
+		t.Error("the card was deleted")
+	}
+}
+
 func TestGuardrailSetLocationsKeepsTheModels(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{

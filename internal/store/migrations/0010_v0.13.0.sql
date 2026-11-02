@@ -28,6 +28,44 @@ ALTER TABLE models DROP CONSTRAINT models_kind_check,
     ADD CONSTRAINT models_kind_check
         CHECK (kind IN ('chat', 'completion', 'embedding', 'rerank', 'decision'));
 
+-- A fee an operator charges an organisation every month or year, such as for a
+-- dedicated model. It is charged to the saved card and not credited. See
+-- docs/billing.md.
+CREATE TABLE recurring_charges (
+    id           text PRIMARY KEY,
+    org_id       text NOT NULL REFERENCES orgs (id) ON DELETE CASCADE,
+    -- What it pays for, on the payment page and the receipt.
+    name         text NOT NULL,
+    -- Each period's price in CHF, without VAT and fee.
+    micros       bigint NOT NULL CHECK (micros > 0),
+    every        text NOT NULL CHECK (every IN ('month', 'year')),
+    -- The first period starts at midnight UTC on this day. Period n starts n
+    -- months or years later, counted from here so the 31st stays the 31st.
+    starts_on    date NOT NULL,
+    -- How many periods are paid. The next one is due when it starts.
+    paid_periods int NOT NULL DEFAULT 0,
+    -- Why charging the saved card last failed. Until it is cleared, the card
+    -- is not tried again.
+    error        text,
+    actor        text NOT NULL,
+    created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX recurring_charges_org_idx ON recurring_charges (org_id);
+
+-- A payment of one period of a recurring charge. charge_id has no foreign
+-- key: the payment is kept when the charge is removed.
+ALTER TABLE payments
+    DROP CONSTRAINT payments_kind_check,
+    ADD CONSTRAINT payments_kind_check CHECK (kind IN ('topup', 'auto', 'grant', 'charge')),
+    ADD COLUMN charge_id    text,
+    -- The charge's name when it was paid.
+    ADD COLUMN item         text,
+    ADD COLUMN period_start timestamptz,
+    ADD COLUMN period_end   timestamptz;
+-- At most one charge of the saved card per recurring charge is under way.
+CREATE UNIQUE INDEX payments_one_charge_idx ON payments (charge_id)
+    WHERE kind = 'charge' AND state = 'pending' AND NOT save_card;
+
 -- Where a scope's models may run, such as ch or onprem, so prompts stay there.
 -- NULL inherits, like allowed_models; an empty list allows nothing.
 ALTER TABLE guardrails ADD COLUMN allowed_locations text[];

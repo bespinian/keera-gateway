@@ -290,6 +290,11 @@ export const api = {
       amount_micros: amountMicros,
       note,
     }),
+  // Recurring charges. Operators add and remove them; administrators pay.
+  createCharge: (charge) => request("POST", "/v1/billing/charges", charge),
+  deleteCharge: (id) => request("DELETE", path`/v1/billing/charges/${id}`),
+  // Like topUp, the answer's url is the payment page.
+  payCharge: (id) => request("POST", path`/v1/billing/charges/${id}/pay`),
   requests: (params) => get("/v1/requests" + query(params)),
 
   // Takes the narrowing of requests(), and `sort`.

@@ -244,15 +244,45 @@ const kindLabels = {
   topup: "Payment",
   auto: "Automatic top-up",
   grant: "Granted",
+  charge: "Recurring charge",
 };
+
+// day shows a UTC date, as charges count days in UTC.
+function day(iso) {
+  return new Date(iso).toLocaleDateString(undefined, { timeZone: "UTC" });
+}
+
+// ordinal writes a day of the month as 1st, 2nd, 3rd or 4th.
+function ordinal(n) {
+  const suffix =
+    n % 10 === 1 && n !== 11
+      ? "st"
+      : n % 10 === 2 && n !== 12
+        ? "nd"
+        : n % 10 === 3 && n !== 13
+          ? "rd"
+          : "th";
+  return n + suffix;
+}
+
+// period is the days a charge's payment covers: its end is the next start.
+function period(p) {
+  const last = new Date(p.period_end);
+  last.setUTCDate(last.getUTCDate() - 1);
+  return `${day(p.period_start)} to ${day(last.toISOString())}`;
+}
 
 const stateTones = { paid: "good", pending: "warn", failed: "bad" };
 
 async function creditSection(ctx) {
   const res = await api.creditAccount(ctx.orgID);
   if (!res.payments) return null;
+  // The banner on every screen says whether a charge is due. Reading the
+  // account may have just settled one, so the counts are read after it.
+  ctx.setSetup(await api.setup(ctx.orgID).catch(() => ctx.state.setup));
   const a = res.account;
   const recent = res.recent || [];
+  const charges = res.charges || [];
   const operator = ctx.state.me.unrestricted;
   ctx.setSubtitle(`${money(a.balance_micros)} credit`);
 
@@ -296,7 +326,9 @@ async function creditSection(ctx) {
         ? a.card.expires_at
           ? `expires ${new Date(a.card.expires_at).toLocaleDateString(undefined, { month: "2-digit", year: "2-digit" })}`
           : "saved at PostFinance, not here"
-        : "save one when you add credit",
+        : charges.length
+          ? "required: it pays the recurring charges"
+          : "save one when you add credit",
     ),
   );
 
@@ -314,7 +346,8 @@ async function creditSection(ctx) {
       { class: "btn", onClick: () => autoTopUp(ctx, a) },
       "Automatic top-up",
     ),
-    a.card
+    // The recurring charges need the card. Saving another replaces it.
+    a.card && !charges.length
       ? h(
           "button",
           {
@@ -340,6 +373,13 @@ async function creditSection(ctx) {
     h("div", { class: "spacer" }),
     operator
       ? h("button", { class: "btn", onClick: () => grant(ctx) }, "Grant credit")
+      : null,
+    operator
+      ? h(
+          "button",
+          { class: "btn", onClick: () => addCharge(ctx, res) },
+          "Add recurring charge",
+        )
       : null,
     operator
       ? h(
@@ -393,7 +433,20 @@ async function creditSection(ctx) {
           h(
             "div",
             { class: "stack" },
-            h("span", {}, kindLabels[p.kind] || p.kind),
+            h(
+              "span",
+              {},
+              p.kind === "charge" && p.item
+                ? p.item
+                : kindLabels[p.kind] || p.kind,
+            ),
+            p.kind === "charge" && p.period_start
+              ? h(
+                  "span",
+                  { class: "faint", style: { fontSize: "11px" } },
+                  `Recurring charge, ${period(p)}`,
+                )
+              : null,
             p.note
               ? h(
                   "span",
@@ -404,7 +457,7 @@ async function creditSection(ctx) {
           ),
       },
       {
-        label: "Credit",
+        label: "Amount",
         num: true,
         cell: (p) => h("strong", {}, money(p.amount_micros)),
         sortKey: (p) => p.amount_micros,
@@ -463,9 +516,123 @@ async function creditSection(ctx) {
     stats,
     failed,
     actions,
+    chargesTable(ctx, charges, a),
     sectionHead("Payments", "the latest 20"),
     list,
   );
+}
+
+// chargesTable lists the recurring charges, which an operator sets and the
+// saved card pays. Nothing shows without any.
+function chargesTable(ctx, charges, a) {
+  if (!charges.length) return null;
+  const operator = ctx.state.me.unrestricted;
+  const now = new Date();
+  // Like the server: with a card that works, the period is charged to it.
+  const payable = (c) => !a.card || c.error || new Date(c.due_at) <= now;
+  const state = (c) => {
+    const due = new Date(c.due_at) <= now;
+    if (c.error) return pill("Declined", "bad");
+    if (!a.card)
+      return pill(due ? "Due, no card" : "Needs a card", due ? "bad" : "warn");
+    return due ? pill("Charging", "warn") : pill("Card saved", "good");
+  };
+  const list = table(
+    [
+      {
+        label: "Charge",
+        cell: (c) =>
+          h(
+            "div",
+            { class: "stack" },
+            h("span", {}, c.name),
+            c.error
+              ? h(
+                  "span",
+                  { class: "faint", style: { fontSize: "11px" } },
+                  c.error,
+                )
+              : null,
+          ),
+      },
+      {
+        label: "Amount",
+        num: true,
+        cell: (c) => h("strong", {}, money(c.amount_micros)),
+      },
+      { label: "Every", cell: (c) => capitalise(c.every) },
+      {
+        label: "Next",
+        cell: (c) => h("span", { class: "nowrap" }, day(c.due_at)),
+      },
+      { label: "State", cell: state },
+      {
+        label: "",
+        shrink: true,
+        cell: (c) =>
+          h(
+            "div",
+            { class: "row-tight" },
+            payable(c)
+              ? h(
+                  "button",
+                  {
+                    class: "btn btn-sm btn-primary",
+                    onClick: (e) => payCharge(e.currentTarget, c),
+                  },
+                  "Pay now",
+                )
+              : null,
+            operator
+              ? iconButton(
+                  icons.trash,
+                  "Remove this charge",
+                  () =>
+                    confirm({
+                      title: `Remove “${c.name}”?`,
+                      body:
+                        "No further period is charged, and one not paid yet is " +
+                        "no longer due. Its payments are kept.",
+                      confirmLabel: "Remove charge",
+                      danger: true,
+                      onConfirm: async () => {
+                        await api.deleteCharge(c.id);
+                        toast("Charge removed", "good");
+                        ctx.reload();
+                      },
+                    }),
+                  { quiet: true },
+                )
+              : null,
+          ),
+      },
+    ],
+    charges,
+  );
+  return h(
+    "div",
+    {},
+    sectionHead(
+      "Recurring charges",
+      "charged to the saved card, plus VAT and a transaction fee",
+    ),
+    list,
+    h("div", { style: { marginBottom: "28px" } }),
+  );
+}
+
+// payCharge pays a charge's first unpaid period on the payment page, which
+// saves the card for the periods after.
+async function payCharge(button, c) {
+  button.disabled = true;
+  try {
+    const started = await api.payCharge(c.id);
+    remember("keera.billing.wait", null);
+    location.assign(started.url);
+  } catch (ex) {
+    toast(ex.message, "bad");
+    button.disabled = false;
+  }
 }
 
 // returnBanner says how a payment went. A pending one is checked again for a
@@ -476,7 +643,10 @@ function returnBanner(ctx, p, a) {
     return banner(
       "good",
       { style: { marginBottom: "16px" } },
-      `Thank you: ${money(p.amount_micros)} was added. The credit is now ${money(a.balance_micros)}.`,
+      p.kind === "charge"
+        ? `Thank you: “${p.item}” is paid until ${day(p.period_end)}.` +
+            (a.card ? " The card is saved for the periods after." : "")
+        : `Thank you: ${money(p.amount_micros)} was added. The credit is now ${money(a.balance_micros)}.`,
     );
   }
   if (p.state === "failed") {
@@ -498,7 +668,9 @@ function returnBanner(ctx, p, a) {
   return banner(
     "info",
     { style: { marginBottom: "16px" } },
-    "PostFinance is still confirming the payment. The credit is added as soon as it is through.",
+    p.kind === "charge"
+      ? "PostFinance is still confirming the payment."
+      : "PostFinance is still confirming the payment. The credit is added as soon as it is through.",
   );
 }
 
@@ -682,6 +854,89 @@ function grant(ctx) {
         throw new Error("Say why, for the organisation's payments.");
       }
       await api.grantCredit(ctx.orgID, m, note.value.trim());
+    },
+  });
+}
+
+// addCharge has an operator charge the organisation every month or year.
+function addCharge(ctx, res) {
+  const today = new Date().toISOString().slice(0, 10);
+  const name = h("input", {
+    class: "input",
+    placeholder: "Dedicated model",
+    maxlength: 100,
+  });
+  const amount = h("input", {
+    class: "input",
+    type: "number",
+    min: 1,
+    step: "1",
+    inputmode: "decimal",
+  });
+  const monthly = h("option", { value: "month" });
+  const yearly = h("option", { value: "year" });
+  const every = h("select", { class: "select" }, monthly, yearly);
+  // The options name the day of the first charge, as each period repeats it.
+  const label = () => {
+    const d = new Date(starts.value || today);
+    monthly.textContent = `Monthly, on the ${ordinal(d.getUTCDate())}`;
+    yearly.textContent = `Yearly, on ${d.toLocaleDateString("en-GB", { day: "numeric", month: "long", timeZone: "UTC" })}`;
+  };
+  const starts = h("input", {
+    class: "input",
+    type: "date",
+    min: today,
+    value: today,
+    onInput: label,
+  });
+  label();
+  formModal({
+    title: "Add recurring charge",
+    subtitle:
+      "The saved card is charged when each period starts. Nothing is credited.",
+    body: h(
+      "form",
+      { onSubmit: (e) => e.preventDefault() },
+      field(
+        "What it pays for",
+        name,
+        "Shown on the payment page and the receipt.",
+      ),
+      field(
+        "Price in CHF",
+        amount,
+        "Each period. VAT and a transaction fee are added on top.",
+      ),
+      field(
+        "First charge",
+        starts,
+        res.account.card
+          ? "In UTC."
+          : "In UTC. There is no saved card yet: from this day, every call " +
+              "is refused until an administrator pays.",
+      ),
+      field("How often", every),
+    ),
+    submitLabel: "Add charge",
+    done: "Recurring charge added",
+    ctx,
+    submit: async () => {
+      const m = chf(amount.value);
+      if (!name.value.trim()) {
+        name.focus();
+        throw new Error("Say what the charge pays for.");
+      }
+      if (Number.isNaN(m) || m <= 0) {
+        amount.focus();
+        throw new Error("Enter a price in francs.");
+      }
+      await api.createCharge({
+        org_id: ctx.orgID,
+        name: name.value.trim(),
+        amount_micros: m,
+        every: every.value,
+        starts_on: starts.value || today,
+      });
     },
   });
 }

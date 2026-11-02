@@ -12,7 +12,8 @@ This is how a public instance resells a provider. Without such a key, nothing ch
 enters its own key, as described in [providers.md](providers.md).
 
 With a PostFinance Checkout account, organisations also
-[pay in advance](#pay-in-advance), by card.
+[pay in advance](#pay-in-advance), by card, and you can charge an organisation
+a [fixed fee every month or year](#recurring-charges).
 
 ## Set a provider key
 
@@ -210,7 +211,8 @@ not. When PostFinance cannot be reached, the next try is after 10
 minutes.
 
 Forgetting the card removes it here and at PostFinance, and turns the automatic
-top-up off. Saving a new card replaces the old one.
+top-up off. Saving a new card replaces the old one. An organisation with
+[recurring charges](#recurring-charges) cannot forget its card.
 
 ### For operators
 
@@ -227,6 +229,49 @@ up; `keera org set <org> --lift-limit` does.
 An organisation **billed by invoice** may use the keys without credit. Its use
 is still metered, and its credit goes below zero. Bill it from the monthly
 report: its "from credit" column is the whole amount, not money already paid. `--off` makes it pay in advance again.
+
+### Recurring charges
+
+For a dedicated or enterprise customer, charge a fixed fee every month or
+year, such as for a dedicated model:
+
+```sh
+keera billing charge --org <org> --name "Dedicated model" --amount 2000 --every month
+keera billing charge --org <org> --name "Support" --amount 12000 --every year --start 2027-01-01
+keera billing charges                 # every organisation's, for an operator
+keera billing end-charge <charge>
+```
+
+Each period is charged to the saved card when it starts, at midnight UTC, with
+VAT and the transaction fee on top. It is not credited. Periods count from the
+start day, so one from the 31st is charged on the last day of shorter months.
+`--start` is today or later, so no past period is charged at once. Ending a
+charge keeps its payments; a period not paid by then is no longer due.
+
+**A recurring charge needs a saved card.** While a period is due and no saved
+card can pay it, every call of the organisation is refused with
+`402 charge_due`, whichever model, the organisation's own ones too. This is
+the case when:
+
+- there is no saved card. Start the charge a few days ahead to give the
+  organisation time to save one.
+- PostFinance declined the card. It is not tried again until a payment goes
+  through.
+
+An administrator then pays the period on the payment page, under **Billing**
+or with `keera billing pay-charge`, which also saves the card. Any paid
+payment clears a declined charge, so the card is tried again on the next
+round. Paying ahead is refused while a card that works will pay the period.
+
+The panel shows a banner on every screen while a charge is due, or will be
+without a card. The card stays while the organisation has charges: it can be
+replaced by paying with another, not forgotten.
+
+A charge works like an automatic top-up: one replica charges due periods
+every 30 seconds, at most one at a time per charge, and not again within 10
+minutes when PostFinance could not be reached. A period paid on the payment
+page in the last hour is not charged to the card as well. If both are paid
+anyway, the gateway logs an error naming the payment to refund.
 
 ### How a payment is confirmed
 
@@ -255,7 +300,8 @@ someone can look it up in PostFinance.
   one cannot use up the key for the rest.
 - **Keep the rows.** `KEERA_USAGE_RETENTION` does not delete billing rows or
   payments, and neither does deleting an organisation. That removes only its
-  saved card, here and at PostFinance. Back up the database.
+  saved card, here and at PostFinance, and its recurring charges. Back up the
+  database.
 - **Running requests hold credit.** A request is charged when it ends. Until
   then, it holds the most it may cost: its whole body as prompt, plus its
   output ceiling (64,000 tokens if it sets none), at the dearest model it may

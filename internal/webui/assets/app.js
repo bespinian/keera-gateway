@@ -722,6 +722,36 @@ function limitedNotice() {
   );
 }
 
+/** chargeNotice says, on every screen, that a recurring charge no saved card
+ *  can pay stops every call, or will when it falls due. */
+function chargeNotice() {
+  const due = state.setup.charge_due_at;
+  if (!due || !state.orgID) return null;
+  const day = new Date(due).toLocaleDateString(undefined, { timeZone: "UTC" });
+  const started = new Date(due) <= new Date();
+  // Before it is due, only someone who can pay needs to know.
+  if (!started && !state.me.can_admin_org) return null;
+  const pay = state.me.can_admin_org
+    ? h(
+        "button",
+        {
+          class: "btn btn-sm",
+          style: { marginLeft: "8px" },
+          onClick: () => navigate("/billing"),
+        },
+        "Pay under Billing",
+      )
+    : " An administrator can pay it under Billing.";
+  return banner(
+    started ? "bad" : "warn",
+    { style: { marginBottom: "16px" } },
+    started
+      ? `Every call is refused: a recurring charge has been due since ${day}, and no saved card can pay it.`
+      : `A recurring charge is due on ${day}, and there is no saved card to pay it. Pay it before then, or every call is refused.`,
+    pay,
+  );
+}
+
 async function renderRoute() {
   tearDown();
   const gen = ++rendering;
@@ -786,7 +816,7 @@ async function renderRoute() {
         ? chooseOrg(ctx, perOrg)
         : await route.view(ctx);
     if (gen !== rendering) return;
-    replace(outlet, limitedNotice(), view);
+    replace(outlet, chargeNotice(), limitedNotice(), view);
     adoptListActions();
   } catch (err) {
     if (gen !== rendering) return;

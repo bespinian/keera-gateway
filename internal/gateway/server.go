@@ -43,6 +43,9 @@ type Budgeter interface {
 	ReleaseCredit(orgID string, micros int64)
 	// ChargeCredit takes a request's use of those keys from the credit.
 	ChargeCredit(orgID string, micros int64)
+	// ChargesPaid refuses every call of an organisation with a recurring
+	// charge due that no saved card can pay.
+	ChargesPaid(orgID string, now time.Time) error
 }
 
 // Limiter is the token buckets a request is decided against. They live in
