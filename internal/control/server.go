@@ -30,7 +30,6 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/ratelimit"
 	"github.com/bespinian/keera-gateway/internal/registry"
-	"github.com/bespinian/keera-gateway/internal/sandbox"
 	"github.com/bespinian/keera-gateway/internal/secret"
 	"github.com/bespinian/keera-gateway/internal/store"
 	"github.com/bespinian/keera-gateway/internal/usage"
@@ -70,16 +69,9 @@ type Options struct {
 	// SessionGap is how long an agent conversation may go quiet before the
 	// next request starts a new task. Zero is store.DefaultSessionGap.
 	SessionGap time.Duration
-	// Sandboxes lends out machines. Nil means no sandbox driver: the catalogue
-	// can still be edited, and everything else says a driver must be switched
-	// on.
-	Sandboxes *sandbox.Manager
 	// Template is what every new organisation starts with, from
-	// KEERA_MODELS_FILE and KEERA_SANDBOXES_FILE.
+	// KEERA_MODELS_FILE.
 	Template store.OrgTemplate
-	// SandboxImages are the image prefixes an administrator may give a class,
-	// besides the template's images. See mayUseImage.
-	SandboxImages []string
 	// Platform is the deployment's own provider keys. A model they cover
 	// takes no key of its own, and is billed.
 	Platform catalog.Platform
@@ -311,22 +303,6 @@ func (s *Server) mux() *httpx.Mux {
 	// The request log as it is written. It takes the same query as
 	// /v1/requests, so what arrives live matches what a reload shows.
 	route("GET /v1/requests/stream", s.requestStream)
-
-	route("GET /v1/sandbox-classes", s.listSandboxClasses)
-	route("PUT /v1/sandbox-classes/{name}", s.putSandboxClass)
-	route("DELETE /v1/sandbox-classes/{name}", s.deleteSandboxClass)
-	route("GET /v1/sandboxes", s.listSandboxes)
-	route("POST /v1/sandboxes", s.withSandboxes(s.createSandbox))
-	route("GET /v1/sandboxes/{ref}", s.getSandbox)
-	route("DELETE /v1/sandboxes/{ref}", s.withSandboxes(s.terminateSandbox))
-	route("POST /v1/sandboxes/{ref}/extend", s.withSandboxes(s.extendSandbox))
-	route("POST /v1/sandboxes/{ref}/suspend", s.withSandboxes(s.suspendSandbox))
-	route("POST /v1/sandboxes/{ref}/resume", s.withSandboxes(s.resumeSandbox))
-	route("GET /v1/sandbox-usage", s.sandboxUsage)
-
-	// A byte stream into a sandbox. It runs on this listener, not its own port,
-	// so a deployment keeps one address and one certificate. See attach.go.
-	s.attachRoutes(mux)
 
 	// Everything under the control prefix is the API. Without this, a typo in
 	// a path would fall through to the panel and answer HTML with a 200.
@@ -692,17 +668,9 @@ func (s *Server) keyChanged(r *http.Request, keyID string) {
 
 // announce is changed for a caller without a request.
 func (s *Server) announce(ctx context.Context, c registry.Change) {
-	Announce(ctx, s.reg, s.st, s.log, c)
-}
-
-// Announce is changed for code outside the control plane, such as the sandbox
-// manager, which is built before the Server is.
-func Announce(ctx context.Context, reg *registry.Registry, st *store.Store, log *slog.Logger,
-	c registry.Change,
-) {
-	reg.Forget(c)
-	if err := st.Notify(ctx, string(c)); err != nil {
-		log.Warn("announcing a policy change failed", "error", err)
+	s.reg.Forget(c)
+	if err := s.st.Notify(ctx, string(c)); err != nil {
+		s.log.Warn("announcing a policy change failed", "error", err)
 	}
 }
 

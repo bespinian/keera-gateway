@@ -44,7 +44,7 @@ func sessionKey(r *http.Request, keyID string, kind policy.Kind,
 	if !ok {
 		return ""
 	}
-	// The hash lives in the store, next to the stated one sandboxes use.
+	// The hash lives in the store, next to the stated one.
 	return store.DerivedSessionKey(store.SessionHash(keyID, store.SessionKindOpening, first))
 }
 

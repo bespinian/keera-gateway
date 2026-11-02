@@ -213,7 +213,6 @@ type identity struct {
 	Unrestricted bool `json:"unrestricted"`
 	// Orgs is only set when there are several.
 	Orgs                []membership `json:"orgs,omitempty"`
-	Sandboxes           bool         `json:"sandboxes"`
 	ClaudeSubscriptions bool         `json:"claude_subscriptions"`
 }
 

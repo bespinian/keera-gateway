@@ -356,7 +356,7 @@ func TestADirectoryCheckReachesEveryOrganisation(t *testing.T) {
 
 // A terminal token belongs to one row, which 'keera org switch' moves. A
 // command that names another of the person's organisations acts there, with
-// the role they have there, so KEERA_ORG and an ssh config keep working.
+// the role they have there, so KEERA_ORG keeps working.
 func TestATerminalTokenActsInTheOrganisationItNames(t *testing.T) {
 	s := membershipServer(t, false)
 	ctx := context.Background()

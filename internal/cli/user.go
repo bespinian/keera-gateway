@@ -216,10 +216,6 @@ func (r *userRun) disable(ctx context.Context) error {
 		if authn.IsPasskeyAccount(user.ExternalID) {
 			lines = append(lines, "  their passkeys are removed")
 		}
-		if me, err := whoami(ctx, r.c); err == nil && me.Sandboxes {
-			lines = append(lines, "  their agent sandboxes and any not started yet are terminated; "+
-				"the rest are suspended")
-		}
 		lines = append(lines, "Usage history and the audit log are kept. 'keera user enable' lets them back in.")
 		if err := confirm("Disabling "+user.Email+":", lines, "email", user.Email,
 			"nobody was disabled"); err != nil {
@@ -230,12 +226,6 @@ func (r *userRun) disable(ctx context.Context) error {
 		ID          string `json:"id"`
 		Email       string `json:"email"`
 		RevokedKeys int    `json:"revoked_keys"`
-		Sandboxes   *struct {
-			Terminated int `json:"terminated"`
-			Suspended  int `json:"suspended"`
-			Failed     int `json:"failed"`
-		} `json:"sandboxes,omitempty"`
-		Warning string `json:"warning,omitempty"`
 	}
 	raw, err := keepRaw(ctx, r.c, "POST", "/v1/users/"+url.PathEscape(user.ID)+"/disable", nil, &res)
 	if err != nil {
@@ -244,13 +234,6 @@ func (r *userRun) disable(ctx context.Context) error {
 	return out(r.asJSON, raw, func(w *table) {
 		_, _ = fmt.Fprintf(w, "%s is disabled and signed out everywhere.\n", res.Email)
 		_, _ = fmt.Fprintf(w, "Revoked %s.\n", plural(res.RevokedKeys, "key"))
-		if sb := res.Sandboxes; sb != nil && sb.Terminated+sb.Suspended > 0 {
-			_, _ = fmt.Fprintf(w, "Sandboxes: %d terminated, %d suspended.\n",
-				sb.Terminated, sb.Suspended)
-		}
-		if res.Warning != "" {
-			_, _ = fmt.Fprintln(w, style.warn("Warning: "+res.Warning+"."))
-		}
 	})
 }
 

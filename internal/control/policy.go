@@ -62,41 +62,6 @@ func (s *Server) chainLimits(ctx context.Context, orgID, projectID string) (
 	return org, &lim, err
 }
 
-// checkAllowedRepos cleans up allowed_repos and checks who may change it.
-//
-// On an organisation, only an operator may: one forge credential reaches
-// every tenant's repositories, and this list keeps a tenant to its own. An
-// administrator's write keeps what the operator set. A project only narrows
-// it, so its administrators may set it. A key cannot set it at all.
-func (s *Server) checkAllowedRepos(w http.ResponseWriter, r *http.Request, p *authn.Principal,
-	scope policy.ScopeType, scopeID string, lim *policy.Limits,
-) bool {
-	for i, e := range lim.AllowedRepos {
-		e = strings.Trim(strings.TrimSpace(e), "/")
-		if !policy.ValidRepoPattern(e) {
-			badRequest(w, fmt.Sprintf("'allowed_repos' has %q; use an owner or group such as "+
-				"'bankb', a repository such as 'bankb/core', or '*' for all", e))
-			return false
-		}
-		lim.AllowedRepos[i] = e
-	}
-	if scope != policy.ScopeOrg || p.Unrestricted() {
-		return true
-	}
-	stored, err := s.storedLimits(r.Context(), scope, scopeID)
-	if err != nil {
-		s.fail(w, err)
-		return false
-	}
-	if lim.AllowedRepos != nil && !slices.Equal(lim.AllowedRepos, stored.AllowedRepos) {
-		forbid(w, "only an operator can change which repositories an organisation's "+
-			"sandboxes may check out; leave 'allowed_repos' out to keep it")
-		return false
-	}
-	lim.AllowedRepos = stored.AllowedRepos
-	return true
-}
-
 // maxSystemPromptBytes bounds a scope's standing instruction. It is added to
 // and charged on every chat request, so a pasted handbook would quietly cost
 // money.
@@ -159,9 +124,8 @@ type Effective struct {
 	SystemPrompt  string   `json:"system_prompt,omitempty"`
 	Filters       []string `json:"filters,omitempty"`
 	// AllowedTools nil means every tool of every MCP server.
-	AllowedTools []string               `json:"allowed_tools"`
-	Scopes       []policy.Scope         `json:"scopes"`
-	Sandbox      policy.ResolvedSandbox `json:"sandbox"`
+	AllowedTools []string       `json:"allowed_tools"`
+	Scopes       []policy.Scope `json:"scopes"`
 }
 
 // effectiveGuardrails answers with the chain above a scope, combined as the
@@ -236,7 +200,6 @@ func (s *Server) effective(ctx context.Context, scope policy.ScopeType,
 		Filters:       res.Filters,
 		AllowedTools:  res.AllowedTools,
 		Scopes:        res.Scopes,
-		Sandbox:       res.Sandbox,
 	}
 	if project != nil {
 		out.Levels = append(out.Levels, s.effectiveLevel(ctx, policy.ScopeProject, projectID, *project))
@@ -301,12 +264,6 @@ func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.
 		badRequest(w, msg)
 		return
 	}
-	// A sandbox's key is minted for that sandbox and dies with it, so sandbox
-	// limits on a key would limit nothing, while looking like they did.
-	if scope == policy.ScopeKey && !lim.SandboxLimits.IsZero() {
-		badRequest(w, "sandbox limits are set on an organisation or a project, not on a key")
-		return
-	}
 	if size, ok := checkSystemPrompt(&lim); !ok {
 		badRequest(w, fmt.Sprintf("'system_prompt' is %d bytes; the limit is %d, because this text is "+
 			"sent and charged on every request this scope makes", size, maxSystemPromptBytes))
@@ -321,7 +278,7 @@ func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.
 	}
 	defer unlock()
 	if !s.checkGuardrailFilters(w, r, owner, &lim) || !s.checkAllowList(w, r, scope, owner, &lim) ||
-		!s.checkAllowedTools(w, r, owner, &lim) || !s.checkAllowedRepos(w, r, p, scope, scopeID, &lim) {
+		!s.checkAllowedTools(w, r, owner, &lim) {
 		return
 	}
 	if err := s.st.PutGuardrail(r.Context(), scope, scopeID, lim); err != nil {

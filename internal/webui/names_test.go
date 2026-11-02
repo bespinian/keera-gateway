@@ -26,9 +26,8 @@ func TestTheServerAndThePanelShareTheNameRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	rules := map[string]func(string) bool{
-		"alias":   policy.ValidAlias,
-		"model":   policy.ValidModelAlias,
-		"sandbox": policy.ValidSandboxName,
+		"alias": policy.ValidAlias,
+		"model": policy.ValidModelAlias,
 	}
 	for kind, valid := range rules {
 		c, ok := cases[kind]

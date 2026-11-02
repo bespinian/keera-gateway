@@ -15,8 +15,8 @@ services:
     image: localhost/keera-gateway:latest
     restart: unless-stopped
     ports:
-      # One port serves everything: the panel at /, inference under /api, the
-      # control API under /control, and sandbox attach under /sandbox.
+      # One port serves everything: the panel at /, inference under /api and
+      # the control API under /control.
       #
       # Bound to loopback unless KEERA_BIND says otherwise. Beyond a
       # development machine, put a TLS proxy in front.
@@ -24,7 +24,6 @@ services:
     volumes:
       # ",z" relabels for SELinux hosts; harmless elsewhere.
       - ./models.yaml:/etc/keera/models.yaml:ro,z
-      - ./sandboxes.yaml:/etc/keera/sandboxes.yaml:ro,z
     # Every setting in .env reaches the gateway. docs/install.md explains them.
     env_file: .env
     # These win over .env.
@@ -33,13 +32,9 @@ services:
       KEERA_OPERATOR_KEY: ${KEERA_OPERATOR_KEY:?set KEERA_OPERATOR_KEY in .env - see .env.example}
       KEERA_SECRET_KEY: ${KEERA_SECRET_KEY:?set KEERA_SECRET_KEY in .env - see .env.example}
       KEERA_MODELS_FILE: /etc/keera/models.yaml
-      # Read even without a sandbox driver, so new organisations have the
-      # classes once one is on. See README.md.
-      KEERA_SANDBOXES_FILE: /etc/keera/sandboxes.yaml
-      # `make dev` reads the same .env, so these override it: the port is the
-      # one published below, and the podman driver cannot run in here.
+      # `make dev` reads the same .env, so this overrides it: the port is the
+      # one published below.
       KEERA_ADDR: ":8080"
-      KEERA_SANDBOX_DRIVER: ""
     healthcheck:
       # A scratch image has no shell or curl, so the binary checks /readyz.
       test: ["CMD", "/keera-gateway", "health"]

@@ -73,7 +73,7 @@ to an operator, and `KEERA_OIDC_<NAME>_DEFAULT_ROLE` cannot be `operator`.
 
 The operator role spans organisations, so you can see who holds it by reading
 the configuration. An administrator runs one organisation, including its models,
-MCP servers, filters, routers and sandbox classes. Remove a person from the
+MCP servers, filters and routers. Remove a person from the
 group, and they are demoted within 15 minutes (see
 [Asking the directory again](#asking-the-directory-again)). Remove an address
 from `KEERA_OPERATORS`, and they are demoted at the next directory check after
@@ -441,7 +441,6 @@ reaches your network:
 | --------------------------------------------------------------- | --------------------------------------------------- |
 | Models on your provider keys, paid from credit in advance       | Models inside your network, such as Keera Engine    |
 | Models and MCP servers on public addresses, with their own keys | MCP servers inside your network                     |
-|                                                                 | Sandboxes                                           |
 |                                                                 | Models on your provider keys, without card payments |
 
 A request for something that waits is refused with `org_limited`, and
@@ -605,11 +604,6 @@ Immediately:
 
 - they cannot sign in, and all their sessions and `keera login` tokens end
 - every key attributed to them is revoked for good
-- their agent sandboxes, and any sandbox that has not started yet, are
-  terminated. Their other sandboxes are suspended with the volume kept. An
-  administrator can keep or terminate them; getting at the work inside takes an
-  operator, since nobody else can open a shell in another person's sandbox
-- the repository credentials those sandboxes held are revoked
 
 The panel hides disabled people until you tick **Show disabled**. An
 administrator can disable anyone in

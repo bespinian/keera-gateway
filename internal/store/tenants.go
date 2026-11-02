@@ -22,7 +22,7 @@ type Org struct {
 	EmailDomain string `json:"email_domain,omitempty"`
 	// Limited is set on a self-signed-up organisation until it pays once or an
 	// operator lifts it. Until then its models may not run on the deployment's
-	// own machines, and it gets no sandboxes.
+	// own machines.
 	Limited   bool      `json:"limited,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -134,10 +134,9 @@ func (k KeyInfo) State(now time.Time) string {
 }
 
 // OrgTemplate is what a new organisation starts with: a copy of each model
-// and sandbox class, from the template files.
+// from the template files.
 type OrgTemplate struct {
-	Models         []policy.Model
-	SandboxClasses []policy.SandboxClass
+	Models []policy.Model
 }
 
 // CreateOrg inserts an organisation with its email domain and template in one
@@ -172,12 +171,6 @@ func createOrg(ctx context.Context, tx pgx.Tx, o Org, tmpl OrgTemplate) (Org, er
 	for _, m := range tmpl.Models {
 		m.OrgID = id
 		if err := upsertModel(ctx, tx, m, Credential{}); err != nil {
-			return o, err
-		}
-	}
-	for _, c := range tmpl.SandboxClasses {
-		c.OrgID = id
-		if err := upsertSandboxClass(ctx, tx, &c); err != nil {
 			return o, err
 		}
 	}
@@ -239,16 +232,10 @@ type DeletedOrg struct {
 	Projects int    `json:"projects"`
 	Users    int    `json:"users"`
 	Keys     int    `json:"keys"`
-	// LiveSandboxes is set only when the delete was refused for them.
-	LiveSandboxes int `json:"live_sandboxes,omitempty"`
 	// CardToken is the saved card the delete removed, zero for none, so
 	// PostFinance can forget it too.
 	CardToken int64 `json:"-"`
 }
-
-// ErrOrgHasSandboxes refuses to delete an organisation whose sandboxes still
-// hold machines, which would then keep running with nothing to stop them.
-var ErrOrgHasSandboxes = errors.New("store: the organisation still has live sandboxes")
 
 // DeleteOrg removes an organisation and everything scoped to it. Guardrails
 // and spend are cleared first, while the ids that name them still exist; the
@@ -270,16 +257,6 @@ func (s *Store) DeleteOrg(ctx context.Context, orgID string) (DeletedOrg, error)
 			return notFound(err)
 		}
 		gone.ID = orgID
-
-		// The row lock above holds off a sandbox being created meanwhile: its
-		// insert has to lock the same row.
-		if err := tx.QueryRow(ctx, "SELECT count(*) FROM sandboxes WHERE org_id = $1 AND "+liveSandbox,
-			orgID).Scan(&gone.LiveSandboxes); err != nil {
-			return err
-		}
-		if gone.LiveSandboxes > 0 {
-			return ErrOrgHasSandboxes
-		}
 
 		scoped := func(owner string) string {
 			return `(scope_type = 'org'     AND ` + owner + ` = $1)
@@ -403,16 +380,10 @@ type DeletedProject struct {
 	// DetachedKeys is how many revoked keys stayed behind, no longer naming any
 	// project. They are kept as history.
 	DetachedKeys int `json:"detached_keys"`
-	// LiveSandboxes is set when ErrProjectHasSandboxes refused the delete.
-	LiveSandboxes int `json:"-"`
 }
 
-// ErrProjectHasSandboxes refuses to delete a project whose sandboxes still
-// hold resources. An expired one counts: it can be resumed.
-var ErrProjectHasSandboxes = errors.New("store: the project still has live sandboxes")
-
 // oldestProject selects the oldest project of the organisation in orgParam,
-// such as "$1". Keys and sandboxes without a project go there.
+// such as "$1". Keys without a project go there.
 func oldestProject(orgParam string) string {
 	return "SELECT id FROM projects WHERE org_id = " + orgParam + " ORDER BY created_at, id LIMIT 1"
 }
@@ -442,16 +413,6 @@ func (s *Store) DeleteProject(ctx context.Context, orgID, projectID string) (Del
 			return notFound(err)
 		}
 		gone.ID = projectID
-
-		// The row lock above holds off a new sandbox: its insert checks the
-		// foreign key, which waits for the lock.
-		if err := tx.QueryRow(ctx, "SELECT count(*) FROM sandboxes WHERE project_id = $1 AND "+liveSandbox,
-			projectID).Scan(&gone.LiveSandboxes); err != nil {
-			return err
-		}
-		if gone.LiveSandboxes > 0 {
-			return ErrProjectHasSandboxes
-		}
 
 		rows, err := tx.Query(ctx, `SELECT name FROM api_keys
 			WHERE project_id = $1 AND revoked_at IS NULL ORDER BY name`, projectID)
@@ -663,10 +624,6 @@ func (s *Store) ActivateKey(ctx context.Context, orgID, id, name string, hash []
 	}
 }
 
-// ErrSandboxKey is a key minted for a sandbox. It lives and dies with the
-// sandbox, so it is not rotated.
-var ErrSandboxKey = errors.New("store: the key belongs to a sandbox")
-
 // RotateKey replaces the key oldID with next in one transaction: next gets the
 // old key's organisation, project, person, kind and guardrails, and the old
 // key is revoked. An empty next.Name keeps the old name. A nil next.ExpiresAt
@@ -690,16 +647,6 @@ func (s *Store) RotateKey(ctx context.Context, orgID, oldID string, next KeyInfo
 		}
 		if old.Pending {
 			return policy.ErrKeyPending
-		}
-		// A sandbox revokes its key by id when it ends, so a rotated copy would
-		// outlive it, and could be rotated on for ever.
-		var sandboxed bool
-		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM sandboxes WHERE key_id = $1)",
-			oldID).Scan(&sandboxed); err != nil {
-			return err
-		}
-		if sandboxed {
-			return ErrSandboxKey
 		}
 		next.OrgID, next.ProjectID, next.UserID, next.Kind = old.OrgID, old.ProjectID, old.UserID, old.Kind
 		if next.Name == "" {

@@ -141,15 +141,6 @@ models:
 	if err == nil || !strings.Contains(err.Error(), "api_key_env") {
 		t.Errorf("a model with an unknown field: err = %v, want it named", err)
 	}
-	_, err = parseSandboxFile([]byte(`
-sandboxes:
-  - name: standard
-    image: example/sandbox:1
-    egress: [github.com]
-`))
-	if err == nil || !strings.Contains(err.Error(), "egress") {
-		t.Errorf("a class with an unknown field: err = %v, want it named", err)
-	}
 	if _, err := parseModelFile([]byte("")); err == nil || !strings.Contains(err.Error(), "no models") {
 		t.Errorf("an empty file: err = %v, want 'declares no models'", err)
 	}

@@ -10,7 +10,6 @@ import (
 	"github.com/bespinian/keera-gateway/internal/gateway"
 	"github.com/bespinian/keera-gateway/internal/openapi"
 	"github.com/bespinian/keera-gateway/internal/ratelimit"
-	"github.com/bespinian/keera-gateway/internal/sandbox"
 )
 
 // The spec is written by hand: every route must be in it, and everything in it
@@ -18,10 +17,8 @@ import (
 func TestOpenAPIDescribesEveryRoute(t *testing.T) {
 	log := slog.New(slog.DiscardHandler)
 	gw := gateway.New(nil, nil, ratelimit.New(), nil, nil, gateway.Options{}, log)
-	// With sandboxes on, so their routes are registered too.
 	ctl := control.New(nil, nil, nil, nil, control.Options{
 		OperatorKey: testOperatorKey, ServeUI: true,
-		Sandboxes: sandbox.NewManager(nil, nil, sandbox.ManagerOptions{Log: log}),
 	}, log)
 
 	var served []string

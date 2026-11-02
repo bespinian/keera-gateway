@@ -239,11 +239,9 @@ func TestFileClientsStateTheSameWindow(t *testing.T) {
 	if got, _ := entry["contextWindow"].(float64); int(got) != window {
 		t.Errorf("pi declares context %v, want %d", entry["contextWindow"], window)
 	}
-	// The sandbox image writes this to ~/.pi/agent/models.json and Pi expands
-	// the variable, so the credential stays out of files on the volume.
+	// Pi expands the variable, so the key stays out of the file.
 	if got := p.Providers.Keera.APIKey; got != "${KEERA_API_KEY}" {
-		t.Errorf("pi apiKey = %q; the sandbox image relies on Pi expanding this "+
-			"from the environment", got)
+		t.Errorf("pi apiKey = %q; Pi should read the key from the environment", got)
 	}
 	// Pi sends no User-Agent of its own.
 	if got := Identify(p.Providers.Keera.Headers[ClientHeader], ""); got != "pi" {

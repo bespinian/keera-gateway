@@ -396,11 +396,10 @@ type Setup struct {
 	Keys     int64 `json:"keys"`
 	Models   int64 `json:"models"`
 	Requests int64 `json:"requests"`
-	// Filters, Routers, Sandboxes and MCP servers are optional. The panel hides
-	// their screens until there is at least one.
+	// Filters, Routers and MCP servers are optional. The panel hides their
+	// screens until there is at least one.
 	Filters    int64 `json:"filters"`
 	Routers    int64 `json:"routers"`
-	Sandboxes  int64 `json:"sandboxes"`
 	MCPServers int64 `json:"mcp_servers"`
 	// Credits counts the money ever put into credit, paid or granted.
 	Credits int64 `json:"credits"`
@@ -423,14 +422,12 @@ func (s *Store) SetupState(ctx context.Context, orgID string) (Setup, error) {
 		(SELECT count(*) FROM (SELECT 1 FROM usage_daily WHERE $1 = '' OR org_id = $1 LIMIT 1) AS served),
 		(SELECT count(*) FROM filters WHERE $1 = '' OR org_id = $1),
 		(SELECT count(*) FROM routers WHERE $1 = '' OR org_id = $1),
-		-- Classes, not running machines, so the screen stays when none is up.
-		(SELECT count(*) FROM sandbox_classes WHERE $1 = '' OR org_id = $1),
 		(SELECT count(*) FROM mcp_servers WHERE $1 = '' OR org_id = $1),
 		(SELECT count(*) FROM payments WHERE ($1 = '' OR org_id = $1)
 			AND state = 'paid' AND micros > 0),
 		EXISTS (SELECT 1 FROM credit_accounts WHERE org_id = $1 AND invoiced)`, orgID,
 	).Scan(&st.Orgs, &st.Keys, &st.Models, &st.Requests,
-		&st.Filters, &st.Routers, &st.Sandboxes, &st.MCPServers, &st.Credits,
+		&st.Filters, &st.Routers, &st.MCPServers, &st.Credits,
 		&st.Invoiced)
 	return st, err
 }

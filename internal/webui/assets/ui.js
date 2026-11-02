@@ -327,10 +327,6 @@ export const icons = {
   header:
     "M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" +
     "M8 8h.01",
-  // A box with a clock: a sandbox is a machine that goes away by itself.
-  sandboxes:
-    "M21 8v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8M3 8l2-4h14l2 4zM3 8h18" +
-    "M12 11v3l2 1.5",
   collapse: "M11 17l-5-5 5-5M18 17l-5-5 5-5",
   expand: "M13 17l5-5-5-5M6 17l5-5-5-5",
   back: "M19 12H5M12 19l-7-7 7-7",
@@ -1958,13 +1954,6 @@ export function takenProblem(entries, alias, noun) {
   return (entries || []).some((e) => e.alias === alias)
     ? `The ${noun} ${alias} already exists. Change it from its row instead.`
     : "";
-}
-
-/** sandboxNameProblem mirrors policy.ValidSandboxName: the alias rule, but at
- *  most 40 characters, because the name also becomes a hostname. */
-export function sandboxNameProblem(name) {
-  if (!name) return "Give the sandbox a name.";
-  return nameProblem(name, 40, "A sandbox name");
 }
 
 function nameProblem(name, max, what) {

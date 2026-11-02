@@ -163,14 +163,12 @@ var commands = []command{
 					"in the audit log. An organisation somebody created by signing up is " +
 					"limited until it buys credit, or until an operator lifts the limit. " +
 					"--lift-limit opens the models and MCP servers inside this deployment's " +
-					"network, and sandboxes. Without card payments it also opens the models " +
+					"network. Without card payments it also opens the models " +
 					"on the deployment's own provider keys.",
 			},
 			{
 				name: "delete", args: "<org>", summary: "delete an organisation and everything in it",
 				flags: []string{"yes", "json"},
-				prose: "Refused while any of its sandboxes is still live: terminate them first, " +
-					"so no machine keeps running after its organisation is gone.",
 			},
 		},
 		examples: []string{
@@ -209,7 +207,7 @@ var commands = []command{
 				flags: []string{"yes", "json"},
 				prose: "Refused while any key in the project is not revoked, expired ones " +
 					"included: deleting it would take those credentials with it. Revoke them first. " +
-					"Refused too while a sandbox in it is live, expired ones included. A key cannot change " +
+					"A key cannot change " +
 					"project, so issue a new one in another project for anything that still " +
 					"needs one. Revoked keys stay as history, under no project.",
 			},
@@ -250,8 +248,7 @@ var commands = []command{
 				summary: "turn a person off, for when they leave",
 				flags:   []string{"yes", "json"},
 				prose: "They are signed out and their keys revoked; leaving the directory alone " +
-					"does not revoke keys. Their agent sandboxes and any not started yet are " +
-					"terminated, and the rest suspended. See https://docs.keera.ch/manage/users/.",
+					"does not revoke keys. See https://docs.keera.ch/manage/users/.",
 			},
 			{
 				name: "enable", args: "<email-or-id>", summary: "let a disabled person sign in again",
@@ -504,8 +501,7 @@ var commands = []command{
 				flags: []string{
 					"models", "no-models", "requests", "tokens", "per", "budget", "period",
 					"system-prompt", "no-system-prompt", "filters", "no-filters", "tools", "no-tools",
-					"max-sandboxes", "max-sandbox-ttl", "sandbox-classes", "no-sandbox-classes",
-					"max-sandbox-cpu", "max-sandbox-memory", "repos", "no-repos", "json",
+					"json",
 				},
 				examples: []string{
 					"keera guardrail set project payments --models keera-speed --requests 120 \\\n" +
@@ -665,86 +661,6 @@ var commands = []command{
 			{
 				name: "delete", args: "<alias>", summary: "remove a router",
 				flags: []string{"yes", "json"},
-			},
-		},
-	},
-	{
-		name:    "sandbox",
-		aliases: []string{"sandboxes", "sbx"},
-		summary: "the machines this gateway lends out",
-		prose: "A sandbox is a machine for one task or one working day, with its own API key " +
-			"and an expiry. 'sandbox ssh' attaches through the gateway's one port, and " +
-			"'sandbox agent' starts one task's machine that ends by pushing a branch. " +
-			"See https://docs.keera.ch/manage/sandboxes/.",
-		subs: []subcommand{
-			{name: "classes", summary: "the machines this organisation offers", flags: []string{"json"}},
-			{
-				name: "apply", args: "<file>", summary: "add or update every class a template file declares",
-				flags: []string{"json"},
-			},
-			{
-				name: "delete-class", aliases: []string{"remove-class", "rm-class"}, args: "<name>",
-				summary: "remove a class; sandboxes already running on it keep working",
-				flags:   []string{"yes", "json"},
-			},
-			{
-				name: "create", aliases: []string{"up"}, args: "<name>", summary: "start one",
-				flags: []string{
-					"project", "class", "purpose", "ttl", "repo", "branch",
-					"task", "ssh-key", "json",
-				},
-			},
-			{
-				name: "agent", args: "<name>", summary: "start one for an agent",
-				flags: []string{"project", "class", "ttl", "repo", "branch", "task", "json"},
-			},
-			{
-				name: "list", summary: "what is running",
-				flags: []string{"project", "class", "purpose", "all", "json"},
-			},
-			{name: "show", args: "<name>", summary: "one sandbox in full", flags: []string{"json"}},
-			{
-				name: "ssh", args: "<name> [-- <command>]", summary: "open a shell in it",
-				prose: "Runs your own ssh, with your keys and agent, through the gateway. " +
-					"With a command after --, it runs that and exits with its status.",
-				examples: []string{"keera sandbox ssh box", "keera sandbox ssh box -- git status"},
-			},
-			{
-				name: "config", summary: "the ~/.ssh/config block, so any editor can attach",
-				prose: "Prints the block on stdout, to append to ~/.ssh/config. Then plain ssh, " +
-					"VS Code's Remote-SSH and JetBrains Gateway reach every sandbox you own in " +
-					"this organisation. The block always matches the same hosts, so ssh uses " +
-					"the first one in the file; for a sandbox in another organisation, use " +
-					"KEERA_ORG=<org> keera sandbox ssh.",
-				examples: []string{"keera sandbox config >> ~/.ssh/config"},
-			},
-			// --org, so a ProxyCommand keeps working after 'keera org switch'.
-			{
-				name: "proxy", args: "<name>", summary: "the attach surface, for ssh's ProxyCommand",
-				flags: []string{"org", "port"},
-			},
-			{
-				name: "extend", args: "<name>", summary: "push its expiry out again",
-				flags: []string{"ttl", "json"},
-			},
-			{
-				name: "suspend", args: "<name>", summary: "release its compute, keep its disk",
-				flags: []string{"json"},
-			},
-			{
-				name: "resume", args: "<name>", summary: "start it again where it left off",
-				flags: []string{"json"},
-				prose: "A suspended sandbox starts again as it was. An expired one also gets a " +
-					"new API key, a new repository credential and the class's default lifetime, " +
-					"because its old ones were revoked when it expired.",
-			},
-			{
-				name: "terminate", aliases: []string{"delete", "rm", "remove", "down"}, args: "<name>", summary: "end it and take its volume with it",
-				flags: []string{"yes", "json"},
-			},
-			{
-				name: "usage", summary: "what sandboxes have cost",
-				flags: []string{"by", "since", "json"},
 			},
 		},
 	},
@@ -1166,7 +1082,7 @@ var printHelp = func(fs *flag.FlagSet, name, sub string) error {
 
 // wantsHelp returns the subcommand asked about, empty for the command itself.
 // The word "help" counts only where a verb goes, so a project can be called
-// "help". It stops at "--", as in `keera sandbox ssh box -- git --help`.
+// "help". It stops at "--", after which every word is positional.
 func wantsHelp(args []string) (string, bool) {
 	asked := false
 	var named []string

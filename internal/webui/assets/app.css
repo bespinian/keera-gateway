@@ -1019,11 +1019,6 @@ tr.row-new > td:first-child {
   }
 }
 
-/* A finished sandbox: dimmed, not hidden, so people can see what it cost. */
-.row-faint td {
-  opacity: 0.55;
-}
-
 .facts {
   display: grid;
   gap: 11px;

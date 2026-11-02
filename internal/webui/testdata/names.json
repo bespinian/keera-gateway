@@ -36,16 +36,5 @@
       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a"
     ]
-  },
-  "sandbox": {
-    "valid": ["desk", "my-box-2", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
-    "invalid": [
-      "",
-      "-desk",
-      "desk-",
-      "Desk",
-      "a.b",
-      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    ]
   }
 }

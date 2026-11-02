@@ -44,7 +44,7 @@ func testStore(t *testing.T) (*store.Store, context.Context) {
 	}
 	if _, err := st.Pool().Exec(ctx, `TRUNCATE orgs, projects, users, api_keys, guardrails,
 		models, filters, filter_runs, routers, usage_events, usage_daily, spend, audit_log, sessions,
-		login_flows, signups, cli_codes, cli_tokens, sandboxes, sandbox_classes, mcp_servers,
+		login_flows, signups, cli_codes, cli_tokens, mcp_servers,
 		tool_calls, billing_lines, credit_accounts, payments, identities, job_runs
 		RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)

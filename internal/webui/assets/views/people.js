@@ -32,7 +32,7 @@ const ROLES = [
   {
     key: "admin",
     label: "Administrator",
-    note: "Manages the organisation: users, projects, keys, guardrails, models, MCP servers, filters, routers and sandbox classes.",
+    note: "Manages the organisation: users, projects, keys, guardrails, models, MCP servers, filters and routers.",
   },
   {
     key: "operator",
@@ -406,14 +406,6 @@ export function disablePerson(ctx, user) {
         ctx.state.me.passkeys && isPasskeyAccount(user)
           ? h("li", {}, "their passkeys are removed")
           : null,
-        ctx.state.me.sandboxes
-          ? h(
-              "li",
-              {},
-              "their agent sandboxes and any not started yet are terminated; " +
-                "the rest are suspended",
-            )
-          : null,
       ),
       h(
         "p",
@@ -427,17 +419,7 @@ export function disablePerson(ctx, user) {
     onConfirm: async () => {
       const res = await api.disableUser(user.id);
       const keys = `${res.revoked_keys} ${plural(res.revoked_keys, "key")}`;
-      const sb = res.sandboxes || {};
-      const stopped = (sb.terminated || 0) + (sb.suspended || 0);
-      const sandboxes = stopped
-        ? `, ${stopped} ${plural(stopped, "sandbox", "sandboxes")} stopped`
-        : "";
-      toast(
-        res.warning
-          ? `${user.email} disabled. ${res.warning}`
-          : `${user.email} disabled; ${keys} revoked${sandboxes}`,
-        res.warning ? "warn" : "good",
-      );
+      toast(`${user.email} disabled; ${keys} revoked`, "good");
       ctx.reload();
     },
   });

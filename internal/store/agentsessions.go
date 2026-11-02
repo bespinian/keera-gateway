@@ -39,8 +39,7 @@ func DerivedSessionKey(hash string) string { return derivedPrefix + hash }
 // later are still told apart by the idle gap.
 const MaxSessionInput = 128 << 10
 
-// SessionHash derives a session hash. The gateway and sandboxes (through
-// StatedSessionKeyFor) share it, so the two cannot drift apart.
+// SessionHash derives a session hash.
 //
 // The kind is mixed in so a stated id and an opening prompt with the same bytes
 // still differ. The zero byte separator appears in no id or JSON document.

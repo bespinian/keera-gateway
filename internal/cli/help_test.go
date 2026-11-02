@@ -103,7 +103,7 @@ func TestEveryDispatchedCommandIsRegistered(t *testing.T) {
 	dispatched := []string{
 		"org", "orgs", "project", "projects", "user", "users", "key", "keys",
 		"model", "models", "filter", "filters", "router", "routers", "router", "routers",
-		"sandbox", "sandboxes", "sbx", "guardrail", "guardrails",
+		"guardrail", "guardrails",
 		"mcp", "limit", "limits", "budget", "budgets", "usage", "failure", "failures", "sessions",
 		"session", "connect", "doctor", "login", "logout", "whoami",
 		"version", "help",
@@ -129,8 +129,8 @@ func TestWantsHelp(t *testing.T) {
 		{[]string{"--help", "add"}, "add", true},
 		{[]string{"list"}, "", false},
 		{[]string{"add", "my-filter", "--mode", "gate"}, "", false},
-		{[]string{"ssh", "box", "--", "git", "--help"}, "", false},
-		{[]string{"ssh", "--help", "--", "git"}, "ssh", true},
+		{[]string{"show", "box", "--", "--help"}, "", false},
+		{[]string{"show", "--help", "--", "box"}, "show", true},
 		// "help" is a verb only where a verb goes: here it is a name and a value.
 		{[]string{"create", "help"}, "", false},
 		{[]string{"add", "f", "--prompt", "help"}, "", false},
@@ -184,10 +184,10 @@ func TestTakeURL(t *testing.T) {
 			[]string{"whoami"},
 			"https://keera.example.ch",
 		},
-		// Everything after -- belongs to the command being run in a sandbox.
+		// Everything after -- is positional.
 		{
-			[]string{"sandbox", "ssh", "box", "--", "curl", "--url", "x"},
-			[]string{"sandbox", "ssh", "box", "--", "curl", "--url", "x"},
+			[]string{"filter", "show", "--", "--url", "x"},
+			[]string{"filter", "show", "--", "--url", "x"},
 			"",
 		},
 	}
@@ -222,7 +222,7 @@ func TestHelpHidesDefaultsThatMeanNotGiven(t *testing.T) {
 		}
 	}
 	for _, args := range [][]string{
-		{"guardrail", "set", "--help"}, {"sandbox", "create", "--help"},
+		{"guardrail", "set", "--help"}, {"usage", "--help"},
 	} {
 		out := capture(t, args...)
 		if strings.Contains(out, "(default -1ns)") || strings.Contains(out, "(default 0s)") {

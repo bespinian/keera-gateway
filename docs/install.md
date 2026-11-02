@@ -37,9 +37,8 @@ touches the database.
 
 ## Configuration
 
-Everything is an environment variable, except a few files: the models and
-sandbox classes new organisations start with, and the
-[Git credentials for sandboxes](sandboxes.md#configuration).
+Everything is an environment variable, except a few files, such as the models
+new organisations start with.
 
 ### Required
 
@@ -56,7 +55,7 @@ sandbox classes new organisations start with, and the
 | `KEERA_METRICS_TOKEN`    | unset       | Reads `/metrics` and nothing else. Must differ from the operator key.                                                                                                                                                                                |
 | `KEERA_PUBLIC_URL`       | Host header | The gateway's address as a browser sees it. Used for the sign-out redirect, by **Connect client**, and for the panel link in a refusal. Unset, or with `KEERA_UI=false`, a refusal has no link. Required with single sign-on, passkeys and payments. |
 | `KEERA_MODELS_FILE`      | unset       | The models each new organisation starts with. See [Template files](gateway.md#template-files).                                                                                                                                                       |
-| `KEERA_USAGE_RETENTION`  | for ever    | How long the request log, ended sandboxes and ended keys are kept. See [Retention and sizing](#retention-and-sizing).                                                                                                                                |
+| `KEERA_USAGE_RETENTION`  | for ever    | How long the request log and ended keys are kept. See [Retention and sizing](#retention-and-sizing).                                                                                                                                                 |
 | `KEERA_AUDIT_RETENTION`  | for ever    | How long audit entries are kept.                                                                                                                                                                                                                     |
 | `KEERA_UPSTREAM_DENY`    | see below   | Addresses the gateway never connects to. See [Where the gateway may connect](#where-the-gateway-may-connect).                                                                                                                                        |
 | `KEERA_UPSTREAM_PRIVATE` | `all`       | Host names inside the network that organisations may reach. Required with sign-up. See [Where the gateway may connect](#where-the-gateway-may-connect).                                                                                              |
@@ -92,9 +91,8 @@ addresses, groups, domains and scopes, are comma-separated. A number,
 duration or on/off value that cannot be read, such as `64MB`, `365d` or
 `enabled`, is ignored and the default is used. So is a size or count of zero or
 less, and a zero or negative `KEERA_CACHE_TTL`, `KEERA_SPEND_REFRESH` or
-`KEERA_UPSTREAM_HEADER_TIMEOUT`. For retention and `KEERA_SANDBOX_IDLE_SUSPEND`,
-`0` means off and a negative value is refused. The sandbox setting is only
-checked while a driver is set ([Sandboxes](#sandboxes)).
+`KEERA_UPSTREAM_HEADER_TIMEOUT`. For retention, `0` means off and a negative
+value is refused.
 
 Some values stop the start instead, with a message that names the setting.
 Among them: a `KEERA_LOG_LEVEL` or `KEERA_LOG_FORMAT` not listed above, a
@@ -103,9 +101,8 @@ Among them: a `KEERA_LOG_LEVEL` or `KEERA_LOG_FORMAT` not listed above, a
 `KEERA_METRICS_TOKEN` equal to the operator key, a
 subscription model in `KEERA_MODELS_FILE` while `KEERA_CLAUDE_SUBSCRIPTIONS` is
 off, and a `KEERA_OIDC_<NAME>_DEFAULT_ROLE` other than `admin` or
-`member`. The single sign-on, passkey, sandbox and payment settings have checks
-of their own, which their sections, [sso.md](sso.md),
-[sandboxes.md](sandboxes.md#configuration) and
+`member`. The single sign-on, passkey and payment settings have checks of their
+own, which their sections, [sso.md](sso.md) and
 [billing.md](billing.md#set-it-up) describe.
 
 ### Where the gateway may connect
@@ -176,13 +173,6 @@ passkeys. `KEERA_OPERATORS`
 names the email addresses that are operators
 ([sso.md](sso.md#the-operator-role-comes-from-the-environment-always)). Every
 setting is in [sso.md](sso.md#settings).
-
-### Sandboxes
-
-Off unless `KEERA_SANDBOX_DRIVER` is `kubernetes` or `podman`; the podman
-driver is for local development and tests. Every `KEERA_SANDBOX_*` setting, and
-which are read without a driver, is in
-[sandboxes.md](sandboxes.md#configuration).
 
 ## Single host with compose
 
@@ -300,7 +290,7 @@ What to put in front of the gateway:
 [Publish it](https://docs.keera.ch/operate/install/#publish-it). That list
 matters more than usual, because one port carries the control side and the
 inference side, and only credentials keep them apart
-([gateway.md](gateway.md#one-listener-four-surfaces)). Until single sign-on or
+([gateway.md](gateway.md#one-listener-three-surfaces)). Until single sign-on or
 passkeys are set up, the only way in is the operator key, which can change
 every guardrail, and every audit entry reads `operator@localhost`.
 
@@ -343,8 +333,7 @@ Most tables grow with the number of customers. These grow with use:
 | `filter_runs`   | filter run, per request                          |
 | `tool_calls`    | MCP tool call                                    |
 | `usage_daily`   | organisation, key, model, client and day, in UTC |
-| `sandboxes`     | sandbox lent out                                 |
-| `api_keys`      | key, and one more for each sandbox               |
+| `api_keys`      | key                                              |
 | `billing_lines` | billable call, on the deployment's keys          |
 | `audit_log`     | administrative action, so it grows slowly        |
 
@@ -364,9 +353,9 @@ it logs the windows, or `no retention window is configured`. The daily totals
 are never deleted: they are small, and long reports read them.
 
 Past the usage window, the gateway deletes the request log, filter runs, tool
-calls and closed budget windows. It also deletes sandboxes that ended, and keys
-revoked or expired, with their guardrails. A key that a sandbox still names
-stays. Billing rows and payments are never deleted ([billing.md](billing.md)).
+calls and closed budget windows. It also deletes keys revoked or expired, with
+their guardrails. Billing rows and payments are never deleted
+([billing.md](billing.md)).
 
 **Which screens reach back how far:**
 
@@ -399,8 +388,8 @@ rather than being killed. `GOMEMLIMIT` overrides that. Size Postgres for
 replicas × (`KEERA_MAX_DB_CONNS` + 2) connections: the two listeners hold
 their own.
 
-Background jobs, such as the sandbox sweep, retention and payments, run on one
-replica per interval, whichever asks first.
+Background jobs, such as retention and payments, run on one replica per
+interval, whichever asks first.
 
 ## Upgrading
 
@@ -429,6 +418,11 @@ restart. Also:
   are carried over. The output-token guardrail (`--max-output-tokens`,
   `max_output_tokens`) is removed, and its values are dropped. Update scripts
   and API clients that set these.
+- **v0.13.0 removes sandboxes.** The upgrade revokes the keys of sandboxes
+  still running and drops their tables and guardrail limits, along with
+  `allowed_repos`. It does not stop the machines: remove leftover sandbox pods
+  or containers yourself. The `KEERA_SANDBOX_*` and `KEERA_SANDBOXES_FILE`
+  settings are ignored, and `keera sandbox` is gone.
 - **A database created before v0.4.0 cannot be upgraded in place.** Its first
   schema file changed up to that release, and the gateway runs each file only
   once. Start from an empty database.

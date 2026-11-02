@@ -13,9 +13,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/payment"
-	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/registry"
-	"github.com/bespinian/keera-gateway/internal/sandbox"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
@@ -92,18 +90,6 @@ var isolationCases = map[string]isolationCase{
 	"GET /v1/requests/stream":               {"/v1/requests/stream?org_id=org_a", ""},
 	"GET /v1/sessions":                      {"/v1/sessions?org_id=org_a", ""},
 	"GET /v1/sessions/{id}":                 {"/v1/sessions/req_a?org_id=org_a", ""},
-
-	"GET /v1/sandbox-classes":           {"/v1/sandbox-classes?org_id=org_a", ""},
-	"PUT /v1/sandbox-classes/{name}":    {"/v1/sandbox-classes/standard?org_id=org_a", `{"image":"example/sandbox:1","cpu_millis":1000,"memory_mib":1024,"disk_mib":1024}`},
-	"DELETE /v1/sandbox-classes/{name}": {"/v1/sandbox-classes/standard?org_id=org_a", ""},
-	"GET /v1/sandboxes":                 {"/v1/sandboxes?org_id=org_a", ""},
-	"POST /v1/sandboxes":                {"/v1/sandboxes", `{"org_id":"org_a","name":"taken","class":"standard","authorized_keys":["ssh-ed25519 AAAA eve"]}`},
-	"GET /v1/sandboxes/{ref}":           {"/v1/sandboxes/sbx_a", ""},
-	"DELETE /v1/sandboxes/{ref}":        {"/v1/sandboxes/sbx_a", ""},
-	"POST /v1/sandboxes/{ref}/extend":   {"/v1/sandboxes/sbx_a/extend", "{}"},
-	"POST /v1/sandboxes/{ref}/suspend":  {"/v1/sandboxes/sbx_a/suspend", ""},
-	"POST /v1/sandboxes/{ref}/resume":   {"/v1/sandboxes/sbx_a/resume", ""},
-	"GET /v1/sandbox-usage":             {"/v1/sandbox-usage?org_id=org_a", ""},
 }
 
 // notTenantData are the routes that only ever act on the caller, or read
@@ -150,27 +136,9 @@ func TestNoRouteLetsOneTenantReachAnother(t *testing.T) {
 		[]byte("hash-of-key_a-is-32-bytes-long!!")); err != nil {
 		t.Fatal(err)
 	}
-	class := policy.SandboxClass{
-		OrgID: "org_a", Name: "standard", Image: "example/sandbox:1",
-		Isolation: policy.IsolationIsolated, CPU: 1000, Memory: 1024, Disk: 1024,
-		DefaultTTLSeconds: 3600, MaxTTLSeconds: 3600,
-	}
 	if err := st.CreatePayment(ctx, store.Payment{
 		ID: "pay_a", OrgID: "org_a", Kind: store.PaymentTopUp,
 		AmountMicros: 10_000_000, Actor: "ada@example.ch",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.UpsertSandboxClass(ctx, &class); err != nil {
-		t.Fatal(err)
-	}
-	expires := time.Now().Add(time.Hour)
-	if _, err := st.CreateSandbox(ctx, store.Sandbox{
-		ID: "sbx_a", OrgID: "org_a", ProjectID: "project_a",
-		UserID: "user_a", Owner: "ada@example.ch", Name: "desk", Class: "standard",
-		Purpose: policy.PurposeEngineer, State: policy.SandboxReady, Image: "example/sandbox:1",
-		Isolation: policy.IsolationIsolated, CPU: 1000, Memory: 1024, Disk: 1024,
-		KeyID: "key_a", ExpiresAt: &expires,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +159,6 @@ func TestNoRouteLetsOneTenantReachAnother(t *testing.T) {
 	}
 	srv := New(st, reg, nil, nil, Options{
 		OperatorKey: testOperatorKey,
-		Sandboxes:   sandbox.NewManager(st, stubDriver{}, sandbox.ManagerOptions{}),
 		// Nothing listens there: a refused request never reaches it.
 		Payments: &Payments{Client: payment.New(payment.Settings{
 			URL:     "http://127.0.0.1:1",
@@ -247,12 +214,6 @@ func TestNoRouteLetsOneTenantReachAnother(t *testing.T) {
 				t.Errorf("%s showed another tenant's %q: %s", pattern, secret, body)
 			}
 		}
-	}
-	// Attaching to a sandbox is a byte stream, registered on its own.
-	if code, body := send("GET", httpx.SandboxPrefix+"/v1/sbx_a/tcp/2222", "",
-		"Connection", "Upgrade", "Upgrade", upgradeProtocol); code != http.StatusForbidden &&
-		code != http.StatusNotFound {
-		t.Errorf("attaching to another tenant's sandbox = %d %s, want 403 or 404", code, body)
 	}
 	for pattern := range isolationCases {
 		if !slices.Contains(srv.routes, pattern) {

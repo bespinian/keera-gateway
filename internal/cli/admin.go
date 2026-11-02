@@ -324,19 +324,6 @@ func textOrFile(v string) (string, error) {
 	return strings.TrimSpace(string(b)), nil
 }
 
-// setInt treats -1 as "not given" and 0 as clear.
-func setInt(dst **int, v int) {
-	switch {
-	case v < 0:
-		return
-	case v == 0:
-		*dst = nil
-	default:
-		n := v
-		*dst = &n
-	}
-}
-
 // stringList may be repeated and takes comma-separated values, because people
 // type both.
 type stringList []string
@@ -401,13 +388,9 @@ func yesNo(b bool) string {
 	return statusWord("no")
 }
 
-// plural takes an irregular plural too: plural(n, "sandbox", "sandboxes").
-func plural(n int, noun string, many ...string) string {
+func plural(n int, noun string) string {
 	if n == 1 {
 		return "1 " + noun
-	}
-	if len(many) > 0 {
-		return strconv.Itoa(n) + " " + many[0]
 	}
 	return strconv.Itoa(n) + " " + noun + "s"
 }
@@ -419,13 +402,6 @@ func share(part, whole int64) string {
 		return "-"
 	}
 	return fmt.Sprintf("%.1f%%", float64(part)/float64(whole)*100)
-}
-
-func derefInt(p *int) int {
-	if p == nil {
-		return 0
-	}
-	return *p
 }
 
 // shortDuration avoids time.Duration's "11m30.000000001s" and "168h0m0s".

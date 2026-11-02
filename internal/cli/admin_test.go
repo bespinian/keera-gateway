@@ -1621,29 +1621,6 @@ func TestRotatingARevokedKeyWithNoProjectSuggestsNoProject(t *testing.T) {
 	}
 }
 
-func TestMaxSizeShowsEitherPartAlone(t *testing.T) {
-	for _, tc := range []struct {
-		cpu, memory int
-		want        string
-	}{
-		{2000, 0, "2c, any memory"},
-		{0, 8192, "any CPU, 8Gi"},
-		{1500, 4096, "1.5c, 4Gi"},
-	} {
-		if got := maxSize(tc.cpu, tc.memory); got != tc.want {
-			t.Errorf("maxSize(%d, %d) = %q, want %q", tc.cpu, tc.memory, got, tc.want)
-		}
-	}
-	var w strings.Builder
-	tw := newTable(&w)
-	memory := 8192
-	printLimits(tw, policy.Limits{MaxSandboxMemory: &memory}, "project")
-	_ = tw.Flush()
-	if !strings.Contains(w.String(), "any CPU, 8Gi") {
-		t.Errorf("a memory-only limit was not shown:\n%s", w.String())
-	}
-}
-
 // An 'add' that overwrote would drop every field it was not given.
 func TestAddRefusesAnAliasThatExists(t *testing.T) {
 	quiet(t)
@@ -1747,11 +1724,11 @@ func TestKeyCreateExpiresOnADay(t *testing.T) {
 func TestDeleteJSONKeepsWhatTheServerSaid(t *testing.T) {
 	newFakeControl(t, map[string]any{
 		"DELETE /v1/orgs/org_2": map[string]any{
-			"id": "org_2", "name": "Another Bank", "projects": 1, "sandbox_classes": 3,
+			"id": "org_2", "name": "Another Bank", "projects": 1, "users": 3,
 		},
 	})
 	out := capture(t, "org", "delete", "org_2", "--yes", "--json")
-	if !strings.Contains(out, "sandbox_classes") {
+	if !strings.Contains(out, "\"users\"") {
 		t.Errorf("--json dropped a field the server sent:\n%s", out)
 	}
 }

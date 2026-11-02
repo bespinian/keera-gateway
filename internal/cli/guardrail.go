@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/bespinian/keera-gateway/internal/control"
 	"github.com/bespinian/keera-gateway/internal/policy"
@@ -17,27 +16,19 @@ import (
 // guardrailFlags numbers use -1 for "not given" and 0 to clear; everything
 // else is cleared by its --no- flag.
 type guardrailFlags struct {
-	models           string
-	noModels         bool
-	requests         int64
-	tokens           int64
-	per              string
-	budget           float64
-	period           string
-	systemPrompt     string
-	noSystemPrompt   bool
-	filters          string
-	noFilters        bool
-	tools            string
-	noTools          bool
-	maxSandboxes     int
-	maxSandboxTTL    time.Duration
-	sandboxClasses   string
-	noSandboxClasses bool
-	maxSandboxCPU    float64
-	maxSandboxMemory int
-	repos            string
-	noRepos          bool
+	models         string
+	noModels       bool
+	requests       int64
+	tokens         int64
+	per            string
+	budget         float64
+	period         string
+	systemPrompt   string
+	noSystemPrompt bool
+	filters        string
+	noFilters      bool
+	tools          string
+	noTools        bool
 }
 
 func registerGuardrailFlags(fs *flag.FlagSet) *guardrailFlags {
@@ -60,25 +51,6 @@ func registerGuardrailFlags(fs *flag.FlagSet) *guardrailFlags {
 	fs.StringVar(&f.tools, "tools", "",
 		"comma-separated MCP tools this scope may call: a server, or server/tool")
 	fs.BoolVar(&f.noTools, "no-tools", false, "stop this scope limiting the tools; an outer level still does")
-	fs.IntVar(&f.maxSandboxes, "max-sandboxes", -1,
-		"how many sandboxes this scope may run at once (0 clears it); the sandbox "+
-			"flags are for an organisation or a project, not a key")
-	durationVar(fs, &f.maxSandboxTTL, "max-sandbox-ttl", -1,
-		"longest lifetime any one of them may be given (0 clears it)")
-	fs.StringVar(&f.sandboxClasses, "sandbox-classes", "",
-		"comma-separated sandbox classes this scope may use")
-	fs.BoolVar(&f.noSandboxClasses, "no-sandbox-classes", false,
-		"stop this scope limiting the sandbox classes; an outer level still does")
-	fs.Float64Var(&f.maxSandboxCPU, "max-sandbox-cpu", -1,
-		"largest sandbox this scope may run, in cores (0 clears it)")
-	fs.IntVar(&f.maxSandboxMemory, "max-sandbox-memory", -1,
-		"largest sandbox this scope may run, in mebibytes (0 clears it)")
-	fs.StringVar(&f.repos, "repos", "",
-		"comma-separated repositories sandboxes may check out: owner, owner/name, or '*' "+
-			"for all; on an organisation, operators only")
-	fs.BoolVar(&f.noRepos, "no-repos", false,
-		"clear this scope's repositories: on an organisation that allows none, "+
-			"on a project it leaves the organisation's list")
 	return f
 }
 
@@ -111,21 +83,7 @@ func (f *guardrailFlags) apply(lim *policy.Limits) error {
 	if err := setList(&lim.Filters, "filters", f.filters, f.noFilters); err != nil {
 		return err
 	}
-	if err := setList(&lim.AllowedTools, "tools", f.tools, f.noTools); err != nil {
-		return err
-	}
-	setInt(&lim.MaxSandboxes, f.maxSandboxes)
-	setInt(&lim.MaxSandboxMemory, f.maxSandboxMemory)
-	if f.maxSandboxCPU >= 0 {
-		setInt(&lim.MaxSandboxCPU, int(f.maxSandboxCPU*1000))
-	}
-	if f.maxSandboxTTL >= 0 {
-		setInt(&lim.MaxSandboxTTLSeconds, int(f.maxSandboxTTL.Seconds()))
-	}
-	if err := setList(&lim.SandboxClasses, "sandbox-classes", f.sandboxClasses, f.noSandboxClasses); err != nil {
-		return err
-	}
-	return setList(&lim.AllowedRepos, "repos", f.repos, f.noRepos)
+	return setList(&lim.AllowedTools, "tools", f.tools, f.noTools)
 }
 
 // setList treats an empty value as "not given".
@@ -228,10 +186,10 @@ func guardrailCmd(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		return out(r.asJSON, lim, func(w *table) { printLimits(w, lim, scope) })
+		return out(r.asJSON, lim, func(w *table) { printLimits(w, lim) })
 	default:
 		return doOut(ctx, c, "GET", guardrailPath(scope, scopeID), nil, r.asJSON,
-			func(w *table, lim policy.Limits) { printLimits(w, lim, scope) })
+			func(w *table, lim policy.Limits) { printLimits(w, lim) })
 	}
 }
 
@@ -360,7 +318,6 @@ var effectiveParts = []struct {
 	{"prompt", printEffectivePrompt},
 	{"filters", printEffectiveFilters},
 	{"tools", printEffectiveTools},
-	{"sandboxes", printEffectiveSandboxes},
 }
 
 // printEffective names the level behind every row, so nobody changes the
@@ -469,29 +426,6 @@ func printEffectiveTools(w *table, eff control.Effective) {
 		narrowedBy(eff, func(l policy.Limits) bool { return l.AllowedTools != nil }))
 }
 
-func printEffectiveSandboxes(w *table, eff control.Effective) {
-	sb := eff.Sandbox
-	showSet(w, "sandbox classes", "(every class)", sb.SandboxClasses != nil,
-		strings.Join(sb.SandboxClasses, ","),
-		narrowedBy(eff, func(l policy.Limits) bool { return l.SandboxClasses != nil }))
-	showSet(w, "repositories", "(none)", sb.AllowedRepos != nil,
-		strings.Join(sb.AllowedRepos, ","),
-		narrowedBy(eff, func(l policy.Limits) bool { return l.AllowedRepos != nil }))
-	showSet(w, "max sandboxes", "(unlimited)", sb.MaxSandboxes != 0,
-		sb.MaxSandboxes,
-		narrowedBy(eff, func(l policy.Limits) bool { return l.MaxSandboxes != nil }))
-	if sb.MaxSandboxTTLSeconds > 0 {
-		showFrom(w, "max sandbox lifetime",
-			shortDuration(time.Duration(sb.MaxSandboxTTLSeconds)*time.Second),
-			narrowedBy(eff, func(l policy.Limits) bool { return l.MaxSandboxTTLSeconds != nil }))
-	}
-	showSet(w, "max sandbox size", "(unlimited)", sb.MaxSandboxCPU != 0 || sb.MaxSandboxMemory != 0,
-		maxSize(sb.MaxSandboxCPU, sb.MaxSandboxMemory),
-		narrowedBy(eff, func(l policy.Limits) bool {
-			return l.MaxSandboxCPU != nil || l.MaxSandboxMemory != nil
-		}))
-}
-
 // narrowedBy names the innermost level that set a field, which decided it.
 func narrowedBy(eff control.Effective, set func(policy.Limits) bool) string {
 	from := ""
@@ -535,7 +469,7 @@ const notSet = "(not set here)"
 
 // printLimits shows one scope's own guardrail; 'guardrail effective' shows
 // what applies.
-func printLimits(w *table, lim policy.Limits, scope string) {
+func printLimits(w *table, lim policy.Limits) {
 	show(w, "models", joinedOr(lim.AllowedModels, notSet))
 	showEach(w, "rate limit", ratesOf(lim))
 	showEach(w, "budget", budgetsOf(lim))
@@ -551,44 +485,6 @@ func printLimits(w *table, lim policy.Limits, scope string) {
 		// --json has the whole text.
 		show(w, "system prompt", firstLine(*lim.SystemPrompt))
 	}
-	show(w, "sandbox classes", joinedOr(lim.SandboxClasses, notSet))
-	// Only the organisation grants repositories, so there unset means none.
-	noRepos := notSet
-	if scope == string(policy.ScopeOrg) {
-		noRepos = "(none)"
-	}
-	show(w, "repositories", joinedOr(lim.AllowedRepos, noRepos))
-	show(w, "max sandboxes", notSetHere(lim.MaxSandboxes))
-	if lim.MaxSandboxTTLSeconds == nil {
-		show(w, "max sandbox lifetime", notSet)
-	} else {
-		show(w, "max sandbox lifetime",
-			shortDuration(time.Duration(*lim.MaxSandboxTTLSeconds)*time.Second))
-	}
-	if lim.MaxSandboxCPU == nil && lim.MaxSandboxMemory == nil {
-		show(w, "max sandbox size", notSet)
-	} else {
-		show(w, "max sandbox size", maxSize(derefInt(lim.MaxSandboxCPU), derefInt(lim.MaxSandboxMemory)))
-	}
-}
-
-func notSetHere(p *int) any {
-	if p == nil {
-		return notSet
-	}
-	return *p
-}
-
-// maxSize uses cores and mebibytes, as the template file and the flags do.
-func maxSize(cpuMillis, memoryMiB int) string {
-	cpu, memory := "any CPU", "any memory"
-	if cpuMillis > 0 {
-		cpu = coresOf(cpuMillis)
-	}
-	if memoryMiB > 0 {
-		memory = mibOf(memoryMiB)
-	}
-	return cpu + ", " + memory
 }
 
 func joinedOr(items []string, none string) string {

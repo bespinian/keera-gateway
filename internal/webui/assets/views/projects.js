@@ -372,7 +372,7 @@ export async function openProject(
   });
 }
 
-/** oldestProject is where a key or sandbox that names none goes. */
+/** oldestProject is where a key that names none goes. */
 export function oldestProject(projects) {
   let first = null;
   for (const t of projects) {

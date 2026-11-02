@@ -82,16 +82,15 @@ on the same card; the unquantised 14B needs a 48 GB card (g6e.xlarge).
   a standing system prompt, set one on a guardrail:
   `keera guardrail set org <org-id> --system-prompt ...`.
 - **Port 8080 carries the panel, the control API and the inference API**
-  ([gateway.md](../docs/gateway.md#one-listener-four-surfaces)). Put a TLS
+  ([gateway.md](../docs/gateway.md#one-listener-three-surfaces)). Put a TLS
   terminator in front before you change `KEERA_BIND`.
 - **Port 8000 is not published on purpose**: the inference backend has no
   authentication ([gateway.md](../docs/gateway.md#failure-modes-worth-knowing)).
   For the same reason the llama.cpp tier runs with `--no-webui`.
 - **Every setting in `.env` reaches the gateway**
   ([docs/install.md](../docs/install.md) lists them). `compose.yaml` fixes the
-  database, the listen address and the template files, and keeps
-  `KEERA_SANDBOX_DRIVER` empty. A variable exported in your shell but not
-  written in `.env` does not reach it.
+  database, the listen address and the template file. A variable exported in
+  your shell but not written in `.env` does not reach it.
 - The gateway image is `FROM scratch`: one static binary, no shell. So its
   healthcheck is `keera-gateway health`, which asks the running server's
   `/readyz` instead of `curl`.
@@ -128,22 +127,3 @@ keera router add auto --model keera-decider \
 `backend_model` in `models.yaml` picks the checkpoint: `english`,
 `multilingual` or `typed-decisions`. Add it to `LAYA_MODELS` in the
 Containerfile too, or `laya-serve` loads it on the first request.
-
-## Sandboxes do not work in this shape
-
-`sandboxes.yaml` is read, so each new organisation starts with its classes, but
-`KEERA_SANDBOX_DRIVER` is not set. The podman driver runs `podman`, and the
-gateway here is a `FROM scratch` container: it would need the host's podman
-socket, and its sandboxes would then have all the power of the host's podman.
-
-So run sandboxes with `make dev`, where the gateway runs on the host:
-
-```sh
-make sandbox-image                                  # once
-echo 'KEERA_SANDBOX_DRIVER=podman' >> compose/.env
-make dev
-```
-
-The gateway under compose runs no sandboxes, so only `make dev` uses the driver
-settings in `.env`, and it sets `KEERA_SANDBOX_PUBLIC_URL` for you.
-`KEERA_SANDBOX_IMAGES` reaches both. See [docs/sandboxes.md](../docs/sandboxes.md).

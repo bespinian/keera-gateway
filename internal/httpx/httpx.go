@@ -20,17 +20,13 @@ import (
 // prefix. They live here so the routes, the panel and the CLI agree.
 //
 // InferencePrefix has no version because clients append /v1/... themselves.
-// SandboxPrefix tunnels to a port in a sandbox over an HTTP upgrade, so it
-// needs no second port or certificate.
 const (
 	InferencePrefix = "/api"
 	ControlPrefix   = "/control"
-	SandboxPrefix   = "/sandbox"
 )
 
 // SessionHeader lets a client name its own session, which is exact where a
-// derived session is a guess. Sandboxes set it for their agents. The value is
-// stored hashed.
+// derived session is a guess. The value is stored hashed.
 const SessionHeader = "X-Keera-Session"
 
 type ctxKey int

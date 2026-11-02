@@ -326,7 +326,7 @@ func TestANotifyFromTheControlPlaneDropsEveryCachedKey(t *testing.T) {
 }
 
 func TestAKeyChangeDropsThatKeyAlone(t *testing.T) {
-	// Sandboxes mint and revoke keys often, which must not drop every key.
+	// Issuing or revoking one key must not drop every key.
 	s := newSource()
 	revoked := &policy.Resolved{Key: policy.Key{ID: "key_1", OrgID: "org_1"}}
 	kept := &policy.Resolved{Key: policy.Key{ID: "key_2", OrgID: "org_1"}}

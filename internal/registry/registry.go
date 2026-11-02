@@ -112,7 +112,7 @@ func (c Change) org() (string, bool) {
 }
 
 // KeyChange is a change to one key, such as its creation or revocation. It
-// drops that key alone and reloads nothing, so a sandbox starting or stopping
+// drops that key alone and reloads nothing, so issuing or revoking one key
 // does not cost every active key a query.
 func KeyChange(id string) Change { return Change(keyChange + id) }
 

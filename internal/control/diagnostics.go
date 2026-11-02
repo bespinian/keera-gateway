@@ -93,7 +93,6 @@ func (s *Server) diagnostics(w http.ResponseWriter, r *http.Request, p *authn.Pr
 	s.checkCatalogue(r.Context(), d, orgID, p, probe)
 	s.checkTenancy(r.Context(), d, orgID, p)
 	s.checkHooks(r.Context(), d, orgID, p)
-	s.checkSandboxes(r.Context(), d, orgID)
 	httpx.WriteJSON(w, http.StatusOK, d)
 }
 
@@ -411,30 +410,6 @@ func (s *Server) checkRoutes(ctx context.Context, d *Diagnosis, orgID, org strin
 			}
 		}
 	}
-}
-
-func (s *Server) checkSandboxes(ctx context.Context, d *Diagnosis, orgID string) {
-	const area = "Sandboxes"
-
-	if orgID == "" {
-		return // an operator looking at every organisation at once
-	}
-	classes, err := s.st.ListSandboxClasses(ctx, orgID)
-	if err != nil {
-		return
-	}
-	if s.opts.Sandboxes == nil {
-		// Not a warning: every new organisation gets the template's classes,
-		// driver or not, so they are there once one is set.
-		if len(classes) > 0 {
-			d.add(area, "Driver", VerdictOK,
-				fmt.Sprintf("sandboxes are off; set KEERA_SANDBOX_DRIVER to lend "+
-					"out the %d classes", len(classes)),
-				"")
-		}
-		return
-	}
-	d.add(area, "Driver", VerdictOK, fmt.Sprintf("%d classes", len(classes)), "")
 }
 
 // orgEnv is what a suggested command needs in front of it to act on orgID.

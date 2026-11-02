@@ -2,7 +2,6 @@ package control
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -136,13 +135,6 @@ func (s *Server) deleteOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		return
 	}
 	gone, err := s.st.DeleteOrg(r.Context(), orgID)
-	if errors.Is(err, store.ErrOrgHasSandboxes) {
-		conflict(w, "org_has_sandboxes",
-			fmt.Sprintf("%s still has %d live sandbox(es); terminate them first "+
-				"(KEERA_ORG=%s keera sandbox list), so none keeps running after its "+
-				"organisation is gone", gone.Name, gone.LiveSandboxes, orgID))
-		return
-	}
 	if err != nil {
 		s.fail(w, err)
 		return

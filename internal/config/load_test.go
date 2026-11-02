@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
-	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
 // Load catches a deployment's mistakes. These tests pin each floor and the
@@ -279,61 +278,6 @@ func TestTheChatURLIsABareOrigin(t *testing.T) {
 	}
 }
 
-func TestSandboxSettingsAreOnlyCheckedWhenSandboxesAreOn(t *testing.T) {
-	// Without a driver the setting does nothing, so a leftover line must not
-	// stop the start.
-	c, err := loadWith(t, valid(map[string]string{"KEERA_SANDBOX_IDLE_SUSPEND": "1s"}))
-	if err != nil {
-		t.Fatalf("a stray sandbox setting stopped a gateway with sandboxes off: %v", err)
-	}
-	if c.Sandbox.Enabled() {
-		t.Error("sandboxes are enabled with no driver configured")
-	}
-
-	// With a driver it is checked: a few seconds would suspend a sandbox
-	// whose user is reading a diff.
-	_, err = loadWith(t, valid(map[string]string{
-		"KEERA_SANDBOX_DRIVER":       "podman",
-		"KEERA_SANDBOX_IDLE_SUSPEND": "1s",
-	}))
-	if err == nil {
-		t.Fatal("a one-second idle suspend was accepted for a live driver")
-	}
-	if !strings.Contains(err.Error(), "five minutes") {
-		t.Errorf("error = %q, want it to name the floor", err)
-	}
-}
-
-func TestAForgeNeedsItsCredential(t *testing.T) {
-	for _, tc := range []struct {
-		env  map[string]string
-		want string
-	}{
-		{map[string]string{"KEERA_SANDBOX_GIT_FORGE": "gitea"}, "'github', 'gitlab'"},
-		{map[string]string{"KEERA_SANDBOX_GIT_FORGE": "github"}, "KEERA_SANDBOX_GIT_APP_KEY_FILE"},
-		{map[string]string{"KEERA_SANDBOX_GIT_FORGE": "gitlab"}, "KEERA_SANDBOX_GIT_TOKEN_FILE"},
-	} {
-		tc.env["KEERA_SANDBOX_DRIVER"] = "podman"
-		_, err := loadWith(t, valid(tc.env))
-		if err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("%v: error = %v, want it to name %s", tc.env, err, tc.want)
-		}
-	}
-	c, err := loadWith(t, valid(map[string]string{
-		"KEERA_SANDBOX_DRIVER":           "podman",
-		"KEERA_SANDBOX_GIT_FORGE":        "GitLab",
-		"KEERA_SANDBOX_GIT_URL":          "https://gitlab.example.ch",
-		"KEERA_SANDBOX_GIT_TOKEN_FILE":   "/run/secrets/gitlab",
-		"KEERA_SANDBOX_GIT_APP_KEY_FILE": "",
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if g := c.Sandbox.Git; g.Forge != "gitlab" || g.TokenFile != "/run/secrets/gitlab" {
-		t.Errorf("Git = %+v", g)
-	}
-}
-
 func TestLogSettingsAreReadWhateverTheirCaseAndUnknownOnesRefused(t *testing.T) {
 	c, err := loadWith(t, valid(map[string]string{
 		"KEERA_LOG_LEVEL": "DEBUG", "KEERA_LOG_FORMAT": "JSON",
@@ -350,19 +294,6 @@ func TestLogSettingsAreReadWhateverTheirCaseAndUnknownOnesRefused(t *testing.T) 
 		_, err := loadWith(t, valid(map[string]string{name: value}))
 		if err == nil || !strings.Contains(err.Error(), name) {
 			t.Errorf("%s=%s: error = %v, want a refusal that names it", name, value, err)
-		}
-	}
-}
-
-func TestAnUnknownSandboxDriverIsRefused(t *testing.T) {
-	// Otherwise the gateway would advertise sandboxes it cannot create.
-	_, err := loadWith(t, valid(map[string]string{"KEERA_SANDBOX_DRIVER": "docker"}))
-	if err == nil {
-		t.Fatal("an unknown driver was accepted")
-	}
-	for _, want := range []string{"kubernetes", "podman"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error = %q, want it to name %q as a driver that exists", err, want)
 		}
 	}
 }
@@ -490,23 +421,6 @@ func TestAMalformedNumberFallsBackRatherThanFailing(t *testing.T) {
 	}
 	if c.CacheTTL != 30*time.Second {
 		t.Errorf("CacheTTL = %v, want the default 30s", c.CacheTTL)
-	}
-}
-
-func TestSandboxRuntimesAreReadPerIsolationTier(t *testing.T) {
-	// Each tier names its runtime class, as the name differs per cluster.
-	env := valid(map[string]string{"KEERA_SANDBOX_DRIVER": "kubernetes"})
-	for _, tier := range policy.Isolations {
-		env["KEERA_SANDBOX_RUNTIME_"+strings.ToUpper(string(tier))] = "runtime-" + string(tier)
-	}
-	c, err := loadWith(t, env)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	for _, tier := range policy.Isolations {
-		if got := c.Sandbox.Runtimes[tier]; got != "runtime-"+string(tier) {
-			t.Errorf("runtime for %s = %q, want %q", tier, got, "runtime-"+string(tier))
-		}
 	}
 }
 

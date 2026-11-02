@@ -25,7 +25,6 @@ One listener serves all of it, told apart by path rather than by port:
   /api/v1/...   the inference API (OpenAI- and Anthropic-shaped)
   /api/mcp/...  the MCP servers the gateway stands in front of
   /control/...  the control API
-  /sandbox/...  attaching to a sandbox
 
 Administration - organisations, projects, keys, guardrails, usage - is the 'keera'
 command, which talks to the control API over HTTP.

@@ -52,8 +52,6 @@ func Run(ctx context.Context, args []string) error {
 		return routerCmd(ctx, rest)
 	case "mcp":
 		return mcpCmd(ctx, rest)
-	case "sandbox":
-		return sandboxCmd(ctx, rest)
 	case "guardrail":
 		return guardrailCmd(ctx, rest)
 	// Each sets one part of a guardrail, like 'guardrail set' with fewer flags.
@@ -100,12 +98,6 @@ func versionCmd(args []string) error {
 	return nil
 }
 
-// ExitCode only sets the exit status. The program the command ran, such as
-// ssh, has already said what went wrong.
-type ExitCode int
-
-func (e ExitCode) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
-
 // Fail prints a command's error.
 func Fail(err error) {
 	fmt.Fprintln(os.Stderr, styleErr.bad("keera:"), err)
@@ -126,8 +118,7 @@ func takeURL(args []string) ([]string, error) {
 }
 
 // takeGlobal takes a global flag out of args and hands each value to set. It
-// stops at "--", since the rest belongs to the command being run, as in
-// `keera sandbox ssh box -- git status`.
+// stops at "--", since the rest is positional.
 func takeGlobal(args []string, name string, set func(string) error) ([]string, error) {
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {

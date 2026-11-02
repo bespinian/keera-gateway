@@ -168,10 +168,9 @@ func TestRetentionKeepsTheOpenMonthWhenItBeganBeforeTheCutoff(t *testing.T) {
 	}
 }
 
-func TestEndedSandboxesAndKeysGoOnceTheirUsageHasGone(t *testing.T) {
+func TestEndedKeysGoOnceTheirUsageHasGone(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
-	newSandboxClass(t, st, ctx, f.orgID, "standard")
 	now := time.Now().UTC()
 	old, cutoff := now.AddDate(0, 0, -400), now.AddDate(0, 0, -365)
 
@@ -193,10 +192,6 @@ func TestEndedSandboxesAndKeysGoOnceTheirUsageHasGone(t *testing.T) {
 	}
 	key("key_revoked", "revoked_at")
 	key("key_expired", "expires_at")
-	key("key_of_suspended", "expires_at") // an old sandbox's, which may yet be revived
-	key("key_of_expired", "expires_at")
-	key("key_of_failed_agent", "revoked_at")
-	key("key_of_failed_engineer", "revoked_at")
 	key("key_live", "")
 	// A guardrail and a spend row on a key name it by id alone.
 	if _, err := st.pool.Exec(ctx, `INSERT INTO guardrails (scope_type, scope_id) VALUES ('key', 'key_revoked');
@@ -205,34 +200,12 @@ func TestEndedSandboxesAndKeysGoOnceTheirUsageHasGone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// sandbox creates one at at; a terminated one also ends at at.
-	sandbox := func(name, keyID string, state policy.SandboxState, purpose policy.Purpose, at time.Time) {
-		t.Helper()
-		sb := newSandbox(t, st, ctx, f, name)
-		if _, err := st.pool.Exec(ctx, `UPDATE sandboxes SET key_id = $2, state = $3, purpose = $4,
-			created_at = $5, terminated_at = CASE WHEN $3 = 'terminated' THEN $5::timestamptz END
-			WHERE id = $1`, sb.ID, keyID, string(state), string(purpose), at); err != nil {
-			t.Fatal(err)
-		}
-	}
-	engineer, agent := policy.PurposeEngineer, policy.PurposeAgent
-	sandbox("gone", "key_expired", policy.SandboxTerminated, engineer, old)
-	sandbox("recent", "key_live", policy.SandboxTerminated, engineer, now)
-	sandbox("resting", "key_of_suspended", policy.SandboxSuspended, engineer, old)
-	// An expired one can be resumed, and a failed engineer one keeps its
-	// volume until it is terminated, so both stay however old they are.
-	sandbox("lapsed", "key_of_expired", policy.SandboxExpired, engineer, old)
-	sandbox("broken-dev", "key_of_failed_engineer", policy.SandboxFailed, engineer, old)
-	// A failed agent sandbox has ended. It has no end time, so its age counts.
-	sandbox("broken-task", "key_of_failed_agent", policy.SandboxFailed, agent, old)
-	sandbox("broken-today", "key_live", policy.SandboxFailed, agent, now)
-
 	n, err := st.PurgeEnded(ctx, cutoff)
 	if err != nil {
 		t.Fatalf("PurgeEnded: %v", err)
 	}
-	if n != 5 {
-		t.Errorf("PurgeEnded deleted %d rows, want 5: two sandboxes and three keys", n)
+	if n != 2 {
+		t.Errorf("PurgeEnded deleted %d keys, want 2", n)
 	}
 
 	left := func(query string) []string {
@@ -247,11 +220,7 @@ func TestEndedSandboxesAndKeysGoOnceTheirUsageHasGone(t *testing.T) {
 		}
 		return ids
 	}
-	wantSandboxes := []string{"broken-dev", "broken-today", "lapsed", "recent", "resting"}
-	if got := left("SELECT name FROM sandboxes ORDER BY name"); !slices.Equal(got, wantSandboxes) {
-		t.Errorf("sandboxes left: %v, want %v", got, wantSandboxes)
-	}
-	want := []string{f.keyID, "key_live", "key_of_expired", "key_of_failed_engineer", "key_of_suspended"}
+	want := []string{f.keyID, "key_live"}
 	if got := left("SELECT id FROM api_keys ORDER BY id"); !slices.Equal(got, want) {
 		t.Errorf("keys left: %v, want %v", got, want)
 	}

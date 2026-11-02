@@ -635,8 +635,6 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request, p *authn.Principal) 
 		"gateway_url": s.gatewayURL(r),
 		// Where Keera Chat runs, so the panel can link to it. Empty without one.
 		"chat_url": s.opts.ChatURL,
-		// Whether this deployment lends out sandboxes.
-		"sandboxes": s.opts.Sandboxes != nil,
 		// Whether the deployment holds its own provider key, and so bills
 		// organisations.
 		"billing": len(s.opts.Platform) > 0,

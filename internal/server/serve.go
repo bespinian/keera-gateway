@@ -15,15 +15,12 @@ import (
 	"github.com/bespinian/keera-gateway/internal/catalog"
 	"github.com/bespinian/keera-gateway/internal/config"
 	"github.com/bespinian/keera-gateway/internal/control"
-	"github.com/bespinian/keera-gateway/internal/forge"
 	"github.com/bespinian/keera-gateway/internal/gateway"
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/metrics"
 	"github.com/bespinian/keera-gateway/internal/payment"
-	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/ratelimit"
 	"github.com/bespinian/keera-gateway/internal/registry"
-	"github.com/bespinian/keera-gateway/internal/sandbox"
 	"github.com/bespinian/keera-gateway/internal/secret"
 	"github.com/bespinian/keera-gateway/internal/store"
 	"github.com/bespinian/keera-gateway/internal/usage"
@@ -95,11 +92,6 @@ func serve(ctx context.Context) error {
 		log.Info("passkeys enabled", "rp_id", cfg.Passkeys.ID())
 	}
 
-	sandboxes, err := buildSandboxes(ctx, st, reg, cfg, log)
-	if err != nil {
-		return err
-	}
-
 	ctl := control.New(st, reg, mreg, recorder, control.Options{
 		OperatorKey:         cfg.OperatorKey,
 		MetricsToken:        cfg.MetricsToken,
@@ -113,9 +105,7 @@ func serve(ctx context.Context) error {
 		ChatURL:             cfg.ChatURL,
 		Gateway:             gw,
 		SessionGap:          cfg.SessionGap,
-		Sandboxes:           sandboxes,
 		Template:            template,
-		SandboxImages:       cfg.Sandbox.Images,
 		Platform:            cfg.Platform,
 		Payments:            buildPayments(cfg),
 		ClaudeSubscriptions: cfg.ClaudeSubscriptions,
@@ -135,8 +125,6 @@ func serve(ctx context.Context) error {
 	wg.Go(func() { ctl.RunPayments(bg) })
 	wg.Go(func() { sweep(bg, reg, limiter, ctl, st, log) })
 	wg.Go(func() { retain(bg, st, cfg, log) })
-	// Its own loop, so the cache sweep never waits on the cluster.
-	wg.Go(func() { sweepSandboxes(bg, sandboxes, st, log) })
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
@@ -155,8 +143,7 @@ func serve(ctx context.Context) error {
 	errs := make(chan error, 1)
 	go func() {
 		log.Info("listening", "addr", cfg.Addr, "panel", "/",
-			"inference", httpx.InferencePrefix, "control", httpx.ControlPrefix,
-			"sandbox", httpx.SandboxPrefix)
+			"inference", httpx.InferencePrefix, "control", httpx.ControlPrefix)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errs <- fmt.Errorf("listener: %w", err)
 		}
@@ -195,8 +182,8 @@ func prepareStore(ctx context.Context, st *store.Store, log *slog.Logger) error 
 	return nil
 }
 
-// loadTemplate reads what every new organisation starts with: the models and
-// the sandbox classes in the template files.
+// loadTemplate reads what every new organisation starts with: the models in
+// the template file.
 func loadTemplate(cfg config.Config, log *slog.Logger) (store.OrgTemplate, error) {
 	var t store.OrgTemplate
 	if cfg.ModelsFile == "" {
@@ -221,35 +208,7 @@ func loadTemplate(cfg config.Config, log *slog.Logger) (store.OrgTemplate, error
 		log.Info("read model template", "file", cfg.ModelsFile, "models", names)
 		t.Models = models
 	}
-	if cfg.Sandbox.File != "" {
-		classes, err := loadSandboxTemplate(cfg, log)
-		if err != nil {
-			return t, err
-		}
-		t.SandboxClasses = classes
-	}
 	return t, nil
-}
-
-// loadSandboxTemplate reads the sandbox classes and says what they will not do.
-func loadSandboxTemplate(cfg config.Config, log *slog.Logger) ([]policy.SandboxClass, error) {
-	classes, err := catalog.LoadSandboxes(cfg.Sandbox.File)
-	if err != nil {
-		return nil, err
-	}
-	names := make([]string, 0, len(classes))
-	for _, c := range classes {
-		names = append(names, c.Name)
-	}
-	log.Info("read sandbox template", "file", cfg.Sandbox.File, "classes", names)
-
-	if !cfg.Sandbox.Enabled() {
-		log.Info("no sandbox driver is configured, so new organisations get these "+
-			"classes but none can start until KEERA_SANDBOX_DRIVER is set to "+
-			"'kubernetes' or 'podman'",
-			"file", cfg.Sandbox.File, "classes", len(classes))
-	}
-	return classes, nil
 }
 
 // buildSecrets builds the box that encrypts stored credentials.
@@ -474,7 +433,7 @@ func retain(ctx context.Context, st *store.Store, cfg config.Config, log *slog.L
 }
 
 // purgeOld deletes usage events and audit entries past their windows, and
-// sandboxes and keys that ended before the usage window. Daily usage totals are
+// keys that ended before the usage window. Daily usage totals are
 // kept for ever: they are small, and long reports read them.
 func purgeOld(ctx context.Context, st *store.Store, cfg config.Config, log *slog.Logger) {
 	if !myTurn(ctx, st, log, "retention", retentionInterval) {
@@ -485,7 +444,7 @@ func purgeOld(ctx context.Context, st *store.Store, cfg config.Config, log *slog
 		n, err := st.PurgeUsage(ctx, now.Add(-cfg.UsageRetention))
 		logPurge(ctx, log, "usage past its retention window", n, err)
 		n, err = st.PurgeEnded(ctx, now.Add(-cfg.UsageRetention))
-		logPurge(ctx, log, "sandboxes and keys that ended before the usage retention window", n, err)
+		logPurge(ctx, log, "keys that ended before the usage retention window", n, err)
 	}
 	if cfg.AuditRetention > 0 {
 		n, err := st.PurgeAudit(ctx, now.Add(-cfg.AuditRetention))
@@ -521,133 +480,6 @@ func newLogger(cfg config.Config) *slog.Logger {
 		return slog.New(slog.NewJSONHandler(os.Stderr, opts))
 	}
 	return slog.New(slog.NewTextHandler(os.Stderr, opts))
-}
-
-// buildSandboxes builds the driver and the manager, or returns nil when no
-// driver is configured. A failure here, such as a missing CRD or podman, fails
-// the start.
-func buildSandboxes(ctx context.Context, st *store.Store, reg *registry.Registry,
-	cfg config.Config, log *slog.Logger,
-) (*sandbox.Manager, error) {
-	if !cfg.Sandbox.Enabled() {
-		return nil, nil
-	}
-
-	driver, err := buildSandboxDriver(ctx, cfg, log)
-	if err != nil {
-		return nil, fmt.Errorf("sandbox driver %s: %w", cfg.Sandbox.Driver, err)
-	}
-
-	// Where a sandbox sends inference. In a cluster, use the in-cluster
-	// Service, not the public name.
-	base := cfg.Sandbox.PublicURL
-	if base == "" {
-		base = cfg.PublicURL
-	}
-	if base == "" {
-		log.Warn("sandboxes are enabled but no address is configured for them to reach this " +
-			"gateway on; sandboxes will be created with no inference configured, which is a " +
-			"machine a developer can work in and an agent cannot " +
-			"(set KEERA_SANDBOX_PUBLIC_URL to the address sandboxes reach this gateway on)")
-	}
-
-	caps := driver.Capabilities()
-	log.Info("sandboxes enabled", "driver", driver.Name(),
-		"isolation", caps.Isolation, "warm", caps.Warm,
-		"namespace", cfg.Sandbox.Namespace, "idle_suspend", cfg.Sandbox.IdleSuspend)
-	// Without a stronger runtime, isolation is weak for running a model's
-	// output.
-	if caps.Isolation == policy.IsolationStandard {
-		log.Warn("no stronger sandbox runtime is mapped, so sandboxes run with the host's own " +
-			"isolation; a class asking for 'isolated' or 'vm' will be refused rather than " +
-			"quietly downgraded (KEERA_SANDBOX_RUNTIME_ISOLATED, KEERA_SANDBOX_RUNTIME_VM)")
-	}
-
-	git, err := buildGitMinter(cfg.Sandbox.Git)
-	if err != nil {
-		return nil, fmt.Errorf("sandbox repository credentials (KEERA_SANDBOX_GIT_*): %w", err)
-	}
-	if git == nil {
-		log.Info("no forge is configured for sandboxes, so they are created without a " +
-			"repository (set KEERA_SANDBOX_GIT_FORGE)")
-	} else {
-		log.Info("sandboxes check out from a forge", "forge", cfg.Sandbox.Git.Forge,
-			"url", cfg.Sandbox.Git.URL)
-	}
-
-	return sandbox.NewManager(st, driver, sandbox.ManagerOptions{
-		PublicURL:   base,
-		IdleSuspend: cfg.Sandbox.IdleSuspend,
-		Git:         git,
-		// A new or revoked sandbox key must take effect on every replica at
-		// once, not a cache lifetime later.
-		OnKeyChange: func(keyID string) {
-			control.Announce(context.WithoutCancel(ctx), reg, st, log, registry.KeyChange(keyID))
-		},
-		Log: log,
-	}), nil
-}
-
-// buildGitMinter builds the configured forge's minter, or returns nil when
-// there is none.
-func buildGitMinter(cfg config.GitConfig) (sandbox.GitMinter, error) {
-	switch cfg.Forge {
-	case "github":
-		key, err := os.ReadFile(cfg.AppKeyFile)
-		if err != nil {
-			return nil, err
-		}
-		return forge.NewGitHub(forge.GitHubOptions{API: cfg.URL, AppID: cfg.AppID, Key: key})
-	case "gitlab":
-		token, err := os.ReadFile(cfg.TokenFile)
-		if err != nil {
-			return nil, err
-		}
-		return forge.NewGitLab(forge.GitLabOptions{URL: cfg.URL, Token: string(token)})
-	}
-	return nil, nil
-}
-
-func buildSandboxDriver(ctx context.Context, cfg config.Config, log *slog.Logger) (sandbox.Driver, error) {
-	switch cfg.Sandbox.Driver {
-	case "kubernetes":
-		return sandbox.NewKubernetes(ctx, sandbox.KubernetesOptions{
-			Namespace:        cfg.Sandbox.Namespace,
-			Runtimes:         cfg.Sandbox.Runtimes,
-			StorageClass:     cfg.Sandbox.StorageClass,
-			ServiceAccount:   cfg.Sandbox.ServiceAccount,
-			ImagePullSecrets: cfg.Sandbox.ImagePullSecrets,
-			Warm:             cfg.Sandbox.Warm,
-			Log:              log,
-		})
-	case "podman":
-		return sandbox.NewPodman(ctx, sandbox.PodmanOptions{
-			Binary:   cfg.Sandbox.PodmanBinary,
-			Network:  cfg.Sandbox.PodmanNetwork,
-			Runtimes: cfg.Sandbox.Runtimes,
-			Log:      log,
-		})
-	}
-	// Only reached by a driver added to config but not here.
-	return nil, fmt.Errorf("no driver called %q", cfg.Sandbox.Driver)
-}
-
-// sandboxSweepInterval is how often the sandbox sweep runs. A minute is fine
-// enough for "ready" and "time is up".
-const sandboxSweepInterval = time.Minute
-
-// sweepSandboxes runs the sandbox reconcile loop, on one replica at a time.
-func sweepSandboxes(ctx context.Context, m *sandbox.Manager, st *store.Store, log *slog.Logger) {
-	if m == nil {
-		return
-	}
-	// Once right away too, so a restarted gateway tears down what expired
-	// while it was down.
-	every(ctx, sandboxSweepInterval, true, func(now time.Time) {
-		if myTurn(ctx, st, log, "sandbox-sweep", sandboxSweepInterval) {
-			m.Sweep(ctx, now)
-		}
-	})
 }
 
 // myTurn reports whether this replica runs a background job now. See

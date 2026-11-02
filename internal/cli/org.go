@@ -31,8 +31,8 @@ func orgCmd(ctx context.Context, args []string) error {
 		"email domain whose sign-ins land in this organisation, such as example.ch")
 	fs.BoolVar(&r.noDomain, "no-domain", false, "remove the organisation's email domain")
 	fs.BoolVar(&r.liftLimit, "lift-limit", false,
-		"open the models and MCP servers inside this deployment's network, and sandboxes, "+
-			"to an organisation that signed up; without card payments, also the models on "+
+		"open the models and MCP servers inside this deployment's network to an "+
+			"organisation that signed up; without card payments, also the models on "+
 			"the deployment's own provider keys")
 	fs.BoolVar(&r.all, "all", false,
 		"act on every organisation again, rather than on one (operators)")
@@ -119,7 +119,7 @@ func (r *orgRun) set(ctx context.Context) error {
 		}
 		if r.liftLimit {
 			_, _ = fmt.Fprintln(w, "\nThe models and MCP servers inside this deployment's "+
-				"network, and sandboxes, are open to it now.")
+				"network are open to it now.")
 		}
 	})
 }
@@ -358,21 +358,12 @@ func confirmOrgDelete(ctx context.Context, c *client, orgID string) error {
 	if err != nil {
 		return err
 	}
-	// The control plane refuses while sandboxes hold machines; saying so now
-	// spares typing the name for nothing.
-	if live, err := list[store.Sandbox](ctx, c, inOrg("/v1/sandboxes", orgID)); err == nil && len(live) > 0 {
-		return fmt.Errorf("%s still has %s; terminate them first "+
-			"(keera org switch %s, then keera sandbox list)", org.Name,
-			plural(len(live), "live sandbox", "live sandboxes"), orgID)
-	}
-
 	return confirm(fmt.Sprintf("Deleting %s (%s) removes:", org.Name, org.ID), []string{
 		"  " + plural(len(projects), "project"),
 		"  " + plural(len(users), "user") + ", signed out everywhere",
 		"  " + plural(len(keys), "API key") + ", which stop working at once",
 		"  its guardrails and its budget counters",
-		"  its models and their stored provider keys, MCP servers, filters, routers,",
-		"  sandbox classes and the record of its finished sandboxes",
+		"  its models and their stored provider keys, MCP servers, filters and routers",
 		"Usage history and the audit log are kept.",
 		styleErr.bad("This cannot be undone."),
 	}, "organisation's name", org.Name, "nothing was deleted")

@@ -494,11 +494,9 @@ func TestLimitsIsZeroCountsEveryField(t *testing.T) {
 	if !(Limits{}).IsZero() {
 		t.Error("the empty guardrail is not zero")
 	}
-	one := 1
 	for name, l := range map[string]Limits{
 		"allowed tools": {AllowedTools: []string{"github"}},
-		"max sandboxes": {SandboxLimits: SandboxLimits{MaxSandboxes: &one}},
-		"allowed repos": {SandboxLimits: SandboxLimits{AllowedRepos: []string{"bankb"}}},
+		"filters":       {Filters: []string{"pii"}},
 	} {
 		if l.IsZero() {
 			t.Errorf("a guardrail with only %s counts as none", name)
@@ -507,10 +505,7 @@ func TestLimitsIsZeroCountsEveryField(t *testing.T) {
 }
 
 func TestAnEmptyAllowListSurvivesJSON(t *testing.T) {
-	none := Limits{
-		AllowedModels: []string{}, AllowedTools: []string{},
-		SandboxClasses: []string{}, AllowedRepos: []string{},
-	}
+	none := Limits{AllowedModels: []string{}, AllowedTools: []string{}}
 	b, err := json.Marshal(none)
 	if err != nil {
 		t.Fatal(err)
@@ -520,10 +515,8 @@ func TestAnEmptyAllowListSurvivesJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, l := range map[string][]string{
-		"allowed_models":  back.AllowedModels,
-		"allowed_tools":   back.AllowedTools,
-		"sandbox_classes": back.SandboxClasses,
-		"allowed_repos":   back.AllowedRepos,
+		"allowed_models": back.AllowedModels,
+		"allowed_tools":  back.AllowedTools,
 	} {
 		if l == nil {
 			t.Errorf("%s: an empty list came back as inherit: %s", name, b)

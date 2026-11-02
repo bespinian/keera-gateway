@@ -12,9 +12,7 @@ import (
 // limitFields are a guardrail's columns, in the order limitTargets reads them
 // and limitValues writes them. A new limit needs an entry here and in both.
 var limitFields = []string{
-	"allowed_models", "rate_limits", "budgets", "system_prompt", "filters",
-	"max_sandboxes", "max_sandbox_ttl_seconds", "sandbox_classes",
-	"max_sandbox_cpu_millis", "max_sandbox_memory_mib", "allowed_tools", "allowed_repos",
+	"allowed_models", "rate_limits", "budgets", "system_prompt", "filters", "allowed_tools",
 }
 
 // limitColumns is a guardrail row as policy.Limits holds it, from a table
@@ -46,8 +44,7 @@ var copyKeyGuardrailSQL = `INSERT INTO guardrails (scope_type, scope_id, ` +
 func limitTargets(lim *policy.Limits) []any {
 	return []any{
 		&lim.AllowedModels, &lim.RateLimits, &lim.Budgets, &lim.SystemPrompt, &lim.Filters,
-		&lim.MaxSandboxes, &lim.MaxSandboxTTLSeconds, &lim.SandboxClasses,
-		&lim.MaxSandboxCPU, &lim.MaxSandboxMemory, &lim.AllowedTools, &lim.AllowedRepos,
+		&lim.AllowedTools,
 	}
 }
 
@@ -55,9 +52,7 @@ func limitTargets(lim *policy.Limits) []any {
 func limitValues(lim policy.Limits) []any {
 	return []any{
 		lim.AllowedModels, jsonList(lim.RateLimits), jsonList(lim.Budgets),
-		lim.SystemPrompt, lim.Filters,
-		lim.MaxSandboxes, lim.MaxSandboxTTLSeconds, lim.SandboxClasses,
-		lim.MaxSandboxCPU, lim.MaxSandboxMemory, lim.AllowedTools, lim.AllowedRepos,
+		lim.SystemPrompt, lim.Filters, lim.AllowedTools,
 	}
 }
 

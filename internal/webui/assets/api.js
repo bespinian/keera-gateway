@@ -211,22 +211,6 @@ export const api = {
   routerReport: (orgID, alias, since) =>
     get(path`/v1/routers/${alias}/report` + query({ org_id: orgID, since })),
 
-  // With what the driver can deliver and what the reader's guardrail allows.
-  sandboxClasses: (orgID) =>
-    get("/v1/sandbox-classes" + query({ org_id: orgID })),
-  deleteSandboxClass: (orgID, name) =>
-    request("DELETE", inOrg(orgID, "sandbox-classes", name)),
-
-  sandboxes: (orgID, { all } = {}) =>
-    get("/v1/sandboxes" + query({ org_id: orgID, all: all ? "1" : "" })),
-  createSandbox: (sandbox) => request("POST", "/v1/sandboxes", sandbox),
-  // Terminate, not delete: the row outlives the machine.
-  terminateSandbox: (id) => request("DELETE", path`/v1/sandboxes/${id}`),
-  extendSandbox: (id, lifetime) =>
-    request("POST", path`/v1/sandboxes/${id}/extend`, lifetime),
-  suspendSandbox: (id) => request("POST", path`/v1/sandboxes/${id}/suspend`),
-  resumeSandbox: (id) => request("POST", path`/v1/sandboxes/${id}/resume`),
-
   // From the control plane, so the panel and `keera connect` agree.
   connect: () => get("/v1/connect"),
   renderConnect: (models) => request("POST", "/v1/connect/render", { models }),

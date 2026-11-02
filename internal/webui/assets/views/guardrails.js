@@ -138,8 +138,7 @@ export async function ceilingsFor(
   return out;
 }
 
-// The fields the blocks set. Others, such as sandbox limits, must survive a
-// save.
+// The fields the blocks set. Any others must survive a save.
 const OWNED_HERE = new Set([
   "allowed_models",
   "rate_limits",

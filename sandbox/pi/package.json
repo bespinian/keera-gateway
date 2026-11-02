@@ -1,8 +1,0 @@
-{
-  "name": "keera-sandbox-pi",
-  "private": true,
-  "description": "The Pi coding agent the sandbox image installs. package-lock.json pins every package under it.",
-  "dependencies": {
-    "@earendil-works/pi-coding-agent": "1.4.0"
-  }
-}

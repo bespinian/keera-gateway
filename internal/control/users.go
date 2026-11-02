@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
@@ -212,8 +211,8 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"id": userID, "role": role})
 }
 
-// disableUser turns off a person who left: no sign-in, sessions or keys, and
-// their sandboxes stop. Leaving the directory only stops new sign-ins, not the
+// disableUser turns off a person who left: no sign-in, sessions or keys.
+// Leaving the directory only stops new sign-ins, not the
 // keys a person already has.
 func (s *Server) disableUser(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	target, ok := s.userToSwitch(w, r, p, "disable")
@@ -230,22 +229,8 @@ func (s *Server) disableUser(w http.ResponseWriter, r *http.Request, p *authn.Pr
 	out := map[string]any{
 		"id": target.ID, "email": target.Email, "disabled": true, "revoked_keys": revoked,
 	}
-	if s.opts.Sandboxes != nil {
-		stopped, err := s.opts.Sandboxes.Offboard(r.Context(), target.ID)
-		out["sandboxes"] = stopped
-		switch {
-		case err != nil:
-			s.log.Warn("reading a disabled person's sandboxes failed", "error", err,
-				"user", target.ID)
-			out["warning"] = "their sandboxes could not be read, so none were stopped; " +
-				"their keys are revoked, so the sandboxes cannot reach the gateway"
-		case stopped.Failed > 0:
-			out["warning"] = strconv.Itoa(stopped.Failed) + " of their sandboxes could not " +
-				"be stopped; their keys are revoked, and the log says why"
-		}
-	}
 	s.auditf(r, p, target.OrgID, "user.disable", "user", target.ID, map[string]any{
-		"email": target.Email, "revoked_keys": revoked, "sandboxes": out["sandboxes"],
+		"email": target.Email, "revoked_keys": revoked,
 	})
 	httpx.WriteJSON(w, http.StatusOK, out)
 }

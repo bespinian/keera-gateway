@@ -254,8 +254,8 @@ func (s *Server) cliPrincipal(r *http.Request, token string) (*authn.Principal, 
 
 // rowInRequestedOrg is the person's row in the organisation a command names
 // with org_id, so it acts there with the role it has there. A token belongs
-// to one row, which 'keera org switch' moves; without this, KEERA_ORG and an
-// ssh ProxyCommand's --org would stop working after a switch.
+// to one row, which 'keera org switch' moves; without this, KEERA_ORG would
+// stop working after a switch.
 //
 // An organisation the person is not in leaves the row as it is, and the route
 // refuses the request.

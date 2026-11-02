@@ -102,12 +102,6 @@ developer who types "fix the tests" twice in twenty minutes has one session.
 The stated headers exist for both cases. The panel shows whether a session was
 stated or inferred.
 
-An agent sandbox avoids the problem: it is exactly one task, so it sends its own
-id in `X-Keera-Session`. The gateway configures Pi and Claude Code to do so; an
-image that adds another agent has to configure it. The sandbox's session key is
-computed once at creation, the same way as per request, so a sandbox and its
-task can be read side by side. See [sandboxes.md](sandboxes.md).
-
 ## Sessions are cut when the report is read
 
 Nothing is stored per session, so recording a request stays one insert. This

@@ -11,7 +11,7 @@ To use it, see
 [Models](https://docs.keera.ch/manage/models/) in the Keera docs. This page
 explains how it works and why.
 
-## One listener, four surfaces
+## One listener, three surfaces
 
 Port 8080 carries everything, told apart by path:
 
@@ -19,13 +19,7 @@ Port 8080 carries everything, told apart by path:
 | ---------- | -------------------------------------------------------------------------------------------------------------------- |
 | `/api`     | The inference API and the MCP servers. Authenticated by an API key, as a bearer token, `x-api-key` or `X-Keera-Key`. |
 | `/control` | The control API. Authenticated by the operator key, a panel session or a `keera login` token.                        |
-| `/sandbox` | Attaching to a sandbox, and the Git credential a sandbox asks for.                                                   |
 | `/`        | The control panel, `/metrics`, `/healthz`, `/readyz`, and the API description at `/openapi.json`.                    |
-
-`/sandbox` is not JSON. It carries a byte stream between an authenticated
-caller and a port inside a sandbox, so attaching needs no second port and no
-second certificate. With sandboxes switched off, it answers 501
-`sandboxes_disabled`. See [sandboxes.md](sandboxes.md).
 
 `/openapi.json` and `/openapi.yaml` describe every route on this listener in
 OpenAPI 3.1, for generating a client or browsing the API. They need no sign-in.
@@ -97,9 +91,6 @@ other model. Changing the file later does not touch organisations that already
 exist. To add the file's models to one, switch to it and run
 `keera model apply <file>`. `keera model validate <file>` checks a file without
 a server.
-
-`KEERA_SANDBOXES_FILE` works the same way for
-[sandbox classes](sandboxes.md#classes), with `keera sandbox apply <file>`.
 
 The file holds no API keys. After a new organisation is created, its
 administrator stores the key for each hosted model
@@ -329,8 +320,6 @@ The exceptions:
   that must both hold, and each level's rate limit is counted on its own.
 - **System prompts and filters accumulate**, outermost first. A level may add to
   what it inherits but may not drop it.
-- **Only the organisation grants repositories** to sandboxes. A project can only
-  narrow the list; a key cannot set it.
 
 When an organisation's guardrail lists allowed models, a model the organisation
 adds is put on that list, whether it was added in the panel, with
@@ -356,13 +345,11 @@ page leaves out:
 - Organisation names are unique, ignoring case. An operator renames one with
   `keera org set <org> --name` or the pencil on the organisations screen;
   everything refers to it by id. `keera org delete <org>` deletes it and
-  everything in it, but is refused (409 `org_has_sandboxes`) while one of its
-  sandboxes is [live](sandboxes.md#quotas), so no machine runs without an owner.
+  everything in it.
 - A key created without `--project` goes in the organisation's oldest project,
   so an organisation with no projects cannot have keys. A project with keys
   that are not revoked, expired ones included, cannot be deleted (409
-  `project_has_keys`), nor one with a live sandbox (409
-  `project_has_sandboxes`). Its revoked keys stay, without a project.
+  `project_has_keys`). Its revoked keys stay, without a project.
 - A key issued with the operator key belongs to nobody, since the operator key
   is not a person. Through the API, a key with neither `expires_in_seconds` nor
   `expires_at` does not expire.
@@ -370,7 +357,7 @@ page leaves out:
   organisation, and an operator any key. The old name stays in the audit log.
 - Anyone who may revoke a key may rotate it, expired ones too, so members rotate
   their own. Only an administrator can give the new key another lifetime with
-  `--expires`. A sandbox's key cannot be rotated: it ends with its sandbox.
+  `--expires`.
 
 ## Several organisations
 
@@ -386,8 +373,7 @@ there. Elsewhere it lands in the one used last ([Which organisation a sign-in
 lands in](sso.md#which-organisation-a-sign-in-lands-in)). `keera login` goes
 back to the one that machine was last in. Every command acts on that
 organisation, so none takes `--org`. The exceptions are `keera billing grant`
-and `keera billing invoiced`, where an operator names it each time, and `keera
-sandbox proxy`, which `keera sandbox config` writes into the ssh config.
+and `keera billing invoiced`, where an operator names it each time.
 
 An operator works in every organisation, so `keera org switch` only chooses the
 one commands act on, and `keera org switch --all` goes back to all of them. The
@@ -622,8 +608,7 @@ The gateway keeps an in-memory view of the control plane (`internal/registry`),
 so a request waits on the database only to check a key it has not seen
 recently. A change made through the control API is pushed to every replica at
 once, over Postgres LISTEN/NOTIFY, so a revoked key stops working right away.
-A change to one key, such as a sandbox starting or stopping, drops only that
-key. Any other change, such as a model or a guardrail, drops the keys of
+A change to one key, such as issuing or revoking it, drops only that key. Any other change, such as a model or a guardrail, drops the keys of
 its organisation and reloads that organisation alone. In case a
 notification is lost, a checked key is reused for at most
 [`KEERA_CACHE_TTL`](install.md#everything-else), and models, filters, routers and

@@ -19,9 +19,9 @@ updates:
       actions:
         patterns: ["*"]
 
-  # The gateway's build stage, the sandbox base image and Keera Decider's.
+  # The gateway's build stage and Keera Decider's.
   - package-ecosystem: docker
-    directories: ["/", "/sandbox", "/compose/decider"]
+    directories: ["/", "/compose/decider"]
     schedule:
       interval: weekly
     groups:

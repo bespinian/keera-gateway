@@ -549,8 +549,6 @@ type Limits struct {
 	// AllowedTools lists MCP servers by alias for all their tools, or
 	// 'alias/tool' for one. Nil inherits.
 	AllowedTools []string `json:"allowed_tools"`
-	// Embedded so a row stays one flat object in JSON, SQL and the CLI.
-	SandboxLimits
 }
 
 // RateLimit is the most a scope may use per Period. Zero means no limit.
@@ -715,8 +713,7 @@ type Resolved struct {
 	Scopes []Scope
 	// Quotas are the rate limits per day or month. They are apart from Scopes
 	// because a request counts against them only once let through.
-	Quotas  []Scope
-	Sandbox ResolvedSandbox
+	Quotas []Scope
 }
 
 func (r *Resolved) allowsModel(alias string) bool {
@@ -744,7 +741,6 @@ func (r *Resolved) MayCallRouter(alias string) bool {
 //   - Budgets and rate limits are kept per level, and each must hold.
 //   - System prompts concatenate outermost first.
 //   - Filters add up level by level.
-//   - Only the organisation grants repositories; the levels below narrow them.
 func Resolve(key Key, org, project, own *Limits) *Resolved {
 	r := &Resolved{Key: key}
 
@@ -763,7 +759,7 @@ func Resolve(key Key, org, project, own *Limits) *Resolved {
 		month := Scope{Type: lv.typ, ID: lv.id, Period: PeriodMonth}
 		var day *Scope
 		if lv.lim != nil {
-			r.narrow(lv.lim, lv.typ == ScopeOrg)
+			r.narrow(lv.lim)
 			for _, rl := range lv.lim.RateLimits {
 				r.Quotas = append(r.Quotas, rl.count(&month)...)
 			}
@@ -784,14 +780,12 @@ func Resolve(key Key, org, project, own *Limits) *Resolved {
 	return r
 }
 
-// narrow applies one level's limits. top is the organisation, the only level
-// that grants repositories.
-func (r *Resolved) narrow(lim *Limits, top bool) {
+// narrow applies one level's limits.
+func (r *Resolved) narrow(lim *Limits) {
 	r.AllowedModels = intersect(r.AllowedModels, lim.AllowedModels)
 	r.SystemPrompt = JoinPrompts(r.SystemPrompt, deref(lim.SystemPrompt))
 	r.Filters = appendFilters(r.Filters, lim.Filters)
 	r.AllowedTools = intersectTools(r.AllowedTools, lim.AllowedTools)
-	r.Sandbox.narrow(lim, top)
 }
 
 // intersect narrows an allow-list. A nil list means unrestricted, not empty.
@@ -853,18 +847,6 @@ func appendFilters(cur, next []string) []string {
 		}
 	}
 	return cur
-}
-
-// minPositive treats zero or less as no limit.
-func minPositive(a, b int) int {
-	switch {
-	case a <= 0:
-		return b
-	case b <= 0:
-		return a
-	default:
-		return min(a, b)
-	}
 }
 
 func deref[T any](p *T) T {

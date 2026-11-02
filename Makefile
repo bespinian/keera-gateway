@@ -265,34 +265,15 @@ dev: dev-env dev-backends $(DEV_MODELS)
 	@echo
 	@echo "^C stops the gateway and leaves the containers up."
 	@echo
-	@# .env may name other catalogue files. The sandbox class file is set even
-	@# without a driver, so organisations have classes once one is on. The
-	@# backends are on loopback, so the deny list is the default without it; a
-	@# test in internal/gateway holds it to DefaultUpstreamDeny.
+	@# .env may name another catalogue file. The backends are on loopback, so
+	@# the deny list is the default without it; a test in internal/gateway
+	@# holds it to DefaultUpstreamDeny.
 	@set -a; . ./$(DEV_ENV); set +a; \
 		KEERA_DATABASE_URL='postgres://keera:keera@127.0.0.1:5432/keera?sslmode=disable' \
 		KEERA_MODELS_FILE="$${KEERA_MODELS_FILE:-$(DEV_MODELS)}" \
-		KEERA_SANDBOXES_FILE="$${KEERA_SANDBOXES_FILE:-compose/sandboxes.yaml}" \
-		KEERA_SANDBOX_PUBLIC_URL="$${KEERA_SANDBOX_DRIVER:+$${KEERA_SANDBOX_PUBLIC_URL:-http://host.containers.internal:8080}}" \
 		KEERA_UPSTREAM_DENY="$${KEERA_UPSTREAM_DENY:-169.254.0.0/16,fe80::/10,0.0.0.0/8,::/128,fd00:ec2::254/128,100.100.100.200/32,168.63.129.16/32}" \
 		KEERA_LOG_FORMAT=text KEERA_LOG_LEVEL=debug \
 		$(AIR)
-
-# The sandbox image the development catalogue names.
-#
-# Not a dependency of `dev`, because it takes a minute to build.
-#
-# sandbox/Containerfile is a base: it owns what the gateway depends on (the
-# fixed uid, sshd on 2222, the entrypoint), and a deployment builds its own on
-# top. Its build context is sandbox/ alone.
-SANDBOX_IMAGE ?= localhost/keera-sandbox:dev
-
-.PHONY: sandbox-image
-sandbox-image:
-	@$(PODMAN) build -t $(SANDBOX_IMAGE) sandbox
-	@echo
-	@echo "built $(SANDBOX_IMAGE), which compose/sandboxes.yaml names."
-	@echo "Add KEERA_SANDBOX_DRIVER=podman to $(DEV_ENV) and restart 'make dev'."
 
 # The gateway and compose need both keys, so the first run generates them from
 # /dev/urandom. An existing .env is left alone. It is written to a temporary

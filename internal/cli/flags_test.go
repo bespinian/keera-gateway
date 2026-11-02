@@ -124,34 +124,33 @@ func TestFormatMicrosKeepsSmallAmountsVisible(t *testing.T) {
 	}
 }
 
-// Every sandbox verb shares one FlagSet, so without this check 'resume --ttl
-// 8h' would parse and silently drop the lifetime. It also holds the arguments
-// to what help.go says the verb takes.
+// Every key verb shares one FlagSet, so without this check 'revoke --name x'
+// would parse and silently drop the name. It also holds the arguments to what
+// help.go says the verb takes.
 func TestParseVerbHoldsAVerbToItsFlagsAndArguments(t *testing.T) {
 	for _, tc := range []struct {
 		sub  string
 		args []string
 		want string // the verb's own name, or "" for a refusal
 	}{
-		{"extend", []string{"box", "--ttl", "8h"}, "extend"},
-		{"resume", []string{"box", "--ttl", "8h"}, ""},
-		{"resume", []string{"box", "--json"}, "resume"},
-		{"down", []string{"box"}, "terminate"},
+		{"set", []string{"laptop", "--name", "old"}, "set"},
+		{"revoke", []string{"laptop", "--name", "old"}, ""},
+		{"revoke", []string{"laptop", "--json"}, "revoke"},
+		{"rm", []string{"laptop"}, "revoke"},
 		{"", nil, "list"},
-		{"show", nil, ""},
-		{"show", []string{"box", "extra"}, ""},
-		{"ssh", []string{"box", "--", "git", "status"}, "ssh"},
+		{"set", nil, ""},
+		{"set", []string{"laptop", "extra"}, ""},
 		{"lst", nil, ""},
 	} {
-		fs := flag.NewFlagSet("sandbox "+tc.sub, flag.ContinueOnError)
-		fs.Duration("ttl", 0, "")
+		fs := flag.NewFlagSet("key "+tc.sub, flag.ContinueOnError)
+		fs.String("name", "", "")
 		fs.Bool("json", false, "")
-		got, err := parseVerb(fs, "sandbox", tc.sub, tc.args)
+		got, err := parseVerb(fs, "key", tc.sub, tc.args)
 		if tc.want == "" && err == nil {
-			t.Errorf("sandbox %s %v was accepted, want a refusal", tc.sub, tc.args)
+			t.Errorf("key %s %v was accepted, want a refusal", tc.sub, tc.args)
 		}
 		if tc.want != "" && (err != nil || got != tc.want) {
-			t.Errorf("sandbox %s %v = %q, %v; want %q", tc.sub, tc.args, got, err, tc.want)
+			t.Errorf("key %s %v = %q, %v; want %q", tc.sub, tc.args, got, err, tc.want)
 		}
 	}
 }
@@ -163,7 +162,6 @@ func TestArgCount(t *testing.T) {
 		"<alias>":                      {1, 1},
 		"[<alias>]":                    {0, 1},
 		"<scope> [<id>] [flags]":       {1, 2},
-		"<name> [-- <command>]":        {1, -1},
 		"<project> <new-name>":         {2, 2},
 		"[<client>] [flags]":           {0, 1},
 		"<email-or-id> <member|admin>": {2, 2},
@@ -200,7 +198,7 @@ func TestDurationFlagTakesDays(t *testing.T) {
 	if def := fs.Lookup("ttl").DefValue; shownDefault(def) {
 		t.Errorf("--ttl default prints as %q, which help would show", def)
 	}
-	// 'sandbox agent' passes its flags on as text, so a value must read back.
+	// A value must read back from how it prints.
 	if err := fs.Parse([]string{"--ttl", "1d12h"}); err != nil || ttl != day+12*time.Hour {
 		t.Fatalf("--ttl 1d12h = %v, %v", ttl, err)
 	}

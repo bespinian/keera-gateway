@@ -146,8 +146,7 @@ func TestModelCatalogueRoundTrip(t *testing.T) {
 	}
 }
 
-// A new organisation starts with a copy of each template model and sandbox
-// class, as its own.
+// A new organisation starts with a copy of each template model, as its own.
 func TestANewOrganisationStartsWithTheTemplate(t *testing.T) {
 	st, ctx := db(t)
 	template := []policy.Model{{
@@ -155,20 +154,13 @@ func TestANewOrganisationStartsWithTheTemplate(t *testing.T) {
 		BackendModel: "x", Location: policy.LocationOnPrem, Enabled: true,
 	}}
 	for _, id := range []string{"org_1", "org_2"} {
-		classes := []policy.SandboxClass{{
-			Name: "standard", Image: "example/sandbox:1", Isolation: policy.IsolationIsolated,
-			DefaultTTLSeconds: 3600, MaxTTLSeconds: 4 * 3600,
-		}}
-		if _, err := st.CreateOrg(ctx, Org{ID: id, Name: id}, OrgTemplate{Models: template, SandboxClasses: classes}); err != nil {
+		if _, err := st.CreateOrg(ctx, Org{ID: id, Name: id}, OrgTemplate{Models: template}); err != nil {
 			t.Fatalf("CreateOrg: %v", err)
 		}
 	}
 	for _, id := range []string{"org_1", "org_2"} {
 		if m, err := st.Model(ctx, id, "keera-speed"); err != nil || m.OrgID != id {
 			t.Errorf("%s keera-speed = %+v, %v; want its own copy", id, m, err)
-		}
-		if c, err := st.SandboxClass(ctx, id, "standard"); err != nil || c.OrgID != id {
-			t.Errorf("%s standard = %+v, %v; want its own copy", id, c, err)
 		}
 	}
 	// A copy is the organisation's own, so removing it leaves the other.

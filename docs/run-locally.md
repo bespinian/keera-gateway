@@ -22,7 +22,7 @@ leaves the containers running, so later starts are instant.
 3. **air** - builds and runs the gateway on the host against those three, with
    the settings below.
 
-The gateway reads every setting in `compose/.env`, sandbox ones included.
+The gateway reads every setting in `compose/.env`.
 `make dev` sets these:
 
 | Setting                    | `make dev` sets                                                                                                                     | A value in `.env` |
@@ -31,16 +31,13 @@ The gateway reads every setting in `compose/.env`, sandbox ones included.
 | `KEERA_LOG_LEVEL`          | `debug`                                                                                                                             | is ignored        |
 | `KEERA_LOG_FORMAT`         | `text`                                                                                                                              | is ignored        |
 | `KEERA_MODELS_FILE`        | `build/models.dev.yaml`, a copy of `compose/models.yaml` with the backends at `127.0.0.1:8000` and `:8001`                          | wins              |
-| `KEERA_SANDBOXES_FILE`     | `compose/sandboxes.yaml`                                                                                                            | wins              |
-| `KEERA_SANDBOX_PUBLIC_URL` | `http://host.containers.internal:8080`, when `KEERA_SANDBOX_DRIVER` is set                                                          | wins              |
 | `KEERA_UPSTREAM_DENY`      | the default list without loopback, because the backends are on `127.0.0.1` ([install.md](install.md#where-the-gateway-may-connect)) | wins              |
 
-The two files only seed new organisations
+The models file only seeds new organisations
 ([Template files](gateway.md#template-files)). The addresses `make dev` prints
 assume the default `KEERA_ADDR` of `:8080`. That listens on every interface,
 so others on your network can reach the panel. Set
-`KEERA_ADDR=127.0.0.1:8080` in `.env` to keep it on this machine, unless you
-use podman sandboxes, which need to reach it.
+`KEERA_ADDR=127.0.0.1:8080` in `.env` to keep it on this machine.
 
 Install air once if you do not have it:
 

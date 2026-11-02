@@ -156,9 +156,7 @@ what was removed.
   permissions do not apply. The allow-list is the control. Signing each person
   in to the server is not built yet.
 - **Only remote servers.** An MCP server that an agent starts as a local process
-  never passes through the gateway. For those, give the agent a
-  [sandbox](sandboxes.md), whose egress can be limited
-  ([The security boundary](sandboxes.md#the-security-boundary)).
+  never passes through the gateway, so the gateway cannot see or limit it.
 - **One tool call per request.** A JSON-RPC batch that holds a tool call is
   refused. MCP removed batches in its 2025-06-18 version.
 - **A tool call needs an id.** One sent as a notification is refused with

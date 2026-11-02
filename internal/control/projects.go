@@ -2,7 +2,6 @@ package control
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -129,27 +128,11 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request, p *authn.
 	httpx.WriteJSON(w, http.StatusOK, project)
 }
 
-// firstProject returns the project a sandbox goes in when none was named: the
-// organisation's oldest, as for keys. It answers the refusal itself when the
-// organisation has no project.
-func (s *Server) firstProject(w http.ResponseWriter, r *http.Request, orgID string) (string, bool) {
-	projectID, err := s.st.FirstProject(r.Context(), orgID)
-	if errors.Is(err, store.ErrNotFound) {
-		noProject(w)
-		return "", false
-	}
-	if err != nil {
-		s.fail(w, err)
-		return "", false
-	}
-	return projectID, true
-}
-
-// noProject refuses a key or a sandbox in an organisation with no projects.
+// noProject refuses a key in an organisation with no projects.
 // Every one is in a project, so there can be none until a project is created.
 func noProject(w http.ResponseWriter) {
 	conflict(w, "project_required",
-		"this organisation has no projects, and every key and sandbox is in one; "+
+		"this organisation has no projects, and every key is in one; "+
 			"create a project first")
 }
 
@@ -169,12 +152,6 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request, p *authn.
 		return
 	}
 	gone, err := s.st.DeleteProject(r.Context(), writeOrg(p), projectID)
-	if errors.Is(err, store.ErrProjectHasSandboxes) {
-		conflict(w, "project_has_sandboxes",
-			fmt.Sprintf("'%s' still has %d live sandbox(es), expired ones included; "+
-				"terminate them first", gone.Name, gone.LiveSandboxes))
-		return
-	}
 	if inUse, ok := errors.AsType[*store.ProjectInUseError](err); ok {
 		conflict(w, "project_has_keys",
 			"revoke the keys of '"+inUse.Project+"' first: "+strings.Join(inUse.Keys, ", "))

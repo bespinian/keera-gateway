@@ -1,5 +1,5 @@
 // Package config reads the gateway's settings from the environment. The model
-// and sandbox files are templates that each new organisation starts from.
+// files are templates that each new organisation starts from.
 package config
 
 import (
@@ -18,7 +18,6 @@ import (
 	"github.com/bespinian/keera-gateway/internal/catalog"
 	"github.com/bespinian/keera-gateway/internal/gateway"
 	"github.com/bespinian/keera-gateway/internal/httpx"
-	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/ratelimit"
 	"github.com/bespinian/keera-gateway/internal/registry"
 	"github.com/bespinian/keera-gateway/internal/store"
@@ -35,8 +34,7 @@ type Config struct {
 	MaxDBConns  int32
 
 	// Addr is the one listener. The panel is served at /, inference and MCP
-	// under /api, the control API under /control and the sandbox attach
-	// surface under /sandbox.
+	// under /api and the control API under /control.
 	Addr string
 
 	// OperatorKey authenticates the control API. It is not stored in the
@@ -74,7 +72,7 @@ type Config struct {
 	SpendRefresh time.Duration
 
 	// UsageRetention and AuditRetention are how long usage events and audit
-	// entries are kept. Ended sandboxes and keys go with usage. Zero, the
+	// entries are kept. Ended keys go with usage. Zero, the
 	// default, keeps them for ever. See docs/install.md.
 	UsageRetention time.Duration
 	AuditRetention time.Duration
@@ -118,9 +116,6 @@ type Config struct {
 	// https public URL; off lets a plain-http demo on localhost sign in.
 	SecureCookies bool
 
-	// Sandbox is the machines this deployment lends out. Off by default.
-	Sandbox SandboxConfig
-
 	// OIDC is every identity provider, in the order the sign-in screen shows
 	// them. With none and no passkeys, the operator key is the only way in.
 	OIDC []authn.OIDCConfig
@@ -152,7 +147,6 @@ func Load() (Config, error) {
 		AuditRetention:        envDuration("KEERA_AUDIT_RETENTION", 0),
 		SessionGap:            envDuration("KEERA_SESSION_GAP", store.DefaultSessionGap),
 		RedisPrefix:           env("KEERA_REDIS_PREFIX", ratelimit.DefaultRedisPrefix),
-		Sandbox:               sandboxConfig(),
 		UI:                    envBool("KEERA_UI", true),
 		ClaudeSubscriptions:   envBool("KEERA_CLAUDE_SUBSCRIPTIONS", false),
 		PublicURL:             strings.TrimRight(env("KEERA_PUBLIC_URL", ""), "/"),
@@ -207,7 +201,7 @@ func (c Config) servedOverHTTPS() bool {
 func (c Config) validate() error {
 	for _, check := range []func() error{
 		c.validateCredentials, c.validateLogging,
-		c.validateDBConns, c.validateRetention, c.validateSessionGap, c.Sandbox.validate, c.validateOIDC,
+		c.validateDBConns, c.validateRetention, c.validateSessionGap, c.validateOIDC,
 		c.validateChatURL,
 	} {
 		if err := check(); err != nil {
@@ -615,148 +609,4 @@ func envDuration(key string, def time.Duration) time.Duration {
 		return def
 	}
 	return d
-}
-
-// SandboxConfig holds the sandbox settings, off by default. Switching them on
-// is one variable; the rest defaults to what the Helm chart installs.
-type SandboxConfig struct {
-	// Driver is "kubernetes", "podman", or empty for no sandboxes.
-	Driver string
-	// File declares the sandbox classes each new organisation starts with.
-	File string
-	// Namespace is where the Kubernetes driver creates sandboxes. Not the
-	// gateway's own: a sandbox's API key is in its pod spec, readable by anyone
-	// who can read pods there.
-	Namespace string
-	// Runtimes maps an isolation tier to this cluster's or host's name for it.
-	// A class asking for an unmapped tier is refused, not given weaker
-	// isolation.
-	Runtimes map[policy.Isolation]string
-
-	StorageClass     string
-	ServiceAccount   string
-	ImagePullSecrets []string
-	// Images are the image prefixes an organisation's administrator may give
-	// a class, besides the template's images. Others need an operator, as
-	// pods pull with the deployment's credentials.
-	Images []string
-
-	// PublicURL is the gateway as a sandbox sees it, usually the in-cluster
-	// Service. Empty uses the deployment's PublicURL, which suits one host.
-	PublicURL string
-	// IdleSuspend is how long a sandbox may sit with nobody attached before it
-	// is suspended, keeping the volume. Zero leaves it running until it
-	// expires.
-	IdleSuspend time.Duration
-
-	// Warm keeps a few sandboxes of each class started, so asking for one is
-	// instant. It needs the agent-sandbox warm-pool extension.
-	Warm bool
-
-	// PodmanBinary and PodmanNetwork configure the single-host driver.
-	PodmanBinary  string
-	PodmanNetwork string
-
-	// Git is where sandboxes get their repository credentials.
-	Git GitConfig
-}
-
-// GitConfig names the forge sandboxes check out from, and the deployment's
-// credential there. Secrets are read from files, to keep them out of the
-// environment.
-type GitConfig struct {
-	// Forge is "github", "gitlab", or empty for none, which allows no
-	// repository in a sandbox.
-	Forge string
-	// URL is GitHub's API (https://<host>/api/v3 for Enterprise Server) or the
-	// GitLab instance. Empty is GitHub.com or GitLab.com.
-	URL string
-	// AppID and AppKeyFile are the GitHub App's id and private key.
-	AppID      string
-	AppKeyFile string
-	// TokenFile holds the GitLab token that creates project access tokens.
-	TokenFile string
-}
-
-func (s SandboxConfig) Enabled() bool { return s.Driver != "" }
-
-func sandboxConfig() SandboxConfig {
-	return SandboxConfig{
-		Driver:           strings.ToLower(env("KEERA_SANDBOX_DRIVER", "")),
-		File:             env("KEERA_SANDBOXES_FILE", ""),
-		Namespace:        env("KEERA_SANDBOX_NAMESPACE", ""),
-		Runtimes:         sandboxRuntimes(),
-		StorageClass:     env("KEERA_SANDBOX_STORAGE_CLASS", ""),
-		ServiceAccount:   env("KEERA_SANDBOX_SERVICE_ACCOUNT", ""),
-		ImagePullSecrets: envList("KEERA_SANDBOX_IMAGE_PULL_SECRETS"),
-		Images:           envList("KEERA_SANDBOX_IMAGES"),
-		PublicURL:        strings.TrimRight(env("KEERA_SANDBOX_PUBLIC_URL", ""), "/"),
-		IdleSuspend:      envDuration("KEERA_SANDBOX_IDLE_SUSPEND", 0),
-		Warm:             envBool("KEERA_SANDBOX_WARM", false),
-		PodmanBinary:     env("KEERA_SANDBOX_PODMAN_BINARY", "podman"),
-		PodmanNetwork:    env("KEERA_SANDBOX_PODMAN_NETWORK", ""),
-		Git: GitConfig{
-			Forge:      strings.ToLower(env("KEERA_SANDBOX_GIT_FORGE", "")),
-			URL:        env("KEERA_SANDBOX_GIT_URL", ""),
-			AppID:      env("KEERA_SANDBOX_GIT_APP_ID", ""),
-			AppKeyFile: env("KEERA_SANDBOX_GIT_APP_KEY_FILE", ""),
-			TokenFile:  env("KEERA_SANDBOX_GIT_TOKEN_FILE", ""),
-		},
-	}
-}
-
-// sandboxRuntimes reads one variable per tier, not a list, so order cannot map
-// the wrong tier.
-func sandboxRuntimes() map[policy.Isolation]string {
-	out := map[policy.Isolation]string{}
-	for _, tier := range policy.Isolations {
-		if v := env("KEERA_SANDBOX_RUNTIME_"+strings.ToUpper(string(tier)), ""); v != "" {
-			out[tier] = v
-		}
-	}
-	return out
-}
-
-func (s SandboxConfig) validate() error {
-	switch s.Driver {
-	case "", "kubernetes", "podman":
-	default:
-		return fmt.Errorf("KEERA_SANDBOX_DRIVER is %q; it is 'kubernetes', 'podman', or unset "+
-			"for a deployment that lends out no sandboxes", s.Driver)
-	}
-	// The rest configures a driver, so with sandboxes off a stray setting must
-	// not stop the start. The classes file is read either way.
-	if !s.Enabled() {
-		return nil
-	}
-	if s.IdleSuspend < 0 {
-		return errors.New("KEERA_SANDBOX_IDLE_SUSPEND cannot be negative")
-	}
-	// A short timer could suspend a sandbox in use, or a laptop reconnecting.
-	if s.IdleSuspend > 0 && s.IdleSuspend < 5*time.Minute {
-		return fmt.Errorf("KEERA_SANDBOX_IDLE_SUSPEND is %s; below five minutes it could "+
-			"suspend a sandbox somebody is still connected to, because an open connection "+
-			"is only recorded once a minute", s.IdleSuspend)
-	}
-	return s.Git.validate()
-}
-
-func (g GitConfig) validate() error {
-	switch g.Forge {
-	case "":
-		return nil
-	case "github":
-		if g.AppID == "" || g.AppKeyFile == "" {
-			return errors.New("KEERA_SANDBOX_GIT_FORGE is github, which needs " +
-				"KEERA_SANDBOX_GIT_APP_ID and KEERA_SANDBOX_GIT_APP_KEY_FILE")
-		}
-	case "gitlab":
-		if g.TokenFile == "" {
-			return errors.New("KEERA_SANDBOX_GIT_FORGE is gitlab, which needs " +
-				"KEERA_SANDBOX_GIT_TOKEN_FILE")
-		}
-	default:
-		return fmt.Errorf("KEERA_SANDBOX_GIT_FORGE is %q; it is 'github', 'gitlab', or unset", g.Forge)
-	}
-	return nil
 }

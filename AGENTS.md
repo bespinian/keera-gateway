@@ -10,8 +10,7 @@ The repository is one Go module: a gateway (`cmd/keera-gateway`), a CLI
 edit what it writes.
 
 This repository holds what is built from this source tree: the gateway's
-image, the compose deployment, which is also the development loop, and the
-sandbox base image.
+image and the compose deployment, which is also the development loop.
 
 ## Layout
 
@@ -29,8 +28,6 @@ sandbox base image.
 | `internal/policy`    | The tenancy model and how limits combine.                        |
 | `internal/catalog`   | The template files and the hosted-provider catalogue.            |
 | `internal/registry`  | The gateway's in-memory view of the control plane.               |
-| `internal/sandbox`   | The machines it lends out: two drivers, and the manager.         |
-| `internal/forge`     | Short-lived repository credentials, from GitHub or GitLab.       |
 | `internal/connect`   | The client list the panel and `keera connect` share.             |
 | `internal/ratelimit` | Request and token rate limiting.                                 |
 | `internal/usage`     | The usage recorder behind billing and reports.                   |
@@ -45,7 +42,6 @@ sandbox base image.
 | `internal/version`   | The build version both binaries report.                          |
 | `Containerfile`      | The image the gateway ships in. `FROM scratch`.                  |
 | `compose`            | Single-host deployment, and the development loop.                |
-| `sandbox`            | The sandbox image: sshd, entrypoint, Git and agent tools.        |
 | `scripts`            | The third-party notices the image and the archives carry.        |
 
 ## Commands
@@ -62,7 +58,6 @@ make dev               # the development loop: backends in containers, gateway u
 make dev TIER=gpu      # the same with vLLM instead of llama.cpp, for tool calls
 make dev-down          # remove the backend containers make dev left, keep the volumes
 make image             # the gateway image, tagged localhost/keera-gateway:latest
-make sandbox-image     # the sandbox base image, which the podman driver needs
 make sbom              # rebuild the image and write build/sbom/keera-gateway.cdx.json
 make notices           # the licences of what is compiled in, to build/THIRD_PARTY_NOTICES
 make dist              # the keera command for every release platform, to build/dist
@@ -107,8 +102,8 @@ https://docs.keera.ch, from the keera-docs repository; `docs/` links there
 instead of repeating it. Texts users see - CLI help, errors, the panel and
 `openapi.yaml` - link to docs.keera.ch, not to `docs/`. `run-locally.md` is the
 development loop and `install.md` every setting or where it is explained,
-retention and sizing; `gateway.md`, `filters.md`, `routers.md`, `sandboxes.md`,
-`providers.md`, `subscriptions.md`, `mcp.md`, `sessions.md`, `sso.md` and
+retention and sizing; `gateway.md`, `filters.md`, `routers.md`, `providers.md`,
+`subscriptions.md`, `mcp.md`, `sessions.md`, `sso.md` and
 `billing.md` each take one part. Explain each thing in one place and link to it.
 Update them when behaviour changes.
 

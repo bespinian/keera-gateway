@@ -8,7 +8,6 @@ import { readFileSync } from "node:fs";
 import {
   aliasProblem,
   modelAliasProblem,
-  sandboxNameProblem,
   compact,
   ms,
   bytes,
@@ -26,7 +25,6 @@ const cases = JSON.parse(
 for (const [kind, problem] of [
   ["alias", aliasProblem],
   ["model", modelAliasProblem],
-  ["sandbox", sandboxNameProblem],
 ]) {
   test(`the panel checks ${kind} names as the server does`, () => {
     for (const name of cases[kind].valid) {

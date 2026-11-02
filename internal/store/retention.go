@@ -36,28 +36,10 @@ func (s *Store) PurgeUsage(ctx context.Context, before time.Time) (int64, error)
 	return events + tag.RowsAffected(), nil
 }
 
-// PurgeEnded deletes the sandboxes that ended before before, and the keys
-// revoked or expired before it. It runs with usage retention, since a
-// sandbox's row is itself usage.
-//
-// A sandbox has ended when it is no longer live (see liveSandbox). A failed
-// row has no end time, so the last time it was seen working stands in.
-//
-// Sandboxes go first, so their keys can go in the same run. A key a sandbox
-// still names stays, since that sandbox may be revived.
+// PurgeEnded deletes the keys revoked or expired before before. It runs with
+// usage retention, since usage rows name the key.
 func (s *Store) PurgeEnded(ctx context.Context, before time.Time) (int64, error) {
-	sandboxes, err := inBatches(ctx, func() (int64, error) {
-		tag, err := s.pool.Exec(ctx, `DELETE FROM sandboxes WHERE id IN (
-			SELECT id FROM sandboxes WHERE NOT `+liveSandbox+`
-			  AND COALESCE(terminated_at, GREATEST(created_at, ready_at, active_at)) < $1
-			LIMIT $2)`,
-			before, purgeBatch)
-		return tag.RowsAffected(), err
-	})
-	if err != nil {
-		return sandboxes, err
-	}
-	keys, err := inBatches(ctx, func() (int64, error) {
+	return inBatches(ctx, func() (int64, error) {
 		// Guardrails and spend have no foreign key to the key, so they are
 		// cleared in the same statement.
 		var n int64
@@ -65,8 +47,7 @@ func (s *Store) PurgeEnded(ctx context.Context, before time.Time) (int64, error)
 			WITH gone AS (
 				DELETE FROM api_keys WHERE id IN (
 					SELECT k.id FROM api_keys k
-					WHERE (k.revoked_at < $1 OR k.expires_at < $1)
-					  AND NOT EXISTS (SELECT 1 FROM sandboxes sb WHERE sb.key_id = k.id)
+					WHERE k.revoked_at < $1 OR k.expires_at < $1
 					LIMIT $2)
 				RETURNING id
 			), cleared_guardrails AS (
@@ -77,7 +58,6 @@ func (s *Store) PurgeEnded(ctx context.Context, before time.Time) (int64, error)
 			SELECT count(*) FROM gone`, before, purgeBatch).Scan(&n)
 		return n, err
 	})
-	return sandboxes + keys, err
 }
 
 // PurgeAudit deletes audit entries older than before. It has its own retention

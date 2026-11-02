@@ -64,10 +64,10 @@ func TestTakeColorMode(t *testing.T) {
 		{[]string{"--color", "never", "org"}, []string{"org"}, "never"},
 		{[]string{"org", "--color=always"}, []string{"org"}, "always"},
 		{[]string{"--no-color", "org"}, []string{"org"}, "never"},
-		// Everything after -- belongs to the command being run in a sandbox.
+		// Everything after -- is positional.
 		{
-			[]string{"sandbox", "ssh", "box", "--", "ls", "--color=always"},
-			[]string{"sandbox", "ssh", "box", "--", "ls", "--color=always"},
+			[]string{"filter", "show", "--", "--color=always"},
+			[]string{"filter", "show", "--", "--color=always"},
 			"auto",
 		},
 	}

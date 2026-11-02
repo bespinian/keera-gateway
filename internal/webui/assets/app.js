@@ -33,7 +33,6 @@ import { keysView } from "./views/keys.js";
 import { modelsView, catalogueView } from "./views/models.js";
 import { filtersView, filterDetailView } from "./views/filters.js";
 import { routersView, routerDetailView } from "./views/routers.js";
-import { sandboxesView } from "./views/sandboxes.js";
 import { mcpView } from "./views/mcp.js";
 import { playgroundView } from "./views/playground.js";
 import { accessView } from "./views/access.js";
@@ -157,20 +156,6 @@ const routes = [
     perOrg: "MCP servers",
     advanced: "mcp_servers",
     about: "Tools for agents, behind the same keys and guardrails.",
-  },
-  // Not under "You": a member sees their own sandboxes and an admin all of
-  // them, in the same table.
-  {
-    path: "/sandboxes",
-    group: "Organisation",
-    label: "Sandboxes",
-    icon: "sandboxes",
-    view: sandboxesView,
-    perOrg: "Sandboxes",
-    advanced: "sandboxes",
-    // Not shown at all without a driver.
-    needs: "sandboxes",
-    about: "Short-lived machines for agents and engineers.",
   },
   {
     path: "/projects",
@@ -727,10 +712,9 @@ function limitedNotice() {
     "This organisation is new. " +
       // With payments on, such a model is paid from credit, so it is open.
       (state.me.billing && !state.me.payments
-        ? "Models on this deployment's provider keys, models and MCP " +
-          "servers inside the network, such as Keera Engine, and sandboxes"
-        : "Models inside the network, such as Keera Engine, MCP servers " +
-          "inside the network, and sandboxes") +
+        ? "Models on this deployment's provider keys, and models and MCP " +
+          "servers inside the network, such as Keera Engine,"
+        : "Models and MCP servers inside the network, such as Keera Engine,") +
       " are not open to it yet. " +
       (state.me.payments
         ? "Its first card payment opens them."

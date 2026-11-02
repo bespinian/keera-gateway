@@ -98,8 +98,7 @@ func (e *apiError) Error() string {
 	return e.Message
 }
 
-// errorMessage is separate from client.do because sandbox attach reads a
-// refused upgrade off a bare connection.
+// errorMessage reads the message out of a control API error.
 func errorMessage(raw []byte) string {
 	var envelope struct {
 		Error struct {

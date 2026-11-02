@@ -79,7 +79,7 @@ export async function orgsView(ctx) {
                   {
                     class: "btn btn-sm",
                     title:
-                      "Open models and MCP servers inside this deployment's network, and sandboxes",
+                      "Open models and MCP servers inside this deployment's network",
                     onClick: () => liftLimit(ctx, o),
                   },
                   "Lift limit",
@@ -190,7 +190,7 @@ function liftLimit(ctx, org) {
         "p",
         {},
         "Lifting the limit opens the models and MCP servers inside this " +
-          "deployment's network, and sandboxes" +
+          "deployment's network" +
           (ctx.state.me.payments || !ctx.state.me.billing
             ? ". "
             : ", and models on this deployment's provider keys. ") +
@@ -348,8 +348,8 @@ function deleteOrg(ctx, org) {
         h(
           "li",
           {},
-          "its models and their stored provider keys, MCP servers, filters, " +
-            "routers, sandbox classes and the record of its finished sandboxes",
+          "its models and their stored provider keys, MCP servers, filters " +
+            "and routers",
         ),
       ),
       h(

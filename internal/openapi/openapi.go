@@ -1,5 +1,5 @@
 // Package openapi serves the OpenAPI description of every route the gateway
-// answers: the inference, control and sandbox APIs, and the probes.
+// answers: the inference and control APIs, and the probes.
 //
 // The spec is written by hand in openapi.yaml. A test in internal/server fails
 // when a route is missing from it, or when it describes one that is gone.

@@ -135,14 +135,11 @@ func parseChecked(fs *flag.FlagSet, args []string, name string, flags []string, 
 	return nil
 }
 
-// argCount reads a spec such as "<scope> [<id>]". hi is -1 when there is no
-// limit, as after "[-- <command>]".
+// argCount reads a spec such as "<scope> [<id>]".
 func argCount(spec string) (lo, hi int) {
 	for part := range strings.FieldsSeq(spec) {
 		switch {
 		case part == "[flags]":
-		case strings.HasPrefix(part, "[--"):
-			return lo, -1
 		case strings.HasPrefix(part, "["):
 			hi++
 		case strings.HasPrefix(part, "<"):
