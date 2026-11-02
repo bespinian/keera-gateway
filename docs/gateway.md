@@ -259,6 +259,62 @@ An `apiKeyHelper` setting makes Claude Code send its key instead, so the
 command warns about one. With a Claude plan, see
 [subscriptions.md](subscriptions.md#4-each-person-once-per-machine).
 
+## Behind GitLab's AI Gateway
+
+GitLab Duo Self-Hosted can run with a
+[self-hosted AI Gateway](https://docs.gitlab.com/administration/gitlab_duo_self_hosted/configuration_types/#self-hosted-ai-gateway).
+GitLab sends every Duo request to that AI Gateway, and the AI Gateway sends it
+to a model server. Keera can be that model server, so Duo gets the same
+guardrails, budgets and audit log as everything else.
+
+GitLab's AI Gateway calls models through LiteLLM. Code completion, code
+generation, Duo Chat and the Agent Platform all send chat completions, even
+for fill-in-the-middle: the fill-in-the-middle tokens are in the message. In
+**Admin > GitLab Duo > Configure models for GitLab Duo**, each model is:
+
+| Field            | Value                                                               |
+| ---------------- | ------------------------------------------------------------------- |
+| Endpoint         | `https://keera.example.ch/api/v1`                                   |
+| API key          | A Keera key, in a project of its own, such as `gitlab-duo`          |
+| Model identifier | `custom_openai/<alias>`, or `openai/<alias>` for an embedding model |
+| Model family     | The model's family if GitLab lists it, otherwise **General**        |
+
+For a Claude model, `anthropic/<alias>` with the endpoint
+`https://keera.example.ch/api` sends the Messages API, and LiteLLM adds
+`/v1/messages` itself. The request then goes to Anthropic as it is, with its
+prompt caching (see [Three request shapes](#three-request-shapes)). LiteLLM
+sends the key as `x-api-key`, which the gateway takes.
+
+On the AI Gateway, set:
+
+```sh
+AIGW_CUSTOM_MODELS__ENABLED=true
+AIGW_CUSTOM_MODELS__EXTRA_HEADERS='{"X-Keera-Client": "gitlab-duo"}'
+```
+
+The second line makes its requests show as **GitLab Duo**. Without it, they
+show as the OpenAI SDK, which is what LiteLLM sends with. The AI Gateway does
+not add the header to embedding requests.
+
+What the gateway does for it:
+
+- **`tool_choice: "any"`.** The Agent Platform sends Anthropic's `"any"` on chat
+  completions to force a tool call. vLLM, llama.cpp and OpenAI refuse it, so
+  the gateway sends `"required"`, which means the same.
+- **Test connection.** GitLab sends one short chat completion. If that answers
+  404, GitLab reads `GET /api/v1/models` with the key and suggests the right
+  identifier.
+
+The Agent Platform and Duo Chat's agentic mode need tool calls. Run
+[`keera model check`](install.md#keera-model-check-is-the-acceptance-test) on
+each model before you give it to Duo.
+
+**All GitLab users share one key.** Reports, budgets and guardrails see the
+project the key is in, not who asked. GitLab can send its user id in a header
+(`AIGW_CUSTOM_MODELS__USER_ID_HEADER`), but the gateway does not read it: the
+id is GitLab's, not a Keera person, and nothing proves it. Set the budgets and
+guardrails for Duo on its project.
+
 ## The tenancy model
 
 Three levels: organisation, project, key. A guardrail can attach at any of them.

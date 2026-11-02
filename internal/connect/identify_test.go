@@ -45,6 +45,19 @@ func TestIdentifyReadsTheAgentOffTheWire(t *testing.T) {
 			want: "openai-sdk",
 		},
 		{
+			name: "the async Python client is the SDK",
+			ua:   "AsyncOpenAI/Python 2.54.0",
+			want: "openai-sdk",
+		},
+		{
+			// GitLab's AI Gateway adds the header from
+			// AIGW_CUSTOM_MODELS__EXTRA_HEADERS.
+			name:   "GitLab Duo names itself in the header",
+			stated: "gitlab-duo",
+			ua:     "AsyncOpenAI/Python 2.54.0",
+			want:   "gitlab-duo",
+		},
+		{
 			// So the table need not know every new editor.
 			name: "an unrecognised agent keeps its own name",
 			ua:   "SomeNewEditor/2.0 (linux)",

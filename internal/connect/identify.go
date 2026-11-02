@@ -42,9 +42,13 @@ var agents = []struct {
 	{key: "keera-playground", label: "Keera Playground"},
 	// Keera Chat sends through the playground route and names itself there.
 	{key: "keera-chat", label: "Keera Chat"},
+	// GitLab's AI Gateway sends as the OpenAI SDK, and names itself only
+	// when its operator sets the header for it.
+	{key: "gitlab-duo", label: "GitLab Duo"},
 	{
 		key: "openai-sdk", label: "OpenAI SDK", generic: true,
-		products: []string{"openai", "openai-python", "openai-node", "async-openai"},
+		// AsyncOpenAI is the Python SDK's async client.
+		products: []string{"openai", "openai-python", "openai-node", "async-openai", "asyncopenai"},
 	},
 	{
 		key: "anthropic-sdk", label: "Anthropic SDK", generic: true,

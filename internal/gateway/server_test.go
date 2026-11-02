@@ -435,6 +435,26 @@ func TestChatCompletionRewritesTheAliasAndAccountsForTheTokens(t *testing.T) {
 	}
 }
 
+// GitLab's agents send Anthropic's "any", which vLLM refuses with a 400.
+func TestAChatCompletionThatMustCallAToolSaysSoInOpenAIsWords(t *testing.T) {
+	h := newHarness(t, jsonBackend(`{"id":"1","choices":[{"message":{"content":"hi"}}]}`), nil, nil)
+
+	resp := h.post(t, "/v1/chat/completions", `{"model":"keera-code","messages":[],`+
+		`"tools":[{"type":"function","function":{"name":"answer","parameters":{}}}],"tool_choice":"any"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var sent struct {
+		ToolChoice string `json:"tool_choice"`
+	}
+	if err := json.Unmarshal(<-h.upstreamBodies, &sent); err != nil {
+		t.Fatal(err)
+	}
+	if sent.ToolChoice != "required" {
+		t.Errorf("tool_choice = %q, want required", sent.ToolChoice)
+	}
+}
+
 func TestStreamingHidesTheInjectedUsageChunkButStillBills(t *testing.T) {
 	h := newHarness(t, sseBackend(
 		`{"choices":[{"delta":{"content":"a"}}]}`,

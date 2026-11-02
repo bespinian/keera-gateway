@@ -270,6 +270,11 @@ func (s *Server) decode(c *call, raw []byte) (*body, bool) {
 	}
 	// Set before any refusal, so a session cut short by a budget shows it.
 	if d == nil {
+		// GitLab's agents send Anthropic's "any" on chat completions too.
+		// vLLM, llama.cpp and OpenAI refuse it, so it gets OpenAI's word.
+		if choice, ok := b.str("tool_choice"); ok && choice == "any" {
+			b.setString("tool_choice", "required")
+		}
 		c.ev.SessionKey = sessionKey(c.r, c.res.Key.ID, c.surf.kind, b.firstUserMessage)
 		return b, true
 	}
