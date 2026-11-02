@@ -21,3 +21,10 @@ ALTER TABLE guardrails
     DROP COLUMN max_sandbox_cpu_millis,
     DROP COLUMN max_sandbox_memory_mib,
     DROP COLUMN allowed_repos;
+
+-- A rerank model scores documents against a query, on /api/v1/rerank and
+-- /api/v2/rerank.
+ALTER TABLE models DROP CONSTRAINT models_kind_check,
+    ADD CONSTRAINT models_kind_check
+        CHECK (kind IN ('chat', 'completion', 'embedding', 'rerank', 'decision'));
+

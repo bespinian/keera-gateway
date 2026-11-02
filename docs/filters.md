@@ -63,13 +63,14 @@ segments.
 - A `pattern` filter sends nothing anywhere. Its rules run on each segment in
   turn.
 
-| Surface                    | Segments                                                                                            |
-| -------------------------- | --------------------------------------------------------------------------------------------------- |
-| `/api/v1/chat/completions` | each message's `content` when it is a string, and the `text` of each `{"type":"text"}` content part |
-| `/api/v1/messages`         | the `system` prompt, and the text of every message, text block and tool result                      |
-| `/api/v1/responses`        | the `instructions`, and the text of every input message, text part and tool output                  |
-| `/api/v1/completions`      | the `prompt`, or each string in a `prompt` array                                                    |
-| `/api/v1/embeddings`       | the `input`, or each string in an `input` array                                                     |
+| Surface                            | Segments                                                                                            |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `/api/v1/chat/completions`         | each message's `content` when it is a string, and the `text` of each `{"type":"text"}` content part |
+| `/api/v1/messages`                 | the `system` prompt, and the text of every message, text block and tool result                      |
+| `/api/v1/responses`                | the `instructions`, and the text of every input message, text part and tool output                  |
+| `/api/v1/completions`              | the `prompt`, or each string in a `prompt` array                                                    |
+| `/api/v1/embeddings`               | the `input`, or each string in an `input` array                                                     |
+| `/api/v1/rerank`, `/api/v2/rerank` | the `query`, and each document: a string, or the `text` of an object                                |
 
 A Messages or Responses request forwarded untranslated to its own provider (see
 [gateway.md](gateway.md#three-request-shapes)) is filtered in its own shape.

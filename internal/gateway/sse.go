@@ -386,6 +386,25 @@ func usageFromResponse(raw []byte) *tokenUsage {
 	return envelope.Usage
 }
 
+// rerankUsage reads a rerank's usage record. vLLM and Infomaniak send only
+// total_tokens, which is all input, since a rerank writes nothing.
+func rerankUsage(raw []byte) *tokenUsage {
+	var envelope struct {
+		Usage *struct {
+			Prompt int `json:"prompt_tokens"`
+			Total  int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if json.Unmarshal(raw, &envelope) != nil || envelope.Usage == nil {
+		return nil
+	}
+	in := envelope.Usage.Prompt
+	if in == 0 {
+		in = envelope.Usage.Total
+	}
+	return &tokenUsage{InputTokens: in}
+}
+
 // scanSSE walks the data payloads of a server-sent event stream, joining an
 // event's data lines and skipping the terminator. limit caps one payload.
 func scanSSE(src io.Reader, limit int64, fn func(payload []byte) error) error {

@@ -1022,6 +1022,64 @@ func TestEmbeddingsGoToTheirOwnSurface(t *testing.T) {
 	}
 }
 
+// Both rerank paths go to the backend's /rerank. vLLM and Infomaniak count
+// only total_tokens, which is billed as input.
+func TestRerankGoesToTheBackendsRerankFromBothPaths(t *testing.T) {
+	paths := make(chan string, 2)
+	backend := func(w http.ResponseWriter, r *http.Request) {
+		paths <- r.URL.Path
+		jsonBackend(`{"id":"r1","model":"bge-served","results":[{"index":1,"relevance_score":0.9}],`+
+			`"usage":{"total_tokens":12}}`)(w, r)
+	}
+	models := map[string]policy.Model{
+		"keera-rerank": {
+			Alias: "keera-rerank", Kind: policy.KindRerank, BackendModel: "bge-served",
+			InputMicrosPerMTok: 1_000_000, Enabled: true,
+		},
+	}
+	h := newHarness(t, backend, models, nil)
+	for _, path := range []string{"/v1/rerank", "/v2/rerank"} {
+		resp := h.post(t, path, `{"model":"keera-rerank","query":"q","documents":["a","b"]}`)
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: status = %d, body = %s", path, resp.StatusCode, body)
+		}
+		if got := <-paths; got != "/v1/rerank" {
+			t.Errorf("%s went to %s, want /v1/rerank", path, got)
+		}
+		if !strings.Contains(string(body), `"model":"keera-rerank"`) {
+			t.Errorf("%s: the answer names the backend's model: %s", path, body)
+		}
+		if ev := h.sink.last(t); ev.InputTokens != 12 || ev.OutputTokens != 0 {
+			t.Errorf("%s: tokens = %d/%d, want 12/0", path, ev.InputTokens, ev.OutputTokens)
+		}
+	}
+	// A rerank model answers nowhere else, and a chat model not here.
+	resp := h.post(t, "/v1/embeddings", `{"model":"keera-rerank","input":"q"}`)
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusNotFound || !strings.Contains(string(body), "/v1/rerank") {
+		t.Errorf("status = %d, body = %s; want a 404 naming /v1/rerank", resp.StatusCode, body)
+	}
+}
+
+// The window holds one document at a time, and a reranker shortens a long one
+// itself, so the total is no reason to refuse.
+func TestALongRerankIsNotRefusedForItsLength(t *testing.T) {
+	models := map[string]policy.Model{
+		"keera-rerank": {
+			Alias: "keera-rerank", Kind: policy.KindRerank, BackendModel: "bge-served",
+			MaxContext: 100, Enabled: true,
+		},
+	}
+	h := newHarness(t, jsonBackend(`{"results":[],"usage":{"total_tokens":1}}`), models, nil)
+	doc := strings.Repeat("word ", 1000)
+	resp := h.post(t, "/v1/rerank",
+		`{"model":"keera-rerank","query":"q","documents":["`+doc+`","`+doc+`"]}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
 func TestAModelAtTheWrongEndpointIsToldWhereItIsServed(t *testing.T) {
 	// "Does not exist" sent people looking for a model that was there.
 	models := map[string]policy.Model{

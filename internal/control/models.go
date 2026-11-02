@@ -70,7 +70,7 @@ func (s *Server) listProviders(w http.ResponseWriter, _ *http.Request, p *authn.
 	var out []entry
 	for _, prov := range catalog.Providers() {
 		if !admin {
-			prov.Endpoint = ""
+			prov.Endpoint, prov.Endpoints = "", nil
 		}
 		out = append(out, entry{Provider: prov, PlatformKey: s.opts.Platform.Has(prov.Name)})
 	}

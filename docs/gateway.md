@@ -106,6 +106,13 @@ The data plane serves the OpenAI API at `/api/v1/chat/completions`,
 Code uses the Messages API and Codex the Responses API. All of them go through
 the same guardrails, accounting and audit.
 
+Rerank models answer `/api/v1/rerank`, as vLLM and llama.cpp serve it, and
+`/api/v2/rerank`, Cohere's path, so Cohere's SDK works too. Both take the same
+body, `model`, `query` and `documents`, and go to the backend's `/rerank`
+with only the model name changed. A rerank writes nothing, so only its input
+is billed. The context window check skips it: the window holds the query and
+one document, and the reranker shortens a long document itself.
+
 `GET /api/v1/models` lists the models a key may call, and
 `GET /api/v1/models/{alias}` describes one. The list carries the fields of both
 OpenAI's and Anthropic's model lists, so either SDK reads it. `HEAD

@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -22,6 +23,9 @@ type Provider struct {
 	// NeedsProductID says each customer has their own endpoint, as at
 	// Infomaniak. An entry then states `product_id` or its own `backends`.
 	NeedsProductID bool `json:"needs_product_id,omitempty"`
+	// Endpoints are the base URLs of kinds served somewhere else than
+	// Endpoint, in the same form. See EndpointFor.
+	Endpoints map[policy.Kind]string `json:"endpoints,omitempty"`
 	// CachedInput says the provider publishes a discounted rate for tokens
 	// served from its prompt cache.
 	CachedInput bool `json:"cached_input"`
@@ -497,10 +501,14 @@ var providers = []Provider{{
 	// The address carries the product id of your AI Service.
 	Endpoint:       "https://api.infomaniak.com/2/ai/{product_id}/openai/v1",
 	NeedsProductID: true,
-	Location:       "ch",
+	// Infomaniak reranks on its Cohere-shaped API only, at /cohere/v2/rerank.
+	Endpoints: map[policy.Kind]string{
+		policy.KindRerank: "https://api.infomaniak.com/2/ai/{product_id}/cohere/v2",
+	},
+	Location: "ch",
 	// Ids are the upstream names, capitals and all, as the endpoint expects.
 	// Prices are Infomaniak's list price times 1.12, on purpose. An embedding
-	// writes nothing, so it has no output price.
+	// or a rerank writes nothing, so it has no output price.
 	Models: []ProviderModel{{
 		ID: "Qwen/Qwen3.5-397B-A17B-FP8", DisplayName: "Qwen3.5 397B A17B FP8",
 		MaxContext: 200_000, ReleaseDate: "2026-02-16",
@@ -552,6 +560,16 @@ var providers = []Provider{{
 		ID: "mini_lm_l12_v2", DisplayName: "all-MiniLM-L12-v2",
 		Kind: policy.KindEmbedding, MaxContext: 128,
 		Description: "tiny embedding model, 384 dimensions - fast indexing and prototypes",
+	}, {
+		ID: "BAAI/bge-reranker-v2-m3", DisplayName: "BGE Reranker v2 M3",
+		Kind: policy.KindRerank, MaxContext: 8_192, ReleaseDate: "2024-03-18",
+		InputMicrosPerMTok: 11_200,
+		Description:        "reranker - orders search results by relevance, in many languages",
+	}, {
+		ID: "Qwen/Qwen3-Reranker-0.6B", DisplayName: "Qwen3 Reranker 0.6B",
+		Kind: policy.KindRerank, MaxContext: 32_768, ReleaseDate: "2025-06-05",
+		InputMicrosPerMTok: 10_080,
+		Description:        "small reranker - orders search results by relevance in over 100 languages",
 	}},
 }, {
 	Name:     "stepping-stone",
@@ -803,11 +821,20 @@ func ProviderNames() string {
 
 func (p Provider) clone() Provider {
 	p.Kinds = p.kinds()
+	p.Endpoints = maps.Clone(p.Endpoints)
 	p.Models = slices.Clone(p.Models)
 	for i := range p.Models {
 		p.Models[i].LongPrompt = p.Models[i].longPrompt()
 	}
 	return p
+}
+
+// EndpointFor is the base URL a kind is served at.
+func (p Provider) EndpointFor(k policy.Kind) string {
+	if e, ok := p.Endpoints[k]; ok {
+		return e
+	}
+	return p.Endpoint
 }
 
 func provider(name string) (Provider, bool) {
@@ -931,8 +958,13 @@ func applyProvider(m Model) (Model, error) {
 		return m, fmt.Errorf("unknown provider %q; Keera Gateway knows: %s",
 			m.Provider, ProviderNames())
 	}
+	known, isKnown := p.Model(m.BackendModel)
+	kind := policy.Kind(m.Kind)
+	if kind == "" && isKnown {
+		kind = known.kindOrChat()
+	}
 	if len(m.Backends) == 0 {
-		m.Backends = []string{p.Endpoint}
+		m.Backends = []string{p.EndpointFor(kind)}
 	}
 	backends, err := fillProductID(p, m.Backends, m.ProductID)
 	if err != nil {
@@ -942,7 +974,6 @@ func applyProvider(m Model) (Model, error) {
 	if m.Location == "" {
 		m.Location = p.Location
 	}
-	known, isKnown := p.Model(m.BackendModel)
 	if m.BackendModel == "" || !isKnown {
 		return m, nil
 	}

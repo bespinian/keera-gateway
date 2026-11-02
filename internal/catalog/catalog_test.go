@@ -97,7 +97,7 @@ func TestParseRejectsWhatWouldFailSilentlyAtRuntime(t *testing.T) {
 		},
 		{
 			name:    "an unknown kind",
-			in:      "models:\n  - alias: a\n    kind: rerank\n    backends: [\"http://x/v1\"]\n    backend_model: m",
+			in:      "models:\n  - alias: a\n    kind: image\n    backends: [\"http://x/v1\"]\n    backend_model: m",
 			wantErr: "kind",
 		},
 		{

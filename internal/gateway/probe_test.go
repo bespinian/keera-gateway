@@ -236,6 +236,38 @@ func TestCheckModelChecksAnEmbeddingModelOnItsOwnTerms(t *testing.T) {
 	}
 }
 
+// A rerank model passes when it ranks the document that answers first.
+func TestCheckModelChecksARerankModelOnItsOwnTerms(t *testing.T) {
+	for _, tc := range []struct {
+		name, answer string
+		ok           bool
+	}{
+		{"ranked right", `{"model":"bge","results":[{"index":1,"relevance_score":0.97},` +
+			`{"index":0,"relevance_score":0.01}]}`, true},
+		{"ranked wrong", `{"model":"bge","results":[{"index":0,"relevance_score":0.6},` +
+			`{"index":1,"relevance_score":0.2}]}`, false},
+		{"no results", `{"model":"bge","results":[]}`, false},
+	} {
+		var path string
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			path = r.URL.Path
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, tc.answer)
+		}))
+		m := chatAlias(upstream.URL)
+		m.Kind = policy.KindRerank
+		m.BackendModel = "bge"
+		p := probeServer(t).CheckModel(context.Background(), m)
+		upstream.Close()
+		if p.OK != tc.ok {
+			t.Errorf("%s: ok = %v (%s), want %v", tc.name, p.OK, p.Error, tc.ok)
+		}
+		if path != "/v1/rerank" {
+			t.Errorf("%s: path = %q, want /v1/rerank", tc.name, path)
+		}
+	}
+}
+
 func TestCheckModelFailsAnEmbeddingModelThatReturnsNoVector(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

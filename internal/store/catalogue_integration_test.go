@@ -38,6 +38,31 @@ func TestModelWithoutAReleaseDate(t *testing.T) {
 	}
 }
 
+// The schema takes every kind the gateway knows, so a new kind cannot be
+// added without its migration.
+func TestEveryModelKindCanBeStored(t *testing.T) {
+	st, ctx := db(t)
+	anOrg(t, st, ctx, "org_1")
+
+	for _, kind := range []policy.Kind{
+		policy.KindChat, policy.KindCompletion, policy.KindEmbedding,
+		policy.KindRerank, policy.KindDecision,
+	} {
+		m := policy.Model{
+			OrgID: "org_1", Alias: "model-" + string(kind), Kind: kind,
+			Backends: []string{"http://x/v1"}, BackendModel: "x",
+			Location: policy.LocationOnPrem, Enabled: true,
+		}
+		if err := st.UpsertModel(ctx, m, Credential{}); err != nil {
+			t.Errorf("UpsertModel(%s): %v", kind, err)
+			continue
+		}
+		if got, err := st.Model(ctx, "org_1", m.Alias); err != nil || got.Kind != kind {
+			t.Errorf("Model(%s) = %q, %v", kind, got.Kind, err)
+		}
+	}
+}
+
 func TestModelCatalogueRoundTrip(t *testing.T) {
 	st, ctx := db(t)
 	anOrg(t, st, ctx, "org_1")

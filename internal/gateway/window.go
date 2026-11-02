@@ -3,6 +3,8 @@ package gateway
 import (
 	"fmt"
 	"net/http"
+
+	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
 // The context window check refuses a request too long for every model it may
@@ -17,6 +19,11 @@ import (
 // fits refuses a request that cannot fit in the context of any model it may
 // go to. A model with no declared context can hold anything.
 func (s *Server) fits(c *call, b *body) bool {
+	// The window holds the query and one document, and a reranker cuts a
+	// long document down itself.
+	if c.surf.kind == policy.KindRerank {
+		return true
+	}
 	window, largest := 0, c.alias
 	for _, m := range c.chain {
 		if m.MaxContext <= 0 {

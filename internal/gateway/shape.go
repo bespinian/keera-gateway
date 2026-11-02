@@ -24,6 +24,10 @@ var (
 	chatSurface       = surface{kind: policy.KindChat, path: "/chat/completions", shape: openAIShape{}}
 	completionSurface = surface{kind: policy.KindCompletion, path: "/completions", shape: openAIShape{}}
 	embeddingSurface  = surface{kind: policy.KindEmbedding, path: "/embeddings", shape: openAIShape{}}
+	// rerankSurface is served at /v1/rerank and /v2/rerank, both sent to
+	// the backend's /rerank: vLLM and llama.cpp serve it under /v1,
+	// Infomaniak under /cohere/v2.
+	rerankSurface = surface{kind: policy.KindRerank, path: "/rerank", shape: openAIShape{}}
 	// messagesSurface is the Anthropic-shaped `/v1/messages`: chatSurface in
 	// another format.
 	messagesSurface = surface{
@@ -36,6 +40,14 @@ var (
 		shape: responsesShape{}, dialect: responsesDialect{},
 	}
 )
+
+// usage reads the token counts of a buffered answer in the plane's shape.
+func (s surface) usage(raw []byte) *tokenUsage {
+	if s.kind == policy.KindRerank {
+		return rerankUsage(raw)
+	}
+	return usageFromResponse(raw)
+}
 
 // What a shape answers when it cannot translate a backend's success.
 const (

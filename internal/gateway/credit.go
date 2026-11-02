@@ -170,9 +170,10 @@ func (s *Server) filtersHold(org string, filters []string, in int) int64 {
 	return most
 }
 
-// outputTokens is the most a request may write; an embedding writes none.
+// outputTokens is the most a request may write; an embedding or a rerank
+// writes none.
 func (c *call) outputTokens(b *body) int {
-	if c.surf.kind == policy.KindEmbedding {
+	if c.surf.kind == policy.KindEmbedding || c.surf.kind == policy.KindRerank {
 		return 0
 	}
 	return outputCeiling(b)

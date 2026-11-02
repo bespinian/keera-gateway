@@ -22,6 +22,8 @@ func extractText(b *body, kind policy.Kind) (textDoc, error) {
 		return extractChat(b)
 	case policy.KindCompletion:
 		return extractScalar(b, "prompt"), nil
+	case policy.KindRerank:
+		return extractRerank(b)
 	default:
 		return extractScalar(b, "input"), nil
 	}
@@ -48,6 +50,36 @@ func extractChat(b *body) (*treeDoc, error) {
 		for _, part := range d.objects(msg["content"]) {
 			addTextBlock(d, part)
 		}
+	}
+	if d.err != nil {
+		return nil, d.err
+	}
+	return d, nil
+}
+
+// extractRerank is the query and each document: a string, or the text of an
+// object, as some rerank APIs take.
+func extractRerank(b *body) (*treeDoc, error) {
+	d := newTreeDoc()
+	query, err := d.root(b, "query")
+	if err != nil {
+		return nil, err
+	}
+	if s, ok := query.(string); ok {
+		d.add(s, func(r string) { d.roots["query"] = r })
+	}
+	docs, err := d.root(b, "documents")
+	if err != nil {
+		return nil, err
+	}
+	arr, _ := docs.([]any)
+	for i, e := range arr {
+		if s, ok := e.(string); ok {
+			d.add(s, func(r string) { arr[i] = r })
+		}
+	}
+	for _, obj := range d.objects(docs) {
+		d.addField(obj, "text")
 	}
 	if d.err != nil {
 		return nil, d.err

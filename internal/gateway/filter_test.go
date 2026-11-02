@@ -64,7 +64,8 @@ func filterHarnessAnswering(t *testing.T, filterReply func(instruction string, s
 	return h
 }
 
-// filterModels is a client's model, a filter's model, and an embedding model.
+// filterModels is a client's model, a filter's model, an embedding model and
+// a rerank model.
 func filterModels() map[string]policy.Model {
 	return map[string]policy.Model{
 		"keera-code": {
@@ -77,6 +78,10 @@ func filterModels() map[string]policy.Model {
 		},
 		"keera-embed": {
 			Alias: "keera-embed", Kind: policy.KindEmbedding, BackendModel: "embed-served",
+			Enabled: true,
+		},
+		"keera-rerank": {
+			Alias: "keera-rerank", Kind: policy.KindRerank, BackendModel: "rerank-served",
 			Enabled: true,
 		},
 	}
@@ -364,6 +369,50 @@ func TestFilterRewritesAnEmbeddingInput(t *testing.T) {
 	}
 	if !strings.Contains(forwarded, `"two"`) {
 		t.Errorf("the rest of the input was lost: %s", forwarded)
+	}
+}
+
+func TestFilterRewritesARerankQueryAndDocuments(t *testing.T) {
+	h := filterHarness(t, redactor, nil)
+
+	resp := h.post(t, "/v2/rerank",
+		`{"model":"keera-rerank","query":"find hunter2","documents":["one hunter2","two"],"top_n":1}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	<-h.upstreamBodies
+	forwarded := string(<-h.upstreamBodies)
+	if strings.Contains(forwarded, "hunter2") {
+		t.Errorf("a rerank left unfiltered: %s", forwarded)
+	}
+	if !strings.Contains(forwarded, `"two"`) || !strings.Contains(forwarded, `"top_n":1`) {
+		t.Errorf("the rest of the request was lost: %s", forwarded)
+	}
+}
+
+// A document may be a string or an object with a text. A misspelled key could
+// carry text past the filter, so it is refused.
+func TestExtractRerankReadsTheQueryAndEachDocument(t *testing.T) {
+	b, err := parseBody([]byte(`{"query":"q","documents":["a",{"text":"b","id":7},42]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := extractRerank(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := doc.texts(); !slices.Equal(got, []string{"q", "a", "b"}) {
+		t.Fatalf("texts = %q, want the query and both documents", got)
+	}
+	if err := doc.apply(b, []string{"Q", "A", "B"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(b.encode()); got != `{"query":"Q","documents":["A",{"text":"B","id":7},42]}` {
+		t.Errorf("body = %s", got)
+	}
+	b, _ = parseBody([]byte(`{"query":"q","documents":[{"Text":"hidden"}]}`))
+	if _, err := extractRerank(b); err == nil {
+		t.Error("a misspelled text key was read past")
 	}
 }
 

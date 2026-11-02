@@ -45,7 +45,8 @@ func (p Platform) Lock(m *policy.Model) error {
 			"cannot be billed on this deployment's key (it knows: %s)",
 			m.BackendModel, prov.Name, prov.modelIDs())
 	}
-	endpoint := prov.Endpoint
+	// The table's kind, since the entry may not state one yet.
+	endpoint := prov.EndpointFor(known.kindOrChat())
 	if prov.NeedsProductID {
 		endpoint = strings.ReplaceAll(endpoint, productIDPlaceholder, p[m.Provider].ProductID)
 	}

@@ -85,4 +85,12 @@ func TestInfomaniaksEndpointTakesTheDeploymentsProductID(t *testing.T) {
 	if want := strings.ReplaceAll(prov.Endpoint, "{product_id}", "12345"); m.Backends[0] != want {
 		t.Errorf("backend = %s, want %s", m.Backends[0], want)
 	}
+	// A rerank model goes to its own address, even before its kind is set.
+	m = policy.Model{Provider: "infomaniak", BackendModel: "Qwen/Qwen3-Reranker-0.6B"}
+	if err := p.Lock(&m); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+	if want := "https://api.infomaniak.com/2/ai/12345/cohere/v2"; m.Backends[0] != want {
+		t.Errorf("rerank backend = %s, want %s", m.Backends[0], want)
+	}
 }

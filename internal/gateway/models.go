@@ -148,6 +148,8 @@ func (s *Server) servedAt(res *policy.Resolved, alias string) string {
 		return "/v1/completions"
 	case policy.KindEmbedding:
 		return "/v1/embeddings"
+	case policy.KindRerank:
+		return "/v1/rerank or /v2/rerank"
 	}
 	return ""
 }

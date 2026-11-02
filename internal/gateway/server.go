@@ -231,6 +231,10 @@ func (s *Server) mux() *httpx.Mux {
 	mux.Handle("POST "+httpx.InferencePrefix+"/v1/chat/completions", s.inference(chatSurface))
 	mux.Handle("POST "+httpx.InferencePrefix+"/v1/completions", s.inference(completionSurface))
 	mux.Handle("POST "+httpx.InferencePrefix+"/v1/embeddings", s.inference(embeddingSurface))
+	// v1 for Jina- and vLLM-shaped clients, v2 for Cohere's. The body is the
+	// same and goes on as the client sent it.
+	mux.Handle("POST "+httpx.InferencePrefix+"/v1/rerank", s.inference(rerankSurface))
+	mux.Handle("POST "+httpx.InferencePrefix+"/v2/rerank", s.inference(rerankSurface))
 	// The Anthropic-shaped surface. Clients post to
 	// /api/v1/messages?beta=true; the query string is not matched.
 	mux.Handle("POST "+httpx.InferencePrefix+"/v1/messages", s.inference(messagesSurface))

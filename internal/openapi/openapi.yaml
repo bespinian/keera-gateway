@@ -2579,7 +2579,7 @@ paths:
               properties:
                 kind:
                   type: string
-                  enum: [chat, completion, embedding, decision]
+                  enum: [chat, completion, embedding, rerank, decision]
                   description: Defaults to chat.
                 backends:
                   type: array
@@ -5466,6 +5466,412 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
       description: For embedding models.
+  /api/v1/rerank:
+    post:
+      tags:
+        - inference
+      operationId: createRerank
+      summary: Rerank documents
+      externalDocs:
+        description: Cohere Rerank v1
+        url: https://docs.cohere.com/v1/reference/rerank
+      security:
+        - bearer: []
+        - apiKey: []
+        - keeraKey: []
+      parameters:
+        - name: X-Request-Id
+          in: header
+          description: "An id for the request. Kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`, otherwise replaced."
+          schema:
+            type: string
+        - name: X-Client-Request-Id
+          in: header
+          description: "The client's own id, as OpenAI's API takes it: printable ASCII, up to 512 characters. It is logged and sent on to OpenAI models. An invalid one is ignored."
+          schema:
+            type: string
+        - name: X-Keera-Client
+          in: header
+          description: The client's own name, which wins over the `User-Agent` in reports.
+          schema:
+            type: string
+        - name: Content-Encoding
+          in: header
+          description: The body may be gzip or deflate.
+          schema:
+            type: string
+            enum:
+              - identity
+              - gzip
+              - x-gzip
+              - deflate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - model
+                - query
+                - documents
+              additionalProperties: true
+              properties:
+                model:
+                  type: string
+                  description: A rerank model's alias from `GET /api/v1/models`.
+                query:
+                  type: string
+                documents:
+                  type: array
+                  description: Strings, or objects with a `text`.
+                  items:
+                    oneOf:
+                      - type: string
+                      - type: object
+                top_n:
+                  type: integer
+                  minimum: 1
+      responses:
+        "200":
+          description: The provider's answer, in this API's format.
+          headers:
+            X-Request-Id:
+              description: "The request's id. One the client sent is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`."
+              schema:
+                type: string
+            X-Keera-Model:
+              description: The alias that answered; behind a router, the destination that answered.
+              schema:
+                type: string
+            X-Keera-Router:
+              description: The router and where it sent the request, as `router -> model`, with ` (fallback)` or ` (every destination failed)` when so.
+              schema:
+                type: string
+            X-Keera-Filters:
+              description: The filters that acted on the request, in order, comma-separated.
+              schema:
+                type: string
+            X-Keera-Removed-Tools:
+              description: Hosted tools taken out on the deployment's key.
+              schema:
+                type: string
+            X-Keera-Removed-Fields:
+              description: Fields taken out on the deployment's key.
+              schema:
+                type: string
+            X-Keera-Budget-Remaining:
+              description: What is left to spend at the tightest level with a budget, in CHF.
+              schema:
+                type: string
+            X-Keera-Budget-Limit:
+              description: That level's budget, in CHF.
+              schema:
+                type: string
+            X-Keera-Budget-Reset:
+              description: When that budget resets.
+              schema:
+                type: string
+                format: date-time
+            X-Keera-Budget-Scope:
+              description: "The level: `org`, `project` or `key`."
+              schema:
+                type: string
+                enum:
+                  - org
+                  - project
+                  - key
+            X-RateLimit-Limit-Requests:
+              description: Requests per minute at the tightest level that limits them.
+              schema:
+                type: integer
+            X-RateLimit-Remaining-Requests:
+              description: Requests left in that bucket.
+              schema:
+                type: integer
+            X-Keera-RateLimit-Scope:
+              description: "The level: `org`, `project` or `key`."
+              schema:
+                type: string
+                enum:
+                  - org
+                  - project
+                  - key
+            Retry-After:
+              description: Passed on from the provider.
+              schema:
+                type: integer
+            X-Should-Retry:
+              description: Passed on from the provider.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: The body or a field is not valid. Codes include `invalid_body`, `missing_model`, `context_length_exceeded` and `unsupported_parameter`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "402":
+          description: "A budget is spent (`budget_exceeded`), or the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`). Not 429: it does not lift by waiting."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Refused by a filter (`filter_refused`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: No such model, or the key may not use it (`model_not_found`). The message says where a model of another kind is served.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: The body is over the gateway's limit (`request_too_large`, 32 MiB by default), or too long for a filter's model (`filter_input_too_large`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "415":
+          description: A `Content-Encoding` other than gzip or deflate (`unsupported_encoding`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          description: The model's backend could not be reached or gave an answer that could not be read (`upstream_unavailable`, `upstream_error`), or a filter failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: No backend serves the model (`no_backend`), a router or filter could not decide, or the control plane is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          description: Any other error status the model's provider gave, such as 504 or 529, passed on in the caller's error shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      description: For rerank models. Scores each document against the query. The body goes on as sent, so it is the shape the model's provider takes; vLLM and llama.cpp take this one. The same as `/api/v2/rerank`.
+  /api/v2/rerank:
+    post:
+      tags:
+        - inference
+      operationId: createRerankV2
+      summary: Rerank documents
+      externalDocs:
+        description: Cohere Rerank v2
+        url: https://docs.cohere.com/reference/rerank
+      security:
+        - bearer: []
+        - apiKey: []
+        - keeraKey: []
+      parameters:
+        - name: X-Request-Id
+          in: header
+          description: "An id for the request. Kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`, otherwise replaced."
+          schema:
+            type: string
+        - name: X-Client-Request-Id
+          in: header
+          description: "The client's own id, as OpenAI's API takes it: printable ASCII, up to 512 characters. It is logged and sent on to OpenAI models. An invalid one is ignored."
+          schema:
+            type: string
+        - name: X-Keera-Client
+          in: header
+          description: The client's own name, which wins over the `User-Agent` in reports.
+          schema:
+            type: string
+        - name: Content-Encoding
+          in: header
+          description: The body may be gzip or deflate.
+          schema:
+            type: string
+            enum:
+              - identity
+              - gzip
+              - x-gzip
+              - deflate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - model
+                - query
+                - documents
+              additionalProperties: true
+              properties:
+                model:
+                  type: string
+                  description: A rerank model's alias from `GET /api/v1/models`.
+                query:
+                  type: string
+                documents:
+                  type: array
+                  description: Strings, or objects with a `text`.
+                  items:
+                    oneOf:
+                      - type: string
+                      - type: object
+                top_n:
+                  type: integer
+                  minimum: 1
+      responses:
+        "200":
+          description: The provider's answer, in this API's format.
+          headers:
+            X-Request-Id:
+              description: "The request's id. One the client sent is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`."
+              schema:
+                type: string
+            X-Keera-Model:
+              description: The alias that answered; behind a router, the destination that answered.
+              schema:
+                type: string
+            X-Keera-Router:
+              description: The router and where it sent the request, as `router -> model`, with ` (fallback)` or ` (every destination failed)` when so.
+              schema:
+                type: string
+            X-Keera-Filters:
+              description: The filters that acted on the request, in order, comma-separated.
+              schema:
+                type: string
+            X-Keera-Removed-Tools:
+              description: Hosted tools taken out on the deployment's key.
+              schema:
+                type: string
+            X-Keera-Removed-Fields:
+              description: Fields taken out on the deployment's key.
+              schema:
+                type: string
+            X-Keera-Budget-Remaining:
+              description: What is left to spend at the tightest level with a budget, in CHF.
+              schema:
+                type: string
+            X-Keera-Budget-Limit:
+              description: That level's budget, in CHF.
+              schema:
+                type: string
+            X-Keera-Budget-Reset:
+              description: When that budget resets.
+              schema:
+                type: string
+                format: date-time
+            X-Keera-Budget-Scope:
+              description: "The level: `org`, `project` or `key`."
+              schema:
+                type: string
+                enum:
+                  - org
+                  - project
+                  - key
+            X-RateLimit-Limit-Requests:
+              description: Requests per minute at the tightest level that limits them.
+              schema:
+                type: integer
+            X-RateLimit-Remaining-Requests:
+              description: Requests left in that bucket.
+              schema:
+                type: integer
+            X-Keera-RateLimit-Scope:
+              description: "The level: `org`, `project` or `key`."
+              schema:
+                type: string
+                enum:
+                  - org
+                  - project
+                  - key
+            Retry-After:
+              description: Passed on from the provider.
+              schema:
+                type: integer
+            X-Should-Retry:
+              description: Passed on from the provider.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: The body or a field is not valid. Codes include `invalid_body`, `missing_model`, `context_length_exceeded` and `unsupported_parameter`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "402":
+          description: "A budget is spent (`budget_exceeded`), or the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`). Not 429: it does not lift by waiting."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Refused by a filter (`filter_refused`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: No such model, or the key may not use it (`model_not_found`). The message says where a model of another kind is served.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: The body is over the gateway's limit (`request_too_large`, 32 MiB by default), or too long for a filter's model (`filter_input_too_large`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "415":
+          description: A `Content-Encoding` other than gzip or deflate (`unsupported_encoding`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          description: The model's backend could not be reached or gave an answer that could not be read (`upstream_unavailable`, `upstream_error`), or a filter failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: No backend serves the model (`no_backend`), a router or filter could not decide, or the control plane is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          description: Any other error status the model's provider gave, such as 504 or 529, passed on in the caller's error shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      description: For rerank models, at Cohere's path, so Cohere's SDK works against the gateway. The same as `/api/v1/rerank`.
   /api/v1/messages:
     post:
       tags:
@@ -7815,7 +8221,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [chat, completion, embedding, decision]
+          enum: [chat, completion, embedding, rerank, decision]
         backends:
           type: [array, "null"]
           description: Base URLs. `null` for anyone but an administrator.
@@ -7964,6 +8370,13 @@ components:
         needs_product_id:
           type: boolean
           description: Each customer has their own endpoint.
+        endpoints:
+          type: object
+          description: |
+            The base URLs of kinds served somewhere else than `endpoint`, by
+            kind. Left out for anyone but an administrator.
+          additionalProperties:
+            type: string
         cached_input:
           type: boolean
           description: It publishes a cheaper rate for cached input.
@@ -7973,7 +8386,7 @@ components:
           type: array
           items:
             type: string
-            enum: [chat, completion, embedding, decision]
+            enum: [chat, completion, embedding, rerank, decision]
         models:
           type: array
           items:
@@ -8001,6 +8414,10 @@ components:
           type: string
         display_name:
           type: string
+        kind:
+          type: string
+          enum: [chat, completion, embedding, rerank, decision]
+          description: Left out for a chat model.
         max_context_tokens:
           type: integer
         release_date:
@@ -8569,6 +8986,7 @@ components:
                 - chat
                 - completion
                 - embedding
+                - rerank
                 - decision
             enabled:
               type: boolean

@@ -303,14 +303,15 @@ func checkProviderModel(t *testing.T, p Provider, m ProviderModel, seenDescripti
 	if m.ReleaseDate != "" && !policy.ValidReleaseDate(m.ReleaseDate) {
 		t.Errorf("%s's release date %q is not YYYY-MM-DD", m.ID, m.ReleaseDate)
 	}
+	// Embedding and rerank models write nothing.
+	inputOnly := m.kindOrChat() == policy.KindEmbedding || m.kindOrChat() == policy.KindRerank
 	switch {
-	case m.kindOrChat() == policy.KindEmbedding && m.OutputMicrosPerMTok != 0:
-		t.Errorf("%s is an embedding model with an output price; it writes nothing", m.ID)
-	case m.kindOrChat() == policy.KindEmbedding && m.InputMicrosPerMTok <= 0 &&
-		!freeModels[m.ID]:
+	case inputOnly && m.OutputMicrosPerMTok != 0:
+		t.Errorf("%s is a %s model with an output price; it writes nothing", m.ID, m.kindOrChat())
+	case inputOnly && m.InputMicrosPerMTok <= 0 && !freeModels[m.ID]:
 		t.Errorf("%s is priced %d; a defaulted price of 0 escapes every budget",
 			m.ID, m.InputMicrosPerMTok)
-	case m.kindOrChat() != policy.KindEmbedding &&
+	case !inputOnly &&
 		(m.InputMicrosPerMTok <= 0 || m.OutputMicrosPerMTok <= 0):
 		t.Errorf("%s is priced %d/%d; a defaulted price of 0 escapes every budget",
 			m.ID, m.InputMicrosPerMTok, m.OutputMicrosPerMTok)
@@ -463,6 +464,33 @@ models:
 `))
 	if err == nil || !strings.Contains(err.Error(), "set kind embedding") {
 		t.Errorf("err = %v, want the embedding kind asked for", err)
+	}
+}
+
+// Infomaniak reranks on its Cohere-shaped API, so a rerank model gets that
+// address, not the OpenAI-shaped one. An address the entry states wins.
+func TestARerankModelGetsItsKindsEndpoint(t *testing.T) {
+	models, err := parseModelFile([]byte(`
+models:
+  - alias: rerank
+    provider: infomaniak
+    product_id: 100234
+    backend_model: BAAI/bge-reranker-v2-m3
+  - alias: rerank-proxied
+    provider: infomaniak
+    product_id: 100234
+    backends: ["https://proxy.example.ch/{product_id}/cohere/v2"]
+    backend_model: BAAI/bge-reranker-v2-m3
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	want := "https://api.infomaniak.com/2/ai/100234/cohere/v2"
+	if m := models[0]; m.Kind != policy.KindRerank || m.Backends[0] != want {
+		t.Errorf("kind, backend = %q, %s, want rerank, %s", m.Kind, m.Backends[0], want)
+	}
+	if got := models[1].Backends[0]; got != "https://proxy.example.ch/100234/cohere/v2" {
+		t.Errorf("stated backend = %s, want it kept", got)
 	}
 }
 

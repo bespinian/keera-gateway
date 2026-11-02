@@ -54,7 +54,7 @@ func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 			"carries - for infomaniak, your AI Service's product id")
 	fs.StringVar(&f.backendModel, "backend-model", "",
 		"the name the inference plane serves, which for vLLM is --served-model-name")
-	fs.StringVar(&f.kind, "kind", "", "chat, completion, embedding or decision (default chat)")
+	fs.StringVar(&f.kind, "kind", "", "chat, completion, embedding, rerank or decision (default chat)")
 	fs.StringVar(&f.displayName, "display-name", "",
 		"the model's name for people, such as \"Claude Haiku 5.5\" "+
 			"(a --provider model starts with that provider's own)")
@@ -250,7 +250,7 @@ func modelCmd(ctx context.Context, args []string) error {
 	r.reword("set", "display-name", "the model's name for people; an empty one clears it, "+
 		"or goes back to the provider's")
 	r.reword("set", "description", "what this model is for, in a sentence; an empty one clears it")
-	r.reword("set", "kind", "chat, completion, embedding or decision")
+	r.reword("set", "kind", "chat, completion, embedding, rerank or decision")
 	r.reword("set", "release-date", "the day the model came out, as YYYY-MM-DD")
 	r.reword("set", "location", "where the model runs, such as ch, usa or onprem")
 	if done, err := r.parse(); done {

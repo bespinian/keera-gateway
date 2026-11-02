@@ -56,6 +56,7 @@ audit:
 
 - the OpenAI API: `/api/v1/chat/completions`, `/api/v1/completions` and
   `/api/v1/embeddings`
+- reranking: `/api/v1/rerank`, and `/api/v2/rerank` for Cohere's SDK
 - the Anthropic Messages API, used by Claude Code: `/api/v1/messages`
 - the OpenAI Responses API, used by Codex: `/api/v1/responses`. The gateway
   stores no conversations; see

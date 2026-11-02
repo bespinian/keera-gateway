@@ -1,11 +1,14 @@
 package gateway
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -85,6 +88,8 @@ func (s *Server) CheckModel(ctx context.Context, m policy.Model) Probe {
 	switch m.Kind {
 	case policy.KindEmbedding:
 		return s.checkEmbedding(ctx, m, p)
+	case policy.KindRerank:
+		return s.checkRerank(ctx, m, p)
 	case policy.KindCompletion:
 		return s.checkCompletion(ctx, m, p)
 	case policy.KindDecision:
@@ -347,6 +352,48 @@ func (s *Server) checkEmbedding(ctx context.Context, m policy.Model, p Probe) Pr
 		return p
 	}
 	p.Sample = fmt.Sprintf("%d dimensions", len(out.Data[0].Embedding))
+	p.OK = true
+	p.Warnings = servedWarnings(p, m)
+	return p
+}
+
+// rerankProbe has one document that answers the query and one that does not,
+// so a model that ranks them the wrong way round is not reading them.
+var rerankProbe = map[string]any{
+	"query": "Which gateway do AI requests pass through?",
+	"documents": []string{
+		"Bananas are a yellow fruit.",
+		"Every AI request passes through Keera Gateway.",
+	},
+}
+
+func (s *Server) checkRerank(ctx context.Context, m policy.Model, p Probe) Probe {
+	request := map[string]any{"model": m.BackendModel}
+	maps.Copy(request, rerankProbe)
+	body, ok := s.probeAnswer(ctx, m, "/rerank", request, &p)
+	if !ok {
+		return p
+	}
+	type result struct {
+		Index int     `json:"index"`
+		Score float64 `json:"relevance_score"`
+	}
+	var out struct {
+		Model   string   `json:"model"`
+		Results []result `json:"results"`
+	}
+	_ = json.Unmarshal(body, &out)
+	p.Served = out.Model
+	if len(out.Results) == 0 {
+		p.Error = "the backend answered 200 but returned no results"
+		return p
+	}
+	best := slices.MaxFunc(out.Results, func(a, b result) int { return cmp.Compare(a.Score, b.Score) })
+	p.Sample = fmt.Sprintf("best match scored %.2f", best.Score)
+	if best.Index != 1 {
+		p.Error = "it ranked the unrelated document first: the model is not reading what it is sent"
+		return p
+	}
 	p.OK = true
 	p.Warnings = servedWarnings(p, m)
 	return p

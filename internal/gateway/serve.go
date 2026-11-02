@@ -1028,7 +1028,7 @@ func (s *Server) relayBuffered(c *call, resp *http.Response, answered time.Time,
 		}
 	} else {
 		if status < 300 {
-			usage = usageFromResponse(body)
+			usage = c.surf.usage(body)
 		}
 		// The shape picks the status, because a success it cannot translate
 		// has to become an error.

@@ -47,11 +47,11 @@ func parseBody(raw []byte) (*body, error) {
 
 // readNames are the keys the gateway reads anywhere in a request.
 var readNames = foldedNames(
-	"_meta", "action", "arguments", "call_id", "content", "data", "definition", "description",
+	"_meta", "action", "arguments", "call_id", "content", "data", "definition", "description", "documents",
 	"disable_parallel_tool_use", "file_data", "filename", "format", "id", "image_url", "input", "input_schema",
 	"instructions", "max_completion_tokens", "max_output_tokens", "max_tokens",
 	"media_type", "messages", "model", "name", "namespace", "output", "parallel_tool_calls",
-	"parameters", "prompt", "refusal", "role", "schema", "source", "stop_sequences",
+	"parameters", "prompt", "query", "refusal", "role", "schema", "source", "stop_sequences",
 	"stream", "stream_options", "strict", "syntax", "system", "temperature", "text", "title",
 	"tool_choice", "tool_use_id", "tools", "top_k", "top_p", "type", "url",
 )

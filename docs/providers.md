@@ -250,12 +250,14 @@ model, are forwarded without being translated
 
 ### Also worth knowing
 
-- **Embedding models.** Infomaniak's are in the table and get
-  `kind: embedding` from it; a chat entry for one is refused. Another
-  provider's embedding model needs its own entry, with no `provider`,
-  `kind: embedding`, the full address in `backends`, a `location` and its own
-  prices. Infomaniak's re-ranking models are not in the table: the gateway
-  serves no re-ranking API.
+- **Embedding and rerank models.** Infomaniak's are in the table and get
+  `kind: embedding` or `kind: rerank` from it; a chat entry for one is
+  refused. Infomaniak reranks on its Cohere-shaped API, so a rerank model's
+  endpoint ends in `/cohere/v2`, not `/openai/v1`. An entry with its own
+  `backends` writes that address. Another provider's embedding or rerank model
+  needs its own entry, with no `provider`, the `kind`, the full address in
+  `backends`, a `location` and its own prices. The gateway sends a rerank to
+  `<backend>/rerank`.
 - **Where to read more:** Phoeniqs on
   [documentation.phoeniqs.com](https://documentation.phoeniqs.com/maas/active-models/),
   CSCS on [docs.cscs.ch](https://docs.cscs.ch/services/inference/api/), its

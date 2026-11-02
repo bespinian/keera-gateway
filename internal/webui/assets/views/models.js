@@ -740,6 +740,8 @@ function surfaceOf(kind) {
       return "Answers /api/v1/completions.";
     case "embedding":
       return "Answers /api/v1/embeddings.";
+    case "rerank":
+      return "Answers /api/v1/rerank and /api/v2/rerank.";
     case "decision":
       return (
         "Answers no client. Routers and gate filters decide with it, " +
@@ -847,7 +849,7 @@ function report(probe, kind) {
   });
 }
 
-const KINDS = ["chat", "completion", "embedding", "decision"];
+const KINDS = ["chat", "completion", "embedding", "rerank", "decision"];
 
 function kindName(kind) {
   return (
@@ -855,6 +857,7 @@ function kindName(kind) {
       chat: "Chat",
       completion: "Completion",
       embedding: "Embedding",
+      rerank: "Rerank",
       decision: "Decision",
     }[kind] || kind
   );
@@ -884,11 +887,18 @@ export function servedName(m) {
 // Must match internal/catalog/providers.go.
 const PRODUCT_ID = "{product_id}";
 
+// templateOf is the address p serves model m at. A kind may have its own, as
+// Infomaniak's rerank models do. See EndpointFor in providers.go.
+function templateOf(p, m) {
+  return (m && p.endpoints && p.endpoints[m.kind || "chat"]) || p.endpoint;
+}
+
 // endpointOf fills in the product id where needed. Null while it is missing.
-function endpointOf(p, state) {
-  if (!p.needs_product_id) return p.endpoint;
+function endpointOf(p, m, state) {
+  const url = templateOf(p, m);
+  if (!p.needs_product_id) return url;
   const id = ((state && state.productID) || "").trim();
-  return id ? p.endpoint.replace(PRODUCT_ID, id) : null;
+  return id ? url.replace(PRODUCT_ID, id) : null;
 }
 
 // aliasFor suggests an alias for a model id. Aliases go unquoted into the
@@ -908,13 +918,16 @@ function aliasFor(id) {
 // is kept. "" if the address does not match the template.
 function productIDOf(p, backends) {
   if (!p || !p.needs_product_id) return "";
-  const [head, tail] = p.endpoint.split(PRODUCT_ID);
   const url = String(backends || "")
     .split("\n")[0]
     .trim();
-  if (!url.startsWith(head) || !url.endsWith(tail)) return "";
-  const id = url.slice(head.length, url.length - tail.length);
-  return /^[A-Za-z0-9_-]+$/.test(id) ? id : "";
+  for (const template of [p.endpoint, ...Object.values(p.endpoints || {})]) {
+    const [head, tail] = template.split(PRODUCT_ID);
+    if (!url.startsWith(head) || !url.endsWith(tail)) continue;
+    const id = url.slice(head.length, url.length - tail.length);
+    if (/^[A-Za-z0-9_-]+$/.test(id)) return id;
+  }
+  return "";
 }
 
 // What a provider's table fills in. Each field gets a line under it naming
@@ -946,7 +959,7 @@ const PRESET_FIELDS = [
   {
     key: "backends",
     label: "endpoint",
-    of: (p, m, state) => endpointOf(p, state),
+    of: (p, m, state) => endpointOf(p, m, state),
   },
   {
     key: "maxContext",
@@ -1376,7 +1389,8 @@ function editModel(ctx, existing, providers, pick) {
       const preset = state.hosted ? state.preset : null;
       // The control plane sets the endpoint itself.
       const platform = onPlatformKey() && !paidByClaudePlan();
-      if (platform && preset) list.splice(0, list.length, preset.p.endpoint);
+      if (platform && preset)
+        list.splice(0, list.length, templateOf(preset.p, preset.m));
       // Where a provider needs a product id, an empty backend means the id
       // is missing.
       if (
@@ -1597,7 +1611,8 @@ function hostedFields(ctx, providers, form) {
   const syncEndpoint = () => {
     const p = chosen();
     if (!p || !p.needs_product_id || state.overridden.has("backends")) return;
-    fields.backends.value = endpointOf(p, state) || "";
+    fields.backends.value =
+      endpointOf(p, state.preset && state.preset.m, state) || "";
   };
   productID.addEventListener("input", () => {
     state.productID = productID.value.trim();

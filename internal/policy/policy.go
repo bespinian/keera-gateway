@@ -64,6 +64,9 @@ const (
 	KindChat       Kind = "chat"
 	KindCompletion Kind = "completion"
 	KindEmbedding  Kind = "embedding"
+	// KindRerank scores documents against a query, on /v1/rerank and
+	// /v2/rerank. It writes no text.
+	KindRerank Kind = "rerank"
 	// KindDecision answers a typed question with a probability per answer and
 	// writes no text, such as Laya behind laya-serve. Only route steps and gate
 	// filters use one; clients cannot name it.
@@ -71,7 +74,8 @@ const (
 )
 
 func (k Kind) Valid() bool {
-	return k == KindChat || k == KindCompletion || k == KindEmbedding || k == KindDecision
+	return k == KindChat || k == KindCompletion || k == KindEmbedding || k == KindRerank ||
+		k == KindDecision
 }
 
 // Model is one of an organisation's models. Clients only ever name the Alias,

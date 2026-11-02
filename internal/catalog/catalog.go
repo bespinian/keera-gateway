@@ -199,7 +199,7 @@ func CheckModel(m *policy.Model, priced bool) error {
 		m.Kind = policy.KindChat
 	}
 	if !m.Kind.Valid() {
-		return fmt.Errorf("kind %q must be chat, completion, embedding or decision", m.Kind)
+		return fmt.Errorf("kind %q must be chat, completion, embedding, rerank or decision", m.Kind)
 	}
 	// The gateway picks how to talk to the backend by provider, so it must
 	// be a known one.
