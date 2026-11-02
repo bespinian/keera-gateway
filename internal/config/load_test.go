@@ -278,6 +278,58 @@ func TestTheChatURLIsABareOrigin(t *testing.T) {
 	}
 }
 
+// KEERA_AGENTS_URL is checked like KEERA_CHAT_URL, and may not be the same
+// address: both take sign-ins at /auth/callback.
+func TestTheAgentsURLIsABareOriginOfItsOwn(t *testing.T) {
+	c, err := loadWith(t, valid(map[string]string{"KEERA_AGENTS_URL": "https://agents.example.ch/"}))
+	if err != nil || c.AgentsURL != "https://agents.example.ch" {
+		t.Fatalf("AgentsURL = %q, %v; want the origin without its slash", c.AgentsURL, err)
+	}
+	for _, bad := range []string{"agents.example.ch", "https://agents.example.ch/app"} {
+		_, err := loadWith(t, valid(map[string]string{"KEERA_AGENTS_URL": bad}))
+		if err == nil || !strings.Contains(err.Error(), "KEERA_AGENTS_URL") {
+			t.Errorf("KEERA_AGENTS_URL=%q: %v, want it refused by name", bad, err)
+		}
+	}
+	_, err = loadWith(t, valid(map[string]string{
+		"KEERA_CHAT_URL":   "https://keera.example.ch",
+		"KEERA_AGENTS_URL": "https://keera.example.ch",
+	}))
+	if err == nil {
+		t.Error("Keera Chat and Keera Agents on one address were accepted")
+	}
+}
+
+// The service key reaches every organisation's keys, so a short one, or one
+// that is another credential too, stops the start.
+func TestTheAgentsServiceKeyIsLongAndItsOwn(t *testing.T) {
+	good := strings.Repeat("s", 32)
+	c, err := loadWith(t, valid(map[string]string{"KEERA_AGENTS_SERVICE_KEY": good}))
+	if err != nil || c.AgentsServiceKey != good {
+		t.Fatalf("AgentsServiceKey = %q, %v; want it read", c.AgentsServiceKey, err)
+	}
+	for name, env := range map[string]map[string]string{
+		"too short": {"KEERA_AGENTS_SERVICE_KEY": strings.Repeat("s", 31)},
+		"the operator key": {
+			"KEERA_OPERATOR_KEY":       good,
+			"KEERA_AGENTS_SERVICE_KEY": good,
+		},
+		"the metrics token": {
+			"KEERA_METRICS_TOKEN":      good,
+			"KEERA_AGENTS_SERVICE_KEY": good,
+		},
+		"the secret key": {
+			"KEERA_SECRET_KEY":         good,
+			"KEERA_AGENTS_SERVICE_KEY": good,
+		},
+	} {
+		_, err := loadWith(t, valid(env))
+		if err == nil || !strings.Contains(err.Error(), "KEERA_AGENTS_SERVICE_KEY") {
+			t.Errorf("%s: %v, want the start stopped, naming the setting", name, err)
+		}
+	}
+}
+
 func TestLogSettingsAreReadWhateverTheirCaseAndUnknownOnesRefused(t *testing.T) {
 	c, err := loadWith(t, valid(map[string]string{
 		"KEERA_LOG_LEVEL": "DEBUG", "KEERA_LOG_FORMAT": "JSON",

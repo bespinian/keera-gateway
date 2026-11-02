@@ -1,7 +1,8 @@
 // Package authn is who the caller is, and what that lets them do.
 //
 // The control plane has three ways in: the operator key, for automation and
-// new deployments; a browser session; and a command-line token.
+// new deployments; a browser session; and a command-line token. Keera Agents
+// has a fourth, its service key, which opens only the routes made for it.
 package authn
 
 import (
@@ -40,7 +41,14 @@ const (
 	// MethodCLI is a session sent in a header rather than a cookie, so it
 	// skips the cross-site checks a cookie needs.
 	MethodCLI Method = "cli"
+	// MethodService is Keera Agents' server with its service key. It is
+	// accepted only on the routes under /control/v1/service, which accept
+	// nothing else.
+	MethodService Method = "service"
 )
+
+// ServiceActor is Keera Agents in the audit log.
+const ServiceActor = "keera-agents"
 
 // Errors a caller can act on.
 var (
@@ -68,10 +76,13 @@ type Principal struct {
 }
 
 // Actor is what goes in the audit log. The operator key is recorded as
-// "operator key".
+// "operator key", and the service key as "keera-agents".
 func (p *Principal) Actor() string {
-	if p.Via == MethodOperatorKey {
+	switch p.Via {
+	case MethodOperatorKey:
 		return "operator key"
+	case MethodService:
+		return ServiceActor
 	}
 	if p.Email != "" {
 		return p.Email

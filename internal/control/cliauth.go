@@ -30,9 +30,10 @@ import (
 //     Any local process can bind a loopback port, but only the one that
 //     started the sign-in has the verifier.
 //
-// Keera Chat signs people in the same way, from its server instead of a
-// terminal. It cannot listen on the browser's loopback, so the one address
-// an operator names in KEERA_CHAT_URL is accepted too, exactly.
+// Keera Chat and Keera Agents sign people in the same way, from their server
+// instead of a terminal. They cannot listen on the browser's loopback, so the
+// one address an operator names for each, in KEERA_CHAT_URL and
+// KEERA_AGENTS_URL, is accepted too, exactly.
 
 // cliLogin is the loopback handshake a sign-in was started with. It is empty
 // for an ordinary sign-in that ends in the panel.
@@ -42,28 +43,48 @@ type cliLogin struct {
 	State     string
 }
 
-// ChatCallbackPath is where Keera Chat takes a sign-in back, under
-// KEERA_CHAT_URL.
-const ChatCallbackPath = "/auth/callback"
+// AppCallbackPath is where a Keera app takes a sign-in back, under its
+// origin.
+const AppCallbackPath = "/auth/callback"
+
+// app is a Keera app on its own origin that signs people in through the
+// gateway. hint is the panel's word for it after the #: "chat" or "agents".
+type app struct {
+	hint, origin string
+}
+
+// apps are the Keera apps this deployment names. One left unset has no
+// origin and matches nothing.
+func (s *Server) apps() []app {
+	return []app{{"chat", s.opts.ChatURL}, {"agents", s.opts.AgentsURL}}
+}
+
+// appFor is the named app whose callback raw is, exactly.
+func appFor(raw string, apps []app) (app, bool) {
+	for _, a := range apps {
+		if a.origin != "" && raw == a.origin+AppCallbackPath {
+			return a, true
+		}
+	}
+	return app{}, false
+}
 
 // panelHint tells the panel's form where a sign-in goes once done, added to the
-// state after the #: ".cli", ".chat" or nothing for the panel. It only picks
-// the form's words; the flow decides where the sign-in goes.
-func (c cliLogin) panelHint(chatURL string) string {
-	switch {
-	case c.Redirect == "":
+// state after the #: ".cli", ".chat", ".agents" or nothing for the panel. It
+// only picks the form's words; the flow decides where the sign-in goes.
+func (c cliLogin) panelHint(apps []app) string {
+	if c.Redirect == "" {
 		return ""
-	case chatURL != "" && c.Redirect == chatURL+ChatCallbackPath:
-		return ".chat"
-	default:
-		return ".cli"
 	}
+	if a, ok := appFor(c.Redirect, apps); ok {
+		return "." + a.hint
+	}
+	return ".cli"
 }
 
 // cliLoginFrom reads the loopback handshake from a sign-in URL. A handshake
-// with parts missing is refused rather than completed without them. chatURL
-// is Keera Chat's origin, or empty.
-func cliLoginFrom(q url.Values, chatURL string) (cliLogin, error) {
+// with parts missing is refused rather than completed without them.
+func cliLoginFrom(q url.Values, apps []app) (cliLogin, error) {
 	c := cliLogin{
 		Redirect:  strings.TrimSpace(q.Get("cli_redirect")),
 		Challenge: strings.TrimSpace(q.Get("cli_challenge")),
@@ -72,7 +93,7 @@ func cliLoginFrom(q url.Values, chatURL string) (cliLogin, error) {
 	if c.Redirect == "" && c.Challenge == "" && c.State == "" {
 		return cliLogin{}, nil
 	}
-	redirect, err := handOverTo(c.Redirect, chatURL)
+	redirect, err := handOverTo(c.Redirect, apps)
 	if err != nil {
 		return cliLogin{}, err
 	}
@@ -88,18 +109,19 @@ func cliLoginFrom(q url.Values, chatURL string) (cliLogin, error) {
 	return c, nil
 }
 
-// handOverTo accepts a loopback listener, or Keera Chat's callback when the
-// deployment names Keera Chat. Chat is matched whole, so no path or query of
-// a caller's choosing reaches it.
-func handOverTo(raw, chatURL string) (string, error) {
-	if chatURL != "" && raw == chatURL+ChatCallbackPath {
+// handOverTo accepts a loopback listener, or the callback of an app the
+// deployment names. An app is matched whole, so no path or query of a
+// caller's choosing reaches it.
+func handOverTo(raw string, apps []app) (string, error) {
+	if _, ok := appFor(raw, apps); ok {
 		return raw, nil
 	}
 	redirect, err := loopbackRedirect(raw)
-	if err != nil && strings.HasSuffix(raw, ChatCallbackPath) {
+	if err != nil && strings.HasSuffix(raw, AppCallbackPath) {
 		// The address is not repeated: anyone can write it into a link.
-		return "", errors.New("this sign-in came from a Keera Chat this gateway does " +
-			"not know; an operator allows it by setting KEERA_CHAT_URL")
+		return "", errors.New("this sign-in came from a Keera Chat or Keera Agents this " +
+			"gateway does not know; an operator allows it by setting KEERA_CHAT_URL or " +
+			"KEERA_AGENTS_URL")
 	}
 	return redirect, err
 }

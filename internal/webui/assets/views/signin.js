@@ -1,7 +1,8 @@
 // The sign-in screen: a button per identity provider, a password form for
 // LDAP, and passkeys where they are on. With none of these, or at
 // ?operator_key=1, it asks for the operator key, which sets up a new
-// deployment. It also hands a sign-in over to `keera login` or Keera Chat.
+// deployment. It also hands a sign-in over to `keera login`, Keera Chat or
+// Keera Agents.
 
 import { api, ApiError } from "../api.js";
 import { getPasskey, passkeysSupported } from "../webauthn.js";
@@ -22,7 +23,7 @@ import {
  *  log. */
 export function passkeySignInFlow() {
   const m = location.hash.match(
-    /^#passkey-sign-in=([A-Za-z0-9_-]+)(?:\.(cli|chat))?$/,
+    /^#passkey-sign-in=([A-Za-z0-9_-]+)(?:\.(cli|chat|agents))?$/,
   );
   return m ? { flow: m[1], to: m[2] || "" } : null;
 }
@@ -31,7 +32,7 @@ export function passkeySignInFlow() {
  *  { provider, flow, to }, or null. */
 export function passwordSignInFlow() {
   const m = location.hash.match(
-    /^#password-sign-in=([a-z0-9][a-z0-9-]*)\.([A-Za-z0-9_-]+)(?:\.(cli|chat))?$/,
+    /^#password-sign-in=([a-z0-9][a-z0-9-]*)\.([A-Za-z0-9_-]+)(?:\.(cli|chat|agents))?$/,
   );
   return m ? { provider: m[1], flow: m[2], to: m[3] || "" } : null;
 }
@@ -49,6 +50,12 @@ function handOver(to) {
     return [
       "Sign in to Keera Chat.",
       "Your browser then goes back to Keera Chat.",
+    ];
+  }
+  if (to === "agents") {
+    return [
+      "Sign in to Keera Agents.",
+      "Your browser then goes back to Keera Agents.",
     ];
   }
   return ["Sign in to Keera Gateway.", ""];

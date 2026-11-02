@@ -206,6 +206,17 @@ export async function keyDetailView(ctx) {
     hide: { key: true, project: true },
     meta: [
       statePill(state),
+      key.issued_by === "agents"
+        ? h(
+            "span",
+            {
+              title:
+                "Issued by Keera Agents for an agent, which holds the only " +
+                "copy. Revoke it to stop the agent.",
+            },
+            pill("Keera Agent"),
+          )
+        : null,
       // Only a revoked key can have none: its project was deleted.
       key.project_id
         ? h(

@@ -103,6 +103,8 @@ func serve(ctx context.Context) error {
 		PublicURL:           cfg.PublicURL,
 		TrustedProxies:      cfg.TrustedProxies,
 		ChatURL:             cfg.ChatURL,
+		AgentsURL:           cfg.AgentsURL,
+		AgentsServiceKey:    cfg.AgentsServiceKey,
 		Gateway:             gw,
 		SessionGap:          cfg.SessionGap,
 		Template:            template,

@@ -92,6 +92,30 @@ var isolationCases = map[string]isolationCase{
 	"GET /v1/sessions/{id}":                 {"/v1/sessions/req_a?org_id=org_a", ""},
 }
 
+// serviceCases are Keera Agents' routes, called with its service key while
+// naming org_b and org_a's rows. The service key reaches every organisation,
+// so the boundary here is the one a request names: none may act on another
+// organisation's person, project or key, and none may touch a key a person
+// issued.
+var serviceCases = map[string][]isolationCase{
+	"POST /v1/service/keys": {
+		{"/v1/service/keys", `{"org_id":"org_b","user_id":"user_a","name":"taken"}`},
+		{"/v1/service/keys", `{"org_id":"org_b","user_id":"user_eve","project_id":"project_a","name":"taken"}`},
+	},
+	"DELETE /v1/service/keys/{id}": {
+		{"/v1/service/keys/key_agents_a?org_id=org_b", ""},
+		// Ada's own key, which a person issued.
+		{"/v1/service/keys/key_a?org_id=org_a", ""},
+	},
+	"GET /v1/service/users": {
+		{"/v1/service/users?org_id=org_b&email=ada@example.ch", ""},
+		{"/v1/service/users?org_id=org_b&id=user_a", ""},
+	},
+	"GET /v1/service/catalog": {
+		{"/v1/service/catalog?org_id=org_b&project_id=project_a", ""},
+	},
+}
+
 // notTenantData are the routes that only ever act on the caller, or read
 // what is the same for every tenant, so there is no other tenant's request
 // to make. Each says why.
@@ -136,6 +160,13 @@ func TestNoRouteLetsOneTenantReachAnother(t *testing.T) {
 		[]byte("hash-of-key_a-is-32-bytes-long!!")); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := st.CreateKey(ctx, store.KeyInfo{
+		ID: "key_agents_a", OrgID: "org_a", ProjectID: "project_a",
+		UserID: "user_a", Name: "ada's agent", Prefix: "keera_sk_g", IssuedBy: store.IssuedByAgents,
+	},
+		[]byte("hash-of-key_agents_a-is-32-bytes")); err != nil {
+		t.Fatal(err)
+	}
 	if err := st.CreatePayment(ctx, store.Payment{
 		ID: "pay_a", OrgID: "org_a", Kind: store.PaymentTopUp,
 		AmountMicros: 10_000_000, Actor: "ada@example.ch",
@@ -158,7 +189,8 @@ func TestNoRouteLetsOneTenantReachAnother(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := New(st, reg, nil, nil, Options{
-		OperatorKey: testOperatorKey,
+		OperatorKey:      testOperatorKey,
+		AgentsServiceKey: testServiceKey,
 		// Nothing listens there: a refused request never reaches it.
 		Payments: &Payments{Client: payment.New(payment.Settings{
 			URL:     "http://127.0.0.1:1",
@@ -195,7 +227,7 @@ func TestNoRouteLetsOneTenantReachAnother(t *testing.T) {
 	}
 
 	for _, pattern := range srv.routes {
-		if _, ok := notTenantData[pattern]; ok {
+		if _, ok := notTenantData[pattern]; ok || isServiceRoute(pattern) {
 			continue
 		}
 		c, ok := isolationCases[pattern]
@@ -215,6 +247,49 @@ func TestNoRouteLetsOneTenantReachAnother(t *testing.T) {
 			}
 		}
 	}
+	for _, pattern := range srv.routes {
+		if !isServiceRoute(pattern) {
+			continue
+		}
+		cases, ok := serviceCases[pattern]
+		if !ok {
+			t.Errorf("%s has no case in serviceCases; add a request about another "+
+				"organisation's rows", pattern)
+			continue
+		}
+		method, _, _ := strings.Cut(pattern, " ")
+		for _, c := range cases {
+			path := httpx.ControlPrefix + c.path
+			// Eve's session and the operator key are not the service key.
+			if code, body := send(method, path, c.body); code != http.StatusUnauthorized {
+				t.Errorf("%s with a session = %d %s, want 401", pattern, code, body)
+			}
+			if code, body := send(method, path, c.body,
+				"Authorization", "Bearer "+testOperatorKey); code != http.StatusUnauthorized {
+				t.Errorf("%s with the operator key = %d %s, want 401", pattern, code, body)
+			}
+			code, body := send(method, path, c.body, "Authorization", "Bearer "+testServiceKey)
+			if code != http.StatusNotFound {
+				t.Errorf("%s %s about another organisation = %d %s, want 404", pattern, c.path, code, body)
+			}
+			for _, secret := range []string{"ada@example.ch", "ada's", "keera_sk_"} {
+				if strings.Contains(body, secret) {
+					t.Errorf("%s showed another organisation's %q: %s", pattern, secret, body)
+				}
+			}
+		}
+	}
+	for pattern := range serviceCases {
+		if !slices.Contains(srv.routes, pattern) {
+			t.Errorf("%s is in serviceCases but no longer a route", pattern)
+		}
+	}
+	// The keys named above are still live: nothing was revoked by mistake.
+	for _, id := range []string{"key_a", "key_agents_a"} {
+		if res, err := st.LookupKeyByID(ctx, id); err != nil || res.Key.ID != id {
+			t.Errorf("%s after the service cases: %v", id, err)
+		}
+	}
 	for pattern := range isolationCases {
 		if !slices.Contains(srv.routes, pattern) {
 			t.Errorf("%s is a case here but no longer a route", pattern)
@@ -225,4 +300,11 @@ func TestNoRouteLetsOneTenantReachAnother(t *testing.T) {
 			t.Errorf("%s is in notTenantData but no longer a route", pattern)
 		}
 	}
+}
+
+// isServiceRoute is a route of Keera Agents' server, which takes the service
+// key instead of a sign-in.
+func isServiceRoute(pattern string) bool {
+	_, path, _ := strings.Cut(pattern, " ")
+	return strings.HasPrefix(path, "/v1/service/")
 }

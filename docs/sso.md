@@ -550,6 +550,9 @@ Keera Chat on `http://127.0.0.1` during development.
 
 Keera Chat's requests show as **Keera Chat** on the map, and the panel's account menu links to it.
 
+Keera Agents signs people in the same way, at the address in
+`KEERA_AGENTS_URL`. See [agents.md](agents.md#signing-in).
+
 ## Moving off localhost
 
 Put the gateway's port behind a TLS terminator, then change two things: the
@@ -611,7 +614,9 @@ their organisation except themselves. Nobody can disable an operator this way;
 take them out of `KEERA_OPERATORS` or the operator group instead.
 
 Keys attributed to nobody, such as a build pipeline's, are not affected. Give a
-key a `--user` when a person is behind it.
+key a `--user` when a person is behind it. The keys Keera Agents issued for the
+person's agents are in their name, so they go too
+([agents.md](agents.md#when-someone-leaves)).
 
 ## Passkeys
 

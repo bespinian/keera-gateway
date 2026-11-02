@@ -54,6 +54,8 @@ tags:
   - name: reports
     description: Usage, requests, sessions, audit and diagnostics.
   - name: billing
+  - name: service
+    description: For Keera Agents' server, with its service key and nothing else.
   - name: spec
     description: This description, as YAML or JSON.
 paths:
@@ -117,7 +119,7 @@ paths:
       description: |
         Opened in a browser. It sends the browser to the identity provider,
         or for a password directory or passkeys to the panel's own form.
-        `keera login` and Keera Chat add the `cli_*` parameters, so the
+        `keera login`, Keera Chat and Keera Agents add the `cli_*` parameters, so the
         sign-in ends at their address with a one-time code for
         `POST /control/auth/cli/token`.
 
@@ -139,8 +141,8 @@ paths:
           in: query
           description: |
             Where a command-line sign-in ends: a loopback address such as
-            `http://127.0.0.1:1234/callback`, or Keera Chat's callback under
-            `KEERA_CHAT_URL`.
+            `http://127.0.0.1:1234/callback`, or the callback of Keera Chat
+            under `KEERA_CHAT_URL` or of Keera Agents under `KEERA_AGENTS_URL`.
           schema: { type: string, format: uri }
         - name: cli_challenge
           in: query
@@ -725,6 +727,7 @@ paths:
                   - roles_from_directory
                   - gateway_url
                   - chat_url
+                  - agents_url
                   - billing
                   - payments
                   - claude_subscriptions
@@ -770,6 +773,9 @@ paths:
                   chat_url:
                     type: string
                     description: Keera Chat, or empty.
+                  agents_url:
+                    type: string
+                    description: Keera Agents, or empty.
                   billing:
                     type: boolean
                   payments:
@@ -1837,7 +1843,8 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
           description: |
-            It is revoked (`key_revoked`) or not yet activated (`key_pending`).
+            It is revoked (`key_revoked`), not yet activated (`key_pending`),
+            or was issued by Keera Agents (`agents_key`).
         "501":
           $ref: "#/components/responses/Disabled"
           description: A subscription key, while this deployment takes no Claude subscriptions (`subscriptions_disabled`).
@@ -4605,6 +4612,245 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+  /control/v1/service/keys:
+    post:
+      operationId: serviceCreateKey
+      tags: [service]
+      summary: Issue a key for an agent
+      description: |
+        For Keera Agents' server. It issues a key in the name of the person
+        an agent works for, so the spend, guardrails and audit trail are
+        theirs. The key is marked `issued_by: agents`: people can revoke it
+        in the panel, but not rotate it. The secret is in `key` and is shown
+        only this once.
+      security:
+        - serviceKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [org_id, user_id, name]
+              properties:
+                org_id:
+                  type: string
+                project_id:
+                  type: string
+                  description: Leave it out for the organisation's oldest project.
+                user_id:
+                  type: string
+                  description: The person's id in this organisation, from `GET /control/v1/service/users`.
+                name:
+                  type: string
+                  minLength: 1
+                budget_micros:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  description: |
+                    A monthly budget on the key itself, in millionths of a
+                    franc. Zero or absent sets none; the project's and the
+                    organisation's budgets apply either way.
+      responses:
+        "201":
+          description: The new key.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/KeyInfo"
+                  - type: object
+                    required: [key]
+                    properties:
+                      key:
+                        type: string
+                        description: The secret. Shown only now.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+          description: A field is missing or wrong. Without `org_id` the code is `org_required`.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+          description: The person is disabled.
+        "404":
+          $ref: "#/components/responses/NotFound"
+          description: The organisation does not exist, or the person or project is not in it.
+        "409":
+          $ref: "#/components/responses/Conflict"
+          description: The organisation has no projects yet (`project_required`).
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "501":
+          $ref: "#/components/responses/Disabled"
+          description: The deployment has no `KEERA_AGENTS_SERVICE_KEY` (`agents_disabled`).
+  /control/v1/service/keys/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      operationId: serviceRevokeKey
+      tags: [service]
+      summary: Revoke a key issued for an agent
+      description: |
+        For Keera Agents' server. Only a key it issued can be revoked here;
+        any other answers 404. A key that is already revoked answers 204 too.
+      security:
+        - serviceKey: []
+      parameters:
+        - name: org_id
+          in: query
+          required: true
+          description: The key's organisation.
+          schema: { type: string }
+      responses:
+        "204":
+          description: The key no longer works.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+          description: "`org_id` is missing (`org_required`)."
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+          description: There is no key of that id that Keera Agents issued in this organisation.
+        "501":
+          $ref: "#/components/responses/Disabled"
+          description: The deployment has no `KEERA_AGENTS_SERVICE_KEY` (`agents_disabled`).
+  /control/v1/service/users:
+    get:
+      operationId: serviceUser
+      tags: [service]
+      summary: Find a person in an organisation
+      description: |
+        For Keera Agents' server, to find the person behind a chat message by
+        their address, or to check on one by id. An address matches whatever
+        its case. Send `email` or `id`, not both.
+      security:
+        - serviceKey: []
+      parameters:
+        - name: org_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: email
+          in: query
+          schema: { type: string }
+        - name: id
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: The person's membership of this organisation.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, email, name, role, disabled]
+                properties:
+                  id:
+                    type: string
+                    description: Their id in this organisation, for `user_id`.
+                  email:
+                    type: string
+                  name:
+                    type: string
+                  role:
+                    type: string
+                    enum: [operator, admin, member]
+                  disabled:
+                    type: boolean
+                    description: A disabled person cannot sign in, and their keys are revoked.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+          description: Nobody with that address or id is in this organisation.
+        "501":
+          $ref: "#/components/responses/Disabled"
+          description: The deployment has no `KEERA_AGENTS_SERVICE_KEY` (`agents_disabled`).
+  /control/v1/service/catalog:
+    get:
+      operationId: serviceCatalog
+      tags: [service]
+      summary: What a key for an agent may use
+      description: |
+        For Keera Agents' server. The organisation's projects, and the chat
+        models, routers and MCP servers a key it issues in one project may
+        use under the organisation's and the project's guardrails.
+      security:
+        - serviceKey: []
+      parameters:
+        - name: org_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: project_id
+          in: query
+          description: Leave it out for the organisation's oldest project.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The catalogue.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [project_id, projects, models, mcp_servers]
+                properties:
+                  project_id:
+                    type: string
+                    description: The project the lists are for.
+                  projects:
+                    type: array
+                    description: Every project of the organisation, the oldest first.
+                    items:
+                      type: object
+                      required: [id, name]
+                      properties:
+                        id:
+                          type: string
+                        name:
+                          type: string
+                  models:
+                    type: array
+                    description: Models first, then routers.
+                    items:
+                      type: object
+                      required: [alias, kind]
+                      properties:
+                        alias:
+                          type: string
+                        kind:
+                          type: string
+                          enum: [model, router]
+                  mcp_servers:
+                    type: array
+                    items:
+                      type: object
+                      required: [alias]
+                      properties:
+                        alias:
+                          type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+          description: The organisation does not exist, or the project is not in it.
+        "409":
+          $ref: "#/components/responses/Conflict"
+          description: The organisation has no projects yet (`project_required`).
+        "501":
+          $ref: "#/components/responses/Disabled"
+          description: The deployment has no `KEERA_AGENTS_SERVICE_KEY` (`agents_disabled`).
   /api/v1/chat/completions:
     post:
       tags:
@@ -6211,6 +6457,12 @@ components:
       description: |
         An API key, when `Authorization` carries the caller's own Claude
         sign-in instead. See https://docs.keera.ch/operate/claude-plans/.
+    serviceKey:
+      type: http
+      scheme: bearer
+      description: |
+        `KEERA_AGENTS_SERVICE_KEY`, sent by Keera Agents' server. It opens the
+        routes under `/control/v1/service` and nothing else.
     session:
       type: apiKey
       in: cookie
@@ -6692,6 +6944,13 @@ components:
         pending:
           type: boolean
           description: Waiting to be activated. It has no secret yet.
+        issued_by:
+          type: string
+          enum: [agents]
+          description: |
+            The app that issued the key and holds its secret. `agents` is Keera
+            Agents; such a key can be revoked but not rotated. Absent for a key
+            a person issued.
     KeySummary:
       description: A key with its own guardrails, last use and spend.
       allOf:

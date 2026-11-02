@@ -80,7 +80,7 @@ func TestKeeraChatCanReceiveASignInWhereTheOperatorNamedIt(t *testing.T) {
 		{"http://chat.example.ch/auth/callback", chat, false},
 		{"https://user@chat.example.ch/auth/callback", chat, false},
 	} {
-		got, err := handOverTo(tc.raw, tc.chatURL)
+		got, err := handOverTo(tc.raw, []app{{"chat", tc.chatURL}})
 		if tc.ok != (err == nil) {
 			t.Errorf("handOverTo(%q, %q) = %q, %v; want ok=%v", tc.raw, tc.chatURL, got, err, tc.ok)
 		}
@@ -91,10 +91,42 @@ func TestKeeraChatCanReceiveASignInWhereTheOperatorNamedIt(t *testing.T) {
 
 	// A chat this gateway does not know gets a message an operator can act
 	// on, without the address, which anyone can write into a link.
-	_, err := handOverTo("https://evil.example/auth/callback", "")
+	_, err := handOverTo("https://evil.example/auth/callback", nil)
 	if err == nil || !strings.Contains(err.Error(), "KEERA_CHAT_URL") ||
-		strings.Contains(err.Error(), "evil") {
+		!strings.Contains(err.Error(), "KEERA_AGENTS_URL") || strings.Contains(err.Error(), "evil") {
 		t.Errorf("unknown chat: %v", err)
+	}
+}
+
+// Keera Agents is handed sign-ins by the same rule as Keera Chat, at its own
+// address, and the panel's form is told which of the two it signs in to.
+func TestKeeraAgentsIsHandedSignInsAtItsOwnAddress(t *testing.T) {
+	apps := []app{{"chat", "https://chat.example.ch"}, {"agents", "https://agents.example.ch"}}
+	for _, tc := range []struct {
+		raw, hint string
+		ok        bool
+	}{
+		{"https://agents.example.ch/auth/callback", ".agents", true},
+		{"https://chat.example.ch/auth/callback", ".chat", true},
+		{"http://127.0.0.1:1234/callback", ".cli", true},
+		{"https://agents.example.ch/auth/callback?next=x", "", false},
+		{"https://agents.example.ch/other", "", false},
+		{"https://agents.example.ch.evil.example/auth/callback", "", false},
+	} {
+		got, err := handOverTo(tc.raw, apps)
+		if tc.ok != (err == nil) {
+			t.Errorf("handOverTo(%q) = %q, %v; want ok=%v", tc.raw, got, err, tc.ok)
+			continue
+		}
+		if hint := (cliLogin{Redirect: got}).panelHint(apps); tc.ok && hint != tc.hint {
+			t.Errorf("%q: hint = %q, want %q", tc.raw, hint, tc.hint)
+		}
+	}
+
+	// Unset, it is not handed sign-ins, even with Keera Chat named.
+	if _, err := handOverTo("https://agents.example.ch/auth/callback",
+		[]app{{"chat", "https://chat.example.ch"}, {"agents", ""}}); err == nil {
+		t.Error("a Keera Agents the operator did not name was handed a sign-in")
 	}
 }
 
@@ -126,7 +158,7 @@ func TestAHalfWrittenHandshakeIsRefusedAtTheStart(t *testing.T) {
 		"cli_challenge": {strings.Repeat("a", 43)},
 		"cli_state":     {"state"},
 	}
-	if got, err := cliLoginFrom(good, ""); err != nil || got.Redirect == "" {
+	if got, err := cliLoginFrom(good, nil); err != nil || got.Redirect == "" {
 		t.Fatalf("cliLoginFrom(complete) = %+v, %v; want it accepted", got, err)
 	}
 
@@ -142,14 +174,14 @@ func TestAHalfWrittenHandshakeIsRefusedAtTheStart(t *testing.T) {
 					q[k] = v
 				}
 			}
-			if got, err := cliLoginFrom(q, ""); err == nil {
+			if got, err := cliLoginFrom(q, nil); err == nil {
 				t.Errorf("cliLoginFrom(%v) = %+v, want it refused", q, got)
 			}
 		})
 	}
 
 	// The ordinary sign-in names none of them.
-	got, err := cliLoginFrom(url.Values{"next": {"/projects"}}, "")
+	got, err := cliLoginFrom(url.Values{"next": {"/projects"}}, nil)
 	if err != nil || got != (cliLogin{}) {
 		t.Errorf("cliLoginFrom(panel sign-in) = %+v, %v; want an empty handshake", got, err)
 	}

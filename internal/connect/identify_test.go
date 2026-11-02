@@ -117,6 +117,14 @@ func TestClientLabelAgreesWithTheCatalogue(t *testing.T) {
 	if got := ClientLabel("keera-chat"); got != "Keera Chat" {
 		t.Errorf("ClientLabel(keera-chat) = %q, want Keera Chat", got)
 	}
+	if got := ClientLabel("keera-agents"); got != "Keera Agents" {
+		t.Errorf("ClientLabel(keera-agents) = %q, want Keera Agents", got)
+	}
+	for _, ua := range []string{"keera-agents/0.1", "node/22 keera-agents/0.1"} {
+		if got := Identify("", ua); got != "keera-agents" {
+			t.Errorf("Identify(%q) = %q, want keera-agents", ua, got)
+		}
+	}
 	if got := ClientLabel("aider"); got != "Aider" {
 		t.Errorf("ClientLabel(aider) = %q, want its own label", got)
 	}

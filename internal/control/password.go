@@ -57,7 +57,7 @@ func (s *Server) startPasswordLogin(w http.ResponseWriter, r *http.Request,
 	}
 	// After the #, so the state stays out of access logs.
 	http.Redirect(w, r, "/#password-sign-in="+provider.Name()+"."+f.State+
-		cli.panelHint(s.opts.ChatURL), http.StatusFound)
+		cli.panelHint(s.apps()), http.StatusFound)
 }
 
 func (s *Server) passwordSignIn(w http.ResponseWriter, r *http.Request) {

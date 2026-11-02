@@ -64,6 +64,11 @@ type Options struct {
 	// ChatURL is Keera Chat's origin. A sign-in may hand over to its
 	// callback as well as to a loopback port. Empty allows only loopback.
 	ChatURL string
+	// AgentsURL is Keera Agents' origin, handed sign-ins as Keera Chat is.
+	AgentsURL string
+	// AgentsServiceKey opens the routes under /control/v1/service to Keera
+	// Agents' server. Empty turns them off. See agents.go.
+	AgentsServiceKey string
 	// Gateway is the data plane the playground and the checks send through.
 	Gateway *gateway.Server
 	// SessionGap is how long an agent conversation may go quiet before the
@@ -101,6 +106,9 @@ type Server struct {
 	// metricsHash is the same for the scrape token.
 	metricsHash     [32]byte
 	hasMetricsToken bool
+	// serviceHash is the same for Keera Agents' service key.
+	serviceHash   [32]byte
+	hasServiceKey bool
 
 	// signIn throttles some unauthenticated routes per client address, and
 	// password sign-ins per account. It is in memory, so each replica counts on
@@ -126,6 +134,8 @@ func New(st *store.Store, reg *registry.Registry, m *metrics.Registry, rec *usag
 		hasOperatorKey:  opts.OperatorKey != "",
 		metricsHash:     sha256.Sum256([]byte(opts.MetricsToken)),
 		hasMetricsToken: opts.MetricsToken != "",
+		serviceHash:     sha256.Sum256([]byte(opts.AgentsServiceKey)),
+		hasServiceKey:   opts.AgentsServiceKey != "",
 		signIn:          ratelimit.New(),
 		feed:            newRequestFeed(),
 		log:             log,
@@ -303,6 +313,18 @@ func (s *Server) mux() *httpx.Mux {
 	// The request log as it is written. It takes the same query as
 	// /v1/requests, so what arrives live matches what a reload shows.
 	route("GET /v1/requests/stream", s.requestStream)
+
+	// Keera Agents' server, with its service key and nothing else. See
+	// agents.go.
+	service := func(pattern string, h handler) {
+		s.routes = append(s.routes, pattern)
+		method, path, _ := strings.Cut(pattern, " ")
+		mux.Handle(method+" "+httpx.ControlPrefix+path, s.serviceAuthenticated(h))
+	}
+	service("POST /v1/service/keys", s.serviceCreateKey)
+	service("DELETE /v1/service/keys/{id}", s.serviceRevokeKey)
+	service("GET /v1/service/users", s.serviceUser)
+	service("GET /v1/service/catalog", s.serviceCatalog)
 
 	// Everything under the control prefix is the API. Without this, a typo in
 	// a path would fall through to the panel and answer HTML with a 200.

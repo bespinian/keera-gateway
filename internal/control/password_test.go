@@ -132,9 +132,9 @@ func TestTheFormIsToldWhereASignInGoesNext(t *testing.T) {
 	}{
 		{"", ""},
 		{"http://127.0.0.1:53682/callback", ".cli"},
-		{chat + ChatCallbackPath, ".chat"},
+		{chat + AppCallbackPath, ".chat"},
 	} {
-		if got := (cliLogin{Redirect: tc.redirect}).panelHint(chat); got != tc.want {
+		if got := (cliLogin{Redirect: tc.redirect}).panelHint([]app{{"chat", chat}}); got != tc.want {
 			t.Errorf("%q: hint = %q, want %q", tc.redirect, got, tc.want)
 		}
 	}

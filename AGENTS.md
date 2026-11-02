@@ -103,7 +103,7 @@ instead of repeating it. Texts users see - CLI help, errors, the panel and
 `openapi.yaml` - link to docs.keera.ch, not to `docs/`. `run-locally.md` is the
 development loop and `install.md` every setting or where it is explained,
 retention and sizing; `gateway.md`, `filters.md`, `routers.md`, `providers.md`,
-`subscriptions.md`, `mcp.md`, `sessions.md`, `sso.md` and
+`subscriptions.md`, `mcp.md`, `sessions.md`, `sso.md`, `agents.md` and
 `billing.md` each take one part. Explain each thing in one place and link to it.
 Update them when behaviour changes.
 

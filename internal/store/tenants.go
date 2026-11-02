@@ -100,21 +100,28 @@ type KeyInfo struct {
 	// Pending is a key waiting to be activated. It has no secret and no
 	// prefix until then.
 	Pending bool `json:"pending,omitempty"`
+	// IssuedBy is the app that issued the key and holds its secret:
+	// IssuedByAgents, or empty for a key a person issued.
+	IssuedBy string `json:"issued_by,omitempty"`
 }
+
+// IssuedByAgents marks a key Keera Agents issued for an agent. Keera Agents
+// holds its only copy, so people may revoke it but not rotate it.
+const IssuedByAgents = "agents"
 
 // keyColumnsOf is the select list keyTargets fills, in its order, with each
 // column prefixed by table, as in userColumnsOf.
 func keyColumnsOf(table string) string {
 	return fmt.Sprintf(`%[1]sid, %[1]sorg_id, COALESCE(%[1]sproject_id,''),
 	COALESCE(%[1]suser_id,''), %[1]sname, %[1]sprefix, %[1]skind, %[1]screated_at,
-	%[1]sexpires_at, %[1]srevoked_at, %[1]skey_hash IS NULL`, table)
+	%[1]sexpires_at, %[1]srevoked_at, %[1]skey_hash IS NULL, %[1]sissued_by`, table)
 }
 
 // keyTargets points at the fields keyColumnsOf fills, in its order.
 func keyTargets(k *KeyInfo) []any {
 	return []any{
 		&k.ID, &k.OrgID, &k.ProjectID, &k.UserID, &k.Name, &k.Prefix, &k.Kind,
-		&k.CreatedAt, &k.ExpiresAt, &k.RevokedAt, &k.Pending,
+		&k.CreatedAt, &k.ExpiresAt, &k.RevokedAt, &k.Pending, &k.IssuedBy,
 	}
 }
 
@@ -388,6 +395,17 @@ func oldestProject(orgParam string) string {
 	return "SELECT id FROM projects WHERE org_id = " + orgParam + " ORDER BY created_at, id LIMIT 1"
 }
 
+// Projects lists an organisation's projects, the oldest first, without their
+// figures.
+func (s *Store) Projects(ctx context.Context, orgID string) ([]Project, error) {
+	return queryAll(ctx, s.pool, func(r row) (Project, error) {
+		var p Project
+		err := r.Scan(&p.ID, &p.OrgID, &p.Name, &p.Description, &p.CreatedAt)
+		return p, err
+	}, `SELECT id, org_id, name, description, created_at FROM projects
+		WHERE org_id = $1 ORDER BY created_at, id`, orgID)
+}
+
 // FirstProject returns the id of an organisation's oldest project.
 // ErrNotFound means there is no project.
 func (s *Store) FirstProject(ctx context.Context, orgID string) (string, error) {
@@ -519,6 +537,17 @@ func (s *Store) DisableUser(ctx context.Context, orgID, userID string) (int, err
 	return revoked, nil
 }
 
+// UserInOrgByEmail finds the person at an address in one organisation,
+// ignoring case: a chat app and a directory may spell one address
+// differently. Should two rows differ only in case, the enabled and older one
+// wins.
+func (s *Store) UserInOrgByEmail(ctx context.Context, orgID, email string) (User, error) {
+	u, err := scanUser(s.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users
+		WHERE org_id = $1 AND lower(email) = lower($2)
+		ORDER BY disabled_at IS NOT NULL, created_at, id LIMIT 1`, orgID, email))
+	return u, notFound(err)
+}
+
 // EnableUser lets a disabled person sign in again. Their old keys stay
 // revoked: they get new ones.
 func (s *Store) EnableUser(ctx context.Context, orgID, userID string) error {
@@ -532,6 +561,22 @@ func (s *Store) CreateKey(ctx context.Context, k KeyInfo, hash []byte) (KeyInfo,
 	return insertKey(ctx, s.pool, k, hash)
 }
 
+// CreateKeyWithLimits is CreateKey with guardrails on the key itself, in one
+// transaction, so the key never works without them.
+func (s *Store) CreateKeyWithLimits(ctx context.Context, k KeyInfo, hash []byte, lim policy.Limits,
+) (KeyInfo, error) {
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		if k, err = insertKey(ctx, tx, k, hash); err != nil {
+			return err
+		}
+		args := append([]any{string(policy.ScopeKey), k.ID}, limitValues(lim)...)
+		_, err = tx.Exec(ctx, putGuardrailSQL, args...)
+		return err
+	})
+	return k, err
+}
+
 // ErrNoProject refuses a key in an organisation that has no projects.
 var ErrNoProject = errors.New("store: the organisation has no projects, and every key is in one")
 
@@ -542,13 +587,13 @@ func insertKey(ctx context.Context, db querier, k KeyInfo, hash []byte) (KeyInfo
 	}
 	k.Pending = hash == nil
 	err := db.QueryRow(ctx, `INSERT INTO api_keys
-		(id, org_id, project_id, user_id, name, key_hash, prefix, kind, expires_at)
+		(id, org_id, project_id, user_id, name, key_hash, prefix, kind, expires_at, issued_by)
 		VALUES ($1, $2,
 			COALESCE($3, (`+oldestProject("$2")+`)),
-			$4, $5, $6, $7, $8, $9)
+			$4, $5, $6, $7, $8, $9, $10)
 		RETURNING project_id, created_at`,
 		k.ID, k.OrgID, nullable(k.ProjectID), nullable(k.UserID), k.Name, hash, k.Prefix,
-		string(k.Kind), k.ExpiresAt,
+		string(k.Kind), k.ExpiresAt, k.IssuedBy,
 	).Scan(&k.ProjectID, &k.CreatedAt)
 	if violates(err, "api_keys_project_check") {
 		return k, ErrNoProject
@@ -624,6 +669,10 @@ func (s *Store) ActivateKey(ctx context.Context, orgID, id, name string, hash []
 	}
 }
 
+// ErrIssuedKey is a key an app issued, such as Keera Agents. The app holds
+// the only copy of the secret, so a rotated key would reach nobody.
+var ErrIssuedKey = errors.New("store: the key was issued by an app")
+
 // RotateKey replaces the key oldID with next in one transaction: next gets the
 // old key's organisation, project, person, kind and guardrails, and the old
 // key is revoked. An empty next.Name keeps the old name. A nil next.ExpiresAt
@@ -647,6 +696,9 @@ func (s *Store) RotateKey(ctx context.Context, orgID, oldID string, next KeyInfo
 		}
 		if old.Pending {
 			return policy.ErrKeyPending
+		}
+		if old.IssuedBy != "" {
+			return ErrIssuedKey
 		}
 		next.OrgID, next.ProjectID, next.UserID, next.Kind = old.OrgID, old.ProjectID, old.UserID, old.Kind
 		if next.Name == "" {

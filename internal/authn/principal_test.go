@@ -135,6 +135,18 @@ func TestActorNamesAPersonWhenThereIsOne(t *testing.T) {
 	}
 }
 
+// Keera Agents' service key is named as Keera Agents, and holds no role, so a
+// route it reaches by mistake grants it nothing.
+func TestTheServiceKeyIsKeeraAgentsAndNoOperator(t *testing.T) {
+	p := &Principal{Via: MethodService}
+	if got := p.Actor(); got != "keera-agents" {
+		t.Errorf("Actor() = %q, want keera-agents", got)
+	}
+	if p.Unrestricted() || p.CanReadOrg("org_a") || p.CanAdminOrg("org_a") {
+		t.Error("the service key was given an operator's or administrator's reach")
+	}
+}
+
 func TestRoleForPrefersTheDirectory(t *testing.T) {
 	m := RoleMapping{
 		OperatorGroups: []string{"keera-operators"},

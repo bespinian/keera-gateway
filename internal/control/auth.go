@@ -78,7 +78,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	// Where this sign-in ends: usually the panel, or for `keera login` a
 	// loopback port. See cliauth.go.
-	cli, err := cliLoginFrom(r.URL.Query(), s.opts.ChatURL)
+	cli, err := cliLoginFrom(r.URL.Query(), s.apps())
 	if err != nil {
 		s.signInFailed(w, r, err)
 		return
@@ -635,6 +635,8 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request, p *authn.Principal) 
 		"gateway_url": s.gatewayURL(r),
 		// Where Keera Chat runs, so the panel can link to it. Empty without one.
 		"chat_url": s.opts.ChatURL,
+		// The same for Keera Agents.
+		"agents_url": s.opts.AgentsURL,
 		// Whether the deployment holds its own provider key, and so bills
 		// organisations.
 		"billing": len(s.opts.Platform) > 0,

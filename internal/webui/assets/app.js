@@ -832,6 +832,9 @@ function accountMenu(anchor) {
       me.chat_url
         ? { label: "Keera Chat", icon: icons.chat, href: me.chat_url }
         : null,
+      me.agents_url
+        ? { label: "Keera Agents", icon: icons.agents, href: me.agents_url }
+        : null,
       { label: "Documentation", icon: icons.docs, href: docsURL({ state }) },
       { separator: true },
       { label: "Sign out", icon: icons.signout, onClick: signOut },

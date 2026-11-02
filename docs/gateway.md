@@ -357,7 +357,8 @@ page leaves out:
   organisation, and an operator any key. The old name stays in the audit log.
 - Anyone who may revoke a key may rotate it, expired ones too, so members rotate
   their own. Only an administrator can give the new key another lifetime with
-  `--expires`.
+  `--expires`. A key Keera Agents issued cannot be rotated
+  ([agents.md](agents.md#keys-issued-for-agents)).
 
 ## Several organisations
 

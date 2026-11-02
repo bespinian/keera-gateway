@@ -134,6 +134,10 @@ heavy reasoning to a large one, or to the next model when one is down. Around it
 redact only what goes to a hosted model, or fall back to the local one once the
 hosted budget is spent. [docs/routers.md](docs/routers.md)
 
+**Keera Agents** runs agents that people start from a chat, such as Slack. It
+is a separate app: each agent works with a key in its owner's name, so their
+guardrails, budgets and audit log apply. [docs/agents.md](docs/agents.md)
+
 **MCP servers** get the same controls as models: an agent calls a server's
 tools through `/api/mcp/<alias>` with its Keera key, sees only the tools its
 guardrail allows, and every call is filtered and logged.

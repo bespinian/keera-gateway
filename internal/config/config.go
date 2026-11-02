@@ -112,6 +112,12 @@ type Config struct {
 	// ChatURL is Keera Chat's origin. A sign-in started there may hand back
 	// to its /auth/callback. Empty allows only loopback. See docs/sso.md.
 	ChatURL string
+	// AgentsURL is Keera Agents' origin, which a sign-in may hand back to as
+	// it does to Keera Chat. See docs/agents.md.
+	AgentsURL string
+	// AgentsServiceKey is what Keera Agents' server sends to the routes under
+	// /control/v1/service, and nowhere else. Empty turns them off.
+	AgentsServiceKey string
 	// SecureCookies marks the session cookie Secure. On by default for an
 	// https public URL; off lets a plain-http demo on localhost sign in.
 	SecureCookies bool
@@ -151,6 +157,8 @@ func Load() (Config, error) {
 		ClaudeSubscriptions:   envBool("KEERA_CLAUDE_SUBSCRIPTIONS", false),
 		PublicURL:             strings.TrimRight(env("KEERA_PUBLIC_URL", ""), "/"),
 		ChatURL:               strings.TrimRight(env("KEERA_CHAT_URL", ""), "/"),
+		AgentsURL:             strings.TrimRight(env("KEERA_AGENTS_URL", ""), "/"),
+		AgentsServiceKey:      env("KEERA_AGENTS_SERVICE_KEY", ""),
 	}
 	c.OIDC = oidcProviders(c.PublicURL)
 	c.SecureCookies = envBool("KEERA_SECURE_COOKIES", c.servedOverHTTPS())
@@ -202,7 +210,7 @@ func (c Config) validate() error {
 	for _, check := range []func() error{
 		c.validateCredentials, c.validateLogging,
 		c.validateDBConns, c.validateRetention, c.validateSessionGap, c.validateOIDC,
-		c.validateChatURL,
+		c.validateAppURLs, c.validateServiceKey,
 	} {
 		if err := check(); err != nil {
 			return err
@@ -303,16 +311,55 @@ func (c Config) validateSessionGap() error {
 	return nil
 }
 
-// validateChatURL accepts a bare origin: sign-ins go to one fixed path under it.
-func (c Config) validateChatURL() error {
-	if c.ChatURL == "" {
-		return nil
+// validateAppURLs accepts bare origins: sign-ins go to one fixed path under
+// each.
+func (c Config) validateAppURLs() error {
+	for _, app := range []struct{ setting, name, origin, example string }{
+		{"KEERA_CHAT_URL", "Keera Chat", c.ChatURL, "https://chat.example.ch"},
+		{"KEERA_AGENTS_URL", "Keera Agents", c.AgentsURL, "https://agents.example.ch"},
+	} {
+		if app.origin == "" {
+			continue
+		}
+		u, err := url.Parse(app.origin)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
+			u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+			return fmt.Errorf("%s must be the address a browser reaches %s on, "+
+				"without a path, such as %s, not %q", app.setting, app.name, app.example, app.origin)
+		}
 	}
-	u, err := url.Parse(c.ChatURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
-		u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
-		return fmt.Errorf("KEERA_CHAT_URL must be the address a browser reaches Keera Chat on, "+
-			"without a path, such as https://chat.example.ch, not %q", c.ChatURL)
+	// Both take sign-ins at /auth/callback, so one address cannot tell them
+	// apart.
+	if c.ChatURL != "" && c.ChatURL == c.AgentsURL {
+		return errors.New("KEERA_CHAT_URL and KEERA_AGENTS_URL are the same address; " +
+			"Keera Chat and Keera Agents each run on their own")
+	}
+	return nil
+}
+
+// minServiceKey is the shortest service key accepted. Only a program sends
+// it, and it issues keys in every organisation, so there is no reason to allow
+// one short enough to guess.
+const minServiceKey = 32
+
+// validateServiceKey keeps the service key apart from every other
+// credential, so that holding it gives the service routes and nothing more.
+func (c Config) validateServiceKey() error {
+	k := c.AgentsServiceKey
+	switch {
+	case k == "":
+		return nil
+	case len(k) < minServiceKey:
+		return fmt.Errorf("KEERA_AGENTS_SERVICE_KEY is too short to be a credential; it needs "+
+			"at least %d characters. Generate one with: openssl rand -hex 32", minServiceKey)
+	case k == c.OperatorKey:
+		return errors.New("KEERA_AGENTS_SERVICE_KEY must differ from KEERA_OPERATOR_KEY; " +
+			"the service key reaches only the routes Keera Agents needs")
+	case k == c.MetricsToken:
+		return errors.New("KEERA_AGENTS_SERVICE_KEY must differ from KEERA_METRICS_TOKEN")
+	case k == c.SecretKey || k == c.SecretKeyPrevious:
+		return errors.New("KEERA_AGENTS_SERVICE_KEY must differ from KEERA_SECRET_KEY, " +
+			"which encrypts stored credentials and is never sent anywhere")
 	}
 	return nil
 }

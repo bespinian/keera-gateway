@@ -89,11 +89,26 @@ export async function keysView(ctx) {
           h(
             "div",
             { class: "stack" },
-            rowLink(
-              ctx,
-              "/keys/" + encodeURIComponent(k.id),
-              k.name,
-              "This key's traffic, cost and requests",
+            h(
+              "div",
+              { class: "row-tight" },
+              rowLink(
+                ctx,
+                "/keys/" + encodeURIComponent(k.id),
+                k.name,
+                "This key's traffic, cost and requests",
+              ),
+              k.issued_by === "agents"
+                ? h(
+                    "span",
+                    {
+                      title:
+                        "Issued by Keera Agents for an agent, which holds the " +
+                        "only copy. Revoke it to stop the agent.",
+                    },
+                    pill("Keera Agent"),
+                  )
+                : null,
             ),
             h(
               "span",
@@ -408,10 +423,11 @@ export function isLive(k) {
   return state === "active" || state === "pending";
 }
 
-// A pending key has no secret to replace yet, so it is activated instead.
+// A pending key has no secret to replace yet, so it is activated instead. A
+// key an app issued is held by that app, so a new secret would reach nobody.
 export function canRotate(k) {
   const state = stateOf(k);
-  return state !== "revoked" && state !== "pending";
+  return state !== "revoked" && state !== "pending" && !k.issued_by;
 }
 
 export function prefixOf(k) {

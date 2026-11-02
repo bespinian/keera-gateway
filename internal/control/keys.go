@@ -226,6 +226,12 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 			"that key is not activated yet, so it has no secret to replace; activate it instead")
 		return
 	}
+	if errors.Is(err, store.ErrIssuedKey) {
+		conflict(w, "agents_key",
+			"that key was issued by Keera Agents, which holds the only copy, so a new "+
+				"secret would reach nobody; revoke it to stop the agent instead")
+		return
+	}
 	if err != nil {
 		s.fail(w, err)
 		return

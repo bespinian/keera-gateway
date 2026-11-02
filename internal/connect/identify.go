@@ -42,6 +42,9 @@ var agents = []struct {
 	{key: "keera-playground", label: "Keera Playground"},
 	// Keera Chat sends through the playground route and names itself there.
 	{key: "keera-chat", label: "Keera Chat"},
+	// Keera Agents sends with keys it issued, and names itself in the header
+	// or its User-Agent.
+	{key: "keera-agents", label: "Keera Agents", products: []string{"keera-agents"}},
 	// GitLab's AI Gateway sends as the OpenAI SDK, and names itself only
 	// when its operator sets the header for it.
 	{key: "gitlab-duo", label: "GitLab Duo"},

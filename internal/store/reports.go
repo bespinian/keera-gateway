@@ -239,6 +239,8 @@ func (s *Store) ProjectOrg(ctx context.Context, projectID string) (string, error
 type KeyOwner struct {
 	OrgID, ProjectID, UserID string
 	Kind                     policy.KeyKind
+	// IssuedBy is the app that issued the key, or empty.
+	IssuedBy string
 }
 
 // KeyOwnerOf reads where a key sits, in one row, so a key reassigned between
@@ -246,9 +248,10 @@ type KeyOwner struct {
 func (s *Store) KeyOwnerOf(ctx context.Context, keyID string) (KeyOwner, error) {
 	var o KeyOwner
 	err := s.pool.QueryRow(ctx,
-		"SELECT org_id, COALESCE(project_id,''), COALESCE(user_id,''), kind FROM api_keys WHERE id = $1",
+		`SELECT org_id, COALESCE(project_id,''), COALESCE(user_id,''), kind, issued_by
+		FROM api_keys WHERE id = $1`,
 		keyID,
-	).Scan(&o.OrgID, &o.ProjectID, &o.UserID, &o.Kind)
+	).Scan(&o.OrgID, &o.ProjectID, &o.UserID, &o.Kind, &o.IssuedBy)
 	return o, notFound(err)
 }
 

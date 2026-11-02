@@ -277,6 +277,9 @@ export const icons = {
     "M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8z",
   // Keera Chat: two bubbles, a conversation, apart from the playground's one.
   chat: "M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2zM18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1",
+  // Keera Agents: a robot's head, for the agents it runs.
+  agents:
+    "M5 8h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2zM12 8V4M9 13h.01M15 13h.01M9 17h6",
   send: "M22 2L11 13M22 2l-7 20-4-9-9-4z",
   stop: "M7 7h10v10H7z",
   trash:

@@ -102,7 +102,7 @@ func (s *Server) passkeyLogin(provider string) bool {
 // signs in with one: the flow keeps the loopback hand-over, and the panel
 // asks for the passkey.
 func (s *Server) startPasskeyLogin(w http.ResponseWriter, r *http.Request) {
-	cli, err := cliLoginFrom(r.URL.Query(), s.opts.ChatURL)
+	cli, err := cliLoginFrom(r.URL.Query(), s.apps())
 	if err != nil {
 		s.signInFailed(w, r, err)
 		return
@@ -113,7 +113,7 @@ func (s *Server) startPasskeyLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// After the #, so the state stays out of access logs.
-	http.Redirect(w, r, "/#passkey-sign-in="+flow.State+cli.panelHint(s.opts.ChatURL),
+	http.Redirect(w, r, "/#passkey-sign-in="+flow.State+cli.panelHint(s.apps()),
 		http.StatusFound)
 }
 

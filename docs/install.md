@@ -80,6 +80,8 @@ new organisations start with.
 | `KEERA_SECURE_COOKIES`          | follows the scheme  | Marks the session cookie `Secure`. On when `KEERA_PUBLIC_URL` is https.                                                                     |
 | `KEERA_CLAUDE_SUBSCRIPTIONS`    | `false`             | Lets Claude Code on a Claude plan through. See [subscriptions.md](subscriptions.md).                                                        |
 | `KEERA_CHAT_URL`                | unset               | Keera Chat's address, without a path, so people can sign in to it and the panel links to it. See [sso.md](sso.md#signing-in-to-keera-chat). |
+| `KEERA_AGENTS_URL`              | unset               | Keera Agents' address, without a path, so people can sign in to it and the panel links to it. See [agents.md](agents.md#signing-in).        |
+| `KEERA_AGENTS_SERVICE_KEY`      | unset               | Opens the service routes to Keera Agents' server, and nothing else. See [agents.md](agents.md#the-service-key).                             |
 | `KEERA_TRUSTED_PROXIES`         | private ranges      | The proxies in front, whose `X-Forwarded-For` names the client. See [Publishing it](#publishing-it).                                        |
 
 Retention below `24h` is refused: deleted rows cannot be recovered, and a
@@ -98,7 +100,8 @@ Some values stop the start instead, with a message that names the setting.
 Among them: a `KEERA_LOG_LEVEL` or `KEERA_LOG_FORMAT` not listed above, a
 `KEERA_REDIS_URL` that is not a Redis URL, a `KEERA_UPSTREAM_DENY` or
 `KEERA_TRUSTED_PROXIES` entry that is not an address or a prefix, a
-`KEERA_METRICS_TOKEN` equal to the operator key, a
+`KEERA_METRICS_TOKEN` equal to the operator key, a `KEERA_AGENTS_SERVICE_KEY`
+shorter than 32 characters or equal to another credential, a
 subscription model in `KEERA_MODELS_FILE` while `KEERA_CLAUDE_SUBSCRIPTIONS` is
 off, and a `KEERA_OIDC_<NAME>_DEFAULT_ROLE` other than `admin` or
 `member`. The single sign-on, passkey and payment settings have checks of their
@@ -418,11 +421,12 @@ restart. Also:
   are carried over. The output-token guardrail (`--max-output-tokens`,
   `max_output_tokens`) is removed, and its values are dropped. Update scripts
   and API clients that set these.
-- **v0.13.0 removes sandboxes.** The upgrade revokes the keys of sandboxes
-  still running and drops their tables and guardrail limits, along with
-  `allowed_repos`. It does not stop the machines: remove leftover sandbox pods
-  or containers yourself. The `KEERA_SANDBOX_*` and `KEERA_SANDBOXES_FILE`
-  settings are ignored, and `keera sandbox` is gone.
+- **v0.13.0 removes sandboxes.** [Keera Agents](agents.md) replaces them. The
+  upgrade revokes the keys of sandboxes still running and drops their tables
+  and guardrail limits, along with `allowed_repos`. It does not stop the
+  machines: remove leftover sandbox pods or containers yourself. The
+  `KEERA_SANDBOX_*` and `KEERA_SANDBOXES_FILE` settings are ignored, and
+  `keera sandbox` is gone.
 - **A database created before v0.4.0 cannot be upgraded in place.** Its first
   schema file changed up to that release, and the gateway runs each file only
   once. Start from an empty database.
