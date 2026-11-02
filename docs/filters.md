@@ -94,6 +94,10 @@ before the call leaves. See [mcp.md](mcp.md#filters).
 - **Pre-tokenised input.** A `prompt` or `input` that is an array of token ids
   has no text to read.
 
+A chat or rerank request with a part the gateway cannot read, such as an
+unknown content part type, is refused with `400` rather than passed on: the
+model might read text no filter saw.
+
 For `rewrite` and `gate`, the gateway appends a wire format to the
 administrator's instruction. Each mode has its own.
 

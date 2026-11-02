@@ -410,9 +410,86 @@ func TestExtractRerankReadsTheQueryAndEachDocument(t *testing.T) {
 	if got := string(b.encode()); got != `{"query":"Q","documents":["A",{"text":"B","id":7},42]}` {
 		t.Errorf("body = %s", got)
 	}
-	b, _ = parseBody([]byte(`{"query":"q","documents":[{"Text":"hidden"}]}`))
-	if _, err := extractRerank(b); err == nil {
-		t.Error("a misspelled text key was read past")
+	for _, body := range []string{
+		`{"query":"q","documents":[{"Text":"hidden"}]}`,
+		`{"query":{"content":[{"type":"text","text":"hidden"}]},"documents":["a"]}`,
+		`{"query":"q","documents":{"content":[{"type":"text","text":"hidden"}]}}`,
+		`{"query":"q","documents":[{"title":"hidden"}]}`,
+	} {
+		b, _ = parseBody([]byte(body))
+		if _, err := extractRerank(b); err == nil {
+			t.Errorf("%s was read past", body)
+		}
+	}
+	// llama.cpp reads "texts" in place of "documents".
+	b, _ = parseBody([]byte(`{"query":"q","texts":["hidden"]}`))
+	if doc, err := extractRerank(b); err != nil || !slices.Equal(doc.texts(), []string{"q", "hidden"}) {
+		t.Errorf("texts were not read: %v", err)
+	}
+}
+
+// Every part a model reads is filtered: refusals, the Responses API's text
+// parts, plain strings in a content array, and earlier reasoning.
+func TestExtractChatReadsEveryTextPart(t *testing.T) {
+	b, err := parseBody([]byte(`{"messages":[
+		{"role":"assistant","content":[{"type":"refusal","refusal":"r"}],"reasoning_content":"rc"},
+		{"role":"assistant","content":"c","reasoning":"rs"},
+		{"role":"user","content":["s",{"type":"input_text","text":"it"},{"type":"output_text","text":"ot"},
+			{"text":"untyped"},{"type":"image_url","image_url":{"url":"data:x"}}]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := extractChat(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"r", "rc", "c", "rs", "s", "it", "ot", "untyped"}
+	if got := doc.texts(); !slices.Equal(got, want) {
+		t.Errorf("texts = %q, want %q", got, want)
+	}
+}
+
+// A part the gateway cannot read is refused, not passed on unfiltered.
+func TestExtractChatRefusesWhatItCannotRead(t *testing.T) {
+	for _, body := range []string{
+		`{"messages":[{"role":"user","content":[{"type":"mystery","text":"hidden"}]}]}`,
+		`{"messages":[{"role":"user","content":[{"value":"hidden"}]}]}`,
+		`{"messages":[{"role":"user","content":[{"type":"text","text":{"value":"hidden"}}]}]}`,
+		`{"messages":[{"role":"user","content":[42]}]}`,
+		`{"messages":[{"role":"user","content":{"text":"hidden"}}]}`,
+		`{"messages":[{"role":"assistant","content":"x","reasoning_content":["hidden"]}]}`,
+	} {
+		b, err := parseBody([]byte(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := extractChat(b); err == nil {
+			t.Errorf("%s was read past", body)
+		}
+	}
+}
+
+func TestFilterRedactsARefusalPartInAChat(t *testing.T) {
+	h := filterHarness(t, redactor, nil)
+
+	resp := h.post(t, "/v1/chat/completions", `{"model":"keera-code","messages":[
+		{"role":"assistant","content":[{"type":"refusal","refusal":"not hunter2"}]},
+		{"role":"user","content":["is hunter2 safe?"]}]}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	// The answer has come, so everything sent upstream is waiting.
+	var sent []string
+	for len(sent) < 2 {
+		select {
+		case body := <-h.upstreamBodies:
+			sent = append(sent, string(body))
+		default:
+			t.Fatalf("the filter did not run: %q", sent)
+		}
+	}
+	if strings.Contains(sent[1], "hunter2") {
+		t.Errorf("a refusal part went upstream unfiltered: %s", sent[1])
 	}
 }
 
