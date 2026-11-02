@@ -299,7 +299,8 @@ function addable(env) {
       case "system_prompt":
         return d.system_prompt === null;
       case "filter":
-        return env.filters.some((f) => !d.filters.includes(f.alias));
+        // Always offered: with none to pick, its form says how to make one.
+        return true;
       case "models":
         return !d.allowed_models && !d.allowed_locations;
       case "tools":
@@ -459,7 +460,7 @@ function render(
     if (apply) apply();
   });
 
-  const { button: save } = formModal({
+  const { button: save, close } = formModal({
     wide: true,
     title: `${meta.title} - ${name}`,
     subtitle:
@@ -471,6 +472,7 @@ function render(
     submit: () => api.putGuardrails(scope, id, saved(lim, env)),
   });
   const foot = () => save.parentElement;
+  env.close = close;
   renderBlocks();
 }
 
@@ -687,6 +689,7 @@ function blockFields(env, kind, b) {
     const usable = env.filters.filter(
       (f) => !d.filters.includes(f.alias) || (b && f.alias === b.alias),
     );
+    if (!usable.length) return noFilter(env);
     const select = h(
       "select",
       { class: "select" },
@@ -1151,6 +1154,38 @@ function filtersValue(levels, known) {
       ),
     ),
   );
+}
+
+/** noFilter stands in for the filter form when there is none to pick. */
+function noFilter(env) {
+  const why = env.filtersLost
+    ? "Could not load the organisation's filters. "
+    : env.filters.length
+      ? "Every filter of the organisation is already here. "
+      : "The organisation has no filters yet. ";
+  return {
+    el: banner(
+      "warn",
+      why,
+      h(
+        "a",
+        {
+          href: "/filters",
+          // The dialog would stay open over the filters screen.
+          onClick: (e) => {
+            e.preventDefault();
+            env.close();
+            env.ctx.navigate("/filters");
+          },
+        },
+        "Create a filter",
+      ),
+      ".",
+    ),
+    read: () => {
+      throw new Error("Create a filter first.");
+    },
+  };
 }
 
 /** So an admin does not add a filter twice. */
