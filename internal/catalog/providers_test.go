@@ -276,6 +276,10 @@ func checkProvider(t *testing.T, p Provider) {
 	}
 }
 
+// freeModels are listed at no charge by their provider, so a price of 0 is
+// on purpose.
+var freeModels = map[string]bool{"mini_lm_l12_v2": true}
+
 func checkProviderModel(t *testing.T, p Provider, m ProviderModel, seenDescription map[string]bool) {
 	t.Helper()
 	if m.ID == "" || m.MaxContext <= 0 {
@@ -299,7 +303,15 @@ func checkProviderModel(t *testing.T, p Provider, m ProviderModel, seenDescripti
 	if m.ReleaseDate != "" && !policy.ValidReleaseDate(m.ReleaseDate) {
 		t.Errorf("%s's release date %q is not YYYY-MM-DD", m.ID, m.ReleaseDate)
 	}
-	if m.InputMicrosPerMTok <= 0 || m.OutputMicrosPerMTok <= 0 {
+	switch {
+	case m.kindOrChat() == policy.KindEmbedding && m.OutputMicrosPerMTok != 0:
+		t.Errorf("%s is an embedding model with an output price; it writes nothing", m.ID)
+	case m.kindOrChat() == policy.KindEmbedding && m.InputMicrosPerMTok <= 0 &&
+		!freeModels[m.ID]:
+		t.Errorf("%s is priced %d; a defaulted price of 0 escapes every budget",
+			m.ID, m.InputMicrosPerMTok)
+	case m.kindOrChat() != policy.KindEmbedding &&
+		(m.InputMicrosPerMTok <= 0 || m.OutputMicrosPerMTok <= 0):
 		t.Errorf("%s is priced %d/%d; a defaulted price of 0 escapes every budget",
 			m.ID, m.InputMicrosPerMTok, m.OutputMicrosPerMTok)
 	}
@@ -421,6 +433,36 @@ models:
 	// No cached-input rate is published, so the input price applies.
 	if m.CachedInputMicrosPerMTok != 0 {
 		t.Errorf("CachedInputMicrosPerMTok = %d, want 0", m.CachedInputMicrosPerMTok)
+	}
+}
+
+// A provider's embedding model is served on /v1/embeddings only, so the
+// table sets the kind, and a chat entry for it is refused.
+func TestAnEmbeddingModelTakesItsKindFromTheTable(t *testing.T) {
+	models, err := parseModelFile([]byte(`
+models:
+  - alias: vectors
+    provider: infomaniak
+    product_id: 100234
+    backend_model: Qwen/Qwen3-Embedding-8B
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if m := models[0]; m.Kind != policy.KindEmbedding || m.OutputMicrosPerMTok != 0 {
+		t.Errorf("kind, output price = %q, %d, want embedding, 0",
+			m.Kind, m.OutputMicrosPerMTok)
+	}
+	_, err = parseModelFile([]byte(`
+models:
+  - alias: vectors
+    kind: chat
+    provider: infomaniak
+    product_id: 100234
+    backend_model: Qwen/Qwen3-Embedding-8B
+`))
+	if err == nil || !strings.Contains(err.Error(), "set kind embedding") {
+		t.Errorf("err = %v, want the embedding kind asked for", err)
 	}
 }
 

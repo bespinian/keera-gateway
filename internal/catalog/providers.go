@@ -28,7 +28,8 @@ type Provider struct {
 	// Location is where prompts go: ch or usa. It is the default for its
 	// models.
 	Location string `json:"location"`
-	// Kinds are the API surfaces the endpoint serves.
+	// Kinds are the APIs its models are served on. The table leaves it out:
+	// Providers fills it from Models, so the two cannot disagree.
 	Kinds  []policy.Kind   `json:"kinds"`
 	Models []ProviderModel `json:"models"`
 	// Summary is the provider in one line, for the panel's provider tile.
@@ -40,7 +41,9 @@ type ProviderModel struct {
 	ID string `json:"id"`
 	// DisplayName is the model's name for people, such as Claude Haiku 5.5.
 	DisplayName string `json:"display_name"`
-	MaxContext  int    `json:"max_context_tokens"`
+	// Kind is the API the model is served on. Empty means chat.
+	Kind       policy.Kind `json:"kind,omitempty"`
+	MaxContext int         `json:"max_context_tokens"`
 	// ReleaseDate is the day the model came out, as YYYY-MM-DD, or empty.
 	ReleaseDate         string `json:"release_date,omitempty"`
 	InputMicrosPerMTok  int64  `json:"input_micros_per_mtok"`
@@ -85,7 +88,6 @@ var providers = []Provider{{
 	Endpoint:    "https://api.anthropic.com/v1",
 	CachedInput: true,
 	Location:    "usa",
-	Kinds:       []policy.Kind{policy.KindChat},
 	Models: []ProviderModel{{
 		ID: "claude-opus-5-5", DisplayName: "Claude Opus 5.5",
 		MaxContext: 1_000_000, ReleaseDate: "2026-09-22",
@@ -164,7 +166,6 @@ var providers = []Provider{{
 	Endpoint:    "https://api.openai.com/v1",
 	CachedInput: true,
 	Location:    "usa",
-	Kinds:       []policy.Kind{policy.KindChat},
 	// Past 272k input tokens, OpenAI's newer models cost twice as much for
 	// input and 1.5 times for output. From gpt-5.6 on, a cache write costs a
 	// quarter more than input; before, the same. OpenAI retires GPT-4o, GPT-4o
@@ -355,7 +356,6 @@ var providers = []Provider{{
 	Endpoint:    "https://generativelanguage.googleapis.com/v1beta/openai",
 	CachedInput: true,
 	Location:    "usa",
-	Kinds:       []policy.Kind{policy.KindChat},
 	Models: []ProviderModel{{
 		ID: "gemini-4-argon", DisplayName: "Gemini 4 Argon",
 		MaxContext: 1_048_576, ReleaseDate: "2026-10-13",
@@ -424,7 +424,6 @@ var providers = []Provider{{
 	Endpoint:    "https://api.mistral.ai/v1",
 	CachedInput: true,
 	Location:    "eu",
-	Kinds:       []policy.Kind{policy.KindChat},
 	Models: []ProviderModel{{
 		ID: "mistral-large-4", DisplayName: "Mistral Large 4",
 		MaxContext: 1_000_000, ReleaseDate: "2026-10-06",
@@ -499,9 +498,9 @@ var providers = []Provider{{
 	Endpoint:       "https://api.infomaniak.com/2/ai/{product_id}/openai/v1",
 	NeedsProductID: true,
 	Location:       "ch",
-	Kinds:          []policy.Kind{policy.KindChat},
 	// Ids are the upstream names, capitals and all, as the endpoint expects.
-	// Prices are Infomaniak's list price times 1.12, on purpose.
+	// Prices are Infomaniak's list price times 1.12, on purpose. An embedding
+	// writes nothing, so it has no output price.
 	Models: []ProviderModel{{
 		ID: "Qwen/Qwen3.5-397B-A17B-FP8", DisplayName: "Qwen3.5 397B A17B FP8",
 		MaxContext: 200_000, ReleaseDate: "2026-02-16",
@@ -537,13 +536,28 @@ var providers = []Provider{{
 		MaxContext: 100_000, ReleaseDate: "2025-12-02",
 		InputMicrosPerMTok: 336_000, OutputMicrosPerMTok: 448_000,
 		Description: "small and quick - chatbots, short edits and everyday questions",
+	}, {
+		ID: "Qwen/Qwen3-Embedding-8B", DisplayName: "Qwen3 Embedding 8B",
+		Kind: policy.KindEmbedding, MaxContext: 8_192, ReleaseDate: "2025-06-05",
+		InputMicrosPerMTok: 78_400,
+		Description:        "embedding, 4096 dimensions - search and RAG in over 100 languages",
+	}, {
+		// Infomaniak's own id, not the upstream BAAI/bge-multilingual-gemma2.
+		ID: "bge_multilingual_gemma2", DisplayName: "BGE Multilingual Gemma2",
+		Kind: policy.KindEmbedding, MaxContext: 8_000,
+		InputMicrosPerMTok: 72_800,
+		Description:        "embedding, 3584 dimensions - semantic search and RAG in many languages",
+	}, {
+		// Infomaniak's own id for all-MiniLM-L12-v2. Infomaniak serves it free.
+		ID: "mini_lm_l12_v2", DisplayName: "all-MiniLM-L12-v2",
+		Kind: policy.KindEmbedding, MaxContext: 128,
+		Description: "tiny embedding model, 384 dimensions - fast indexing and prototypes",
 	}},
 }, {
 	Name:     "stepping-stone",
 	Summary:  "Open-weight models, served in Switzerland.",
 	Endpoint: "https://llm.stoney-cloud.com/v1",
 	Location: "ch",
-	Kinds:    []policy.Kind{policy.KindChat},
 	// Ids are the upstream names, capitals and all. The Nemotron id is spelled
 	// as stepping stone's documentation spells it.
 	Models: []ProviderModel{{
@@ -617,7 +631,6 @@ var providers = []Provider{{
 	Summary:  "Open-weight models, served in Switzerland.",
 	Endpoint: "https://maas.phoeniqs.com/v1",
 	Location: "ch",
-	Kinds:    []policy.Kind{policy.KindChat},
 	// Ids are Phoeniqs's own names, kept across minor upgrades. Release dates
 	// are of the models served on 2026-10-21: GLM-5.2 for inference-glm5,
 	// GLM-5.3-Flash for inference-glm5-flash and its -compact, and
@@ -714,7 +727,6 @@ var providers = []Provider{{
 	Endpoint:    "https://api.inference.cscs.ch/v1",
 	CachedInput: true,
 	Location:    "ch",
-	Kinds:       []policy.Kind{policy.KindChat},
 	// Ids are the upstream names, capitals and all. A -thinking id is the same
 	// weights with reasoning on and tool calls off, so it keeps the date.
 	Models: []ProviderModel{{
@@ -790,7 +802,7 @@ func ProviderNames() string {
 }
 
 func (p Provider) clone() Provider {
-	p.Kinds = slices.Clone(p.Kinds)
+	p.Kinds = p.kinds()
 	p.Models = slices.Clone(p.Models)
 	for i := range p.Models {
 		p.Models[i].LongPrompt = p.Models[i].longPrompt()
@@ -817,6 +829,13 @@ func (p Provider) Model(id string) (ProviderModel, bool) {
 	return ProviderModel{}, false
 }
 
+func (m ProviderModel) kindOrChat() policy.Kind {
+	if m.Kind == "" {
+		return policy.KindChat
+	}
+	return m.Kind
+}
+
 // longPrompt is a copy of the model's long-prompt prices, so the table stays
 // unchanged.
 func (m ProviderModel) longPrompt() *policy.PriceTier {
@@ -831,8 +850,19 @@ func (p Provider) modelIDs() string {
 	return joinNames(p.Models, func(m ProviderModel) string { return m.ID })
 }
 
+// kinds are the APIs the provider's models are served on, in table order.
+func (p Provider) kinds() []policy.Kind {
+	var out []policy.Kind
+	for _, m := range p.Models {
+		if !slices.Contains(out, m.kindOrChat()) {
+			out = append(out, m.kindOrChat())
+		}
+	}
+	return out
+}
+
 func (p Provider) kindNames() string {
-	return joinNames(p.Kinds, func(k policy.Kind) string { return string(k) })
+	return joinNames(p.kinds(), func(k policy.Kind) string { return string(k) })
 }
 
 // joinNames lists items by name, comma separated, for error messages.
@@ -923,7 +953,7 @@ func applyProvider(m Model) (Model, error) {
 // a kind with no endpoint, or a model missing from the price table that states
 // no prices. Files and the control API both run it.
 func (p Provider) Check(kind policy.Kind, backendModel string, priced bool) error {
-	if kind != "" && !slices.Contains(p.Kinds, kind) {
+	if kind != "" && !slices.Contains(p.kinds(), kind) {
 		return fmt.Errorf("provider %s serves only %s, not %q",
 			p.Name, p.kindNames(), kind)
 	}
@@ -931,9 +961,15 @@ func (p Provider) Check(kind policy.Kind, backendModel string, priced bool) erro
 		// The caller's own check reports it, in terms of this provider.
 		return nil
 	}
+	known, isKnown := p.Model(backendModel)
+	if isKnown && kind != "" && kind != known.kindOrChat() {
+		// The provider serves it on one API only; any other fails upstream.
+		return fmt.Errorf("%s is a %s model at %s; set kind %s",
+			backendModel, known.kindOrChat(), p.Name, known.kindOrChat())
+	}
 	// A model newer than this build must be priced by hand, or no budget
 	// could hold it.
-	if _, known := p.Model(backendModel); !known && !priced {
+	if !isKnown && !priced {
 		return fmt.Errorf("%s is not in the Keera Gateway price table for %s "+
 			"(it knows: %s); "+
 			"state input_micros_per_mtok and output_micros_per_mtok for it - "+
@@ -945,6 +981,9 @@ func (p Provider) Check(kind policy.Kind, backendModel string, priced bool) erro
 
 // fillFromTable sets each value the entry left out to the table's.
 func fillFromTable(m Model, known ProviderModel) Model {
+	if m.Kind == "" {
+		m.Kind = string(known.kindOrChat())
+	}
 	if m.MaxContext == nil {
 		m.MaxContext = &known.MaxContext
 	}

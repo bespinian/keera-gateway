@@ -458,10 +458,12 @@ export async function catalogueView(ctx) {
         },
         {
           label: "Kinds",
+          // The model's own kind: a provider that serves embeddings also
+          // serves chat models, which are not embeddings. No kind means chat.
           options: KINDS.filter((k) =>
-            providers.some((p) => (p.kinds || []).includes(k)),
+            rows.some((r) => (r.m.kind || "chat") === k),
           ).map((k) => ({ value: k, label: kindName(k) })),
-          test: (r, v) => (r.p.kinds || []).includes(v),
+          test: (r, v) => (r.m.kind || "chat") === v,
         },
         // A dropdown with one choice filters nothing.
       ].filter((c) => c.options.length > 1),
@@ -1503,7 +1505,8 @@ function providerAnswers(p, known) {
     displayName: !!known && !!known.display_name,
     // No description on purpose: only the organisation knows what the alias
     // is for, and routers need that.
-    kind: (p.kinds || []).length === 1,
+    // A known model is served on one API only.
+    kind: !!known || (p.kinds || []).length === 1,
     backendModel: !!known,
     maxContext: !!known,
     priceIn: !!known,
@@ -1672,7 +1675,11 @@ function hostedFields(ctx, providers, form) {
     }
     // Clears the endpoint until a product id is in.
     syncEndpoint();
-    setKinds(fields.kind, p.kinds, fields.kind.value);
+    setKinds(
+      fields.kind,
+      p.kinds,
+      known ? known.kind || "chat" : fields.kind.value,
+    );
     if (!state.aliasDirty) alias.value = known ? aliasFor(known.id) : "";
     paintMachinery("auto");
     paintPresets(state.preset, fields, marks, state);

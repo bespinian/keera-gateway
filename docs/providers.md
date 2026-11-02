@@ -250,9 +250,12 @@ model, are forwarded without being translated
 
 ### Also worth knowing
 
-- **Embedding models need their own entry**, with no `provider`,
-  `kind: embedding`, the full address in `backends` (for Infomaniak, with your
-  product id in it), `location: ch` and their own prices.
+- **Embedding models.** Infomaniak's are in the table and get
+  `kind: embedding` from it; a chat entry for one is refused. Another
+  provider's embedding model needs its own entry, with no `provider`,
+  `kind: embedding`, the full address in `backends`, a `location` and its own
+  prices. Infomaniak's re-ranking models are not in the table: the gateway
+  serves no re-ranking API.
 - **Where to read more:** Phoeniqs on
   [documentation.phoeniqs.com](https://documentation.phoeniqs.com/maas/active-models/),
   CSCS on [docs.cscs.ch](https://docs.cscs.ch/services/inference/api/), its
