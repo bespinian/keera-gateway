@@ -170,12 +170,16 @@ func (s *Server) chargesDue(ctx context.Context) {
 		s.warnUnlessDone(ctx, "reading the due recurring charges failed", "error", err)
 		return
 	}
-	pay := s.opts.Payments
 	for _, c := range due {
-		pm := pay.newPayment(c.OrgID, store.PaymentCharge, c.AmountMicros, "recurring charge")
-		pm.ChargeID, pm.Item, pm.PeriodStart, pm.PeriodEnd = c.ID, c.Name, &c.DueAt, &c.DueUntil
-		s.chargeCard(ctx, pm, c.CardToken)
+		s.chargeSavedCard(ctx, c)
 	}
+}
+
+// chargeSavedCard charges one period of a recurring charge to the saved card.
+func (s *Server) chargeSavedCard(ctx context.Context, c store.DueCharge) {
+	pm := s.opts.Payments.newPayment(c.OrgID, store.PaymentCharge, c.AmountMicros, "recurring charge")
+	pm.ChargeID, pm.Item, pm.PeriodStart, pm.PeriodEnd = c.ID, c.Name, &c.DueAt, &c.DueUntil
+	s.chargeCard(ctx, pm, c.CardToken)
 }
 
 // lineItemName is how a charge's period reads on the payment page and the

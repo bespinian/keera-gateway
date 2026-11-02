@@ -159,17 +159,21 @@ func (s *Store) DueTopUps(ctx context.Context, limit int) ([]CreditAccount, erro
 		FROM credit_accounts a
 		-- A deleted organisation's card is not charged.
 		JOIN orgs o ON o.id = a.org_id
-		WHERE a.card_token IS NOT NULL AND a.topup_micros > 0
-		  AND a.balance_micros < a.topup_below_micros
-		  AND a.topup_error IS NULL AND NOT a.invoiced
-		  AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.org_id = a.org_id
-		                  AND p.kind = 'auto' AND p.state = 'pending')
-		  -- At most one every ten minutes, whatever happened to the last: a
-		  -- balance driven far below zero is not paid off by a run of charges.
-		  AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.org_id = a.org_id
-		                  AND p.kind = 'auto' AND p.ts > now() - interval '10 minutes')
+		WHERE `+topUpIsDue+`
 		ORDER BY a.org_id LIMIT $1`, limit)
 }
+
+// topUpIsDue holds for an account a that DueTopUps lists. CreatePayment
+// checks it again, as the list may be stale.
+const topUpIsDue = `a.card_token IS NOT NULL AND a.topup_micros > 0
+	AND a.balance_micros < a.topup_below_micros
+	AND a.topup_error IS NULL AND NOT a.invoiced
+	AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.org_id = a.org_id
+	                AND p.kind = 'auto' AND p.state = 'pending')
+	-- At most one every ten minutes, whatever happened to the last: a
+	-- balance driven far below zero is not paid off by a run of charges.
+	AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.org_id = a.org_id
+	                AND p.kind = 'auto' AND p.ts > now() - interval '10 minutes')`
 
 // PaymentKind says where money came from.
 type PaymentKind string
@@ -242,19 +246,35 @@ func deref(s *string) string {
 	return *s
 }
 
-// ErrTopUpUnderway means another automatic top-up for the organisation, or
-// another charge of the saved card for the same recurring charge, is still
-// pending.
+// ErrTopUpUnderway means a charge of the saved card is no longer due: another
+// automatic top-up for the organisation, or another charge for the same
+// period of a recurring charge, is under way or was made already.
 var ErrTopUpUnderway = errors.New("store: an automatic top-up is under way")
 
-// CreatePayment records a payment that has not been paid yet.
+// CreatePayment records a payment that has not been paid yet. A charge of a
+// saved card is recorded only while it is still due. Replicas' payment rounds
+// can overlap, so another may have charged it since it was listed.
 func (s *Store) CreatePayment(ctx context.Context, p Payment) error {
-	_, err := s.pool.Exec(ctx, `INSERT INTO payments (id, org_id, kind, micros, vat_micros,
+	from := ""
+	switch {
+	case p.Kind == PaymentAuto:
+		from = `FROM credit_accounts a JOIN orgs o ON o.id = a.org_id
+			WHERE a.org_id = $2 AND ` + topUpIsDue
+	case p.Kind == PaymentCharge && !p.SaveCard:
+		from = `FROM recurring_charges c JOIN credit_accounts a ON a.org_id = c.org_id
+			WHERE c.id = $9 AND c.org_id = $2 AND ` + chargeDue + ` = $11 AND ` + chargeIsDue
+	}
+	// The casts name the types a SELECT cannot infer.
+	tag, err := s.pool.Exec(ctx, `INSERT INTO payments (id, org_id, kind, micros, vat_micros,
 		fee_micros, state, save_card, actor, charge_id, item, period_start, period_end)
-		VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8,$9,$10,$11,$12)`,
+		SELECT $1::text, $2::text, $3::text, $4::bigint, $5::bigint, $6::bigint, 'pending',
+		       $7::boolean, $8::text, $9::text, $10::text, $11::timestamptz, $12::timestamptz `+from,
 		p.ID, p.OrgID, p.Kind, p.AmountMicros, p.VATMicros, p.FeeMicros, p.SaveCard, p.Actor,
 		nullable(p.ChargeID), nullable(p.Item), p.PeriodStart, p.PeriodEnd)
 	if uniqueOn(err, "payments_one_auto_idx") || uniqueOn(err, "payments_one_charge_idx") {
+		return ErrTopUpUnderway
+	}
+	if err == nil && tag.RowsAffected() == 0 {
 		return ErrTopUpUnderway
 	}
 	return err

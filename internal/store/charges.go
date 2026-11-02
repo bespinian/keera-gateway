@@ -117,15 +117,19 @@ func (s *Store) DueCharges(ctx context.Context, limit int) ([]DueCharge, error) 
 		SELECT `+chargeColumns+`, a.card_token
 		FROM recurring_charges c
 		JOIN credit_accounts a ON a.org_id = c.org_id
-		WHERE a.card_token IS NOT NULL AND c.error IS NULL AND `+chargeDue+` <= now()
-		  AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.org_id = c.org_id
-		                  AND p.charge_id = c.id AND p.state = 'pending'
-		                  AND (NOT p.save_card OR p.ts > now() - interval '1 hour'))
-		  AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.org_id = c.org_id
-		                  AND p.charge_id = c.id AND NOT p.save_card
-		                  AND p.ts > now() - interval '10 minutes')
+		WHERE `+chargeIsDue+`
 		ORDER BY 8 LIMIT $1`, limit)
 }
+
+// chargeIsDue holds for a recurring charge c, with its account a, that
+// DueCharges lists. CreatePayment checks it again, as the list may be stale.
+const chargeIsDue = `a.card_token IS NOT NULL AND c.error IS NULL AND ` + chargeDue + ` <= now()
+	AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.org_id = c.org_id
+	                AND p.charge_id = c.id AND p.state = 'pending'
+	                AND (NOT p.save_card OR p.ts > now() - interval '1 hour'))
+	AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.org_id = c.org_id
+	                AND p.charge_id = c.id AND NOT p.save_card
+	                AND p.ts > now() - interval '10 minutes')`
 
 // payPeriod counts a charge's period as paid. It reports whether that period
 // was paid already, by another payment: the organisation then paid twice.

@@ -626,3 +626,26 @@ func TestTheFeeIsEighteenCentimesPlusAPercentageOfAtLeastTwentyCentimes(t *testi
 		}
 	}
 }
+
+// A top-up listed before another replica made it is not made again.
+func TestAnAutomaticTopUpListedBeforeAnotherReplicaMadeItIsNotMadeAgain(t *testing.T) {
+	st, ctx := routerStore(t)
+	pf := newFakePostFinance(t)
+	s, _ := paymentServer(ctx, t, st, pf)
+	topUp(t, s, pf)
+	if w := invoke(s.updateCreditAccount, admin("org_1"), http.MethodPatch, "/v1/billing/account",
+		`{"topup_below_micros":200000000,"topup_micros":200000000}`); w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body)
+	}
+	stale, err := st.DueTopUps(ctx, 20)
+	if err != nil || len(stale) != 1 {
+		t.Fatalf("due = %+v, %v", stale, err)
+	}
+	s.topUpDue(ctx)
+	first, _ := pf.last()
+
+	s.autoTopUp(ctx, stale[0])
+	if again, _ := pf.last(); again != first {
+		t.Error("the card was charged twice")
+	}
+}

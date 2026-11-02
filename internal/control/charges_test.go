@@ -262,3 +262,30 @@ func TestAChargeFromTheThirtyFirstKeepsItsDay(t *testing.T) {
 		}
 	}
 }
+
+// Replicas' payment rounds can overlap. One that listed a charge before
+// another replica charged it must not charge the card for that period again,
+// even once the other payment is settled and ten minutes have passed.
+func TestAChargeListedBeforeAnotherReplicaChargedItIsNotChargedAgain(t *testing.T) {
+	st, ctx := routerStore(t)
+	pf := newFakePostFinance(t)
+	s, _ := paymentServer(ctx, t, st, pf)
+	topUp(t, s, pf)
+	addCharge(t, s)
+
+	stale, err := st.DueCharges(ctx, 20)
+	if err != nil || len(stale) != 1 {
+		t.Fatalf("due = %+v, %v", stale, err)
+	}
+	s.chargesDue(ctx)
+	first, _ := pf.last()
+	if _, err := st.Pool().Exec(ctx, `UPDATE payments SET ts = ts - interval '11 minutes'
+		WHERE kind = 'charge'`); err != nil {
+		t.Fatal(err)
+	}
+
+	s.chargeSavedCard(ctx, stale[0])
+	if again, _ := pf.last(); again != first {
+		t.Error("the card was charged twice for one period")
+	}
+}
