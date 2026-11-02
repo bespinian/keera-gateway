@@ -303,7 +303,7 @@ func answerOnly(t *testing.T, h *harness) int64 {
 	t.Helper()
 	ev := h.sink.last(t)
 	cost, _ := answerCost(policy.Model{InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 1_000_000},
-		policy.Tokens{Input: ev.InputTokens, Output: ev.OutputTokens})
+		policy.Tokens{Input: ev.InputTokens, Output: ev.OutputTokens}, policy.Tokens{})
 	return cost
 }
 

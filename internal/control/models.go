@@ -30,7 +30,7 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	}
 	admin := p.CanAdminOrg(orgID)
 	for i := range models {
-		s.markPlatform(&models[i])
+		s.markBilled(&models[i])
 		if !admin {
 			models[i].Backends = nil
 			models[i].HasAPIKey = false
@@ -43,9 +43,11 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	})
 }
 
-// markPlatform shows a model on the deployment's key as the gateway sends it:
-// to the provider's endpoint, at list prices. The row may predate the key.
-func (s *Server) markPlatform(m *policy.Model) {
+// markBilled shows a model as the gateway bills it: on the deployment's key,
+// at the provider's endpoint and list prices; self-hosted, at the gateway fee.
+// The row may predate the key, or have a price of its own from before.
+func (s *Server) markBilled(m *policy.Model) {
+	m.PriceAtFee(s.opts.GatewayFee)
 	if !s.opts.Platform.Covers(*m) {
 		return
 	}
@@ -126,6 +128,11 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		}
 		priced = true
 	}
+	// A self-hosted model costs the gateway fee, or nothing without one,
+	// whatever price was sent.
+	if m.PriceAtFee(s.opts.GatewayFee) {
+		priced = true
+	}
 	if err := catalog.CheckModel(&m, priced); err != nil {
 		badRequest(w, err.Error())
 		return
@@ -192,7 +199,7 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		s.fail(w, err)
 		return
 	}
-	s.markPlatform(&stored)
+	s.markBilled(&stored)
 	httpx.WriteJSON(w, http.StatusOK, stored)
 }
 

@@ -85,8 +85,12 @@ type Config struct {
 	// Platform is the deployment's own provider keys, which organisations
 	// use and are billed for. See docs/billing.md.
 	Platform catalog.Platform
-	// Payments is how organisations pay for those keys in advance. Nil
-	// without a PostFinance Checkout account.
+	// GatewayFee is what organisations pay per million tokens, in micros, on
+	// every model the deployment does not bill otherwise: self-hosted ones and
+	// ones on their own keys. Zero, the default, leaves them free.
+	GatewayFee int64
+	// Payments is how organisations pay for those keys and the fee in
+	// advance. Nil without a PostFinance Checkout account.
 	Payments *Payments
 	// ClaudeSubscriptions lets Claude Code signed in to a Claude plan through,
 	// paid by that plan. Off by default. See docs/subscriptions.md.
@@ -187,7 +191,10 @@ func Load() (Config, error) {
 	if c.Platform, err = platformKeys(); err != nil {
 		return c, err
 	}
-	if c.Payments, err = payments(c.Platform, c.PublicURL); err != nil {
+	if c.GatewayFee, err = gatewayFee(env("KEERA_BILLING_GATEWAY_FEE", "")); err != nil {
+		return c, err
+	}
+	if c.Payments, err = payments(c.Platform, c.GatewayFee, c.PublicURL); err != nil {
 		return c, err
 	}
 	// Parsed here, so a typo stops the start before the database is touched.

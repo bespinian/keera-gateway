@@ -15,11 +15,11 @@ func queueBills(batch *pgx.Batch, e Event) {
 	for _, b := range e.Bills {
 		batch.Queue(`INSERT INTO billing_lines (ts, org_id, alias, provider, backend_model,
 			input_tokens, cached_input_tokens, cache_write_tokens, output_tokens,
-			micros, credit_micros)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+			micros, credit_micros, gateway_fee)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
 			e.TS, e.OrgID, b.Alias, b.Provider, b.BackendModel,
 			b.InputTokens, b.CachedInputTokens, b.CacheWriteTokens, b.OutputTokens,
-			b.Micros, b.CreditMicros)
+			b.Micros, b.CreditMicros, b.GatewayFee)
 	}
 }
 
@@ -42,42 +42,46 @@ func queueCredit(batch *pgx.Batch, events []Event) {
 	}
 }
 
-// BillingRow is one organisation's use of one provider model in a window.
+// BillingRow is one organisation's use of one model in a window.
 type BillingRow struct {
 	OrgID string `json:"org_id"`
 	// OrgName is empty for an organisation deleted since.
-	OrgName           string `json:"org_name"`
-	Provider          string `json:"provider"`
-	BackendModel      string `json:"backend_model"`
-	Calls             int64  `json:"calls"`
-	InputTokens       int64  `json:"input_tokens"`
-	CachedInputTokens int64  `json:"cached_input_tokens"`
-	CacheWriteTokens  int64  `json:"cache_write_tokens"`
-	OutputTokens      int64  `json:"output_tokens"`
+	OrgName string `json:"org_name"`
+	// Provider is empty for a self-hosted model.
+	Provider     string `json:"provider"`
+	BackendModel string `json:"backend_model"`
+	// GatewayFee says the row is the gateway fee on a model the deployment
+	// does not bill otherwise, not a list price.
+	GatewayFee        bool  `json:"gateway_fee"`
+	Calls             int64 `json:"calls"`
+	InputTokens       int64 `json:"input_tokens"`
+	CachedInputTokens int64 `json:"cached_input_tokens"`
+	CacheWriteTokens  int64 `json:"cache_write_tokens"`
+	OutputTokens      int64 `json:"output_tokens"`
 	// BilledMicros is what the organisation is billed.
 	BilledMicros int64 `json:"billed_micros"`
 	// CreditMicros is the part paid from credit.
 	CreditMicros int64 `json:"credit_micros"`
 }
 
-// Billing sums the billable calls in [from, to), per organisation and
-// provider model. An empty orgID reads every organisation.
+// Billing sums the billable calls in [from, to), per organisation and model.
+// An empty orgID reads every organisation.
 func (s *Store) Billing(ctx context.Context, orgID string, from, to time.Time) ([]BillingRow, error) {
 	return queryAll(ctx, s.pool, scanBillingRow, `
-		SELECT b.org_id, coalesce(o.name, ''), b.provider, b.backend_model,
+		SELECT b.org_id, coalesce(o.name, ''), b.provider, b.backend_model, b.gateway_fee,
 		       count(*), sum(b.input_tokens), sum(b.cached_input_tokens),
 		       sum(b.cache_write_tokens), sum(b.output_tokens), sum(b.micros),
 		       sum(b.credit_micros)
 		FROM billing_lines b LEFT JOIN orgs o ON o.id = b.org_id
 		WHERE b.ts >= $1 AND b.ts < $2 AND ($3 = '' OR b.org_id = $3)
-		GROUP BY b.org_id, o.name, b.provider, b.backend_model
-		ORDER BY coalesce(o.name, ''), b.org_id, b.provider, b.backend_model`,
+		GROUP BY b.org_id, o.name, b.provider, b.backend_model, b.gateway_fee
+		ORDER BY coalesce(o.name, ''), b.org_id, b.gateway_fee, b.provider, b.backend_model`,
 		from, to, orgID)
 }
 
 func scanBillingRow(r row) (BillingRow, error) {
 	var b BillingRow
-	err := r.Scan(&b.OrgID, &b.OrgName, &b.Provider, &b.BackendModel,
+	err := r.Scan(&b.OrgID, &b.OrgName, &b.Provider, &b.BackendModel, &b.GatewayFee,
 		&b.Calls, &b.InputTokens, &b.CachedInputTokens, &b.CacheWriteTokens,
 		&b.OutputTokens,
 		&b.BilledMicros, &b.CreditMicros)

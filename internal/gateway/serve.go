@@ -79,6 +79,9 @@ type call struct {
 	// held is the organisation credit held until the request ends. See
 	// creditHold.
 	held int64
+	// counted is the gateway's own count of the answer's tokens, for a model
+	// billed on it. See policy.Model.CountsTokens.
+	counted policy.Tokens
 }
 
 // sent is the body that goes out: the OpenAI-shaped one, or the client's own
@@ -485,7 +488,7 @@ func (s *Server) admitted(c *call, b *body) bool {
 		s.refuse(c, ref)
 		return false
 	}
-	if s.onKey(c) {
+	if s.billed(c) {
 		var err error
 		if c.held, err = s.budgets.HoldCredit(c.res.Key.OrgID, s.creditHold(c, c.sent(b))); err != nil {
 			s.refuse(c, refusal{
@@ -862,6 +865,11 @@ func (s *Server) answer(c *call, b *body) {
 	if resp.StatusCode < 400 {
 		s.billUnreported(c, b)
 	}
+	if c.model.CountsTokens() && c.ev.Status < 300 {
+		c.counted.Input = estimateInputTokens(fw.payload)
+	} else {
+		c.counted = policy.Tokens{}
+	}
 	c.ev.Canceled = c.r.Context().Err() != nil
 	c.ev.Latency = time.Since(c.tr.start)
 	// When a later destination answered, an earlier failure is a note, not
@@ -985,9 +993,18 @@ func (s *Server) relayStream(c *call, resp *http.Response, answered time.Time, p
 	if c.chainOnKey() {
 		dst = &afterHangUp{w: c.w}
 	}
-	stream := &flushBeforeRead{src: resp.Body, dst: dst, flusher: http.NewResponseController(c.w)}
+	var src io.Reader = resp.Body
+	var text *textCounter
+	if c.model.CountsTokens() {
+		text = &textCounter{limit: s.opts.MaxResponseBytes}
+		src = io.TeeReader(resp.Body, text)
+	}
+	stream := &flushBeforeRead{src: src, dst: dst, flusher: http.NewResponseController(c.w)}
 	stats, err := pipe(stream, stream.later, stream)
 	stream.now()
+	if text != nil {
+		c.counted.Output = text.tokens()
+	}
 	if err == nil {
 		err = stats.cut
 	}
@@ -1067,6 +1084,9 @@ func (s *Server) relayBuffered(c *call, resp *http.Response, answered time.Time,
 	if usage != nil {
 		setUsage(&c.ev, usage)
 	}
+	if c.model.CountsTokens() && resp.StatusCode < 300 {
+		c.counted.Output = writtenBytes(body) / bytesPerTokenTypical
+	}
 }
 
 func printable(s string) bool {
@@ -1144,7 +1164,7 @@ func (s *Server) finish(c *call) {
 		CacheWrite: ev.CacheWriteTokens, CacheWriteHour: ev.CacheWriteHourTokens,
 		Output: ev.OutputTokens,
 	}
-	cost, bills := answerCost(c.model, used)
+	cost, bills := answerCost(c.model, used, c.counted)
 	ev.CostMicros, ev.Bills = cost, append(c.hookBills(), bills...)
 	// A subscription paid for this. The API price is kept for comparison and
 	// charged to no budget.

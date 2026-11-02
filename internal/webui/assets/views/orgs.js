@@ -191,7 +191,7 @@ function liftLimit(ctx, org) {
         {},
         "Lifting the limit opens the models and MCP servers inside this " +
           "deployment's network" +
-          (ctx.state.me.payments || !ctx.state.me.billing
+          (ctx.state.me.payments || !ctx.state.me.provider_keys
             ? ". "
             : ", and models on this deployment's provider keys. ") +
           "Only do this for a customer you know.",

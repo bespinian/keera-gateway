@@ -1,5 +1,5 @@
-// The bill for the deployment's own provider keys, and the credit an
-// organisation pays for them in advance. See docs/billing.md.
+// The bill for the deployment's own provider keys and the gateway fee, and
+// the credit an organisation pays for them in advance. See docs/billing.md.
 
 import { api } from "../api.js";
 import {
@@ -136,10 +136,11 @@ async function billSection(ctx) {
           h(
             "span",
             { class: "faint", style: { fontSize: "11px" } },
-            r.provider,
+            (r.provider || "Self-hosted") +
+              (r.gateway_fee ? " · gateway fee" : ""),
           ),
         ),
-      sortKey: (r) => `${r.provider}/${r.backend_model}`,
+      sortKey: (r) => `${r.gateway_fee}/${r.provider}/${r.backend_model}`,
     },
     {
       label: "Calls",
@@ -199,8 +200,9 @@ async function billSection(ctx) {
       month === now
         ? "Nothing billed this month"
         : `Nothing billed in ${monthName(month)}`,
-    emptyBody:
-      "Calls to models on this deployment's own provider keys appear here.",
+    emptyBody: ctx.state.me.gateway_fee_micros
+      ? "Calls to your models, and the gateway fee on them, appear here."
+      : "Calls to models on this deployment's own provider keys appear here.",
   });
 
   const foot =

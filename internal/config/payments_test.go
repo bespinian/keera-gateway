@@ -69,7 +69,7 @@ func TestAPaymentSettingThatCannotWorkStopsTheStart(t *testing.T) {
 			"KEERA_BILLING_POSTFINANCE_SPACE_ID",
 		},
 		{"key not base64", with("KEERA_BILLING_POSTFINANCE_AUTH_KEY", "not base64!"), "base64"},
-		{"no provider key", with("KEERA_PROVIDER_CSCS_API_KEY", ""), "KEERA_PROVIDER_<NAME>_API_KEY"},
+		{"no provider key or fee", with("KEERA_PROVIDER_CSCS_API_KEY", ""), "KEERA_PROVIDER_<NAME>_API_KEY"},
 		{"no https address", with("KEERA_PUBLIC_URL", "http://keera.example"), "KEERA_PUBLIC_URL"},
 		{"not this machine", with("KEERA_PUBLIC_URL", "http://localhost.example:8080"), "KEERA_PUBLIC_URL"},
 		{"VAT out of range", with("KEERA_BILLING_VAT", "120"), "KEERA_BILLING_VAT"},
@@ -100,5 +100,41 @@ func TestPaymentsWorkOnThisMachineOverHTTP(t *testing.T) {
 		if err != nil || c.Payments == nil {
 			t.Errorf("%s: payments = %v, %v", u, c.Payments, err)
 		}
+	}
+}
+
+func TestTheGatewayFeeIsReadInCHFPerMillionTokens(t *testing.T) {
+	c, err := loadWith(t, valid(map[string]string{"KEERA_BILLING_GATEWAY_FEE": "0.05"}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.GatewayFee != 50_000 {
+		t.Errorf("fee = %d micros, want 50000", c.GatewayFee)
+	}
+	if c, _ := loadWith(t, valid(nil)); c.GatewayFee != 0 {
+		t.Errorf("fee by default = %d, want 0", c.GatewayFee)
+	}
+	for _, bad := range []string{"-1", "five", "1000", "NaN"} {
+		if _, err := loadWith(t, valid(map[string]string{"KEERA_BILLING_GATEWAY_FEE": bad})); err == nil ||
+			!strings.Contains(err.Error(), "KEERA_BILLING_GATEWAY_FEE") {
+			t.Errorf("%q: err = %v", bad, err)
+		}
+	}
+}
+
+// Payments pay for the gateway fee too, so they need no provider key.
+func TestPaymentsWorkWithTheGatewayFeeAlone(t *testing.T) {
+	c, err := loadWith(t, valid(map[string]string{
+		"KEERA_PUBLIC_URL":                   "https://keera.example",
+		"KEERA_BILLING_GATEWAY_FEE":          "0.05",
+		"KEERA_BILLING_POSTFINANCE_SPACE_ID": "4711",
+		"KEERA_BILLING_POSTFINANCE_USER_ID":  "1",
+		"KEERA_BILLING_POSTFINANCE_AUTH_KEY": "c2VjcmV0",
+	}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Payments == nil {
+		t.Error("payments are off")
 	}
 }

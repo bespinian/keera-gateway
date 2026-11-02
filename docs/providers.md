@@ -115,7 +115,9 @@ keera model add keera-swiss --provider infomaniak --product-id 100234 \
 For a **self-hosted model**, the fields under **Advanced options** default when
 left empty: the kind is chat, the model is enabled, and the location is
 `onprem` for a backend inside your network. A backend outside it needs a
-location.
+location. Its prices are the deployment's
+[gateway fee](billing.md#the-gateway-fee), so the form shows them and asks for
+none.
 
 ## Where the credential lives
 
@@ -156,8 +158,10 @@ provider wrote to it).
 
 List price is not your price, so put a negotiated rate, a discount or an
 internal cross-charge on the entry. A model on the deployment's own key is the
-exception: it is always billed at list price ([billing.md](billing.md)). The
-prices go stale; see [billing.md](billing.md#keep-in-mind).
+exception: it is always billed at list price ([billing.md](billing.md)). A
+self-hosted model is another: its prices are the deployment's
+[gateway fee](billing.md#the-gateway-fee), or 0 without one, and cannot be set.
+The prices go stale; see [billing.md](billing.md#keep-in-mind).
 
 ### Cached input
 
@@ -186,7 +190,8 @@ the cached half of every prompt from a budget.
 keera model set keera-frontier --price-in 4 --price-cached 0.4
 ```
 
-A model in your own infrastructure reports no cache and needs no cached price.
+A model in your own infrastructure reports no cache, and its prices are the
+[gateway fee](billing.md#the-gateway-fee) anyway.
 
 ### Cache writes
 

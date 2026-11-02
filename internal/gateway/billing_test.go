@@ -178,9 +178,8 @@ func TestARequestOnTheDeploymentsKeyHoldsCreditWhileItRuns(t *testing.T) {
 	h.post(t, "/v1/chat/completions", body)
 
 	// The filter's model is on the organisation's own key, so it adds nothing.
-	want, _ := h.src.models["keera-code"].Bill(policy.Tokens{
-		Input: len(body) / bytesPerToken, Output: 1000,
-	})
+	most := policy.Tokens{Input: len(body) / bytesPerToken, Output: 1000}
+	want, _ := h.src.models["keera-code"].Bill(most, most)
 	waitFor(t, "the hold to be given back", func() bool {
 		h.budgets.mu.Lock()
 		defer h.budgets.mu.Unlock()
@@ -203,8 +202,10 @@ func TestARoutedRequestHoldsItsDecisionOnTopOfItsAnswer(t *testing.T) {
 	h.post(t, "/v1/chat/completions", body)
 
 	in := len(body) / bytesPerToken
-	answer, _ := h.src.models["keera-large"].Bill(policy.Tokens{Input: in, Output: 1000})
-	decision, _ := h.src.models["keera-picker"].Bill(policy.Tokens{Input: in, Output: routeOutputTokens})
+	most := policy.Tokens{Input: in, Output: 1000}
+	answer, _ := h.src.models["keera-large"].Bill(most, most)
+	decided := policy.Tokens{Input: in, Output: routeOutputTokens}
+	decision, _ := h.src.models["keera-picker"].Bill(decided, decided)
 	want := answer.CreditMicros + 2*decision.CreditMicros
 	waitFor(t, "the hold to be given back", func() bool {
 		h.budgets.mu.Lock()

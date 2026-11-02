@@ -443,6 +443,9 @@ reaches your network:
 | Models and MCP servers on public addresses, with their own keys | MCP servers inside your network                     |
 |                                                                 | Models on your provider keys, without card payments |
 
+With a [gateway fee](billing.md#the-gateway-fee) and card payments, its models
+on public addresses need credit too, like every organisation's.
+
 A request for something that waits is refused with `org_limited`, and
 `/api/v1/models` does not list it. A banner on every screen names what waits.
 With card payments, while the panel's first-run checklist asks for credit (see

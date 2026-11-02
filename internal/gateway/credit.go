@@ -9,41 +9,42 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// onKey reports whether a request may call any model on the deployment's own
-// provider key, which may need prepaid credit. It runs before anything is
-// spent, so a model a route step might pick counts even if it picks another.
-func (s *Server) onKey(c *call) bool {
-	return len(s.keyDeciders(c)) > 0 || len(s.keyAnswerers(c)) > 0 ||
-		s.filtersOnKey(c.res.Key.OrgID, s.callFilters(c))
+// billed reports whether a request may call any billed model: one on the
+// deployment's own provider key, or one with a gateway fee. Such a request may
+// need prepaid credit. It runs before anything is spent, so a model a route
+// step might pick counts even if it picks another.
+func (s *Server) billed(c *call) bool {
+	return len(s.billedDeciders(c)) > 0 || len(s.billedAnswerers(c)) > 0 ||
+		s.filtersBilled(c.res.Key.OrgID, s.callFilters(c))
 }
 
-// keyAnswerers is the models on the deployment's key that may answer a
-// request: the one it names, or every one its router may reach.
-func (s *Server) keyAnswerers(c *call) []policy.Model {
+// billedAnswerers is the billed models that may answer a request: the one it
+// names, or every one its router may reach.
+func (s *Server) billedAnswerers(c *call) []policy.Model {
 	if !c.viaRouter() {
-		if c.model.PlatformKey {
+		if c.model.Billing != nil {
 			return []policy.Model{c.model}
 		}
 		return nil
 	}
 	var out []policy.Model
 	for _, alias := range c.router.Reaches() {
-		if m, ok := s.keyModel(c.res.Key.OrgID, alias); ok {
+		if m, ok := s.billedModel(c.res.Key.OrgID, alias); ok {
 			out = append(out, m)
 		}
 	}
 	return out
 }
 
-// keyDeciders is the deciding models of a request's route steps that are on
-// the deployment's key.
-func (s *Server) keyDeciders(c *call) []policy.Model {
+// billedDeciders is the deciding models of a request's route steps that are
+// billed.
+func (s *Server) billedDeciders(c *call) []policy.Model {
 	var out []policy.Model
 	for _, rt := range c.router.Routes() {
 		if !rt.Decides() {
 			continue
 		}
-		if m, ok := s.keyModel(c.res.Key.OrgID, rt.Model); ok {
+		if m, ok := s.billedModel(c.res.Key.OrgID, rt.Model); ok {
 			out = append(out, m)
 		}
 	}
@@ -61,30 +62,30 @@ func (s *Server) callFilters(c *call) []string {
 	return append(out, c.res.Filters...)
 }
 
-func (s *Server) filtersOnKey(org string, filters []string) bool {
-	return len(s.keyFilterModels(org, filters)) > 0
+func (s *Server) filtersBilled(org string, filters []string) bool {
+	return len(s.billedFilterModels(org, filters)) > 0
 }
 
-func (s *Server) keyFilterModels(org string, filters []string) []policy.Model {
+func (s *Server) billedFilterModels(org string, filters []string) []policy.Model {
 	var out []policy.Model
 	for _, alias := range filters {
 		f, ok := s.src.Filter(org, alias)
 		if !ok || !f.UsesModel() {
 			continue
 		}
-		if m, ok := s.keyModel(org, f.Model); ok {
+		if m, ok := s.billedModel(org, f.Model); ok {
 			out = append(out, m)
 		}
 	}
 	return out
 }
 
-func (s *Server) keyModel(org, alias string) (policy.Model, bool) {
+func (s *Server) billedModel(org, alias string) (policy.Model, bool) {
 	if alias == "" {
 		return policy.Model{}, false
 	}
 	m, ok := s.src.Model(org, alias)
-	return m, ok && m.PlatformKey
+	return m, ok && m.Billing != nil
 }
 
 // mostTokens is all a call may use: its whole body as prompt and its output
@@ -138,32 +139,34 @@ const mostOutputTokens = 10_000_000
 
 // creditHold is the most a request may take from the credit: mostTokens at the
 // dearest model it may reach, plus each route step's decision twice, plus a
-// full rewrite by each filter on the key. It errs high and is released once
-// the request is charged.
+// full rewrite by each billed filter. It errs high and is released once the
+// request is charged.
 func (s *Server) creditHold(c *call, b *body) int64 {
 	t := mostTokens(c.received, c.outputTokens(b))
 	in := t.Input
 	var most int64
-	for _, m := range s.keyAnswerers(c) {
-		if line, ok := m.Bill(t); ok {
+	for _, m := range s.billedAnswerers(c) {
+		if line, ok := m.Bill(t, t); ok {
 			most = max(most, line.CreditMicros)
 		}
 	}
 	// An unreadable decision by letter is asked again by name.
-	for _, m := range s.keyDeciders(c) {
-		if line, ok := m.Bill(policy.Tokens{Input: in, Output: routeOutputTokens}); ok {
+	decision := policy.Tokens{Input: in, Output: routeOutputTokens}
+	for _, m := range s.billedDeciders(c) {
+		if line, ok := m.Bill(decision, decision); ok {
 			most += 2 * line.CreditMicros
 		}
 	}
 	return most + s.filtersHold(c.res.Key.OrgID, s.callFilters(c), in)
 }
 
-// filtersHold is the most the filters on the deployment's key may cost to read
-// in tokens. Each may rewrite all of them.
+// filtersHold is the most the billed filters may cost to read in tokens. Each
+// may rewrite all of them.
 func (s *Server) filtersHold(org string, filters []string, in int) int64 {
 	var most int64
-	for _, m := range s.keyFilterModels(org, filters) {
-		if line, ok := m.Bill(policy.Tokens{Input: in, Output: in}); ok {
+	rewrite := policy.Tokens{Input: in, Output: in}
+	for _, m := range s.billedFilterModels(org, filters) {
+		if line, ok := m.Bill(rewrite, rewrite); ok {
 			most += line.CreditMicros
 		}
 	}
@@ -195,9 +198,9 @@ func outputCeiling(b *body) int {
 }
 
 // checkCredit says why a check may not call these models, or "" if it may. A
-// model on the deployment's key needs credit, as for a request.
+// billed model needs credit, as for a request.
 func (s *Server) checkCredit(org string, models ...policy.Model) string {
-	if !slices.ContainsFunc(models, func(m policy.Model) bool { return m.PlatformKey }) {
+	if !slices.ContainsFunc(models, func(m policy.Model) bool { return m.Billing != nil }) {
 		return ""
 	}
 	// Holding 0 only asks whether the organisation has credit.
@@ -207,8 +210,8 @@ func (s *Server) checkCredit(org string, models ...policy.Model) string {
 	return ""
 }
 
-// billCheck bills what a check spent on the deployment's key. It writes no
-// usage row, since a check is not a request.
+// billCheck bills what a check spent on billed models. It writes no usage
+// row, since a check is not a request.
 func (s *Server) billCheck(org string, bills []policy.BillLine) {
 	if len(bills) == 0 {
 		return

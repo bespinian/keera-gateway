@@ -17,8 +17,9 @@ type billingTotal struct {
 	BilledMicros int64 `json:"billed_micros"`
 }
 
-// billing is one month of use of the deployment's own provider keys, per
-// organisation and provider model, at list price. See docs/billing.md.
+// billing is one month of billed use, per organisation and model: the
+// deployment's own provider keys at list price, and the gateway fee on every
+// other model. See docs/billing.md.
 //
 // Administrators read their own organisation's. Operators read any, or all at
 // once.
@@ -77,7 +78,7 @@ func parseMonth(raw string, now time.Time) (time.Time, error) {
 func billingCSV(w http.ResponseWriter, month string, lines []store.BillingRow, payments bool) {
 	cw := beginCSV(w, "keera-billing-"+month+".csv")
 	head := []string{
-		"month", "org_id", "org_name", "provider", "model", "calls",
+		"month", "org_id", "org_name", "provider", "model", "gateway_fee", "calls",
 		"input_tokens", "cached_input_tokens", "cache_write_tokens", "output_tokens", "amount",
 	}
 	if payments {
@@ -87,6 +88,7 @@ func billingCSV(w http.ResponseWriter, month string, lines []store.BillingRow, p
 	for _, l := range lines {
 		rec := []string{
 			month, l.OrgID, l.OrgName, l.Provider, l.BackendModel,
+			strconv.FormatBool(l.GatewayFee),
 			strconv.FormatInt(l.Calls, 10),
 			strconv.FormatInt(l.InputTokens, 10),
 			strconv.FormatInt(l.CachedInputTokens, 10),

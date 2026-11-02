@@ -567,7 +567,7 @@ func (x *mcpExchange) admit(argBytes int) (held int64, why string) {
 	if err := x.s.budgets.Allow(x.res.Scopes, now); err != nil {
 		return 0, err.Error()
 	}
-	if !x.s.filtersOnKey(x.res.Key.OrgID, x.res.Filters) {
+	if !x.s.filtersBilled(x.res.Key.OrgID, x.res.Filters) {
 		return 0, ""
 	}
 	held, err := x.s.budgets.HoldCredit(x.res.Key.OrgID,

@@ -760,6 +760,10 @@ input[type="checkbox"]:disabled {
 .fold .field-row:last-child .field {
   margin-bottom: 0;
 }
+/* A field alone in its row is its row's last child, but more rows follow. */
+.fold .field-row:not(:last-child) > .field {
+  margin-bottom: 14px;
+}
 
 .seg {
   display: inline-flex;

@@ -1058,12 +1058,25 @@ function editModel(ctx, existing, providers, pick) {
     type: "date",
     value: m.release_date || "",
   });
-  const location = h("input", {
-    class: "input",
-    value: m.location || "",
-    placeholder: "from the backend URL",
-    list: "model-locations",
-  });
+  // Empty is worked out by the control plane. A location other than these,
+  // such as from a template file or a provider, is kept as an option so it
+  // is not lost on save.
+  const location = h(
+    "select",
+    { class: "select" },
+    h("option", { value: "" }, "From the backend URL"),
+    [
+      ...new Set([
+        "onprem",
+        "ch",
+        "eu",
+        "usa",
+        ...(providers || []).map((p) => p.location).filter(Boolean),
+        ...(m.location ? [m.location] : []),
+      ]),
+    ].map((l) => h("option", { value: l }, locationName(l))),
+  );
+  location.value = m.location || "";
   const priceIn = priceInput(m.input_micros_per_mtok);
   const priceOut = priceInput(m.output_micros_per_mtok);
   const priceCached = priceInput(m.cached_input_micros_per_mtok);
@@ -1132,6 +1145,32 @@ function editModel(ctx, existing, providers, pick) {
     );
   }
 
+  // A self-hosted model costs the gateway fee, or nothing without one. The
+  // control plane sets it as every price, so none is asked.
+  const fee = ctx.state.me.gateway_fee_micros || 0;
+  // A field of its own, so the row below keeps its distance.
+  const feeNote = h(
+    "div",
+    { class: "field", hidden: true },
+    h(
+      "div",
+      { class: "hint" },
+      fee
+        ? `Set by Keera: CHF ${listPrice(fee)} per million tokens for the ` +
+            "gateway. Running the model is up to you."
+        : "Set by Keera: self-hosted models are free here.",
+    ),
+  );
+  const lockFee = (self) => {
+    feeNote.hidden = !self;
+    cacheRow.hidden = self;
+    if (!self) return;
+    for (const el of [priceIn, priceOut, priceCached, priceWrite]) {
+      el.value = String(fee / 1e6);
+      el.disabled = true;
+    }
+  };
+
   // basics stays visible for a self-hosted model; extras is folded under
   // Advanced options. A hosted model folds both. See layout.
   const basics = h(
@@ -1159,43 +1198,57 @@ function editModel(ctx, existing, providers, pick) {
         marks.maxContext,
       ),
     ),
-    h(
-      "div",
-      { class: "field-row" },
-      field("Input price / Mtok (CHF)", priceIn, null, marks.priceIn),
-      field("Output price / Mtok (CHF)", priceOut, null, marks.priceOut),
+  );
+  // A self-hosted model has nothing to fill its display name in, so it sits
+  // beside the alias. A hosted model takes its provider's, so it is folded.
+  // See layout.
+  const nameField = field(
+    "Name",
+    displayName,
+    "The model's display name.",
+    marks.displayName,
+  );
+  const kindField = field("Kind", kind);
+  const nameKindRow = h("div", { class: "field-row" });
+  const aliasField = field(
+    "Alias",
+    alias,
+    "The name clients use. Changing it breaks them." +
+      ` Only ${orgNameOf(ctx)} can use this model.`,
+  );
+  const aliasRow = h("div", {});
+  // Blank means no rate, not a rate of zero: the input price applies. A
+  // self-hosted model has no cache prices: hidden there.
+  const cacheRow = h(
+    "div",
+    { class: "field-row" },
+    field(
+      "Cached input price / Mtok (CHF)",
+      priceCached,
+      "For prompt tokens a hosted provider serves from its cache. If " +
+        "blank, they are charged at the input price.",
+      marks.priceCached,
+    ),
+    field(
+      "Cache write price / Mtok (CHF)",
+      priceWrite,
+      "For prompt tokens a hosted provider writes to its cache. If " +
+        "blank, they are charged at the input price.",
+      marks.priceWrite,
     ),
   );
   const extras = h(
     "div",
     {},
-    h(
-      "div",
-      { class: "field-row" },
-      field(
-        "Display name",
-        displayName,
-        "The model's name for people.",
-        marks.displayName,
-      ),
-      field("Kind", kind),
-    ),
+    nameKindRow,
     h(
       "div",
       { class: "field-row" },
       field(
         "Location",
         location,
-        "Where the model runs, such as ch or usa. Clients see it. Left " +
-          "empty, a backend inside your network is onprem.",
-        // Suggestions only: any short lowercase name is accepted.
-        h(
-          "datalist",
-          { id: "model-locations" },
-          ["onprem", "ch", "eu", "usa"].map((l) =>
-            h("option", { value: l }, locationName(l)),
-          ),
-        ),
+        "Where the model runs. Clients see it. From the backend URL, a " +
+          "backend inside your network is on-prem.",
         marks.location,
       ),
       field(
@@ -1205,25 +1258,14 @@ function editModel(ctx, existing, providers, pick) {
         marks.releaseDate,
       ),
     ),
-    // Blank means no rate, not a rate of zero: the input price applies.
     h(
       "div",
       { class: "field-row" },
-      field(
-        "Cached input price / Mtok (CHF)",
-        priceCached,
-        "For prompt tokens a hosted provider serves from its cache. If " +
-          "blank, they are charged at the input price.",
-        marks.priceCached,
-      ),
-      field(
-        "Cache write price / Mtok (CHF)",
-        priceWrite,
-        "For prompt tokens a hosted provider writes to its cache. If " +
-          "blank, they are charged at the input price.",
-        marks.priceWrite,
-      ),
+      field("Input price / Mtok (CHF)", priceIn, null, marks.priceIn),
+      field("Output price / Mtok (CHF)", priceOut, null, marks.priceOut),
     ),
+    feeNote,
+    cacheRow,
     h(
       "div",
       { class: "field" },
@@ -1245,12 +1287,16 @@ function editModel(ctx, existing, providers, pick) {
   // fold; undefined leaves it, "auto" keeps it closed unless already open.
   const layout = (how, open) => {
     if (open === "auto") open = advanced.contains(fold) && fold.open;
+    const hosted = how !== "self";
+    aliasRow.className = hosted ? "" : "field-row";
+    aliasRow.replaceChildren(aliasField, ...(hosted ? [] : [nameField]));
+    nameKindRow.replaceChildren(...(hosted ? [nameField] : []), kindField);
     if (!how) {
       slot.replaceChildren();
       advanced.replaceChildren();
       return;
     }
-    const hosted = how === "hosted";
+    lockFee(!hosted);
     slot.replaceChildren(...(hosted ? [] : [basics]));
     fold.replaceChildren(summary, ...(hosted ? [basics] : []), extras);
     if (open !== undefined) fold.open = open;
@@ -1321,16 +1367,6 @@ function editModel(ctx, existing, providers, pick) {
   // apply, so neither is asked.
   const onPlatformKey = () =>
     state.hosted && !!state.place && !!state.place.p?.platform_key;
-  const platformNote = h(
-    "div",
-    { class: "field" },
-    h("label", {}, "Provider key"),
-    h(
-      "div",
-      { class: "hint" },
-      "Provided by Keera directly. Use is billed to your organisation.",
-    ),
-  );
   // A model already paid by subscription still shows the box, so it can be
   // turned back.
   const offersSubscription =
@@ -1339,7 +1375,6 @@ function editModel(ctx, existing, providers, pick) {
     const platform = onPlatformKey() && !paidByClaudePlan();
     subscriptionField.hidden = !anthropicChosen() || !offersSubscription;
     keyField.hidden = paidByClaudePlan() || platform;
-    platformNote.hidden = !platform;
     productSlot.hidden = platform;
   };
   subscription.addEventListener("change", paintSubscription);
@@ -1347,12 +1382,7 @@ function editModel(ctx, existing, providers, pick) {
   const rest = h(
     "div",
     {},
-    field(
-      "Alias",
-      alias,
-      "The name clients use. Changing it breaks them." +
-        ` Only ${orgNameOf(ctx)} can use this model.`,
-    ),
+    aliasRow,
     // Kept outside the fold: routers choose by it.
     field(
       "Description",
@@ -1366,7 +1396,6 @@ function editModel(ctx, existing, providers, pick) {
     slot,
     // The key stays above the fold: provider and model are already shown.
     keyField,
-    platformNote,
     advanced,
   );
 

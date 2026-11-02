@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -68,7 +69,8 @@ func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 		"where the model runs, such as ch, usa or onprem (default: the provider's; "+
 			"without one, onprem for a backend inside your network)")
 	fs.Float64Var(&f.priceIn, "price-in", -1,
-		"input price per million tokens, in CHF (0 for unbilled)")
+		"input price per million tokens, in CHF, of a --provider model (a self-hosted one "+
+			"costs the deployment's gateway fee)")
 	fs.Float64Var(&f.priceOut, "price-out", -1, "output price per million tokens")
 	fs.Float64Var(&f.priceCached, "price-cached", -1,
 		"price per million input tokens the provider served from its own prompt cache "+
@@ -344,6 +346,12 @@ func (r *modelRun) save(ctx context.Context, alias string, m catalog.Model) erro
 		return fmt.Errorf("%s: %w", alias, err)
 	}
 	parsed.OrgID = r.orgID
+	if parsed.SelfHosted() && r.f.pricesGiven() {
+		return errors.New("a self-hosted model costs this deployment's gateway fee, so its " +
+			"prices cannot be set; --price-in, --price-out, --price-cached and " +
+			"--price-cache-write are for a --provider model. See " +
+			"https://docs.keera.ch/manage/billing/")
+	}
 	if r.f.subscription && r.f.noSubscription {
 		return opposites("subscription", "no-subscription")
 	}
@@ -440,6 +448,11 @@ func (r *modelRun) putModel(ctx context.Context, m policy.Model, cred *string) e
 	err := out(r.asJSON, saved, func(w *table) { printModel(w, saved) })
 	warnUnusedBackends(r.f.backends, saved)
 	return err
+}
+
+// pricesGiven says a --price-* flag was given.
+func (f *modelFlags) pricesGiven() bool {
+	return f.priceIn >= 0 || f.priceOut >= 0 || f.priceCached >= 0 || f.priceWrite >= 0
 }
 
 // warnUnusedBackends says when the gateway ignored --backend, as it does for a

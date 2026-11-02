@@ -83,8 +83,8 @@ type Event struct {
 	// Tool is set on a tool call through the MCP proxy. The event then goes to
 	// tool_calls rather than usage_events.
 	Tool *ToolCall
-	// Bills is every call this event made on the deployment's own provider
-	// key, one row each in billing_lines.
+	// Bills is every billed call this event made, one row each in
+	// billing_lines.
 	Bills []policy.BillLine
 	// BillsOnly is a check's calls: billed, but not a request, so no usage
 	// row is written for it.

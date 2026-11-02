@@ -158,6 +158,9 @@ that provider, billed at list price. A provider that serves each customer at
 their own address, such as Infomaniak, also needs
 `KEERA_PROVIDER_<NAME>_PRODUCT_ID`. See [billing.md](billing.md#set-a-provider-key).
 
+`KEERA_BILLING_GATEWAY_FEE` charges a fee per million tokens on every other
+model, such as self-hosted ones. See [billing.md](billing.md#the-gateway-fee).
+
 `KEERA_BILLING_POSTFINANCE_*` lets organisations pay in advance, and
 `KEERA_BILLING_VAT` adds VAT to each payment. See
 [billing.md](billing.md#set-it-up).

@@ -419,10 +419,8 @@ func (s *Server) probeCall(ctx context.Context, m policy.Model, path string,
 		// Billed at its maximum: a check may not read far enough to find the
 		// usage record, and the cost is small.
 		output, _ := request["max_tokens"].(int)
-		if line, ok := m.Bill(policy.Tokens{
-			Input:  len(payload) / bytesPerToken,
-			Output: output,
-		}); ok {
+		most := policy.Tokens{Input: len(payload) / bytesPerToken, Output: output}
+		if line, ok := m.Bill(most, most); ok {
 			s.billCheck(m.OrgID, []policy.BillLine{line})
 		}
 	}

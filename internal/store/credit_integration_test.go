@@ -409,3 +409,34 @@ func TestTheFirstPaymentLiftsTheLimit(t *testing.T) {
 		t.Errorf("Settle = %+v, %v; want nothing lifted the second time", got, err)
 	}
 }
+
+// The gateway fee on a model is its own row, apart from the list price of the
+// same model.
+func TestTheGatewayFeeIsItsOwnRowOfTheBill(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	now := time.Now()
+	line := policy.BillLine{
+		Alias: "fast", Provider: "anthropic", BackendModel: "claude-haiku-4-5",
+		InputTokens: 10, Micros: 20, CreditMicros: 20,
+	}
+	fee := line
+	fee.GatewayFee, fee.Micros, fee.CreditMicros = true, 1, 1
+	if err := st.WriteEvents(ctx, []Event{
+		{TS: now, OrgID: f.orgID, Alias: "fast", Status: 200, Bills: []policy.BillLine{line}},
+		{TS: now, OrgID: f.orgID, Alias: "fast", Status: 200, Bills: []policy.BillLine{fee}},
+	}); err != nil {
+		t.Fatalf("WriteEvents: %v", err)
+	}
+	rows, err := st.Billing(ctx, f.orgID, now.Add(-time.Hour), now.Add(time.Hour))
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("billing = %+v, %v; want two rows", rows, err)
+	}
+	// The list price comes first.
+	if rows[0].GatewayFee || rows[0].BilledMicros != 20 || !rows[1].GatewayFee || rows[1].BilledMicros != 1 {
+		t.Errorf("billing = %+v", rows)
+	}
+	if got := balance(t, st, f.orgID); got != -21 {
+		t.Errorf("balance = %d, want both taken", got)
+	}
+}

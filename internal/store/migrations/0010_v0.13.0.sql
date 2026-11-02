@@ -69,3 +69,7 @@ CREATE UNIQUE INDEX payments_one_charge_idx ON payments (charge_id)
 -- Where a scope's models may run, such as ch or onprem, so prompts stay there.
 -- NULL inherits, like allowed_models; an empty list allows nothing.
 ALTER TABLE guardrails ADD COLUMN allowed_locations text[];
+
+-- A billing line can be the gateway fee on a model the deployment does not
+-- bill otherwise, rather than a provider's list price. See docs/billing.md.
+ALTER TABLE billing_lines ADD COLUMN gateway_fee boolean NOT NULL DEFAULT false;

@@ -45,6 +45,9 @@ type Options struct {
 	// Prepaid says organisations pay for those keys in advance, so one
 	// without credit cannot use them.
 	Prepaid bool
+	// GatewayFee is the price per million tokens, in micros, on every other
+	// model. Zero, the default, leaves them free. See docs/billing.md.
+	GatewayFee int64
 }
 
 // The defaults behind Options. internal/config reads them from here, so the
@@ -488,8 +491,18 @@ func sortedValues[T any](byAlias map[string]T) []T {
 func (r *Registry) finishModel(m *policy.Model, limited map[string]string) {
 	if r.opts.Platform.Covers(*m) {
 		r.usePlatformKey(m)
-	} else if len(m.APIKeyCiphertext) > 0 {
-		m.APIKey = r.open(ModelSecretName(m.OrgID, m.Alias), m.APIKeyCiphertext)
+	} else {
+		if len(m.APIKeyCiphertext) > 0 {
+			m.APIKey = r.open(ModelSecretName(m.OrgID, m.Alias), m.APIKeyCiphertext)
+		}
+		// Set again here, so a row saved with a price of its own is not served
+		// at it.
+		m.PriceAtFee(r.opts.GatewayFee)
+		if r.opts.GatewayFee > 0 {
+			m.Billing = &policy.Billing{
+				Provider: m.Provider, Credit: r.opts.Prepaid, FeeMicrosPerMTok: r.opts.GatewayFee,
+			}
+		}
 	}
 	if name, ok := limited[m.OrgID]; ok {
 		m.Limited, m.OrgName = true, name

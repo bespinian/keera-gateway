@@ -13,8 +13,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/payment"
 )
 
-// Payments is how organisations pay for the deployment's provider keys in
-// advance. See docs/billing.md.
+// Payments is how organisations pay for the deployment's provider keys and
+// the gateway fee in advance. See docs/billing.md.
 type Payments struct {
 	PostFinance payment.Settings
 	// VATBP is the VAT added to every payment, in basis points: 810 is 8.1%.
@@ -22,8 +22,8 @@ type Payments struct {
 }
 
 // payments reads the PostFinance Checkout account and the VAT. Without an
-// account it is nil, and provider key calls take nothing from credit.
-func payments(platform catalog.Platform, publicURL string) (*Payments, error) {
+// account it is nil, and billed calls take nothing from credit.
+func payments(platform catalog.Platform, fee int64, publicURL string) (*Payments, error) {
 	space := env("KEERA_BILLING_POSTFINANCE_SPACE_ID", "")
 	user := env("KEERA_BILLING_POSTFINANCE_USER_ID", "")
 	key := env("KEERA_BILLING_POSTFINANCE_AUTH_KEY", "")
@@ -53,9 +53,10 @@ func payments(platform catalog.Platform, publicURL string) (*Payments, error) {
 			"authentication key PostFinance Checkout showed for the application user: " +
 			"it is base64")
 	}
-	if len(platform) == 0 {
-		return nil, fmt.Errorf("payments are for the deployment's own provider keys, and " +
-			"no KEERA_PROVIDER_<NAME>_API_KEY is set")
+	if len(platform) == 0 && fee == 0 {
+		return nil, fmt.Errorf("payments are for the deployment's own provider keys and " +
+			"the gateway fee, and neither a KEERA_PROVIDER_<NAME>_API_KEY nor " +
+			"KEERA_BILLING_GATEWAY_FEE is set")
 	}
 	if !strings.HasPrefix(publicURL, "https://") && !onThisMachine(publicURL) {
 		return nil, fmt.Errorf("payments need KEERA_PUBLIC_URL to be an https address: " +
@@ -73,6 +74,24 @@ func payments(platform catalog.Platform, publicURL string) (*Payments, error) {
 		VATBP: vat,
 	}, nil
 }
+
+// gatewayFee reads KEERA_BILLING_GATEWAY_FEE, in CHF per million tokens, as
+// micros.
+func gatewayFee(raw string) (int64, error) {
+	if raw == "" {
+		return 0, nil
+	}
+	chf, err := strconv.ParseFloat(raw, 64)
+	if err != nil || math.IsNaN(chf) || chf < 0 || chf > maxGatewayFee {
+		return 0, fmt.Errorf("KEERA_BILLING_GATEWAY_FEE is %q; it is CHF per million "+
+			"tokens, from 0 to %d, such as 0.05", raw, maxGatewayFee)
+	}
+	return int64(math.Round(chf * 1_000_000)), nil
+}
+
+// maxGatewayFee is far above any sensible fee. It keeps a typo from billing
+// thousands for one request.
+const maxGatewayFee = 100
 
 // percentBP reads a percentage, such as 8.1, as basis points.
 func percentBP(raw string) (int64, error) {

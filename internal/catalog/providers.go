@@ -556,10 +556,11 @@ var providers = []Provider{{
 		InputMicrosPerMTok: 72_800,
 		Description:        "embedding, 3584 dimensions - semantic search and RAG in many languages",
 	}, {
-		// Infomaniak's own id for all-MiniLM-L12-v2. Infomaniak serves it free.
+		// Infomaniak's own id for all-MiniLM-L12-v2.
 		ID: "mini_lm_l12_v2", DisplayName: "all-MiniLM-L12-v2",
 		Kind: policy.KindEmbedding, MaxContext: 128,
-		Description: "tiny embedding model, 384 dimensions - fast indexing and prototypes",
+		InputMicrosPerMTok: 10_000,
+		Description:        "tiny embedding model, 384 dimensions - fast indexing and prototypes",
 	}, {
 		ID: "BAAI/bge-reranker-v2-m3", DisplayName: "BGE Reranker v2 M3",
 		Kind: policy.KindRerank, MaxContext: 8_192, ReleaseDate: "2024-03-18",

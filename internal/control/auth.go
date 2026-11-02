@@ -637,9 +637,13 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request, p *authn.Principal) 
 		"chat_url": s.opts.ChatURL,
 		// The same for Keera Agents.
 		"agents_url": s.opts.AgentsURL,
-		// Whether the deployment holds its own provider key, and so bills
-		// organisations.
-		"billing": len(s.opts.Platform) > 0,
+		// Whether the deployment holds its own provider key.
+		"provider_keys": len(s.opts.Platform) > 0,
+		// Whether the deployment bills organisations: it holds its own
+		// provider key, or charges the gateway fee.
+		"billing": len(s.opts.Platform) > 0 || s.opts.GatewayFee > 0,
+		// The gateway fee per million tokens, in micros, or 0.
+		"gateway_fee_micros": s.opts.GatewayFee,
 		// Whether organisations pay for those keys in advance, by card.
 		"payments": s.opts.Payments != nil,
 		// Whether Claude Code may come through on a Claude plan.

@@ -11,6 +11,9 @@ works, how to set it up, and why.
 This is how a public instance resells a provider. Without such a key, nothing changes: each organisation
 enters its own key, as described in [providers.md](providers.md).
 
+A deployment can also charge a [gateway fee](#the-gateway-fee) on every other
+model: self-hosted ones, and ones on the organisation's own keys.
+
 With a PostFinance Checkout account, organisations also
 [pay in advance](#pay-in-advance), by card, and you can charge an organisation
 a [fixed fee every month or year](#recurring-charges).
@@ -66,12 +69,58 @@ deployment's key, whichever one answers it.
 
 A subscription model is not affected: each person's own Claude plan pays for it
 ([subscriptions.md](subscriptions.md)). Self-hosted models are not affected
-either.
+either, except by the [gateway fee](#the-gateway-fee).
+
+## The gateway fee
+
+A model that is not on a deployment's key earns the deployment nothing, but
+every request still goes through the gateway. The gateway fee charges for that:
+
+```sh
+KEERA_BILLING_GATEWAY_FEE=0.05   # CHF per million tokens
+```
+
+| Setting                     | What it does                                                                                        |
+| --------------------------- | --------------------------------------------------------------------------------------------------- |
+| `KEERA_BILLING_GATEWAY_FEE` | CHF per million tokens on every model not on the deployment's keys. Default 0: no fee. At most 100. |
+
+It applies to self-hosted models, models on the organisation's own provider
+keys, and [subscription models](subscriptions.md). A Claude plan pays for the
+model, not for the gateway. Every token costs the same, input, output, cached or
+not, since the gateway handles each one the same way.
+
+**Who counts the tokens.** A hosted provider's usage record is used as it is. A
+self-hosted backend can report whatever it likes, so the gateway counts its
+tokens itself, from what it passed on: the whole request body it sent, and the
+text that came back (content, reasoning and tool calls), at 4 bytes a token. An
+image counts by its size in the request. The usage row still shows the
+backend's own numbers, but its cost is the gateway's count.
+
+**Self-hosted models cost the fee.** The fee is every price of a self-hosted
+model: input, output, cached and cache write. Without a fee, they are 0. Nobody
+sets them: the panel shows them and does not let anyone change them, `keera
+model` refuses `--price-*` for a self-hosted model, and the control API
+replaces any price it is sent, as does a template file. Budgets and reports use
+the fee too, so they match the bill. A model saved with a price of its own is
+priced at the fee from the next start. Models at a hosted provider keep their
+own prices: the provider's bill is the organisation's.
+
+**Every call pays it**, like a call on the deployment's key: the request
+itself, and the calls a [filter](filters.md) or a [router](routers.md) makes to
+such a model. `keera model check` too. Each is a row in the monthly report,
+marked as the gateway fee, apart from list-price rows.
+
+**It needs credit** when organisations [pay in advance](#pay-in-advance), so
+switching on the fee stops every organisation without credit, its own models
+included. Grant credit, or warn organisations, before you set it. Without
+payments, the fee is only in the monthly report, to bill by invoice. Payments
+need no provider key when the fee is set.
 
 ## What is billed
 
-Every call to such a model is billed, at list price: the request itself, and
-the calls a [filter](filters.md) or a [router](routers.md) makes to it. Each
+Every call to a model on the deployment's key is billed, at list price: the
+request itself, and the calls a [filter](filters.md) or a [router](routers.md)
+makes to it. Each
 call is one row in `billing_lines`, written in the same batch as the usage
 row.
 
@@ -115,7 +164,7 @@ The same report is at `GET /control/v1/billing?month=2026-09`, and as CSV with
 `&format=csv`. Months are UTC, like budgets.
 
 In the panel, only administrators and operators see it, and only on a
-deployment that holds at least one provider key.
+deployment that holds at least one provider key or charges the gateway fee.
 
 ## Pay in advance
 
@@ -124,7 +173,8 @@ they use the deployment's keys. Each call takes its list price from the
 credit. When the credit is used up, calls to such models are refused with
 `402 credit_exhausted`. So are calls while
 [running requests hold](#keep-in-mind) all that is left. The organisation's own models keep working, and so do
-subscription models.
+subscription models, unless the deployment charges the
+[gateway fee](#the-gateway-fee).
 
 ### Set it up
 
@@ -153,8 +203,9 @@ KEERA_BILLING_VAT=8.1                   # optional
 | `KEERA_BILLING_VAT`                  | VAT added on top of each payment, in percent, such as `8.1`. Default 0. It applies to every organisation alike. |
 | `KEERA_BILLING_POSTFINANCE_URL`      | The API's address. Default `https://checkout.postfinance.ch`, which serves test spaces too.                     |
 
-Payments also need at least one `KEERA_PROVIDER_<NAME>_API_KEY`, and
-`KEERA_PUBLIC_URL` set to an `https` address: PostFinance sends people back
+Payments also need at least one `KEERA_PROVIDER_<NAME>_API_KEY` or
+[`KEERA_BILLING_GATEWAY_FEE`](#the-gateway-fee), and `KEERA_PUBLIC_URL` set to
+an `https` address: PostFinance sends people back
 there after they pay. On your own machine, `http://localhost`, any
 `*.localhost` name and a loopback address such as `http://127.0.0.1` work too.
 
@@ -162,7 +213,8 @@ A setting that cannot work stops the start: only some of the three
 `KEERA_BILLING_POSTFINANCE_*` settings, `KEERA_BILLING_POSTFINANCE_URL` or
 `KEERA_BILLING_VAT` without them, a space id that is not a number, an
 authentication key that is not base64, a VAT that is not a number from 0 to
-100, no provider key, or a `KEERA_PUBLIC_URL` that is not `https`.
+100, neither a provider key nor a gateway fee, or a `KEERA_PUBLIC_URL` that is
+not `https`.
 
 ### Turning it on
 

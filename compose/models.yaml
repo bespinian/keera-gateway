@@ -19,10 +19,8 @@ models:
     description: >-
       Fast and served inside this cluster. Short edits, syntax questions,
       renames, commit messages and everyday work.
-    # Micro-units of CHF per million tokens. 0 means not billed, as on a
-    # dedicated or on-premises deployment.
-    input_micros_per_mtok: 0
-    output_micros_per_mtok: 0
+    # No prices: a self-hosted model costs KEERA_BILLING_GATEWAY_FEE, or
+    # nothing without one. See docs/billing.md#the-gateway-fee.
 
   # Keera Decider: Laya, a classifier served by laya-serve. A decision model
   # writes no text, so only routers and gate filters use it, not clients. See
@@ -40,8 +38,6 @@ models:
     max_context_tokens: 2048
     description: >-
       Decides, does not write. A classifier for routers and gate filters.
-    input_micros_per_mtok: 0
-    output_micros_per_mtok: 0
 
 # A hosted model, for work a small local model cannot do, or before there are
 # GPUs. `provider` fills in the endpoint, context window, prices, description,

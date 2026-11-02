@@ -221,7 +221,7 @@ func TestAdministratorsReadOnlyTheirOwnBill(t *testing.T) {
 	}
 
 	w = invoke(s.billing, operator(), http.MethodGet, "/v1/billing?month=2026-09&format=csv", "")
-	if !strings.Contains(w.Body.String(), "2026-09,org_1,Example Bank,anthropic,claude-haiku-4-5,2,2000,0,0,200,0.003\n") {
+	if !strings.Contains(w.Body.String(), "2026-09,org_1,Example Bank,anthropic,claude-haiku-4-5,false,2,2000,0,0,200,0.003\n") {
 		t.Errorf("csv = %s", w.Body)
 	}
 	if w := invoke(s.billing, operator(), http.MethodGet, "/v1/billing?month=september", ""); w.Code != http.StatusBadRequest {
@@ -229,21 +229,70 @@ func TestAdministratorsReadOnlyTheirOwnBill(t *testing.T) {
 	}
 }
 
-func TestThePanelShowsBillingOnlyWithADeploymentKey(t *testing.T) {
+func TestThePanelShowsBillingOnlyWhenTheDeploymentBills(t *testing.T) {
 	for _, tt := range []struct {
 		platform catalog.Platform
+		fee      int64
 		want     bool
-	}{{nil, false}, {testPlatform, true}} {
-		s := New(nil, nil, nil, nil, Options{OperatorKey: testOperatorKey, Platform: tt.platform},
-			slog.New(slog.DiscardHandler))
+	}{{nil, 0, false}, {testPlatform, 0, true}, {nil, 50_000, true}} {
+		s := New(nil, nil, nil, nil, Options{
+			OperatorKey: testOperatorKey, Platform: tt.platform, GatewayFee: tt.fee,
+		}, slog.New(slog.DiscardHandler))
 		w := httptest.NewRecorder()
 		s.me(w, httptest.NewRequest(http.MethodGet, "/v1/me", nil), operator())
 		var me map[string]any
 		if err := json.Unmarshal(w.Body.Bytes(), &me); err != nil {
 			t.Fatal(err)
 		}
-		if me["billing"] != tt.want {
-			t.Errorf("with %d provider keys, billing = %v, want %v", len(tt.platform), me["billing"], tt.want)
+		if me["billing"] != tt.want || me["provider_keys"] != (tt.platform != nil) ||
+			me["gateway_fee_micros"] != float64(tt.fee) {
+			t.Errorf("with %d provider keys and a fee of %d: billing = %v, provider_keys = %v, "+
+				"gateway_fee_micros = %v", len(tt.platform), tt.fee, me["billing"],
+				me["provider_keys"], me["gateway_fee_micros"])
 		}
+	}
+}
+
+// The organisation pays the fee for a self-hosted model, so that is its price,
+// whatever price it is saved with.
+func TestASelfHostedModelIsSavedAtTheGatewayFee(t *testing.T) {
+	st, ctx := routerStore(t)
+	s := New(st, platformRegistry(ctx, t, st), nil, nil, Options{
+		OperatorKey: testOperatorKey, GatewayFee: 50_000,
+	}, slog.New(slog.DiscardHandler))
+
+	w := invoke(s.putModel, admin("org_1"), http.MethodPut, "/v1/models/engine",
+		`{"backend_model":"qwen","backends":["http://engine:8000/v1"],"location":"onprem",`+
+			`"input_micros_per_mtok":3000000,"output_micros_per_mtok":3000000,"enabled":true}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body)
+	}
+	var got policy.Model
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.InputMicrosPerMTok != 50_000 || got.OutputMicrosPerMTok != 50_000 {
+		t.Errorf("saved at %d in, %d out; want the fee", got.InputMicrosPerMTok, got.OutputMicrosPerMTok)
+	}
+	// Without prices, it would be refused as unpriced.
+	w = invoke(s.putModel, admin("org_1"), http.MethodPut, "/v1/models/engine2",
+		`{"backend_model":"qwen","backends":["http://engine:8000/v1"],"location":"onprem","enabled":true}`)
+	if w.Code != http.StatusOK {
+		t.Errorf("a self-hosted model without prices: %d %s", w.Code, w.Body)
+	}
+
+	// Without a fee it is free, whatever price it is sent.
+	free := New(st, platformRegistry(ctx, t, st), nil, nil, Options{OperatorKey: testOperatorKey},
+		slog.New(slog.DiscardHandler))
+	w = invoke(free.putModel, admin("org_1"), http.MethodPut, "/v1/models/engine3",
+		`{"backend_model":"qwen","backends":["http://engine:8000/v1"],"location":"onprem",`+
+			`"input_micros_per_mtok":3000000,"output_micros_per_mtok":3000000,"enabled":true}`)
+	got = policy.Model{}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("%d: %s", w.Code, w.Body)
+	}
+	if got.InputMicrosPerMTok != 0 || got.OutputMicrosPerMTok != 0 {
+		t.Errorf("without a fee, saved at %d in, %d out; want 0", got.InputMicrosPerMTok,
+			got.OutputMicrosPerMTok)
 	}
 }

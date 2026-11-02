@@ -49,5 +49,6 @@ func leastTokens(texts []string, kind policy.Kind) int {
 const bytesPerTokenTypical = 4
 
 // estimateInputTokens is used when a stream not on the deployment's key ends
-// without its usage record. It errs a little high, as a guardrail should.
+// without its usage record, and to bill a self-hosted model. It errs a little
+// high, as a guardrail should.
 func estimateInputTokens(payload []byte) int { return len(payload) / bytesPerTokenTypical }

@@ -521,7 +521,8 @@ func (s *Server) askGuard(ctx context.Context, m policy.Model, q guardQuestion, 
 	unreported := func() guardAnswer {
 		var a guardAnswer
 		if m.PlatformKey {
-			a.micros, a.bills = answerCost(m, mostTokens(len(payload), q.outputTokens))
+			most := mostTokens(len(payload), q.outputTokens)
+			a.micros, a.bills = answerCost(m, most, most)
 		}
 		return a
 	}
@@ -554,21 +555,27 @@ func (s *Server) askGuard(ctx context.Context, m policy.Model, q guardQuestion, 
 	}
 	a := guardAnswer{raw: raw, status: resp.StatusCode}
 	if resp.StatusCode < 300 {
-		if u := usageFromResponse(raw); u != nil {
-			a.micros, a.bills = answerCost(m, u.tokens())
-		} else {
+		u := usageFromResponse(raw)
+		if u == nil && m.PlatformKey {
 			a = unreported()
 			a.raw, a.status = raw, resp.StatusCode
+		} else {
+			a.micros, a.bills = answerCost(m, u.tokens(), countedTokens(payload, raw))
 		}
 	}
 	return a, nil
 }
 
 // answerCost is what a model charged for one answer, and its bill line if it
-// is on the deployment's key.
-func answerCost(m policy.Model, used policy.Tokens) (int64, []policy.BillLine) {
+// is billed. used is what the backend reported, counted the gateway's own
+// count; see policy.Model.Bill. A model billed on the count costs the count
+// too, so its budgets match the bill.
+func answerCost(m policy.Model, used, counted policy.Tokens) (int64, []policy.BillLine) {
+	if m.CountsTokens() {
+		used = counted
+	}
 	micros := m.Cost(used)
-	if line, ok := m.Bill(used); ok && used.Input+used.Output > 0 {
+	if line, ok := m.Bill(used, counted); ok && line.InputTokens+line.OutputTokens > 0 {
 		return micros, []policy.BillLine{line}
 	}
 	return micros, nil

@@ -728,7 +728,9 @@ paths:
                   - gateway_url
                   - chat_url
                   - agents_url
+                  - provider_keys
                   - billing
+                  - gateway_fee_micros
                   - payments
                   - claude_subscriptions
                   - passkeys
@@ -776,8 +778,16 @@ paths:
                   agents_url:
                     type: string
                     description: Keera Agents, or empty.
+                  provider_keys:
+                    type: boolean
+                    description: Whether the deployment holds its own provider keys.
                   billing:
                     type: boolean
+                    description: Whether the deployment bills organisations, for its provider keys or the gateway fee.
+                  gateway_fee_micros:
+                    type: integer
+                    format: int64
+                    description: The gateway fee per million tokens on models the deployment does not bill otherwise, in millionths of CHF. 0 means none. See https://docs.keera.ch/manage/billing/.
                   payments:
                     type: boolean
                   claude_subscriptions:
@@ -2566,7 +2576,9 @@ paths:
         Administrators only. A new model is put on the organisation's
         allow-list, if it has one. For a provider whose key the deployment
         holds, the backend and prices are set by the gateway and `api_key`
-        must be left out. See https://docs.keera.ch/manage/models/.
+        must be left out. A self-hosted model, one with no `provider`, costs
+        the deployment's gateway fee, or nothing without one: any price sent
+        for it is replaced. See https://docs.keera.ch/manage/models/.
       parameters:
         - $ref: "#/components/parameters/OrgID"
       requestBody:
@@ -4113,7 +4125,7 @@ paths:
             text/csv:
               schema:
                 type: string
-                description: "Columns: month, org_id, org_name, provider, model, calls, input_tokens, cached_input_tokens, cache_write_tokens, output_tokens, amount, and from_credit when the deployment takes payments."
+                description: "Columns: month, org_id, org_name, provider, model, gateway_fee, calls, input_tokens, cached_input_tokens, cache_write_tokens, output_tokens, amount, and from_credit when the deployment takes payments."
           headers:
             Content-Disposition:
               description: "With `format=csv`: an attachment and its file name."
@@ -9588,12 +9600,13 @@ components:
           description: Sessions by outcome, whichever outcome was asked for.
     BillingRow:
       type: object
-      description: One organisation's use of one provider model in a month.
+      description: One organisation's use of one model in a month, at list price or as the gateway fee.
       required:
         - org_id
         - org_name
         - provider
         - backend_model
+        - gateway_fee
         - calls
         - input_tokens
         - cached_input_tokens
@@ -9609,9 +9622,13 @@ components:
           description: Empty for an organisation deleted since.
         provider:
           type: string
+          description: Empty for a self-hosted model.
         backend_model:
           type: string
           description: The provider's name for the model.
+        gateway_fee:
+          type: boolean
+          description: Whether the row is the gateway fee on a model the deployment does not bill otherwise, rather than a list price. Its tokens are counted by the gateway for a self-hosted model.
         calls:
           type: integer
           format: int64

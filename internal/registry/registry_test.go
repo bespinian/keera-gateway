@@ -989,3 +989,44 @@ func TestACallerWhoHangsUpWaitingForASlotGivesItUp(t *testing.T) {
 		t.Error("the abandoned query is still marked in flight, so nobody can retry it")
 	}
 }
+
+// The gateway fee bills every model the deployment does not bill otherwise.
+// A self-hosted one also costs just the fee, whatever price it was saved with.
+func TestTheGatewayFeeBillsEveryOtherModel(t *testing.T) {
+	models := func() []policy.Model {
+		return []policy.Model{
+			{OrgID: "org_1", Alias: "engine", InputMicrosPerMTok: 9, Backends: []string{"http://engine:8000/v1"}},
+			{OrgID: "org_1", Alias: "own-key", Provider: "mistral", InputMicrosPerMTok: 9},
+			{OrgID: "org_1", Alias: "billed", Provider: "anthropic", BackendModel: "claude-haiku-5-5"},
+		}
+	}
+	s := newSource()
+	s.models = models()
+	platform := catalog.Platform{"anthropic": {APIKey: "sk-platform"}}
+	r := newRegistry(t, s, Options{Platform: platform, Prepaid: true, GatewayFee: 50_000})
+
+	engine, _ := r.Model("org_1", "engine")
+	if engine.Billing == nil || engine.Billing.FeeMicrosPerMTok != 50_000 || !engine.Billing.Credit ||
+		engine.InputMicrosPerMTok != 50_000 || !engine.CountsTokens() {
+		t.Errorf("engine = %+v, billing %+v; want the fee as its price and its bill", engine, engine.Billing)
+	}
+	own, _ := r.Model("org_1", "own-key")
+	if own.Billing == nil || own.Billing.FeeMicrosPerMTok != 50_000 || own.InputMicrosPerMTok != 9 ||
+		own.CountsTokens() {
+		t.Errorf("own-key = %+v, billing %+v; want the fee, its own price, and the provider's count",
+			own, own.Billing)
+	}
+	if billed, _ := r.Model("org_1", "billed"); billed.Billing == nil || billed.Billing.FeeMicrosPerMTok != 0 {
+		t.Errorf("a model on the deployment's key pays the fee: %+v", billed.Billing)
+	}
+
+	s = newSource()
+	s.models = models()
+	free := newRegistry(t, s, Options{})
+	if m, _ := free.Model("org_1", "engine"); m.Billing != nil || m.InputMicrosPerMTok != 0 {
+		t.Errorf("without a fee, engine = %+v, billing %+v; want it free", m, m.Billing)
+	}
+	if m, _ := free.Model("org_1", "own-key"); m.InputMicrosPerMTok != 9 {
+		t.Errorf("without a fee, own-key lost its price: %+v", m)
+	}
+}

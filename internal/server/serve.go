@@ -109,6 +109,7 @@ func serve(ctx context.Context) error {
 		SessionGap:          cfg.SessionGap,
 		Template:            template,
 		Platform:            cfg.Platform,
+		GatewayFee:          cfg.GatewayFee,
 		Payments:            buildPayments(cfg),
 		ClaudeSubscriptions: cfg.ClaudeSubscriptions,
 	}, log)
@@ -205,6 +206,7 @@ func loadTemplate(cfg config.Config, log *slog.Logger) (store.OrgTemplate, error
 			if err := cfg.Platform.Lock(&models[i]); err != nil {
 				return t, fmt.Errorf("%s: '%s': %w", cfg.ModelsFile, m.Alias, err)
 			}
+			models[i].PriceAtFee(cfg.GatewayFee)
 			names = append(names, m.Alias)
 		}
 		log.Info("read model template", "file", cfg.ModelsFile, "models", names)
@@ -269,6 +271,7 @@ func buildRegistry(ctx context.Context, st *store.Store, cfg config.Config,
 		Secrets:      secrets,
 		Platform:     cfg.Platform,
 		Prepaid:      cfg.Payments != nil,
+		GatewayFee:   cfg.GatewayFee,
 	}, log)
 	if err != nil {
 		return nil, fmt.Errorf("load control-plane state: %w", err)

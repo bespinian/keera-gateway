@@ -637,8 +637,9 @@ func TestModelAddFillsInTheProviderDefaults(t *testing.T) {
 // The endpoint replaces the whole entry, so a field the CLI forgot to restate
 // is gone.
 func TestModelSetChangesWhatItIsGivenAndKeepsTheRest(t *testing.T) {
+	// A hosted model: a self-hosted one's prices are the deployment's.
 	stored := map[string]any{
-		"alias": "keera-speed", "kind": "chat",
+		"alias": "keera-speed", "kind": "chat", "provider": "mistral",
 		"backends":      []string{"http://vllm-a:8000/v1", "http://vllm-b:8000/v1"},
 		"backend_model": "qwen3-8b", "max_context_tokens": 32768,
 		"input_micros_per_mtok": 100_000, "output_micros_per_mtok": 300_000,
@@ -682,6 +683,37 @@ func TestModelSetChangesWhatItIsGivenAndKeepsTheRest(t *testing.T) {
 			}
 			if body["backend_model"] != "qwen3-8b" || body["enabled"] != true {
 				t.Errorf("set changed a field it was not given: %v", body)
+			}
+		})
+	}
+}
+
+// A self-hosted model costs the gateway fee, so nobody prices it.
+func TestASelfHostedModelTakesNoPrice(t *testing.T) {
+	for _, args := range [][]string{
+		{
+			"add", "keera-new", "--backend", "http://vllm:8000/v1", "--backend-model", "qwen3-8b",
+			"--price-in", "1",
+		},
+		{"set", "keera-speed", "--price-cache-write", "0.5"},
+	} {
+		t.Run(args[0], func(t *testing.T) {
+			quiet(t)
+			f := newFakeControl(t, map[string]any{
+				"GET /v1/models": map[string]any{"data": []map[string]any{{
+					"alias": "keera-speed", "kind": "chat", "backends": []string{"http://vllm:8000/v1"},
+					"backend_model": "qwen3-8b", "enabled": true,
+				}}},
+				"PUT /v1/models/keera-speed": map[string]any{"alias": "keera-speed"},
+			})
+			err := modelCmd(context.Background(), args)
+			if err == nil || !strings.Contains(err.Error(), "gateway fee") {
+				t.Fatalf("err = %v, want the prices refused", err)
+			}
+			for _, r := range f.seen {
+				if r.method == "PUT" {
+					t.Errorf("the model was saved: %v", r.body)
+				}
 			}
 		})
 	}

@@ -80,8 +80,11 @@ type Options struct {
 	// Platform is the deployment's own provider keys. A model they cover
 	// takes no key of its own, and is billed.
 	Platform catalog.Platform
-	// Payments takes payments for those keys in advance. Nil means
-	// organisations do not pay in advance.
+	// GatewayFee is the price per million tokens, in micros, on every other
+	// model. Zero leaves them free.
+	GatewayFee int64
+	// Payments takes payments for those keys and the fee in advance. Nil
+	// means organisations do not pay in advance.
 	Payments *Payments
 	// ClaudeSubscriptions allows subscription models and keys. Off, neither
 	// can be created, and the gateway refuses the ones already there.

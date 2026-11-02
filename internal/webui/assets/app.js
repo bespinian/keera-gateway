@@ -711,7 +711,7 @@ function limitedNotice() {
     { style: { marginBottom: "16px" } },
     "This organisation is new. " +
       // With payments on, such a model is paid from credit, so it is open.
-      (state.me.billing && !state.me.payments
+      (state.me.provider_keys && !state.me.payments
         ? "Models on this deployment's provider keys, and models and MCP " +
           "servers inside the network, such as Keera Engine,"
         : "Models and MCP servers inside the network, such as Keera Engine,") +

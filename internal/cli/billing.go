@@ -123,7 +123,7 @@ type billingTotal struct {
 
 func printBilling(w *table, res billingResponse) {
 	if len(res.Data) == 0 {
-		printNone(w, "use of this deployment's provider keys in "+res.Month, "")
+		printNone(w, "billed use in "+res.Month, "")
 		return
 	}
 	head := "ORG\tMODEL\tCALLS\tIN\tCACHED\tWRITTEN\tOUT\tAMOUNT"
@@ -136,8 +136,8 @@ func printBilling(w *table, res billingResponse) {
 		if org == "" {
 			org = b.OrgID + " (deleted)"
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%s/%s\t%d\t%d\t%d\t%d\t%d\t%s", org, b.Provider,
-			b.BackendModel, b.Calls, b.InputTokens, b.CachedInputTokens, b.CacheWriteTokens,
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%d\t%d\t%d\t%s", org, billedModel(b),
+			b.Calls, b.InputTokens, b.CachedInputTokens, b.CacheWriteTokens,
 			b.OutputTokens,
 			policy.FormatMoney(b.BilledMicros))
 		if res.Payments {
@@ -148,6 +148,16 @@ func printBilling(w *table, res billingResponse) {
 	t := res.Total
 	_, _ = fmt.Fprintf(w, "total %s\t\t%d\t\t\t\t\t%s", res.Month, t.Calls, policy.FormatMoney(t.BilledMicros))
 	_, _ = fmt.Fprintln(w)
+}
+
+// billedModel names a row's model, and says when it is the gateway fee rather
+// than a list price.
+func billedModel(b store.BillingRow) string {
+	name := cmp.Or(b.Provider, "self-hosted") + "/" + b.BackendModel
+	if b.GatewayFee {
+		name += " (gateway fee)"
+	}
+	return name
 }
 
 type creditResponse struct {

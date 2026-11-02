@@ -276,10 +276,6 @@ func checkProvider(t *testing.T, p Provider) {
 	}
 }
 
-// freeModels are listed at no charge by their provider, so a price of 0 is
-// on purpose.
-var freeModels = map[string]bool{"mini_lm_l12_v2": true}
-
 func checkProviderModel(t *testing.T, p Provider, m ProviderModel, seenDescription map[string]bool) {
 	t.Helper()
 	if m.ID == "" || m.MaxContext <= 0 {
@@ -308,7 +304,7 @@ func checkProviderModel(t *testing.T, p Provider, m ProviderModel, seenDescripti
 	switch {
 	case inputOnly && m.OutputMicrosPerMTok != 0:
 		t.Errorf("%s is a %s model with an output price; it writes nothing", m.ID, m.kindOrChat())
-	case inputOnly && m.InputMicrosPerMTok <= 0 && !freeModels[m.ID]:
+	case inputOnly && m.InputMicrosPerMTok <= 0:
 		t.Errorf("%s is priced %d; a defaulted price of 0 escapes every budget",
 			m.ID, m.InputMicrosPerMTok)
 	case !inputOnly &&
