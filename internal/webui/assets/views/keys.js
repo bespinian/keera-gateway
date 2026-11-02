@@ -621,7 +621,7 @@ function issueKey(ctx, projects, users, last = {}) {
   const person = h(
     "select",
     { class: "select" },
-    h("option", { value: "" }, NO_USER),
+    h("option", { value: "" }, "No user (service account)"),
     users.map((u) =>
       h(
         "option",

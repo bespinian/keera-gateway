@@ -143,8 +143,15 @@ function inLocations(m, locs, models) {
   });
 }
 
+/** placesName is where models may run, to go inside a sentence. Place names
+ *  keep their capitals. */
+function placesName(locs) {
+  return locs.length ? "in " + locs.map(locationName).join(", ") : "nowhere";
+}
+
 function locationsName(locs) {
-  return locs.length ? "In " + locs.map(locationName).join(", ") : "Nowhere";
+  const s = placesName(locs);
+  return s[0].toUpperCase() + s.slice(1);
 }
 
 /** Separate from openGuardrails so a caller that has the chain does not
@@ -513,7 +520,7 @@ function put(d, kind, b, v) {
       else d.filters.push(v);
       return;
     case "models":
-      // One or the other, as the form picks.
+      // Names, locations or both, as the form picks.
       d.allowed_models = v.models;
       d.allowed_locations = v.locations;
       return;
@@ -589,9 +596,14 @@ function blockName(env, b) {
     case "filter":
       return h("span", { class: "mono" }, b.alias);
     case "models":
-      return d.allowed_locations
-        ? locationsName(d.allowed_locations)
-        : listName(d.allowed_models, "model");
+      if (!d.allowed_locations) return listName(d.allowed_models, "model");
+      if (!d.allowed_models) return locationsName(d.allowed_locations);
+      return h(
+        "span",
+        {},
+        listName(d.allowed_models, "model"),
+        ", " + placesName(d.allowed_locations),
+      );
     case "tools":
       return listName(d.allowed_tools, "tool");
   }
@@ -613,19 +625,22 @@ function blockMeta(env, b) {
     const n = env.draft.filters.length;
     if (n > 1)
       bits.push(h("span", { class: "faint small" }, `${b.index + 1} of ${n}`));
-  } else if (b.kind === "models" && env.draft.allowed_locations) {
-    const locs = env.draft.allowed_locations;
-    if (
-      !env.models.some((m) => !m.router && inLocations(m, locs, env.models))
-    ) {
-      bits = [pill("Nothing is served", "bad")];
-    } else if (locs.some((l) => !locationAbove(env.ceilings, l))) {
-      bits = [pill("Some blocked above", "warn")];
-    }
   } else if (b.kind === "models") {
     const list = env.draft.allowed_models;
-    if (!list.length) bits = [pill("Nothing is served", "bad")];
-    else if (list.some((a) => !allowedAbove(env.ceilings, a, env.models))) {
+    const locs = env.draft.allowed_locations;
+    // A model named but not shown, such as a disabled one, still counts.
+    const served = !locs
+      ? list.length > 0
+      : env.models.some(
+          (m) =>
+            (list ? list.includes(m.alias) : !m.router) &&
+            inLocations(m, locs, env.models),
+        );
+    if (!served) bits = [pill("Nothing is served", "bad")];
+    else if (
+      (list && list.some((a) => !allowedAbove(env.ceilings, a, env.models))) ||
+      (locs && locs.some((l) => !locationAbove(env.ceilings, l)))
+    ) {
       bits = [pill("Some blocked above", "warn")];
     }
   } else if (b.kind === "tools" && !env.draft.allowed_tools.length) {
@@ -730,15 +745,19 @@ function blockFields(env, kind, b) {
     const named = modelBoxes(env);
     const placed = locationBoxes(env);
     // A new block asks how to allow models; an existing one shows its own.
-    let chosen = b ? (d.allowed_locations ? "locations" : "names") : null;
-    const panes = { names: named.el, locations: placed.el };
+    // Saving writes both lists, so a level with both must show both.
+    let chosen = null;
+    if (b && d.allowed_models && d.allowed_locations) chosen = "both";
+    else if (b) chosen = d.allowed_locations ? "locations" : "names";
     const sync = () => {
-      for (const [k, el] of Object.entries(panes)) el.hidden = k !== chosen;
+      named.el.hidden = chosen !== "names" && chosen !== "both";
+      placed.el.hidden = chosen !== "locations" && chosen !== "both";
     };
     const picker = modeTiles(MODEL_MODES, chosen, (value) => {
       chosen = value;
       sync();
-      const first = panes[value].querySelector("input");
+      const pane = value === "locations" ? placed.el : named.el;
+      const first = pane.querySelector("input");
       if (first) first.focus();
     });
     if (chosen) picker.choose(chosen);
@@ -759,9 +778,10 @@ function blockFields(env, kind, b) {
       ),
       read: () => {
         if (!chosen) throw new Error("Choose how to allow models.");
-        return chosen === "names"
-          ? { models: named.read(), locations: null }
-          : { models: null, locations: placed.read() };
+        return {
+          models: chosen === "locations" ? null : named.read(),
+          locations: chosen === "names" ? null : placed.read(),
+        };
       },
     };
   }
@@ -800,6 +820,12 @@ const MODEL_MODES = [
     icon: icons.map,
     name: "By location",
     what: "Allow every model that runs in the places you pick.",
+  },
+  {
+    value: "both",
+    icon: icons.shield,
+    name: "By name and location",
+    what: "Tick the models, and allow them only where they run in the places you pick.",
   },
 ];
 
@@ -1058,7 +1084,7 @@ function narrowedBy(levels) {
   const locs = narrowed(levels, "allowed_locations");
   return (
     `Narrowed by ${said.map((lv) => lv.label).join(", then ")}.` +
-    (locs ? ` Only models running ${locationsName(locs).toLowerCase()}.` : "")
+    (locs ? ` Only models running ${placesName(locs)}.` : "")
   );
 }
 
@@ -1226,7 +1252,7 @@ function describe(lim) {
     bits.push(n ? `${n} ${plural(n, "model")}` : "no model");
   }
   if (lim.allowed_locations) {
-    bits.push(`models ${locationsName(lim.allowed_locations).toLowerCase()}`);
+    bits.push(`models ${placesName(lim.allowed_locations)}`);
   }
   for (const rl of lim.rate_limits || []) bits.push(...rateShort(rl));
   for (const b of lim.budgets || []) bits.push(budgetText(b));

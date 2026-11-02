@@ -361,7 +361,9 @@ function overview(ctx, providers) {
       { class: "hint" },
       "Every request goes through the gateway. It checks the key and the " +
         "guardrails, runs the filters, then passes the request on to a model " +
-        "and records the cost. Need more help? Read the ",
+        "and records the cost.",
+      h("br"),
+      "Need more help? Read the ",
       h(
         "a",
         { href: docsURL(ctx), target: "_blank", rel: "noopener" },
