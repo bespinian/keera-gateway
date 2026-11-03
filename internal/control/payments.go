@@ -275,7 +275,12 @@ func (s *Server) payOnPage(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	pm store.Payment, action string,
 ) {
 	pay := s.opts.Payments
-	if err := s.st.CreatePayment(r.Context(), pm); err != nil {
+	switch err := s.st.CreatePayment(r.Context(), pm); {
+	case errors.Is(err, store.ErrTopUpUnderway):
+		conflict(w, "charge_underway", "the saved card is being charged for this period; "+
+			"check again in a few minutes")
+		return
+	case err != nil:
 		s.fail(w, err)
 		return
 	}
@@ -692,7 +697,17 @@ func (s *Server) chargeCard(ctx context.Context, pm store.Payment, token int64) 
 		return
 	}
 	charged, err := pay.Client.Charge(ctx, tx.ID)
-	if refused, ok := errors.AsType[*payment.Error](err); ok && refused.Status/100 == 4 {
+	if refused, ok := errors.AsType[*payment.Error](err); ok && refused.TurnedAway() {
+		// Not the card's fault, such as a rate limit or a wrong credential:
+		// nothing was charged, and the next round tries again.
+		s.log.Warn("PostFinance turned a charge of a saved card away; it is tried again",
+			"org_id", pm.OrgID, "kind", pm.Kind, "error", err)
+		if err := s.settleFailed(ctx, pm, "PostFinance Checkout turned the charge away", true); err != nil {
+			s.log.Warn("settling a charge of a saved card failed", "payment", pm.ID, "error", err)
+		}
+		return
+	}
+	if refused, ok := errors.AsType[*payment.Error](err); ok && refused.Refused() {
 		// PostFinance refused to charge the card at all, so nothing was
 		// charged, and trying again would be refused again.
 		s.log.Warn("PostFinance refused to charge a saved card", "org_id", pm.OrgID,

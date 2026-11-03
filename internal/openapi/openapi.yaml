@@ -4664,7 +4664,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: Nothing is due yet, and the saved card pays the next period when it starts. The code is `nothing_due`.
+          description: Nothing is due yet, and the saved card pays the next period when it starts (`nothing_due`). Or the saved card is being charged for this period (`charge_underway`).
           content:
             application/json:
               schema:

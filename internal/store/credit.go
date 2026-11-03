@@ -248,7 +248,8 @@ func deref(s *string) string {
 
 // ErrTopUpUnderway means a charge of the saved card is no longer due: another
 // automatic top-up for the organisation, or another charge for the same
-// period of a recurring charge, is under way or was made already.
+// period of a recurring charge, is under way or was made already. For a
+// recurring charge paid on the page, it means the saved card is being charged.
 var ErrTopUpUnderway = errors.New("store: an automatic top-up is under way")
 
 // CreatePayment records a payment that has not been paid yet. A charge of a
@@ -263,6 +264,11 @@ func (s *Store) CreatePayment(ctx context.Context, p Payment) error {
 	case p.Kind == PaymentCharge && !p.SaveCard:
 		from = `FROM recurring_charges c JOIN credit_accounts a ON a.org_id = c.org_id
 			WHERE c.id = $9 AND c.org_id = $2 AND ` + chargeDue + ` = $11 AND ` + chargeIsDue
+	case p.Kind == PaymentCharge:
+		// Paying on the page while the saved card is being charged would pay
+		// the period twice.
+		from = `WHERE NOT EXISTS (SELECT 1 FROM payments p WHERE p.kind = 'charge' AND p.charge_id = $9
+			AND p.state = 'pending' AND NOT p.save_card)`
 	}
 	// The casts name the types a SELECT cannot infer.
 	tag, err := s.pool.Exec(ctx, `INSERT INTO payments (id, org_id, kind, micros, vat_micros,

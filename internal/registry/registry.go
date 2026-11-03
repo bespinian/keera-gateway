@@ -501,6 +501,7 @@ func (r *Registry) finishModel(m *policy.Model, limited map[string]string) {
 		if r.opts.GatewayFee > 0 {
 			m.Billing = &policy.Billing{
 				Provider: m.Provider, Credit: r.opts.Prepaid, FeeMicrosPerMTok: r.opts.GatewayFee,
+				AtProvider: catalog.AtProvider(*m),
 			}
 		}
 	}

@@ -84,6 +84,8 @@ func TestAModelOnTheOrganisationsOwnKeyIsBilledWhatItReported(t *testing.T) {
 	m.Provider = "mistral"
 	h.src.models["keera-code"] = m
 	withGatewayFee(h, "keera-code")
+	// As the registry marks a model on the provider's own endpoint.
+	h.src.models["keera-code"].Billing.AtProvider = true
 
 	h.post(t, "/v1/chat/completions",
 		`{"model":"keera-code","messages":[{"role":"user","content":"hello"}]}`)
@@ -95,6 +97,83 @@ func TestAModelOnTheOrganisationsOwnKeyIsBilledWhatItReported(t *testing.T) {
 	if b := ev.Bills[0]; !b.GatewayFee || b.InputTokens != 10 || b.OutputTokens != 5 ||
 		b.Micros != 15 || b.Provider != "mistral" {
 		t.Errorf("bill = %+v, want the reported 10 in and 5 out at the fee", b)
+	}
+}
+
+// Naming a provider does not make a server the provider: a model of
+// "mistral" on the organisation's own server is counted like any other.
+func TestAServerThatOnlyNamesAProviderIsBilledWhatTheGatewayCounted(t *testing.T) {
+	h := newHarness(t, jsonBackend(lyingAnswer), nil, nil)
+	m := h.src.models["keera-code"]
+	m.Provider = "mistral"
+	h.src.models["keera-code"] = m
+	withGatewayFee(h, "keera-code")
+
+	h.post(t, "/v1/chat/completions",
+		`{"model":"keera-code","messages":[{"role":"user","content":"hello"}]}`)
+
+	ev := h.sink.last(t)
+	if len(ev.Bills) != 1 || ev.Bills[0].OutputTokens != 100 || ev.Bills[0].InputTokens == 0 {
+		t.Fatalf("bills = %+v, want the gateway's count", ev.Bills)
+	}
+}
+
+// A model of "anthropic" or "openai" gets the client's own API, so its answer
+// is counted in that shape too.
+func TestANativeAnswerFromAServerThatOnlyNamesAProviderIsCounted(t *testing.T) {
+	text := strings.Repeat("x", 400)
+	tests := []struct {
+		name, provider, path, request string
+		backend                       http.HandlerFunc
+	}{
+		{
+			"messages", "anthropic", "/v1/messages",
+			`{"model":"keera-frontier","max_tokens":64,"messages":[{"role":"user","content":"hello"}]}`,
+			jsonBackend(`{"id":"msg_1","type":"message","role":"assistant","content":[` +
+				`{"type":"text","text":"` + text + `"}],"usage":{"input_tokens":0,"output_tokens":0}}`),
+		},
+		{
+			"messages stream", "anthropic", "/v1/messages",
+			`{"model":"keera-frontier","max_tokens":64,"stream":true,` +
+				`"messages":[{"role":"user","content":"hello"}]}`,
+			rawSSEBackend(
+				`{"type":"message_start","message":{"id":"msg_1","usage":{"input_tokens":0,"output_tokens":0}}}`,
+				`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"`+text+`"}}`,
+				`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":0}}`,
+				`{"type":"message_stop"}`),
+		},
+		{
+			"responses", "openai", "/v1/responses",
+			`{"model":"keera-frontier","input":"hello"}`,
+			jsonBackend(`{"id":"resp_1","object":"response","status":"completed","output":[` +
+				`{"type":"message","role":"assistant","content":[{"type":"output_text","text":"` + text +
+				`"}]}],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}`),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, _ := providerHarness(t, tt.provider, "some-model", tt.backend, nil)
+			withGatewayFee(h, "keera-frontier")
+
+			resp := h.post(t, tt.path, tt.request)
+			_, _ = io.Copy(io.Discard, resp.Body)
+
+			ev := h.sink.last(t)
+			if len(ev.Bills) != 1 || ev.Bills[0].OutputTokens != 100 {
+				t.Fatalf("bills = %+v, want 100 tokens out", ev.Bills)
+			}
+		})
+	}
+}
+
+// rawSSEBackend streams events as they are, without the [DONE] of a chat
+// completion.
+func rawSSEBackend(events ...string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, e := range events {
+			_, _ = io.WriteString(w, "data: "+e+"\n\n")
+		}
 	}
 }
 
@@ -141,7 +220,26 @@ func TestWrittenBytesCountsEverythingTheModelWrote(t *testing.T) {
 			3 + 2 + 2,
 		},
 		{"a stream chunk", `{"choices":[{"delta":{"reasoning":"ab","content":"cd"}}]}`, 4},
+		{"reasoning under both names", `{"choices":[{"delta":{"reasoning":"ab","reasoning_content":"ab"}}]}`, 2},
 		{"a text completion", `{"choices":[{"text":"hello"}]}`, 5},
+		{
+			"a messages answer",
+			`{"content":[{"type":"thinking","thinking":"hm"},{"type":"text","text":"hello"},` +
+				`{"type":"tool_use","name":"ls","input":{}}]}`,
+			2 + 5 + 2 + 2,
+		},
+		{"a messages stream event", `{"type":"content_block_delta","delta":{"type":"text_delta","text":"ab"}}`, 2},
+		{"a messages tool stream event", `{"delta":{"type":"input_json_delta","partial_json":"{\"a"}}`, 3},
+		{"a messages stop event", `{"type":"message_delta","delta":{"stop_reason":"end_turn"}}`, 0},
+		{
+			"a responses answer",
+			`{"output":[{"type":"reasoning","summary":[{"text":"hm"}]},` +
+				`{"type":"message","content":[{"type":"output_text","text":"hello"}]},` +
+				`{"type":"function_call","name":"ls","arguments":"{}"}]}`,
+			2 + 5 + 2 + 2,
+		},
+		{"a responses stream event", `{"type":"response.output_text.delta","delta":"abc"}`, 3},
+		{"a responses end event", `{"type":"response.completed","response":{"output":[{"content":[{"text":"x"}]}]}}`, 0},
 		{"an embedding", `{"data":[{"embedding":[0.1,0.2,0.3]}]}`, 0},
 		{"not JSON", `nonsense`, 0},
 	}

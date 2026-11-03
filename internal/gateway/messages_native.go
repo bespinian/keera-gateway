@@ -84,6 +84,8 @@ func addTextBlock(d *treeDoc, block map[string]any) {
 		d.addField(block, "text")
 	case "search_result":
 		d.addField(block, "title")
+		// The URL reaches a translated request as text.
+		d.addField(block, "source")
 		for _, inner := range d.objects(block["content"]) {
 			addTextBlock(d, inner)
 		}

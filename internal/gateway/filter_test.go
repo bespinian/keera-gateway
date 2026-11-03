@@ -390,8 +390,8 @@ func TestFilterRewritesARerankQueryAndDocuments(t *testing.T) {
 	}
 }
 
-// A document may be a string or an object with a text. A misspelled key could
-// carry text past the filter, so it is refused.
+// A document may be a string or an object with a text. A misspelled key, or
+// text in another field, could carry text past the filter, so it is refused.
 func TestExtractRerankReadsTheQueryAndEachDocument(t *testing.T) {
 	b, err := parseBody([]byte(`{"query":"q","documents":["a",{"text":"b","id":7},42]}`))
 	if err != nil {
@@ -415,6 +415,8 @@ func TestExtractRerankReadsTheQueryAndEachDocument(t *testing.T) {
 		`{"query":{"content":[{"type":"text","text":"hidden"}]},"documents":["a"]}`,
 		`{"query":"q","documents":{"content":[{"type":"text","text":"hidden"}]}}`,
 		`{"query":"q","documents":[{"title":"hidden"}]}`,
+		`{"query":"q","documents":[{"text":"ok","title":"hidden"}]}`,
+		`{"query":"q","documents":[{"text":"ok","meta":{"notes":["hidden"]}}]}`,
 	} {
 		b, _ = parseBody([]byte(body))
 		if _, err := extractRerank(b); err == nil {

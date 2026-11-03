@@ -205,3 +205,29 @@ func TestAmountsAreWholeCentimes(t *testing.T) {
 		t.Errorf("Percent(810) = %s", got)
 	}
 }
+
+// Only a request PostFinance read and refused is refused for good. A charge
+// it turned away, or that may have gone through, is not the card's fault.
+func TestOnlyARequestPostFinanceReadIsRefused(t *testing.T) {
+	tests := []struct {
+		status            int
+		turnedAway, final bool
+	}{
+		{http.StatusBadRequest, false, true},
+		{442, false, true},
+		{http.StatusUnauthorized, true, false},
+		{http.StatusForbidden, true, false},
+		{http.StatusTooManyRequests, true, false},
+		{http.StatusRequestTimeout, false, false},
+		{http.StatusConflict, false, false},
+		{http.StatusInternalServerError, false, false},
+		{542, false, false},
+	}
+	for _, tt := range tests {
+		e := &Error{Status: tt.status}
+		if e.TurnedAway() != tt.turnedAway || e.Refused() != tt.final {
+			t.Errorf("%d: turned away %v, refused %v; want %v, %v",
+				tt.status, e.TurnedAway(), e.Refused(), tt.turnedAway, tt.final)
+		}
+	}
+}

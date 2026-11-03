@@ -94,3 +94,33 @@ func TestInfomaniaksEndpointTakesTheDeploymentsProductID(t *testing.T) {
 		t.Errorf("rerank backend = %s, want %s", m.Backends[0], want)
 	}
 }
+
+// Only the provider's own host makes its usage record trusted: an
+// organisation can name any provider for a server of its own.
+func TestAtProviderNeedsTheProvidersOwnHost(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		backends []string
+		want     bool
+	}{
+		{"its endpoint", "mistral", []string{"https://api.mistral.ai/v1"}, true},
+		{"its host in other case", "mistral", []string{"https://API.mistral.ai/v1/"}, true},
+		{"a product's endpoint", "infomaniak", []string{"https://api.infomaniak.com/2/ai/123/openai/v1"}, true},
+		{"another server", "mistral", []string{"http://vllm:8000/v1"}, false},
+		{"plain http", "mistral", []string{"http://api.mistral.ai/v1"}, false},
+		{"another host after a user", "mistral", []string{"https://api.mistral.ai@evil.example/v1"}, false},
+		{"one other backend", "mistral", []string{"https://api.mistral.ai/v1", "https://evil.example/v1"}, false},
+		{"another provider's host", "mistral", []string{"https://api.openai.com/v1"}, false},
+		{"no backends", "mistral", nil, false},
+		{"self-hosted", "", []string{"https://api.mistral.ai/v1"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := policy.Model{Provider: tt.provider, Backends: tt.backends}
+			if got := AtProvider(m); got != tt.want {
+				t.Errorf("AtProvider = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

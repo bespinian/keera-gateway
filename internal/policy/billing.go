@@ -19,6 +19,9 @@ type Billing struct {
 	// FeeMicrosPerMTok is the gateway's price per million tokens on a model
 	// the deployment does not bill otherwise. Zero means list price.
 	FeeMicrosPerMTok int64
+	// AtProvider says every backend is the provider's own endpoint, so the
+	// usage it reports is billed. Any other backend can report what it likes.
+	AtProvider bool
 }
 
 // BillLine is one billable call: to a model on the deployment's key, or the
@@ -41,8 +44,7 @@ type BillLine struct {
 
 // Bill is the bill line for one call to m, or false when m is not billed.
 // reported is what the backend said it used. counted is the gateway's own
-// estimate from what it passed on, which bills a self-hosted model: its
-// backend can report anything.
+// estimate from what it passed on, which bills a model that CountsTokens.
 func (m Model) Bill(reported, counted Tokens) (BillLine, bool) {
 	if m.Billing == nil {
 		return BillLine{}, false
@@ -91,10 +93,11 @@ func (m Model) line(t Tokens, micros int64) BillLine {
 	}
 }
 
-// CountsTokens says the gateway bills m on its own count of the tokens: m is
-// self-hosted and has a gateway fee.
+// CountsTokens says the gateway bills m on its own count of the tokens: m has
+// a gateway fee and is not served by its provider's own endpoint. Naming a
+// provider is not enough, or any server could be named one and report nothing.
 func (m Model) CountsTokens() bool {
-	return m.Billing != nil && m.Billing.FeeMicrosPerMTok > 0 && m.SelfHosted()
+	return m.Billing != nil && m.Billing.FeeMicrosPerMTok > 0 && !m.Billing.AtProvider
 }
 
 // SelfHosted says m runs on a server of the organisation's, not at a hosted

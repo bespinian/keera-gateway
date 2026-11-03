@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
@@ -30,6 +31,34 @@ import (
 // shutdownGrace is how long in-flight requests get to finish. Generous, as one
 // is often an editor mid-completion.
 const shutdownGrace = 45 * time.Second
+
+// cutOffGrace is how long requests cut off after shutdownGrace get to record
+// their usage.
+const cutOffGrace = 10 * time.Second
+
+// requests counts the requests being served.
+type requests struct{ n atomic.Int64 }
+
+func (q *requests) track(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q.n.Add(1)
+		defer q.n.Add(-1)
+		h.ServeHTTP(w, r)
+	})
+}
+
+// wait waits up to d for every request to return, and reports how many have
+// not.
+func (q *requests) wait(d time.Duration) int64 {
+	deadline := time.Now().Add(d)
+	for {
+		left := q.n.Load()
+		if left == 0 || time.Now().After(deadline) {
+			return left
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
 
 func serve(ctx context.Context) error {
 	cfg, err := config.Load()
@@ -119,9 +148,13 @@ func serve(ctx context.Context) error {
 	bg, stopBG := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopBG()
 
+	// The recorder stops last, after the requests that write to it.
+	recCtx, stopRecorder := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopRecorder()
+
 	var wg sync.WaitGroup
 	wg.Go(func() { reg.Run(bg) })
-	wg.Go(func() { recorder.Run(bg) })
+	wg.Go(func() { recorder.Run(recCtx) })
 	// Lets the panel show a request as soon as it is recorded.
 	wg.Go(func() { ctl.Run(bg) })
 	// Charges saved cards that ran low, and settles payments.
@@ -129,9 +162,10 @@ func serve(ctx context.Context) error {
 	wg.Go(func() { sweep(bg, reg, limiter, ctl, st, log) })
 	wg.Go(func() { retain(bg, st, cfg, log) })
 
+	var inFlight requests
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           routes(gw, ctl),
+		Handler:           inFlight.track(routes(gw, ctl)),
 		ReadHeaderTimeout: 15 * time.Second,
 		// No write timeout: it would cut off streams. The client's context and
 		// the upstream header timeout bound requests instead.
@@ -162,9 +196,14 @@ func serve(ctx context.Context) error {
 	defer cancel()
 	_ = srv.Shutdown(shutCtx)
 
-	// Stop the workers only now, so usage from requests that finished during
-	// the grace period is still written.
+	// Cut off the requests the grace did not see end. They still record what
+	// they used, so the recorder stops only once they have returned.
+	gw.Stop()
 	stopBG()
+	if left := inFlight.wait(cutOffGrace); left > 0 {
+		log.Error("requests still running at shutdown; their usage is lost", "count", left)
+	}
+	stopRecorder()
 	wg.Wait()
 	recorder.Wait()
 	if dropped := recorder.Dropped(); dropped > 0 {

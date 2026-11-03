@@ -344,8 +344,9 @@ Most tables grow with the number of customers. These grow with use:
 | `audit_log`     | administrative action, so it grows slowly        |
 
 `usage_events` is the request log, and by far the largest table. A row is ids,
-counts and a latency breakdown: about 500 bytes, and as much again in indexes.
-No prompt or completion text is stored. `usage_daily` holds its totals per day,
+counts and a latency breakdown: about 400 bytes, and 350 more in indexes. A
+filter run adds about 300 bytes for each filter on the request. No prompt or
+completion text is stored. `usage_daily` holds its totals per day,
 and is small: a row per key, model and client that was used that day.
 
 ```sh

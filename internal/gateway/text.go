@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
@@ -192,6 +193,13 @@ func addDocuments(d *treeDoc, field string, docs any) error {
 			if _, ok := doc["text"].(string); !ok {
 				return errors.New("each object in '" + field + "' must have a string 'text'")
 			}
+			// Some rerank APIs rank other fields too, so text there would
+			// reach the model unfiltered. An id as a number is fine.
+			for k, v := range doc {
+				if k != "text" && holdsText(v) {
+					return errors.New("a document in '" + field + "' may hold text only in 'text', not in '" + k + "'")
+				}
+			}
 			d.addField(doc, "text")
 		case json.Number:
 			// A number has no text to read.
@@ -200,6 +208,23 @@ func addDocuments(d *treeDoc, field string, docs any) error {
 		}
 	}
 	return nil
+}
+
+// holdsText reports whether v is or contains a string.
+func holdsText(v any) bool {
+	switch v := v.(type) {
+	case string:
+		return true
+	case []any:
+		return slices.ContainsFunc(v, holdsText)
+	case map[string]any:
+		for _, e := range v {
+			if holdsText(e) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // extractScalar is the text of a field that is one string or an array, such

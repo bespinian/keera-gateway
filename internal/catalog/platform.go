@@ -2,6 +2,8 @@ package catalog
 
 import (
 	"fmt"
+	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
@@ -58,4 +60,34 @@ func (p Platform) Lock(m *policy.Model) error {
 	m.LongPrompt = known.longPrompt()
 	m.PlatformKey = true
 	return nil
+}
+
+// AtProvider reports whether every backend of m is on its provider's own
+// host, so the usage the backend reports comes from the provider. A model
+// without backends, or of no known provider, is not.
+func AtProvider(m policy.Model) bool {
+	prov, ok := provider(m.Provider)
+	if !ok || len(m.Backends) == 0 {
+		return false
+	}
+	hosts := []string{hostOf(prov.Endpoint)}
+	for _, e := range prov.Endpoints {
+		hosts = append(hosts, hostOf(e))
+	}
+	for _, b := range m.Backends {
+		u, err := url.Parse(strings.TrimSpace(b))
+		if err != nil || u.Scheme != "https" || u.User != nil ||
+			!slices.Contains(hosts, strings.ToLower(u.Host)) {
+			return false
+		}
+	}
+	return true
+}
+
+func hostOf(endpoint string) string {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Host)
 }

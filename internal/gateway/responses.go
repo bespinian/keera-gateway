@@ -231,7 +231,10 @@ func addItem(msgs []chatMessage, it responsesItem) ([]chatMessage, []chatPart, e
 		}
 		return addCall(msgs, it, args), nil, nil
 	case "function_call_output", "custom_tool_call_output", "local_shell_call_output":
-		text, parts := responsesContent(it.Output)
+		text, parts, err := responsesContent(it.Output)
+		if err != nil {
+			return nil, nil, errors.New("'output' " + err.Error())
+		}
 		var images []chatPart
 		for _, p := range parts {
 			if p.imageURL != nil {
@@ -275,7 +278,10 @@ func addMessageItem(msgs []chatMessage, it responsesItem) ([]chatMessage, error)
 	default:
 		return nil, errors.New("'role' must be 'user', 'assistant', 'system' or 'developer'")
 	}
-	text, parts := responsesContent(it.Content)
+	text, parts, err := responsesContent(it.Content)
+	if err != nil {
+		return nil, errors.New("'content' " + err.Error())
+	}
 	msg := chatMessage{role: role, content: text}
 	// Only a user can send an image.
 	if role == "user" && len(parts) > 0 {
@@ -286,16 +292,18 @@ func addMessageItem(msgs []chatMessage, it responsesItem) ([]chatMessage, error)
 
 // responsesContent reads content that is a string or an array of parts. It
 // returns the joined text, plus the parts in chat shape when one is an image.
-func responsesContent(raw json.RawMessage) (jsonText, []chatPart) {
+// Anything else is refused rather than passed on as text, since the filters
+// read only these two shapes.
+func responsesContent(raw json.RawMessage) (jsonText, []chatPart, error) {
 	if len(raw) == 0 {
-		return emptyText, nil
+		return emptyText, nil, nil
 	}
 	if text, err := textOf(raw); err == nil {
-		return text, nil
+		return text, nil, nil
 	}
 	var parts []responsesPart
 	if json.Unmarshal(raw, &parts) != nil {
-		return quoteText(string(raw)), nil
+		return nil, nil, errors.New("must be a string or an array of content parts")
 	}
 	var (
 		texts   []jsonText
@@ -327,7 +335,7 @@ func responsesContent(raw json.RawMessage) (jsonText, []chatPart) {
 	if !picture {
 		out = nil
 	}
-	return orEmpty(joinTexts(texts)), out
+	return orEmpty(joinTexts(texts)), out, nil
 }
 
 // fileText is the contents of a text file sent inline, under its name. A file

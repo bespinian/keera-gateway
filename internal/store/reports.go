@@ -334,24 +334,30 @@ type KeyQuery struct {
 	Since     time.Time
 }
 
+// keysListed picks the api_keys rows a KeyQuery lists.
+const keysListed = `org_id = $1 AND ($2 = '' OR project_id = $2) AND ($4 = '' OR user_id = $4)`
+
 // KeySummaries lists an organisation's keys with their guardrails and traffic
 // since q.Since, in one query. Beyond two days, traffic comes from usage_daily,
 // from the midnight before q.Since.
 func (s *Store) KeySummaries(ctx context.Context, q KeyQuery) ([]KeySummary, error) {
-	traffic := `LEFT JOIN LATERAL (
-		    SELECT max(e.ts) AS last_used_at,
-		           count(*) FILTER (WHERE e.status < 400) AS requests,
-		           COALESCE(sum(e.cost_micros), 0) AS micros,
-		           COALESCE(sum(e.list_cost_micros), 0) AS list_micros
-		    FROM usage_events e WHERE e.key_id = k.id AND e.ts >= $3
-		) u ON true`
+	// One pass over the window rather than one per key, and only over the
+	// keys listed: My access lists a few keys of a large organisation.
+	listed := `key_id IN (SELECT id FROM api_keys WHERE ` + keysListed + `)`
+	traffic := `LEFT JOIN (
+		    SELECT key_id, max(ts) AS last_used_at,
+		           count(*) FILTER (WHERE status < 400) AS requests,
+		           sum(cost_micros) AS micros, sum(list_cost_micros) AS list_micros
+		    FROM usage_events WHERE org_id = $1 AND ts >= $3 AND ` + listed + `
+		    GROUP BY key_id
+		) u ON u.key_id = k.id`
 	since, _, daily := DayWindow(q.Since, time.Now())
 	if daily {
 		traffic = `LEFT JOIN (
 		    SELECT key_id, max(last_at) AS last_used_at,
 		           sum(requests - refused - failed) AS requests,
 		           sum(cost_micros) AS micros, sum(list_cost_micros) AS list_micros
-		    FROM usage_daily WHERE org_id = $1 AND day >= $3::date
+		    FROM usage_daily WHERE org_id = $1 AND day >= $3::date AND ` + listed + `
 		    GROUP BY key_id
 		) u ON u.key_id = k.id`
 	}

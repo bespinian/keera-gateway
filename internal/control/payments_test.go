@@ -33,6 +33,9 @@ type fakePostFinance struct {
 	deleted []int64
 	// noInvoice makes PostFinance refuse every invoice document.
 	noInvoice bool
+	// chargeStatus, when set, is how PostFinance answers a charge on a saved
+	// card instead of carrying it out.
+	chargeStatus int
 }
 
 func newFakePostFinance(t *testing.T) *fakePostFinance {
@@ -75,6 +78,11 @@ func newFakePostFinance(t *testing.T) *fakePostFinance {
 	mux.HandleFunc("POST "+base+"/transactions/{id}/process-without-interaction",
 		func(w http.ResponseWriter, r *http.Request) {
 			f.mu.Lock()
+			if f.chargeStatus != 0 {
+				f.mu.Unlock()
+				w.WriteHeader(f.chargeStatus)
+				return
+			}
 			tx := f.state[pathID(r)]
 			tx.State, tx.UserFailureMessage = f.charged.State, f.charged.UserFailureMessage
 			f.state[tx.ID] = tx

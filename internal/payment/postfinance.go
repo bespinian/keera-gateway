@@ -256,6 +256,28 @@ func (e *Error) Error() string {
 	return msg
 }
 
+// TurnedAway says PostFinance did not look at the request at all: it
+// refused Keera's credentials or asked it to slow down. Nothing was done, and
+// the same request may pass later.
+func (e *Error) TurnedAway() bool {
+	switch e.Status {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests:
+		return true
+	}
+	return false
+}
+
+// Refused says PostFinance read the request and refused it, so sending it
+// again would be refused again. A timeout or a conflict is not: the request
+// may have been carried out.
+func (e *Error) Refused() bool {
+	switch e.Status {
+	case http.StatusRequestTimeout, http.StatusConflict:
+		return false
+	}
+	return e.Status/100 == 4 && !e.TurnedAway()
+}
+
 // maxResponse bounds what is read of an answer. A transaction is a few
 // kilobytes; a document is a base64 PDF with the merchant's logo.
 const (

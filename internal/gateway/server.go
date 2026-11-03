@@ -146,6 +146,10 @@ type Server struct {
 	// absent: a self-hosted plane serves logprobs, and finding out otherwise
 	// costs one wasted request per process. See choice.go.
 	noLogprobs sync.Map // model key -> struct{}
+	// stopping ends when the process shuts down, which cannot wait out
+	// readOnFor.
+	stopping context.Context
+	stop     context.CancelFunc
 }
 
 // New builds the data plane.
@@ -161,7 +165,10 @@ func New(src policy.Source, budgets Budgeter, limiter Limiter, sink Sink,
 	// A limited organisation reaches only the public internet.
 	public := newDialer(denyDial(append(slices.Clone(opts.UpstreamDeny), policy.InsideNetwork...),
 		"this organisation can only reach public addresses until its limit is lifted")).DialContext
+	stopping, stop := context.WithCancel(context.Background())
 	return &Server{
+		stopping:     stopping,
+		stop:         stop,
 		src:          src,
 		budgets:      budgets,
 		limiter:      limiter,
@@ -175,6 +182,10 @@ func New(src policy.Source, budgets Budgeter, limiter Limiter, sink Sink,
 		keyClient:    upstreamClient(readOnFor, open.DialContext),
 	}
 }
+
+// Stop cuts off the answers still read after their client left, so their
+// requests end and record what they used before the process exits.
+func (s *Server) Stop() { s.stop() }
 
 func newDialer(deny func(string, string, syscall.RawConn) error) *net.Dialer {
 	return &net.Dialer{Timeout: dialTimeout, KeepAlive: 30 * time.Second, Control: deny}

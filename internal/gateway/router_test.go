@@ -252,6 +252,35 @@ func TestAFilterTheRouterRanIsNotRunAgainForTheKey(t *testing.T) {
 	}
 }
 
+// A translated request carries no text the filters did not read: content in
+// a shape they do not read is refused, not passed on as text.
+func TestARouterFilterSeesAllTheTextOfATranslatedRequest(t *testing.T) {
+	p := policy.Router{Alias: "safe", Start: &policy.Step{
+		ID: "block", Kind: policy.StepFilter, Ref: "block", Next: modelStep("large", "keera-large"),
+	}}
+	h := treeHarness(t, picks("keera-small"), p, nil)
+
+	for _, tc := range []struct{ path, body string }{
+		{"/v1/responses", `{"model":"safe","input":[{"role":"user","content":"hi"},` +
+			`{"type":"function_call_output","call_id":"c","output":{"k":"hunter2"}}]}`},
+		{"/v1/responses", `{"model":"safe","input":[{"role":"user","content":["hunter2"]}]}`},
+		{"/v1/messages", `{"model":"safe","max_tokens":9,"messages":[{"role":"user","content":[` +
+			`{"type":"text","text":"hi"},` +
+			`{"type":"tool_result","tool_use_id":"t","content":{"k":"hunter2"}}]}]}`},
+		{"/v1/messages", `{"model":"safe","max_tokens":9,"messages":[{"role":"user","content":[` +
+			`{"type":"search_result","source":"hunter2","title":"t",` +
+			`"content":[{"type":"text","text":"x"}]}]}]}`},
+	} {
+		resp := h.post(t, tc.path, tc.body)
+		if resp.StatusCode == http.StatusOK {
+			t.Errorf("%s %s: status 200, want a refusal", tc.path, tc.body)
+		}
+		if sent := lastSent(h); strings.Contains(sent, "hunter2") {
+			t.Errorf("%s: the password reached the model: %s", tc.path, sent)
+		}
+	}
+}
+
 // Route steps can follow one another. The last one decides.
 func TestRouterChainsRouteSteps(t *testing.T) {
 	p := policy.Router{Alias: "safe", Start: autoStep("first", map[string]*policy.Step{

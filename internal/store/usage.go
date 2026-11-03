@@ -255,9 +255,9 @@ func queueEvent(batch *pgx.Batch, e Event) {
 		e.Latency.Milliseconds(), e.TTFT.Milliseconds(), e.Stream, e.Estimated, e.Canceled,
 		nullable(truncate(e.Error, maxErrorBytes)), nullable(e.SessionKey),
 		nullable(e.Router), nullable(string(e.RouterOutcome)), e.RouterMS,
-		spansJSON(e.Spans), nullable(e.RequestID), nullable(e.ClientRequestID),
+		spansJSON(e.Spans, e.Alias, e.Status), nullable(e.RequestID), nullable(e.ClientRequestID),
 		nullable(truncate(e.Note, maxErrorBytes)))
-	queueFilterRuns(batch, e, e.Alias)
+	queueFilterRuns(batch, e)
 }
 
 // queuePlans keeps the newest plan usage of each key. Another replica's later
@@ -280,16 +280,15 @@ func queuePlans(batch *pgx.Batch, plans map[string]policy.PlanUsage) {
 	}
 }
 
-// queueFilterRuns adds an event's filter runs to the batch, under the name the
-// request was addressed to.
-func queueFilterRuns(batch *pgx.Batch, e Event, alias string) {
+// queueFilterRuns adds an event's filter runs to the batch. A run keeps only
+// what the filter screens read: one row per filter per request is a lot of rows.
+func queueFilterRuns(batch *pgx.Batch, e Event) {
 	for _, f := range e.FilterRuns {
 		batch.Queue(`INSERT INTO filter_runs (ts, org_id, filter, mode, shadow, outcome,
-			latency_ms, cost_micros, segments, changed, project_id, user_id, key_id, alias)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+			latency_ms, cost_micros, segments, changed, project_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
 			e.TS, e.OrgID, f.Filter, string(f.Mode), f.Shadow, string(f.Outcome),
-			f.LatencyMS, f.CostMicros, f.Segments, f.Changed,
-			nullable(e.ProjectID), nullable(e.UserID), nullable(e.KeyID), alias)
+			f.LatencyMS, f.CostMicros, f.Segments, f.Changed, nullable(e.ProjectID))
 	}
 }
 

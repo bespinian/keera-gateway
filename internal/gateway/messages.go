@@ -357,7 +357,7 @@ func convertMessage(role string, content json.RawMessage) ([]chatMessage, error)
 		}
 		return []chatMessage{{role: "system", content: text}}, nil
 	}
-	return convertUser(blocks), nil
+	return convertUser(blocks)
 }
 
 // convertAssistant collapses an assistant turn into content and tool_calls.
@@ -387,7 +387,7 @@ func convertAssistant(blocks []anthropicBlock) chatMessage {
 
 // convertUser splits a user turn into its tool results and the user's own
 // content.
-func convertUser(blocks []anthropicBlock) []chatMessage {
+func convertUser(blocks []anthropicBlock) ([]chatMessage, error) {
 	var (
 		out   []chatMessage
 		parts []chatPart
@@ -403,7 +403,10 @@ func convertUser(blocks []anthropicBlock) []chatMessage {
 				parts = append(parts, p)
 			}
 		case "tool_result":
-			text, images := toolResult(b.Content)
+			text, images, err := toolResult(b.Content)
+			if err != nil {
+				return nil, err
+			}
 			out = append(out, chatMessage{role: "tool", toolCallID: b.ToolUseID, content: text})
 			// The OpenAI tool role carries only text, so images move to the
 			// user turn after the results.
@@ -423,7 +426,7 @@ func convertUser(blocks []anthropicBlock) []chatMessage {
 	if len(out) == 0 {
 		out = append(out, chatMessage{role: "user", content: emptyText})
 	}
-	return out
+	return out, nil
 }
 
 // imagePart converts an image block, with inline bytes as a data URL.
@@ -460,16 +463,19 @@ func dataURL(mediaType string, data jsonText) jsonText {
 
 // toolResult flattens a tool result's content and separates out its images.
 // `is_error` is dropped, since a failed tool says so in its text anyway.
-func toolResult(raw json.RawMessage) (jsonText, []chatPart) {
+// Content that is neither a string nor blocks is refused rather than passed on
+// as text, since the filters read only those two shapes.
+func toolResult(raw json.RawMessage) (jsonText, []chatPart, error) {
 	if len(raw) == 0 {
-		return emptyText, nil
+		return emptyText, nil, nil
 	}
 	if text, err := textOf(raw); err == nil {
-		return text, nil
+		return text, nil, nil
 	}
 	blocks, err := decodeBlocks(raw)
 	if err != nil {
-		return quoteText(string(raw)), nil
+		return nil, nil, errors.New("a tool_result's 'content' must be a string or an array " +
+			"of content blocks")
 	}
 	var images []chatPart
 	for _, b := range blocks {
@@ -479,7 +485,7 @@ func toolResult(raw json.RawMessage) (jsonText, []chatPart) {
 			}
 		}
 	}
-	return orEmpty(joinText(blocks)), images
+	return orEmpty(joinText(blocks)), images, nil
 }
 
 // joinText joins the blocks' text with a blank line, so words do not glue.

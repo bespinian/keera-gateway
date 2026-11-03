@@ -210,6 +210,12 @@ func readBody(w http.ResponseWriter, r *http.Request, limit int64,
 	var src io.Reader = http.MaxBytesReader(w, r.Body, limit)
 	enc := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Encoding")))
 	compressed := enc != "" && enc != "identity"
+	size := 0
+	if !compressed {
+		// Content-Length is only a claim, so a client cannot make the gateway
+		// reserve more than maxPresize before it sends anything.
+		size = int(min(r.ContentLength, limit, maxPresize))
+	}
 	switch enc {
 	case "", "identity":
 	case "gzip", "x-gzip", "deflate":
@@ -235,7 +241,7 @@ func readBody(w http.ResponseWriter, r *http.Request, limit int64,
 			"the gateway reads a request body plain, gzip or deflate, not "+enc)
 		return nil, false
 	}
-	raw, err := io.ReadAll(src)
+	raw, err := readAll(src, size)
 	if err == nil && int64(len(raw)) > limit {
 		err = &http.MaxBytesError{Limit: limit}
 	}
@@ -251,6 +257,31 @@ func readBody(w http.ResponseWriter, r *http.Request, limit int64,
 		refuse(http.StatusBadRequest, "invalid_body", "the request body could not be decompressed: "+err.Error())
 	}
 	return nil, false
+}
+
+// maxPresize is the most readBody sets aside up front. A coding agent's
+// request is rarely larger; a larger one grows from there.
+const maxPresize = 2 << 20
+
+// readAll is io.ReadAll starting from room for size bytes. io.ReadAll grows
+// from 512 bytes by doubling, so a large body is copied several times and
+// leaves about twice its size behind as garbage.
+func readAll(src io.Reader, size int) ([]byte, error) {
+	// One byte more, so the read that finds the end needs no new room.
+	b := make([]byte, 0, max(size, 511)+1)
+	for {
+		n, err := src.Read(b[len(b):cap(b)])
+		b = b[:len(b)+n]
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				err = nil
+			}
+			return b, err
+		}
+		if len(b) == cap(b) {
+			b = append(b, 0)[:len(b)]
+		}
+	}
 }
 
 // decode parses the body. A body in a provider's own API is kept as is in
@@ -804,6 +835,8 @@ func (s *Server) answer(c *call, b *body) {
 		var cancel context.CancelFunc
 		ctx, cancel = outlast(ctx, readOnFor)
 		defer cancel()
+		// Cut off at shutdown, it is billed the most it may have used.
+		defer context.AfterFunc(s.stopping, cancel)()
 	}
 	fw := s.forward(ctx, c.chain, c.outbound(b), c.tr)
 	// The destination is busy until the last token is served, so it is

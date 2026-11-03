@@ -148,9 +148,9 @@ func TestToolCallsAreWrittenAndRead(t *testing.T) {
 		t.Errorf("%d tool calls were written as requests", requests)
 	}
 	var runs int
-	_ = st.pool.QueryRow(ctx, "SELECT count(*) FROM filter_runs WHERE alias = 'github/search_code'").Scan(&runs)
-	if runs != 2 {
-		t.Errorf("filter runs against the tool = %d, want 2", runs)
+	_ = st.pool.QueryRow(ctx, "SELECT count(*) FROM filter_runs").Scan(&runs)
+	if runs != 3 {
+		t.Errorf("filter runs against the tools = %d, want one per call", runs)
 	}
 	var spent int64
 	_ = st.pool.QueryRow(ctx, "SELECT COALESCE(sum(micros), 0) FROM spend").Scan(&spent)

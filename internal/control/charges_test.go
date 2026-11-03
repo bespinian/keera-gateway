@@ -76,6 +76,27 @@ func TestARecurringChargeIsChargedToTheSavedCardEachPeriod(t *testing.T) {
 	}
 }
 
+// While the saved card is being charged for a period, paying that period on
+// the payment page would pay it twice.
+func TestAChargeIsNotPaidOnThePageWhileTheCardIsCharged(t *testing.T) {
+	st, ctx := routerStore(t)
+	pf := newFakePostFinance(t)
+	s, _ := paymentServer(ctx, t, st, pf)
+	topUp(t, s, pf)
+	c := addCharge(t, s)
+	pf.charged = payment.Transaction{State: "PROCESSING"}
+	s.chargesDue(ctx)
+	charging, _ := pf.last()
+
+	w := invoke(s.payCharge, admin("org_1"), http.MethodPost, "/v1/billing/charges/"+c.ID+"/pay", "")
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "charge_underway") {
+		t.Errorf("pay: %d %s", w.Code, w.Body)
+	}
+	if id, _ := pf.last(); id != charging {
+		t.Error("a payment page was opened for a period the card is paying")
+	}
+}
+
 // Without a saved card, a charge due stops the organisation until an
 // administrator pays it on the payment page, which saves the card.
 func TestADueChargeWithoutACardStopsTheOrganisationUntilItIsPaid(t *testing.T) {
@@ -178,6 +199,37 @@ func TestADeclinedChargeStopsTheOrganisationUntilSomeonePays(t *testing.T) {
 	}
 	if len(pf.deleted) != 1 || pf.deleted[0] != 7 {
 		t.Errorf("the declined card was not replaced: %v", pf.deleted)
+	}
+}
+
+// PostFinance turning a charge away, such as with a rate limit, is not the
+// card's fault: the organisation keeps working and the card is tried again.
+func TestAChargePostFinanceTurnedAwayIsTriedAgain(t *testing.T) {
+	st, ctx := routerStore(t)
+	pf := newFakePostFinance(t)
+	s, reg := paymentServer(ctx, t, st, pf)
+	topUp(t, s, pf)
+	pf.mu.Lock()
+	pf.chargeStatus = http.StatusTooManyRequests
+	pf.mu.Unlock()
+	c := addCharge(t, s)
+	s.chargesDue(ctx)
+	if got, _ := st.Charge(ctx, c.ID); got.Error != "" || got.PaidPeriods != 0 {
+		t.Errorf("charge = %+v, want it unpaid and without an error", got)
+	}
+	if err := reg.Budgets().ChargesPaid("org_1", time.Now()); err != nil {
+		t.Errorf("refused after a rate limit: %v", err)
+	}
+
+	pf.mu.Lock()
+	pf.chargeStatus = 0
+	pf.mu.Unlock()
+	if _, err := st.Pool().Exec(ctx, `UPDATE payments SET ts = ts - interval '11 minutes'`); err != nil {
+		t.Fatal(err)
+	}
+	s.chargesDue(ctx)
+	if got, _ := st.Charge(ctx, c.ID); got.Error != "" || got.PaidPeriods != 1 {
+		t.Errorf("charge = %+v, want it paid on the next round", got)
 	}
 }
 

@@ -65,7 +65,9 @@ func TestAModelWithAGatewayFeeIsBilledEveryTokenAtTheFee(t *testing.T) {
 	m := Model{
 		Alias: "mistral", Provider: "mistral", BackendModel: "mistral-large",
 		InputMicrosPerMTok: 2_000_000,
-		Billing:            &Billing{Provider: "mistral", Credit: true, FeeMicrosPerMTok: 50_000},
+		Billing: &Billing{
+			Provider: "mistral", Credit: true, FeeMicrosPerMTok: 50_000, AtProvider: true,
+		},
 	}
 	reported := Tokens{Input: 1_000_000, CachedInput: 600_000, Output: 1_000_000}
 	line, ok := m.Bill(reported, Tokens{Input: 1, Output: 1})
@@ -73,6 +75,9 @@ func TestAModelWithAGatewayFeeIsBilledEveryTokenAtTheFee(t *testing.T) {
 		t.Fatal("not billed")
 	}
 	// Two million tokens at 0.05, cached or not, as the provider reported.
+	if m.CountsTokens() {
+		t.Fatal("a model at its provider is counted")
+	}
 	if line.Micros != 100_000 || line.CreditMicros != 100_000 || !line.GatewayFee ||
 		line.InputTokens != 1_000_000 || line.Provider != "mistral" {
 		t.Errorf("line = %+v, want 0.10 for the reported two million tokens", line)
@@ -92,6 +97,12 @@ func TestASelfHostedModelIsBilledOnTheGatewaysCount(t *testing.T) {
 	if line.Micros != 4_000 || line.InputTokens != 3_000 || line.OutputTokens != 1_000 {
 		t.Errorf("line = %+v, want 4000 counted tokens at 1.00 per million", line)
 	}
+	// Naming a provider changes nothing while the backend is not its own.
+	posing := m
+	posing.Provider, posing.Billing = "mistral", &Billing{Provider: "mistral", FeeMicrosPerMTok: 1_000_000}
+	if !posing.CountsTokens() {
+		t.Error("a model that only names a provider is not counted")
+	}
 	// It names no backend model, so the alias stands in.
 	if line.BackendModel != "keera-code" || line.Provider != "" {
 		t.Errorf("line names %q/%q", line.Provider, line.BackendModel)
@@ -102,7 +113,7 @@ func TestASelfHostedModelIsBilledOnTheGatewaysCount(t *testing.T) {
 func TestASubscriptionModelPaysTheGatewayFee(t *testing.T) {
 	plan := Model{
 		Provider: "anthropic", Subscription: true, InputMicrosPerMTok: 3_000_000,
-		Billing: &Billing{Provider: "anthropic", FeeMicrosPerMTok: 1_000_000},
+		Billing: &Billing{Provider: "anthropic", FeeMicrosPerMTok: 1_000_000, AtProvider: true},
 	}
 	line, ok := plan.Bill(Tokens{Input: 1_000_000}, Tokens{})
 	if !ok || line.Micros != 1_000_000 || !line.GatewayFee {

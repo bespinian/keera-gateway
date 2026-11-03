@@ -131,12 +131,18 @@ const requestColumns = `id, ts, alias, status, COALESCE(error, ''),
 
 func scanRequest(r row) (Request, error) {
 	var q Request
+	var spans []byte
 	err := r.Scan(&q.ID, &q.CreatedAt, &q.Alias, &q.Status, &q.Error,
 		&q.KeyID, &q.ProjectID, &q.UserID, &q.OrgID, &q.Client,
 		&q.InputTokens, &q.CachedInputTokens, &q.CacheWriteTokens, &q.OutputTokens,
 		&q.CostMicros,
 		&q.LatencyMS, &q.TTFTMS, &q.Stream, &q.Estimated, &q.Canceled, &q.SessionKey,
-		&q.Spans, &q.RequestID, &q.ClientRequestID, &q.Note)
+		&spans, &q.RequestID, &q.ClientRequestID, &q.Note)
+	if err != nil {
+		return q, err
+	}
+	// The stored steps leave out what the row says, so they are read with it.
+	q.Spans, err = readSpans(spans, q.Alias, q.Status)
 	return q, err
 }
 

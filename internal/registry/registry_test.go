@@ -996,7 +996,14 @@ func TestTheGatewayFeeBillsEveryOtherModel(t *testing.T) {
 	models := func() []policy.Model {
 		return []policy.Model{
 			{OrgID: "org_1", Alias: "engine", InputMicrosPerMTok: 9, Backends: []string{"http://engine:8000/v1"}},
-			{OrgID: "org_1", Alias: "own-key", Provider: "mistral", InputMicrosPerMTok: 9},
+			{
+				OrgID: "org_1", Alias: "own-key", Provider: "mistral", InputMicrosPerMTok: 9,
+				Backends: []string{"https://api.mistral.ai/v1"},
+			},
+			{
+				OrgID: "org_1", Alias: "posing", Provider: "mistral",
+				Backends: []string{"http://engine:8000/v1"},
+			},
 			{OrgID: "org_1", Alias: "billed", Provider: "anthropic", BackendModel: "claude-haiku-5-5"},
 		}
 	}
@@ -1015,6 +1022,10 @@ func TestTheGatewayFeeBillsEveryOtherModel(t *testing.T) {
 		own.CountsTokens() {
 		t.Errorf("own-key = %+v, billing %+v; want the fee, its own price, and the provider's count",
 			own, own.Billing)
+	}
+	// Naming a provider does not make its server the provider's.
+	if posing, _ := r.Model("org_1", "posing"); !posing.CountsTokens() {
+		t.Errorf("posing = %+v, billing %+v; want the gateway's count", posing, posing.Billing)
 	}
 	if billed, _ := r.Model("org_1", "billed"); billed.Billing == nil || billed.Billing.FeeMicrosPerMTok != 0 {
 		t.Errorf("a model on the deployment's key pays the fee: %+v", billed.Billing)

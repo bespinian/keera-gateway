@@ -3,6 +3,7 @@ package gateway
 import (
 	"errors"
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -333,6 +334,84 @@ func TestPatternFilterWithBrokenRulesRefusesEverything(t *testing.T) {
 	case sent := <-h.upstreamBodies:
 		t.Fatalf("the request was forwarded with a broken filter in front of it: %s", sent)
 	default:
+	}
+}
+
+// longText is a segment long enough to be remembered as clean.
+func longText(s string) string {
+	return s + strings.Repeat(" padding", minRemembered/8)
+}
+
+func TestPatternSkipsASegmentItFoundCleanBefore(t *testing.T) {
+	var cache patternCache
+	c := cache.rulesFor(patternFilter(policy.FilterRule{Pattern: `\bsk-\w+`, Replace: "[KEY]"}))
+	clean := longText("nothing to see")
+	if _, _, err := runPattern(c, []string{clean}); err != nil {
+		t.Fatal(err)
+	}
+	if !c.clean.has(cleanKey(c.gen, clean)) {
+		t.Fatal("a long segment no rule matched was not remembered")
+	}
+	// Short ones are not worth the room.
+	if _, _, err := runPattern(c, []string{"short"}); err != nil {
+		t.Fatal(err)
+	}
+	if c.clean.has(cleanKey(c.gen, "short")) {
+		t.Error("a short segment was remembered")
+	}
+}
+
+func TestPatternNeverRemembersASegmentARuleMatched(t *testing.T) {
+	var cache patternCache
+	c := cache.rulesFor(patternFilter(policy.FilterRule{Pattern: `\bsk-\w+`, Replace: "[KEY]"}))
+	secret := longText("the key is sk-abc123")
+	for range 2 {
+		out, hits, err := runPattern(c, []string{secret})
+		if err != nil || strings.Contains(out[0], "sk-abc123") || len(hits) != 1 {
+			t.Fatalf("out = %q, hits = %v, err = %v", out[0], hits, err)
+		}
+	}
+}
+
+func TestPatternForgetsCleanSegmentsWhenTheFilterIsWritten(t *testing.T) {
+	// Clean under the old rules says nothing about the new ones.
+	var cache patternCache
+	first := patternFilter(policy.FilterRule{Pattern: `\bsk-\w+`, Replace: "[KEY]"})
+	text := longText("the password is hunter2")
+	if out, _, _ := runPattern(cache.rulesFor(first), []string{text}); out[0] != text {
+		t.Fatalf("the first rules changed %q", out[0])
+	}
+	second := first
+	second.Rules = []policy.FilterRule{{Pattern: `hunter2`, Replace: "[PASSWORD]"}}
+	second.UpdatedAt = first.UpdatedAt.Add(time.Second)
+	out, _, err := runPattern(cache.rulesFor(second), []string{text})
+	if err != nil || strings.Contains(out[0], "hunter2") {
+		t.Fatalf("the edited filter skipped a segment the old one found clean: %q, %v", out[0], err)
+	}
+}
+
+func TestCleanTextsKeepWhatIsStillInUse(t *testing.T) {
+	var clean cleanTexts
+	kept, dropped := cleanKey(1, "kept"), cleanKey(1, "dropped")
+	clean.add(kept)
+	clean.add(dropped)
+	// A full generation later both are in the older one, and asking for one
+	// moves it to the current.
+	for i := range maxCleanTexts - 2 {
+		clean.add(cleanKey(2, strconv.Itoa(i)))
+	}
+	clean.add(cleanKey(3, "first of the next"))
+	if !clean.has(kept) {
+		t.Fatal("a segment one generation old was forgotten")
+	}
+	for i := range maxCleanTexts {
+		clean.add(cleanKey(4, strconv.Itoa(i)))
+	}
+	if !clean.has(kept) {
+		t.Error("a segment asked for was dropped with its generation")
+	}
+	if clean.has(dropped) {
+		t.Error("a segment nobody asked for outlived two generations")
 	}
 }
 

@@ -89,9 +89,12 @@ keys, and [subscription models](subscriptions.md). A Claude plan pays for the
 model, not for the gateway. Every token costs the same, input, output, cached or
 not, since the gateway handles each one the same way.
 
-**Who counts the tokens.** A hosted provider's usage record is used as it is. A
-self-hosted backend can report whatever it likes, so the gateway counts its
-tokens itself, from what it passed on: the whole request body it sent, and the
+**Who counts the tokens.** A hosted provider's usage record is used as it is,
+when every backend of the model is on the provider's own host over https. Any
+other backend can report whatever it likes, so the gateway counts its tokens
+itself. That includes a self-hosted model, and a model that names a provider
+but is sent elsewhere, such as through an egress proxy. The count is made from
+what the gateway passed on: the whole request body it sent, and the
 text that came back (content, reasoning and tool calls), at 4 bytes a token. An
 image counts by its size in the request. The usage row still shows the
 backend's own numbers, but its cost is the gateway's count.
@@ -259,7 +262,8 @@ seconds, one replica checks.
 
 When a charge is declined, no other is tried. The panel shows why. Saving the
 automatic top-up again, or a top-up that is paid, tries again. A grant does
-not. When PostFinance cannot be reached, the next try is after 10
+not. When PostFinance cannot be reached, refuses Keera's credentials or asks
+it to slow down, the card is not at fault, and the next try is after 10
 minutes.
 
 Forgetting the card removes it here and at PostFinance, and turns the automatic
@@ -313,7 +317,8 @@ the case when:
 An administrator then pays the period on the payment page, under **Billing**
 or with `keera billing pay-charge`, which also saves the card. Any paid
 payment clears a declined charge, so the card is tried again on the next
-round. Paying ahead is refused while a card that works will pay the period.
+round. Paying ahead is refused while a card that works will pay the period,
+and so is paying a period the saved card is being charged for.
 
 The panel shows a banner on every screen while a charge is due, or will be
 without a card. The card stays while the organisation has charges: it can be

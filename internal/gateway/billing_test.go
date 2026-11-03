@@ -296,6 +296,46 @@ func TestAnAnswerOnTheDeploymentsKeyIsReadToTheEndAfterAHangUp(t *testing.T) {
 	}
 }
 
+// At shutdown, an answer still read after its client left is cut off and
+// billed the most it may have used, rather than lost with the process.
+func TestShutdownCutsOffAnAnswerReadAfterAHangUp(t *testing.T) {
+	left := make(chan struct{})
+	backend := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"content":"x"}}]}`+"\n\n")
+		_ = http.NewResponseController(w).Flush()
+		<-left
+	}
+	h := newHarness(t, backend, nil, nil)
+	// After the harness's own cleanup is registered, so it runs first.
+	t.Cleanup(func() { close(left) })
+	onPlatformKey(h, "keera-code")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, h.url("/v1/chat/completions"),
+			strings.NewReader(`{"model":"keera-code","messages":[],"stream":true,"max_tokens":50}`))
+		req.Header.Set("Authorization", "Bearer "+testKey)
+		if resp, err := http.DefaultClient.Do(req); err == nil {
+			_ = resp.Body.Close()
+		}
+	}()
+	<-h.upstreamBodies
+	cancel()
+	time.Sleep(50 * time.Millisecond)
+	if h.sink.count() > 0 {
+		t.Fatal("recorded before shutdown; the answer should still be read")
+	}
+	h.srv.Stop()
+
+	waitFor(t, "the request to be recorded", func() bool { return h.sink.count() > 0 })
+	ev := h.sink.last(t)
+	if !ev.Estimated || ev.OutputTokens != 50 {
+		t.Errorf("output = %d, estimated = %v; want the most it may have used, 50",
+			ev.OutputTokens, ev.Estimated)
+	}
+}
+
 // The provider charges for hosted tools apart from tokens, so they never go
 // out on the deployment's key.
 func TestHostedToolsAreTakenOutOnTheDeploymentsKey(t *testing.T) {

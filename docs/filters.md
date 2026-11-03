@@ -80,8 +80,9 @@ other byte of the request goes on as the client sent it, so the provider's
 prompt cache still matches.
 
 Tool results are covered. For a coding agent, that is where file contents
-travel. So are, on an untranslated Messages request, search results and
-documents: a document's title and context, and its source when that is text.
+travel. So are, on a Messages request, search results and documents: a search
+result's title and URL, a document's title and context, and its source when
+that is text.
 
 MCP calls through the gateway are filtered too: every string in the arguments,
 before the call leaves. See [mcp.md](mcp.md#filters).
@@ -95,8 +96,11 @@ before the call leaves. See [mcp.md](mcp.md#filters).
   has no text to read.
 
 A chat or rerank request with a part the gateway cannot read, such as an
-unknown content part type, is refused with `400` rather than passed on: the
-model might read text no filter saw.
+unknown content part type or a rerank document with text outside `text`, is
+refused with `400` rather than passed on: the model might read text no filter
+saw. So is a Messages or Responses request
+whose message content, tool result or tool output is neither text nor a list of
+parts.
 
 For `rewrite` and `gate`, the gateway appends a wire format to the
 administrator's instruction. Each mode has its own.
@@ -186,6 +190,12 @@ It also tells the gateway **how sure** the gate was, which
 A pattern filter is a list of rules. It has no model and no instruction, so it
 adds no wait and no spend. To create one, see
 [Create a pattern filter](https://docs.keera.ch/manage/filters/#create-a-pattern-filter).
+
+Scanning does take time: about 20 ms for 600 KB of conversation with two
+rules. Coding agents send the whole conversation again every turn, so the
+gateway remembers each segment of 512 bytes or more that no rule matched, and
+skips it next time. Only new text is scanned. Editing the filter forgets what
+was remembered. Each process remembers up to 64k segments, held as hashes.
 
 Blank lines and `#` comments are ignored. A line is split at the **last**
 `=>`, because the left side is an expression and the right side is literal.

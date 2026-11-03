@@ -1,10 +1,15 @@
 package gateway
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
+	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
@@ -21,6 +26,10 @@ type compiled struct {
 	// err is a rule that would not compile, kept so a broken filter fails
 	// the same way without recompiling.
 	err error
+	// clean remembers the segments these rules matched nothing in, under
+	// gen, which is new for every compile. Nil remembers nothing.
+	clean *cleanTexts
+	gen   uint64
 }
 
 type compiledRule struct {
@@ -30,7 +39,13 @@ type compiledRule struct {
 
 // patternCache holds compiled rules, one entry per filter. An edit changes
 // the write time, and the next request recompiles in place.
-type patternCache struct{ m sync.Map }
+type patternCache struct {
+	m sync.Map
+	// clean is shared by every filter, so its bound holds however many there
+	// are.
+	clean cleanTexts
+	gens  atomic.Uint64
+}
 
 type patternEntry struct {
 	updatedAt time.Time
@@ -43,8 +58,69 @@ func (c *patternCache) rulesFor(f policy.Filter) compiled {
 		return got.(patternEntry).compiled
 	}
 	out := compileRules(f.Rules)
+	if out.err == nil {
+		// A new generation, so nothing remembered under the old rules
+		// applies to the new ones.
+		out.clean, out.gen = &c.clean, c.gens.Add(1)
+	}
 	c.m.Store(key, patternEntry{updatedAt: f.UpdatedAt, compiled: out})
 	return out
+}
+
+// minRemembered is the shortest segment worth remembering. Shorter ones are
+// cheap to scan, and would crowd the long ones out.
+const minRemembered = 512
+
+// maxCleanTexts is how many segments one generation of cleanTexts holds:
+// about 2 MB each, and at least 16 MB of text.
+const maxCleanTexts = 1 << 15
+
+// cleanTexts remembers segments a filter's rules matched nothing in. Coding
+// agents resend the whole conversation every turn, so without it each turn
+// scans again what the turns before already did, and that grows with the
+// conversation.
+//
+// It keeps two generations: when the current one fills, the older is
+// dropped. A segment found in the older moves to the current, so what is
+// still being resent stays.
+type cleanTexts struct {
+	mu       sync.Mutex
+	cur, old map[[sha256.Size]byte]struct{}
+}
+
+// cleanKey names a segment under one generation of rules. SHA-256, so a text
+// cannot be made to pass as one that was clean.
+func cleanKey(gen uint64, s string) [sha256.Size]byte {
+	h := sha256.New()
+	_, _ = h.Write(binary.BigEndian.AppendUint64(nil, gen))
+	_, _ = io.WriteString(h, s)
+	return [sha256.Size]byte(h.Sum(nil))
+}
+
+func (t *cleanTexts) has(k [sha256.Size]byte) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if _, ok := t.cur[k]; ok {
+		return true
+	}
+	if _, ok := t.old[k]; ok {
+		t.addLocked(k)
+		return true
+	}
+	return false
+}
+
+func (t *cleanTexts) add(k [sha256.Size]byte) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.addLocked(k)
+}
+
+func (t *cleanTexts) addLocked(k [sha256.Size]byte) {
+	if t.cur == nil || len(t.cur) >= maxCleanTexts {
+		t.old, t.cur = t.cur, make(map[[sha256.Size]byte]struct{})
+	}
+	t.cur[k] = struct{}{}
 }
 
 // compileRules fails closed. The control plane validates rules on write, so a
@@ -85,17 +161,34 @@ func runPattern(c compiled, texts []string) ([]string, []patternHit, error) {
 	if c.err != nil {
 		return nil, nil, c.err
 	}
-	out := make([]string, len(texts))
-	copy(out, texts)
+	out := slices.Clone(texts)
+
+	// A segment no rule matched is left as it was, so a remembered one needs
+	// no scan and adds no hits.
+	keys := make(map[int][sha256.Size]byte)
+	scan := make([]int, 0, len(out))
+	for i, s := range out {
+		if c.clean != nil && len(s) >= minRemembered {
+			k := cleanKey(c.gen, s)
+			if c.clean.has(k) {
+				continue
+			}
+			keys[i] = k
+		}
+		scan = append(scan, i)
+	}
+	matched := make([]bool, len(out))
 
 	var hits []patternHit
 	for _, cr := range c.rules {
 		matches := 0
-		for i, s := range out {
+		for _, i := range scan {
+			s := out[i]
 			found := len(cr.re.FindAllStringIndex(s, -1))
 			if found == 0 {
 				continue
 			}
+			matched[i] = true
 			matches += found
 			if cr.rule.Refuse {
 				// Capped like a model's reason: it goes into an error body and
@@ -109,6 +202,11 @@ func runPattern(c compiled, texts []string) ([]string, []patternHit, error) {
 		}
 		if matches > 0 {
 			hits = append(hits, patternHit{Rule: cr.rule.Pattern, Matches: matches})
+		}
+	}
+	for i, k := range keys {
+		if !matched[i] {
+			c.clean.add(k)
 		}
 	}
 	return out, hits, nil

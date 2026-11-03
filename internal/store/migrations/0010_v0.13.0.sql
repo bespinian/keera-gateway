@@ -73,3 +73,8 @@ ALTER TABLE guardrails ADD COLUMN allowed_locations text[];
 -- A billing line can be the gateway fee on a model the deployment does not
 -- bill otherwise, rather than a provider's list price. See docs/billing.md.
 ALTER TABLE billing_lines ADD COLUMN gateway_fee boolean NOT NULL DEFAULT false;
+
+-- Write less on every request. Nothing reads who ran a filter or for which
+-- model, only for which project, and one row per filter per request makes this
+-- table as large as the request log.
+ALTER TABLE filter_runs DROP COLUMN user_id, DROP COLUMN key_id, DROP COLUMN alias;

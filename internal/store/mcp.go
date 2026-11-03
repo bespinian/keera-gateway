@@ -90,7 +90,7 @@ func queueToolCall(batch *pgx.Batch, e Event) {
 		t.Server, t.Tool, string(t.Outcome), e.Latency.Milliseconds(), t.ArgBytes, t.ResultBytes,
 		e.CostMicros, nullable(truncate(e.Error, maxErrorBytes)), nullable(e.SessionKey),
 		nullable(e.Client))
-	queueFilterRuns(batch, e, t.Server+"/"+t.Tool)
+	queueFilterRuns(batch, e)
 }
 
 // ToolCallRow is one tool call as the control API returns it.

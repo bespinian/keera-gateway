@@ -74,3 +74,22 @@ func TestTheLimitHoldsForWhatABodyUnpacksTo(t *testing.T) {
 		t.Errorf("status = %d, want 413", status)
 	}
 }
+
+func TestReadAllReadsTheWholeBodyWhateverSizeWasClaimed(t *testing.T) {
+	body := bytes.Repeat([]byte("abcdefgh"), 1000)
+	for _, size := range []int{-1, 0, 10, len(body) - 1, len(body), len(body) + 1, 1 << 20} {
+		got, err := readAll(bytes.NewReader(body), size)
+		if err != nil || !bytes.Equal(got, body) {
+			t.Errorf("size %d: read %d bytes, err = %v", size, len(got), err)
+		}
+	}
+}
+
+func TestReadAllNeedsNoMoreRoomThanTheClaim(t *testing.T) {
+	body := bytes.Repeat([]byte("x"), 100_000)
+	got, _ := readAll(bytes.NewReader(body), len(body))
+	if cap(got) != len(body)+1 {
+		t.Errorf("cap = %d for a body of %d bytes, want one allocation of %d",
+			cap(got), len(body), len(body)+1)
+	}
+}
