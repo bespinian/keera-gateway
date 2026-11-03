@@ -372,18 +372,21 @@ func (f *flushBeforeRead) flush() {
 }
 
 // usageFromResponse pulls the usage record out of a complete, non-streamed
-// response body.
+// response body. Only the top level is split, since the answer can be long and
+// usage is all that is read.
 func usageFromResponse(raw []byte) *tokenUsage {
 	if !bytes.Contains(raw, usageKey) {
 		return nil
 	}
-	var envelope struct {
-		Usage *tokenUsage `json:"usage"`
-	}
-	if json.Unmarshal(raw, &envelope) != nil {
+	val, ok := topLevel(raw, "usage")
+	if !ok {
 		return nil
 	}
-	return envelope.Usage
+	var usage *tokenUsage
+	if json.Unmarshal(val, &usage) != nil {
+		return nil
+	}
+	return usage
 }
 
 // rerankUsage reads a rerank's usage record. vLLM and Infomaniak send only

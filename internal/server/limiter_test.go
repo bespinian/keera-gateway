@@ -22,7 +22,7 @@ func logged(t *testing.T, cfg config.Config) (limiter, string) {
 	t.Helper()
 	var buf bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	lim, closeLimiter := buildLimiter(t.Context(), cfg, metrics.New(), log)
+	lim, _, closeLimiter := buildLimiter(t.Context(), cfg, metrics.New(), log)
 	t.Cleanup(closeLimiter)
 	return lim, buf.String()
 }
@@ -79,16 +79,26 @@ func TestTheLimiterIsAlwaysSweepable(t *testing.T) {
 	}
 }
 
-func TestClosingTheLimiterIsSafeInBothShapes(t *testing.T) {
-	// serve always defers the closer, so it must not be nil.
+func TestRunningAndClosingTheLimiterIsSafeInBothShapes(t *testing.T) {
+	// serve always runs it and defers the closer, so neither may be nil, and
+	// run must return once its context is done, or shutdown hangs.
 	for _, cfg := range []config.Config{
 		{},
 		{Redis: unreachable()},
 	} {
-		_, closeLimiter := buildLimiter(context.Background(), cfg,
+		_, run, closeLimiter := buildLimiter(context.Background(), cfg,
 			metrics.New(), slog.New(slog.DiscardHandler))
-		if closeLimiter == nil {
-			t.Fatal("buildLimiter returned no closer; serve defers it unconditionally")
+		if run == nil || closeLimiter == nil {
+			t.Fatal("buildLimiter returned no runner or closer; serve uses both unconditionally")
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() { run(ctx); close(done) }()
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("run did not return after its context was done")
 		}
 		closeLimiter()
 	}

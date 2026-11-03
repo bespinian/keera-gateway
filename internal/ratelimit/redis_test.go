@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math/rand/v2"
 	"os"
 	"testing"
@@ -462,5 +463,123 @@ func TestRedisSweepAlsoBoundsTheLocalBucketsUnderneath(t *testing.T) {
 	r.Sweep(time.Hour, now.Add(2*time.Hour))
 	if got := local.Remaining("org|rpm", 60, now); got != 60 {
 		t.Errorf("the local bucket has %d left after a sweep, want a forgotten 60", got)
+	}
+}
+
+// recordingScripter is a liveScripter that keeps what each script was sent.
+type recordingScripter struct {
+	liveScripter
+	keys [][]string
+	args [][]any
+}
+
+func (r *recordingScripter) EvalSha(ctx context.Context, sha string, keys []string, args ...any) *redis.Cmd {
+	r.keys, r.args = append(r.keys, keys), append(r.args, args)
+	return r.cmd(ctx, sha, keys)
+}
+
+func TestRedisHeldChargesWaitForAFlushAndShareOneRoundTrip(t *testing.T) {
+	// With ChargeEvery, a request does not wait for Redis once it is answered:
+	// its charge is held, and a flush sends each bucket's sum in one script.
+	rec := &recordingScripter{liveScripter: liveScripter{tokens: 1000}}
+	r := NewRedis(rec, New(), RedisOptions{ChargeEvery: time.Hour}, nil)
+	now := time.Now()
+	org := Requirement{Key: "org|tpm", PerMinute: 1000}
+	key := Requirement{Key: "key|tpm", PerMinute: 300}
+
+	r.ChargeAll([]Requirement{org, key}, 100, now)
+	r.ChargeAll([]Requirement{org}, 50, now)
+	r.ChargeAll([]Requirement{{Key: "project|tpm"}}, 70, now) // unlimited, so never sent
+	if len(rec.args) != 0 {
+		t.Fatalf("%d round trips before the flush, want none", len(rec.args))
+	}
+
+	r.Flush(now)
+	if len(rec.args) != 1 {
+		t.Fatalf("%d round trips for one flush, want 1", len(rec.args))
+	}
+	got := map[string]float64{}
+	for i, k := range rec.keys[0] {
+		got[k] = rec.args[0][1+3*i].(float64) / 1000
+	}
+	want := map[string]float64{r.key("org|tpm"): 150, r.key("key|tpm"): 100}
+	if !maps.Equal(got, want) {
+		t.Errorf("the flush charged %v, want %v", got, want)
+	}
+
+	r.Flush(now)
+	if len(rec.args) != 1 {
+		t.Error("a flush with nothing held made a round trip")
+	}
+}
+
+func TestRedisHeldChargesFallBackLocallyWhenRedisIsDown(t *testing.T) {
+	// A flush that cannot reach Redis charges the local buckets, as an
+	// immediate charge would.
+	r := NewRedis(&deadScripter{err: errors.New("i/o timeout")}, New(),
+		RedisOptions{ChargeEvery: time.Hour}, nil)
+	now := time.Now()
+	charge(r, "org|tpm", 1000, 600, now)
+	charge(r, "org|tpm", 1000, 600, now)
+	r.Flush(now)
+	if got := r.Remaining("org|tpm", 1000, now); got != 0 {
+		t.Errorf("Remaining = %d, want 0: the held charges were lost", got)
+	}
+}
+
+func TestRedisRunSendsWhatIsHeldWhenItStops(t *testing.T) {
+	// Shutdown stops Run after the last request, so that charge is not lost.
+	rec := &recordingScripter{liveScripter: liveScripter{tokens: 1000}}
+	r := NewRedis(rec, New(), RedisOptions{ChargeEvery: time.Hour}, nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { r.Run(ctx); close(done) }()
+
+	charge(r, "org|tpm", 1000, 10, time.Now())
+	cancel()
+	<-done
+	if len(rec.args) != 1 {
+		t.Errorf("%d round trips when Run stopped, want 1 for the held charge", len(rec.args))
+	}
+}
+
+func TestRedisHeldChargesMatchMemoryOnceFlushed(t *testing.T) {
+	// Each bucket gets its own sum, as memory would, and binds the other
+	// replicas once flushed.
+	rdb, prefix := redisFor(t)
+	r := NewRedis(rdb, New(), RedisOptions{
+		Prefix: prefix, Timeout: 5 * time.Second, ChargeEvery: time.Hour,
+	}, nil)
+	other := replica(t, rdb, prefix)
+	l := New()
+	now := time.Now()
+	org := Requirement{Key: "org|tpm", PerMinute: 1000}
+	key := Requirement{Key: "key|tpm", PerMinute: 300}
+	for _, c := range []struct {
+		reqs []Requirement
+		n    float64
+	}{
+		{[]Requirement{org, key}, 120},
+		{[]Requirement{org}, 400},
+		{[]Requirement{key}, 30},
+	} {
+		r.ChargeAll(c.reqs, c.n, now)
+		l.ChargeAll(c.reqs, c.n, now)
+	}
+
+	// What Redis holds, read without taking anything.
+	held := func(req Requirement) int {
+		other.Admit([]Requirement{req}, now)
+		return other.Remaining(req.Key, req.PerMinute, now)
+	}
+	if got := held(org); got != org.PerMinute {
+		t.Fatalf("Redis has %d left before the flush, want a full %d", got, org.PerMinute)
+	}
+
+	r.Flush(now)
+	for _, req := range []Requirement{org, key} {
+		if got, want := held(req), l.Remaining(req.Key, req.PerMinute, now); got != want {
+			t.Errorf("%s: Redis has %d left after the flush, memory has %d", req.Key, got, want)
+		}
 	}
 }

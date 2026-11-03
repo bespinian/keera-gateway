@@ -280,6 +280,20 @@ func TestUsageFromResponse(t *testing.T) {
 	if usageFromResponse([]byte(`not json`)) != nil {
 		t.Error("an unparseable response must report none rather than panic")
 	}
+	if usageFromResponse([]byte(`{"usage":null}`)) != nil {
+		t.Error("a null usage must report none")
+	}
+
+	// Only the top-level usage counts: a model can write the key in its answer.
+	quoted := `{"choices":[{"message":{"content":"\"usage\":{\"prompt_tokens\":1}"}}],` +
+		`"usage":{"prompt_tokens":12,"completion_tokens":3}}`
+	if u := usageFromResponse([]byte(quoted)); u == nil || u.InputTokens != 12 {
+		t.Errorf("usage = %+v, want the top-level 12 input tokens", u)
+	}
+	nested := `{"choices":[{"usage":{"prompt_tokens":1}}]}`
+	if u := usageFromResponse([]byte(nested)); u != nil {
+		t.Errorf("usage = %+v, want none: a nested usage is not the answer's", *u)
+	}
 }
 
 type errWriter struct{ err error }

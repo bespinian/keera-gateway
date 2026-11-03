@@ -32,6 +32,17 @@ type Redis struct {
 	// decision is local, so an outage does not add the timeout to every
 	// request.
 	resting time.Time
+
+	chargeEvery time.Duration
+	// owedMu guards owed: the charges held until the next Flush, by bucket.
+	owedMu sync.Mutex
+	owed   map[string]owed
+}
+
+// owed is what one bucket is to be charged at the next Flush.
+type owed struct {
+	req Requirement
+	n   float64
 }
 
 // Reporter counts the decisions made locally because Redis could not be
@@ -58,6 +69,11 @@ type RedisOptions struct {
 	Timeout time.Duration
 	// Metrics counts the fallbacks. Optional.
 	Metrics Reporter
+	// ChargeEvery holds ChargeAll's charges and sends them together this
+	// often, from Run. A request then does not wait for Redis once it is
+	// answered, and many requests share one round trip. Zero sends each charge
+	// at once.
+	ChargeEvery time.Duration
 }
 
 // DefaultRedisPrefix is the key prefix when none is set.
@@ -92,6 +108,10 @@ func NewRedis(rdb redis.Scripter, local *Limiter, opts RedisOptions, log *slog.L
 	}
 	if r.timeout <= 0 {
 		r.timeout = defaultRedisTimeout
+	}
+	if opts.ChargeEvery > 0 {
+		r.chargeEvery = opts.ChargeEvery
+		r.owed = make(map[string]owed)
 	}
 	return r
 }
@@ -170,16 +190,16 @@ end
 return out
 `
 
-// chargeSource takes the amount known at the end of a request from every
-// bucket in KEYS. Each may go negative, as in memory.
+// chargeSource takes the amounts known at the end of requests from the buckets
+// in KEYS, each its own amount. Each may go negative, as in memory.
 const chargeSource = refillSource + `
 local now = tonumber(ARGV[1])
-local n = tonumber(ARGV[2]) / 1000
 local out = {}
 
 for i = 1, #KEYS do
-  local perSec = tonumber(ARGV[2 * i + 1])
-  local burst = tonumber(ARGV[2 * i + 2])
+  local n = tonumber(ARGV[3 * i - 1]) / 1000
+  local perSec = tonumber(ARGV[3 * i])
+  local burst = tonumber(ARGV[3 * i + 1])
   local t, ts = refill(KEYS[i], now, perSec, burst)
   if t > burst then t = burst end
   t = t - n
@@ -203,7 +223,7 @@ var (
 // Admit decides one request against every requirement at once, in Redis. It
 // returns the index into reqs of the first failed requirement, or -1.
 func (r *Redis) Admit(reqs []Requirement, now time.Time) int {
-	keys, args, at := r.bucketArgs(reqs, []any{now.UnixMilli()}, true)
+	keys, args, at := r.admitArgs(reqs, []any{now.UnixMilli()})
 	if len(keys) == 0 {
 		return -1
 	}
@@ -226,41 +246,114 @@ func (r *Redis) Admit(reqs []Requirement, now time.Time) int {
 	return -1
 }
 
-// bucketArgs adds each limited requirement's key and rate to args, and when
-// admitting, the unit it takes. Unlimited ones are left out, so at maps each
-// key back to its index in reqs.
-func (r *Redis) bucketArgs(reqs []Requirement, args []any, admit bool) (keys []string, _ []any, at []int) {
+// admitArgs adds each limited requirement's key, rate and the unit it takes to
+// args. Unlimited ones are left out, so at maps each key back to its index in
+// reqs.
+func (r *Redis) admitArgs(reqs []Requirement, args []any) (keys []string, _ []any, at []int) {
 	for i, req := range reqs {
 		if req.PerMinute <= 0 {
 			continue
 		}
 		perSec, burst := rate(req.PerMinute)
-		keys = append(keys, r.key(req.Key))
-		args = append(args, perSec, burst)
-		if admit {
-			take := 0
-			if req.Take {
-				take = 1
-			}
-			args = append(args, take)
+		take := 0
+		if req.Take {
+			take = 1
 		}
+		keys = append(keys, r.key(req.Key))
+		args = append(args, perSec, burst, take)
 		at = append(at, i)
 	}
 	return keys, args, at
 }
 
 // ChargeAll takes n units from the bucket of every requirement, in one round
-// trip. Take is not used.
+// trip. With ChargeEvery set, it only notes the charge for the next Flush.
+// Take is not used.
 func (r *Redis) ChargeAll(reqs []Requirement, n float64, now time.Time) {
 	if n == 0 {
 		return
 	}
-	keys, args, _ := r.bucketArgs(reqs, []any{now.UnixMilli(), n * 1000}, false)
+	if r.chargeEvery <= 0 {
+		r.charge(reqs, func(int) float64 { return n }, now)
+		return
+	}
+	r.owedMu.Lock()
+	defer r.owedMu.Unlock()
+	for _, req := range reqs {
+		if req.PerMinute <= 0 {
+			continue
+		}
+		o := r.owed[req.Key]
+		o.req, o.n = req, o.n+n
+		r.owed[req.Key] = o
+	}
+}
+
+// maxChargeKeys bounds one charge script, so a flush after a busy interval
+// does not hold Redis for long.
+const maxChargeKeys = 256
+
+// Flush sends the charges ChargeAll held, as of now. They reach Redis up to
+// ChargeEvery late, which a limit per minute does not notice.
+func (r *Redis) Flush(now time.Time) {
+	r.owedMu.Lock()
+	held := r.owed
+	if len(held) > 0 {
+		r.owed = make(map[string]owed, len(held))
+	}
+	r.owedMu.Unlock()
+
+	reqs := make([]Requirement, 0, min(len(held), maxChargeKeys))
+	ns := make([]float64, 0, cap(reqs))
+	for _, o := range held {
+		reqs, ns = append(reqs, o.req), append(ns, o.n)
+		if len(reqs) == maxChargeKeys {
+			r.charge(reqs, func(i int) float64 { return ns[i] }, now)
+			reqs, ns = reqs[:0], ns[:0]
+		}
+	}
+	if len(reqs) > 0 {
+		r.charge(reqs, func(i int) float64 { return ns[i] }, now)
+	}
+}
+
+// Run flushes the held charges every ChargeEvery until ctx is done, and once
+// more then. Without ChargeEvery there is nothing to hold, and it returns.
+func (r *Redis) Run(ctx context.Context) {
+	if r.chargeEvery <= 0 {
+		return
+	}
+	t := time.NewTicker(r.chargeEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			r.Flush(time.Now())
+			return
+		case now := <-t.C:
+			r.Flush(now)
+		}
+	}
+}
+
+// charge takes n(i) units from the bucket of reqs[i], in one round trip.
+func (r *Redis) charge(reqs []Requirement, n func(i int) float64, now time.Time) {
+	keys := make([]string, 0, len(reqs))
+	args := make([]any, 1, 1+3*len(reqs))
+	args[0] = now.UnixMilli()
+	for i, req := range reqs {
+		if req.PerMinute <= 0 {
+			continue
+		}
+		perSec, burst := rate(req.PerMinute)
+		keys = append(keys, r.key(req.Key))
+		args = append(args, n(i)*1000, perSec, burst)
+	}
 	if len(keys) == 0 {
 		return
 	}
 	if r.skip() {
-		r.local.ChargeAll(reqs, n, now)
+		r.chargeLocal(reqs, n, now)
 		return
 	}
 
@@ -269,10 +362,16 @@ func (r *Redis) ChargeAll(reqs []Requirement, n float64, now time.Time) {
 	left, err := chargeScript.Run(ctx, r.rdb, keys, args...).Int64Slice()
 	if err != nil || len(left) != len(keys) {
 		r.degrade("charging a request", err)
-		r.local.ChargeAll(reqs, n, now)
+		r.chargeLocal(reqs, n, now)
 		return
 	}
 	r.remember(keys, left, now)
+}
+
+func (r *Redis) chargeLocal(reqs []Requirement, n func(i int) float64, now time.Time) {
+	for i := range reqs {
+		r.local.ChargeAll(reqs[i:i+1], n(i), now)
+	}
 }
 
 // Remaining reports how many units key's bucket still holds, from what the last

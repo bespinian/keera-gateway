@@ -3,12 +3,15 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 )
 
@@ -31,11 +34,7 @@ func parseBody(raw []byte) (*body, error) {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return nil, errors.New("request body is empty")
 	}
-	// Validated up front, so the walk below can trust the document.
-	if !json.Valid(raw) {
-		return nil, syntaxError(raw)
-	}
-	fields, order, err := splitObject(raw)
+	fields, order, err := splitValid(raw)
 	if err != nil {
 		return nil, err
 	}
@@ -43,6 +42,64 @@ func parseBody(raw []byte) (*body, error) {
 		return nil, err
 	}
 	return &body{fields: fields, order: order}, nil
+}
+
+// bodyDecoders are reused: a decoder's state is worth keeping at thousands of
+// requests a second.
+var bodyDecoders = sync.Pool{New: func() any { return jsontext.NewDecoder(new(bytes.Buffer)) }}
+
+// splitValid validates raw and splits its top level in one pass, since bodies
+// can be hundreds of kilobytes. It accepts what json.Valid accepts: a repeated
+// key, and invalid UTF-8.
+func splitValid(raw []byte) (map[string]json.RawMessage, []string, error) {
+	dec := bodyDecoders.Get().(*jsontext.Decoder)
+	// Reset parses straight from a bytes.Buffer, without copying it.
+	dec.Reset(bytes.NewBuffer(raw), jsontext.AllowDuplicateNames(true), jsontext.AllowInvalidUTF8(true))
+	defer func() {
+		// An empty buffer, so the pool does not keep raw alive.
+		dec.Reset(new(bytes.Buffer))
+		bodyDecoders.Put(dec)
+	}()
+
+	if dec.PeekKind() != '{' {
+		if !json.Valid(raw) {
+			return nil, nil, syntaxError(raw)
+		}
+		return nil, nil, errNotObject
+	}
+	if _, err := dec.ReadToken(); err != nil {
+		return nil, nil, syntaxError(raw)
+	}
+	const typicalFields = 16
+	fields := make(map[string]json.RawMessage, typicalFields)
+	order := make([]string, 0, typicalFields)
+	for dec.PeekKind() != '}' {
+		name, err := dec.ReadToken()
+		if err != nil {
+			return nil, nil, syntaxError(raw)
+		}
+		// Read now: a token is only valid until the next read.
+		key := name.String()
+		val, err := dec.ReadValue()
+		if err != nil {
+			return nil, nil, syntaxError(raw)
+		}
+		// The span is cut from raw by offset, so it outlives the decoder.
+		end := int(dec.InputOffset())
+		// A repeated key keeps its last value, like decoding into a map.
+		if _, seen := fields[key]; !seen {
+			order = append(order, key)
+		}
+		fields[key] = raw[end-len(val) : end]
+	}
+	if _, err := dec.ReadToken(); err != nil {
+		return nil, nil, syntaxError(raw)
+	}
+	// Anything but space after the object makes it invalid, as for json.Valid.
+	if _, err := dec.ReadToken(); err != io.EOF {
+		return nil, nil, syntaxError(raw)
+	}
+	return fields, order, nil
 }
 
 // readNames are the keys the gateway reads anywhere in a request.
@@ -95,48 +152,85 @@ func syntaxError(raw []byte) error {
 // splitObject returns each top-level value as a sub-slice of raw. raw must
 // have passed json.Valid, since this only counts brackets and skips strings.
 func splitObject(raw []byte) (map[string]json.RawMessage, []string, error) {
-	i := skipSpace(raw, 0)
-	if i == len(raw) || raw[i] != '{' {
-		return nil, nil, errNotObject
-	}
 	const typicalFields = 16
 	fields := make(map[string]json.RawMessage, typicalFields)
 	order := make([]string, 0, typicalFields)
+	err := walkObject(raw, func(quoted, val []byte) error {
+		var key string
+		if err := json.Unmarshal(quoted, &key); err != nil {
+			return err
+		}
+		// A repeated key keeps its last value, like decoding into a map.
+		if _, seen := fields[key]; !seen {
+			order = append(order, key)
+		}
+		fields[key] = val
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return fields, order, nil
+}
 
+// topLevel returns the value of key at the top level of raw, the last one if
+// it repeats, without splitting the rest. Like splitObject, it trusts raw.
+func topLevel(raw []byte, key string) (json.RawMessage, bool) {
+	var found json.RawMessage
+	err := walkObject(raw, func(quoted, val []byte) error {
+		name := quoted[1 : len(quoted)-1]
+		if bytes.IndexByte(name, '\\') >= 0 {
+			// An escaped key, such as "usage", is decoded to compare.
+			var k string
+			if json.Unmarshal(quoted, &k) != nil || k != key {
+				return nil
+			}
+		} else if string(name) != key {
+			return nil
+		}
+		found = val
+		return nil
+	})
+	return found, err == nil && found != nil
+}
+
+// walkObject calls fn with each top-level key, quotes included, and its value.
+func walkObject(raw []byte, fn func(quoted, val []byte) error) error {
+	i := skipSpace(raw, 0)
+	if i == len(raw) || raw[i] != '{' {
+		return errNotObject
+	}
 	i++
 	for {
 		i = skipSpace(raw, i)
 		if i == len(raw) {
-			return nil, nil, errMalformed
+			return errMalformed
 		}
 		switch raw[i] {
 		case '}':
-			return fields, order, nil
+			return nil
 		case ',':
 			i++
 			continue
 		case '"':
 		default:
-			return nil, nil, errMalformed
+			return errMalformed
 		}
 
-		keyEnd := endOfString(raw, i)
-		var key string
-		if err := json.Unmarshal(raw[i:keyEnd], &key); err != nil {
-			return nil, nil, err
+		keyStart, keyEnd := i, endOfString(raw, i)
+		if keyEnd-keyStart < 2 {
+			return errMalformed
 		}
 		i = skipSpace(raw, keyEnd)
 		if i == len(raw) || raw[i] != ':' {
-			return nil, nil, errMalformed
+			return errMalformed
 		}
 
 		i = skipSpace(raw, i+1)
 		valEnd := endOfValue(raw, i)
-		// A repeated key keeps its last value, like decoding into a map.
-		if _, seen := fields[key]; !seen {
-			order = append(order, key)
+		if err := fn(raw[keyStart:keyEnd], raw[i:valEnd]); err != nil {
+			return err
 		}
-		fields[key] = raw[i:valEnd]
 		i = valEnd
 	}
 }

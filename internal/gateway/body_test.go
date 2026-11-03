@@ -1,8 +1,10 @@
 package gateway
 
 import (
+	"bytes"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -341,15 +343,25 @@ func FuzzParseBody(f *testing.F) {
 	f.Add(`{}`)
 	f.Add(`[]`)
 	f.Add(`{"é":"😀"}`)
+	f.Add("{\"a\":\"\xff\",\"\xfe\":1} \n")
+	f.Add(`{"model":"m","a":[]}x`)
 
 	f.Fuzz(func(t *testing.T, in string) {
 		b, err := parseBody([]byte(in))
+		checkLikeValidThenSplit(t, in, b, err)
 
 		var reference map[string]json.RawMessage
 		refErr := json.Unmarshal([]byte(in), &reference)
 		if refErr != nil || reference == nil {
 			if err == nil {
 				t.Fatalf("accepted %q, which is not a JSON object", in)
+			}
+			return
+		}
+		// A read key in other case is refused on purpose; see checkKeys.
+		if checkKeys(reference) != nil {
+			if err == nil {
+				t.Fatalf("accepted %q, which spells a read key in other case", in)
 			}
 			return
 		}
@@ -365,6 +377,82 @@ func FuzzParseBody(f *testing.F) {
 			t.Fatalf("%q: encode() is not valid JSON: %v\n%s", in, err, b.encode())
 		}
 	})
+}
+
+// checkLikeValidThenSplit checks that the one-pass parse accepts what
+// json.Valid accepted and cuts the same spans splitObject cut after it.
+func checkLikeValidThenSplit(t *testing.T, in string, b *body, err error) {
+	t.Helper()
+	raw := []byte(in)
+	if !json.Valid(raw) || len(bytes.TrimSpace(raw)) == 0 {
+		if err == nil {
+			t.Fatalf("accepted %q, which json.Valid refuses", in)
+		}
+		return
+	}
+	fields, order, splitErr := splitObject(raw)
+	if splitErr == nil {
+		splitErr = checkKeys(fields)
+	}
+	if (err == nil) != (splitErr == nil) {
+		t.Fatalf("%q: one pass says %v, json.Valid and splitObject said %v", in, err, splitErr)
+	}
+	if err != nil {
+		return
+	}
+	if !slices.Equal(b.order, order) {
+		t.Fatalf("%q: order %q, want %q", in, b.order, order)
+	}
+	for k, want := range fields {
+		if got := b.fields[k]; !bytes.Equal(got, want) {
+			t.Fatalf("%q: field %q is %q, want %q", in, k, got, want)
+		}
+	}
+}
+
+func TestTopLevelReadsOneKeyLikeSplitObject(t *testing.T) {
+	for _, tc := range []struct {
+		in, want string
+		ok       bool
+	}{
+		{`{"a":1,"usage":{"n":2}}`, `{"n":2}`, true},
+		{`{"usage":1,"usage":2}`, `2`, true},       // the last one, as in a map
+		{`{"usage":3}`, `3`, true},                 // an escaped key
+		{`{"x":{"usage":4}}`, ``, false},           // nested, so not the answer's
+		{`{"x":"\"usage\":5"}`, ``, false},         // inside a string
+		{`{"usages":6,"usag":7}`, ``, false},       // other keys
+		{`[{"usage":8}]`, ``, false},               // not an object
+		{` { "usage" : [ 9 ] } `, `[ 9 ]`, true},   // spaces kept, as splitObject keeps them
+		{`{"a\"usage":10,"usage":11}`, `11`, true}, // a quote in a key
+		{`{"usage":null}`, `null`, true},           // present, if null
+	} {
+		got, ok := topLevel([]byte(tc.in), "usage")
+		if ok != tc.ok || string(got) != tc.want {
+			t.Errorf("topLevel(%s) = %q, %v; want %q, %v", tc.in, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+func TestParseBodyCutsWhatValidThenSplitCut(t *testing.T) {
+	// The parse validates and splits in one pass; it must agree with the two.
+	for _, in := range []string{
+		`{"model":"m","messages":[{"role":"user","content":"hi"}]}`,
+		`{ "a" : 1 , "a" : 2 }`,
+		"{\"a\":\"\xff\",\"\xfe\":1}",
+		"{\"model\":\"m\"} \n\t",
+		`{"model":"m"}`,
+		`{"m\"odel":{"x":[1,2,{"y":"}"}]}}`,
+		`{"model":"m"} x`,
+		`{"model":"m"}{}`,
+		`{"a":{"b":1,"b":2}}`,
+		`[1,2]`,
+		`"just a string"`,
+		`{"a":tru}`,
+		`{"a":[1,]}`,
+	} {
+		b, err := parseBody([]byte(in))
+		checkLikeValidThenSplit(t, in, b, err)
+	}
 }
 
 // checkFields compares every field the walk read with what unmarshalling read.

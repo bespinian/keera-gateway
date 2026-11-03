@@ -98,7 +98,7 @@ func serve(ctx context.Context) error {
 	mreg := metrics.New()
 	recorder := usage.NewRecorder(st, usage.Options{}, log)
 
-	limiter, closeLimiter := buildLimiter(ctx, cfg, mreg, log)
+	limiter, runLimiter, closeLimiter := buildLimiter(ctx, cfg, mreg, log)
 	defer closeLimiter()
 
 	gw := gateway.New(reg, reg.Budgets(), limiter, recorder, mreg, gateway.Options{
@@ -155,6 +155,8 @@ func serve(ctx context.Context) error {
 	var wg sync.WaitGroup
 	wg.Go(func() { reg.Run(bg) })
 	wg.Go(func() { recorder.Run(recCtx) })
+	// Sends held token charges; stops with the recorder, after the requests.
+	wg.Go(func() { runLimiter(recCtx) })
 	// Lets the panel show a request as soon as it is recorded.
 	wg.Go(func() { ctl.Run(bg) })
 	// Charges saved cards that ran low, and settles payments.
@@ -387,15 +389,19 @@ type limiter interface {
 	Sweep(idle time.Duration, now time.Time)
 }
 
-// buildLimiter returns the rate-limit buckets and a function that releases
-// them. With KEERA_REDIS_URL, replicas share one allowance and memory is the
-// fallback.
+// chargeEvery is how often token charges go to Redis, held together. Short
+// next to a minute, so a limit per minute barely notices.
+const chargeEvery = 100 * time.Millisecond
+
+// buildLimiter returns the rate-limit buckets, what runs them in the
+// background, and a function that releases them. With KEERA_REDIS_URL,
+// replicas share one allowance and memory is the fallback.
 func buildLimiter(ctx context.Context, cfg config.Config, mreg *metrics.Registry,
 	log *slog.Logger,
-) (limiter, func()) {
+) (limiter, func(context.Context), func()) {
 	local := ratelimit.New()
 	if cfg.Redis == nil {
-		return local, func() {}
+		return local, func(context.Context) {}, func() {}
 	}
 	opt := cfg.Redis
 	rdb := redis.NewClient(opt)
@@ -413,10 +419,12 @@ func buildLimiter(ctx context.Context, cfg config.Config, mreg *metrics.Registry
 			"addr", opt.Addr, "db", opt.DB, "prefix", cfg.RedisPrefix)
 	}
 
-	return ratelimit.NewRedis(rdb, local, ratelimit.RedisOptions{
-		Prefix:  cfg.RedisPrefix,
-		Metrics: mreg,
-	}, log), func() { _ = rdb.Close() }
+	lim := ratelimit.NewRedis(rdb, local, ratelimit.RedisOptions{
+		Prefix:      cfg.RedisPrefix,
+		Metrics:     mreg,
+		ChargeEvery: chargeEvery,
+	}, log)
+	return lim, lim.Run, func() { _ = rdb.Close() }
 }
 
 // sweep bounds the caches' memory. Without it, a public endpoint keeps one

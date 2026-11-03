@@ -94,10 +94,15 @@ func benchGateway(b *testing.B, filters ...string) http.Handler {
 		chunks = append(chunks, deltaChunk)
 	}
 	stream := sseStream(append(chunks, stopChunk, usageChunk)...)
+	return benchGatewayAnswering(b, "text/event-stream", stream, filters...)
+}
+
+// benchGatewayAnswering is a gateway whose backend gives every request answer.
+func benchGatewayAnswering(b *testing.B, contentType, answer string, filters ...string) http.Handler {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, stream)
+		w.Header().Set("Content-Type", contentType)
+		_, _ = io.WriteString(w, answer)
 	}))
 	b.Cleanup(backend.Close)
 
@@ -133,6 +138,20 @@ func benchServe(b *testing.B, h http.Handler, path string, body []byte) {
 
 func BenchmarkChat(b *testing.B) {
 	benchServe(b, benchGateway(b), "/v1/chat/completions", benchChat(b))
+}
+
+// BenchmarkSmallChat is the common case at a high request rate: a short
+// question and a 10 KB answer, not streamed. Here the gateway's own work is
+// what is left once the HTTP plumbing is paid for.
+func BenchmarkSmallChat(b *testing.B) {
+	answer := `{"id":"c","object":"chat.completion","created":1,"model":"served-name",` +
+		`"choices":[{"index":0,"message":{"role":"assistant","content":"` + strings.Repeat("lorem ipsum ", 800) +
+		`"},"finish_reason":"stop"}],"usage":{"prompt_tokens":100,"completion_tokens":2000,"total_tokens":2100}}`
+	body := benchJSON(b, map[string]any{"model": "keera-code", "messages": []map[string]any{
+		{"role": "system", "content": "You are a helpful assistant."},
+		{"role": "user", "content": strings.Repeat("Please explain how HTTP keep-alive works. ", 45)},
+	}})
+	benchServe(b, benchGatewayAnswering(b, "application/json", answer), "/v1/chat/completions", body)
 }
 
 // BenchmarkChatPatternFilter resends the same conversation, as an agent does

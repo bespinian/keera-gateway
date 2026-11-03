@@ -679,6 +679,11 @@ which refuses a script whose keys are in different slots.
   before trying Redis again, so an outage does not add the timeout to every
   request.
 - **The headers come from the same decision**, not from a second round trip.
+- **Tokens are charged after the answer, in batches.** A request's tokens are
+  known only once it has been answered. Each replica holds them and sends them
+  every 100 ms in one script, so a request does not wait for Redis at the end
+  and many requests share one round trip. Other replicas see the tokens up to
+  100 ms late, which a limit per minute does not notice.
 
 The control plane's sign-in throttle stays per replica.
 
