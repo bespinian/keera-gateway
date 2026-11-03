@@ -110,3 +110,4 @@ Update them when behaviour changes.
 ## Instructions
 
 - Always keep code comments, documentation, and user-facing texts concise, easy to read, and in simple language
+- Never add yourself to commits or commit messages
