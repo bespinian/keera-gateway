@@ -923,7 +923,7 @@ async function boot() {
   }
 
   state.me = me;
-  setCsrf(me.csrf);
+  setCsrf(me.csrf, me.user_id);
   state.orgID = me.org_id || "";
 
   if (me.unrestricted) {

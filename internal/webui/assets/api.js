@@ -17,14 +17,53 @@ export class ApiError extends Error {
 }
 
 let csrf = "";
+let csrfUser = "";
 
-export function setCsrf(token) {
+// setCsrf keeps the token from /v1/me, and whose session it belongs to.
+export function setCsrf(token, userID) {
   csrf = token || "";
+  csrfUser = userID || "";
 }
 
 // request sends one call and decodes the answer. raw returns the response,
 // for a body that streams or is a file. A refusal is an ApiError either way.
-async function request(method, path, body, { raw, signal } = {}) {
+//
+// Signing in again in another tab, as Keera Chat does through the gateway,
+// starts a new session and replaces the cookie, so this page's token is
+// refused. If the new session is the same person's, the call is sent once more
+// with its token.
+async function request(method, path, body, opts) {
+  try {
+    return await send(method, path, body, opts);
+  } catch (err) {
+    if (!(err instanceof ApiError && err.code === "csrf")) throw err;
+    if (!(await renewCsrf())) throw err;
+    return send(method, path, body, opts);
+  }
+}
+
+let renewing = null;
+
+// renewCsrf takes the token of the session the cookie holds now. It refuses
+// one of another person, or of the same person in another organisation: this
+// page shows the old one.
+function renewCsrf() {
+  renewing ??= send("GET", "/v1/me")
+    .then(
+      (me) => {
+        if (!csrfUser || me.user_id !== csrfUser) return false;
+        csrf = me.csrf || "";
+        return true;
+      },
+      () => false,
+    )
+    .finally(() => {
+      renewing = null;
+    });
+  return renewing;
+}
+
+async function send(method, path, body, { raw, signal } = {}) {
   const headers = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (csrf && method !== "GET") headers["X-CSRF-Token"] = csrf;

@@ -481,7 +481,7 @@ func (r *recordingScripter) EvalSha(ctx context.Context, sha string, keys []stri
 func TestRedisHeldChargesWaitForAFlushAndShareOneRoundTrip(t *testing.T) {
 	// With ChargeEvery, a request does not wait for Redis once it is answered:
 	// its charge is held, and a flush sends each bucket's sum in one script.
-	rec := &recordingScripter{liveScripter: liveScripter{tokens: 1000}}
+	rec := &recordingScripter{tokens: 1000}
 	r := NewRedis(rec, New(), RedisOptions{ChargeEvery: time.Hour}, nil)
 	now := time.Now()
 	org := Requirement{Key: "org|tpm", PerMinute: 1000}
@@ -529,7 +529,7 @@ func TestRedisHeldChargesFallBackLocallyWhenRedisIsDown(t *testing.T) {
 
 func TestRedisRunSendsWhatIsHeldWhenItStops(t *testing.T) {
 	// Shutdown stops Run after the last request, so that charge is not lost.
-	rec := &recordingScripter{liveScripter: liveScripter{tokens: 1000}}
+	rec := &recordingScripter{tokens: 1000}
 	r := NewRedis(rec, New(), RedisOptions{ChargeEvery: time.Hour}, nil)
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
