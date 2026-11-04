@@ -156,8 +156,8 @@ The steps and settings are in
 Why they are so:
 
 - **This directory only**, as the supported account types. This is the same
-  boundary as Google's **Internal**. The multi-tenant options admit accounts
-  from other directories, and Keera places a first sign-in by its email domain.
+  boundary as Google's **Internal**. To admit other directories too, see
+  [Every Microsoft tenant](#every-microsoft-tenant).
 - **The secret expires.** Copy its _value_, not its ID; it is shown only once.
   Entra secrets last at most 24 months, and an expired secret fails every
   sign-in.
@@ -173,10 +173,47 @@ Why they are so:
   [What each provider does and does not give you](#what-each-provider-does-and-does-not-give-you)
   first. To assign administrators in Keera instead, create no app roles and
   leave out `KEERA_OIDC_ENTRA_ADMIN_GROUPS`.
-- **The issuer** must contain the tenant ID and end in `/v2.0`. The v1 endpoint
+- **The issuer** contains the tenant ID and ends in `/v2.0`. The v1 endpoint
   issues tokens whose `iss` does not match what discovery reports.
 
 Entra allows an `http` redirect URI only for `localhost`, like Google.
+
+### Every Microsoft tenant
+
+For a hosted deployment, one app registration can serve people from any
+Entra tenant. Choose a multi-tenant option as the supported account types, and
+put `common`, `organizations` (work and school accounts only) or `consumers`
+(personal accounts only) in the issuer instead of the tenant ID:
+
+```sh
+KEERA_OIDC_ENTRA_ISSUER=https://login.microsoftonline.com/organizations/v2.0
+KEERA_OIDC_ENTRA_DOMAINS=*
+```
+
+Discovery for these issuers reports `.../{tenantid}/v2.0`, which no token
+carries. So Keera checks each token's `iss` against the tenant in its own `tid`
+claim, as Microsoft asks. The `sub` stays the same for a person whichever
+issuer the app uses, so changing to it keeps everyone's account.
+
+Every tenant's administrator decides their own users' addresses, groups and
+app roles. So with such an issuer:
+
+- **`xms_edov` is required.** A sign-in is refused unless Entra says the
+  tenant owns the address's domain. A domain can be verified in only one
+  tenant, so nobody else can sign in with it.
+- **Personal accounts are trusted like Google's.** They send no `xms_edov`.
+  Keera recognises them by their tenant, `9188040d-6c67-4c5b-b112-36a304b66dad`,
+  and accepts the address, since Microsoft proves it with a code at sign-up.
+  This proves less than `xms_edov`: someone who once read mail at an address
+  can keep a personal account with it, such as a former employee with a
+  company address. Use `organizations` to admit work and school accounts only.
+- **`KEERA_OIDC_<NAME>_DOMAINS` is required**, as for
+  [GitHub](#github). Otherwise anyone with a Microsoft account lands in the one
+  organisation. `*` is allowed here, since `xms_edov` proves each domain, and
+  so is [sign-up](#letting-people-sign-up).
+- **`ADMIN_GROUPS` and `OPERATOR_GROUPS` are refused.** Any tenant could add its
+  users to an app role of that name. Name operators in `KEERA_OPERATORS` and
+  assign administrators in Keera.
 
 > **Not tested against a real tenant.** This setup follows the protocol and
 > Entra's documentation. The group-overage refusal has a test.
@@ -334,8 +371,9 @@ with, and the gateway refuses to start with several providers if one has none. A
 sign-in with an address outside the list is refused.
 
 `*` allows every domain. Use it only for a provider that proves each address
-itself, such as Google. Never use it for Entra, where the tenant admin sets the
-address.
+itself, such as Google, or Entra for
+[every tenant](#every-microsoft-tenant), which requires `xms_edov`. Never use
+it for Entra with one tenant, where the tenant admin sets the address.
 
 The example sets no admin groups: they would decide roles for the whole
 gateway, and Google users, who [send no
@@ -699,6 +737,7 @@ with the operator key. On such a gateway, `keera login` needs no `--provider`.
 | "that email domain belongs to another organisation"            | Each domain belongs to one organisation. `keera org list` shows which; clear it there first.                                                                                |
 | "cannot be used with … sign-in"                                | The provider is only allowed some domains (`KEERA_OIDC_<NAME>_DOMAINS`), and the address is at another. Sign in through its own provider.                                   |
 | "is not a verified address"                                    | `email_verified` (Entra: `xms_edov`) is false. Verify the email in the directory. A missing claim is accepted, except on a sign-up provider for any domain.                 |
+| "admits every Microsoft tenant, so it must prove each address" | Entra sent no `xms_edov`. Add it as an optional ID-token claim. See [Every Microsoft tenant](#every-microsoft-tenant).                                                      |
 | "in too many groups"                                           | Entra group overage. Use app roles. See above.                                                                                                                              |
 | "signs in through …, the way it first signed in"               | That address signed in first through another provider. Use that one. See [One person, one provider](#one-person-one-provider).                                              |
 | "already belongs to an account linked to a different identity" | The address belongs to someone else's account in this organisation. An operator can move it.                                                                                |
@@ -707,7 +746,7 @@ with the operator key. On such a gateway, `keera login` needs no `--provider`.
 | `keera login`: "has to come back to a loopback address"        | The command line is older than the gateway, or something rewrote its redirect. Rebuild it.                                                                                  |
 | `keera login`: the browser signs in and nothing happens        | The browser is not on the same machine as the command, usually because of ssh. See above.                                                                                   |
 | A command says "your sign-in is no longer valid"               | It expired, a role change ended it, or someone ran `keera logout --all`. Run `keera login` again.                                                                           |
-| Entra: "did not match the issuer URL returned by provider"     | The issuer is `.../common/v2.0`, which answers discovery with a templated `{tenantid}` that matches nothing. Use the tenant ID.                                             |
+| Entra: "did not match the issuer URL returned by provider"     | The issuer names neither a tenant ID nor `common`, `organizations` or `consumers`, or does not end in `/v2.0`. See [Every Microsoft tenant](#every-microsoft-tenant).      |
 | Boot fails with "KEERA_PASSKEYS: passkeys need …"              | `KEERA_PUBLIC_URL` is unset, plain http on a name other than `localhost` or `*.localhost`, or an IP address. Browsers refuse passkeys there.                                |
 | "this set-up link has expired, was already used, or …"         | Links work once, for 24 hours, and a new one replaces the last. Ask for a new one: `keera user passkey-link <email>`.                                                       |
 | "that passkey was not accepted"                                | The passkey was removed, belongs to a disabled person, or is for another host name. The gateway log says which.                                                             |

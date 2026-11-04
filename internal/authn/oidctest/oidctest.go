@@ -63,6 +63,18 @@ func New(t *testing.T) *IDP {
 			"id_token_signing_alg_values_supported": []string{"RS256"},
 		})
 	})
+	// Entra's discovery for every tenant, with a placeholder where each
+	// token's issuer has its tenant. Tokens still say iss = URL unless a test
+	// sets iss and tid.
+	mux.HandleFunc("/common/v2.0/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"issuer":                                idp.URL + "/{tenantid}/v2.0",
+			"authorization_endpoint":                idp.URL + "/authorize",
+			"token_endpoint":                        idp.URL + "/token",
+			"jwks_uri":                              idp.URL + "/jwks",
+			"id_token_signing_alg_values_supported": []string{"RS256"},
+		})
+	})
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{
 			Key: key.Public(), KeyID: "test", Algorithm: "RS256", Use: "sig",

@@ -422,6 +422,11 @@ func (c Config) validateOIDC() error {
 				"email domains of the people who may, or %q where people sign up",
 				OIDCEnvPrefix(p.Name), authn.AnyDomain)
 		}
+		if p.IsEntraAnyTenant() {
+			if err := entraAnyTenant(p); err != nil {
+				return err
+			}
+		}
 	}
 	return c.validateSignUp()
 }
@@ -461,6 +466,25 @@ func ldapVouching(p authn.OIDCConfig) error {
 	if p.SignUp {
 		return fmt.Errorf("%sSIGNUP cannot be used with an LDAP directory, which does not "+
 			"prove an address to someone it does not know", prefix)
+	}
+	return nil
+}
+
+// entraAnyTenant refuses what is unsafe when every Microsoft tenant can sign
+// in: each tenant's administrator decides their own users' groups and app
+// roles, and any of them would land in the one organisation.
+func entraAnyTenant(p authn.OIDCConfig) error {
+	prefix := OIDCEnvPrefix(p.Name)
+	if len(p.Domains) == 0 {
+		return fmt.Errorf("set %sDOMAINS: the issuer admits every Microsoft tenant, so name "+
+			"the email domains of the people who may sign in, or %q where people sign up",
+			prefix, authn.AnyDomain)
+	}
+	if p.Mapping.UsesGroups() {
+		return fmt.Errorf("%sOPERATOR_GROUPS and %sADMIN_GROUPS cannot be used with an issuer "+
+			"for every Microsoft tenant, since each tenant decides its own groups and app roles; "+
+			"name operators in KEERA_OPERATORS and assign administrators in Keera, or use the "+
+			"issuer with your tenant ID", prefix, prefix)
 	}
 	return nil
 }

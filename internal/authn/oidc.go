@@ -150,6 +150,9 @@ type OIDC struct {
 	// google is set for accounts.google.com, which wants a URL parameter for
 	// refresh tokens and refuses the offline_access scope.
 	google bool
+	// entraIssuer is set for an Entra issuer for any tenant. It is the issuer
+	// with a placeholder for the tenant, which the verifier cannot check.
+	entraIssuer string
 	// github is set for github.com, which speaks OAuth but not OpenID Connect.
 	// It leaves provider and verifier nil.
 	github *githubAPI
@@ -173,9 +176,29 @@ func NewOIDC(ctx context.Context, cfg OIDCConfig, client *http.Client) (*OIDC, e
 	if client != nil {
 		ctx = oidc.ClientContext(ctx, client)
 	}
+	verify := &oidc.Config{ClientID: cfg.ClientID}
+	entraIssuer := ""
+	if cfg.IsEntraAnyTenant() {
+		// Discovery answers with a placeholder for the tenant, which no token
+		// carries. Each token's issuer is checked against its tenant instead.
+		entraIssuer = entraIssuerTemplate(cfg.IssuerURL)
+		ctx = oidc.InsecureIssuerURLContext(ctx, entraIssuer)
+		verify.SkipIssuerCheck = true
+	}
 	provider, err := oidc.NewProvider(ctx, strings.TrimRight(cfg.IssuerURL, "/"))
 	if err != nil {
 		return nil, fmt.Errorf("discovering the identity provider at %s: %w", cfg.IssuerURL, err)
+	}
+	if entraIssuer != "" {
+		// The override above accepts whatever discovery says, so make sure it
+		// said the template the tokens are checked against.
+		var meta struct {
+			Issuer string `json:"issuer"`
+		}
+		if err := provider.Claims(&meta); err != nil || meta.Issuer != entraIssuer {
+			return nil, fmt.Errorf("discovering the identity provider at %s: it reports the "+
+				"issuer %q, not %q", cfg.IssuerURL, meta.Issuer, entraIssuer)
+		}
 	}
 	google := isGoogle(cfg.IssuerURL)
 	scopes := cfg.Scopes
@@ -187,10 +210,11 @@ func NewOIDC(ctx context.Context, cfg OIDCConfig, client *http.Client) (*OIDC, e
 		}
 	}
 	return &OIDC{
-		cfg:      cfg,
-		google:   google,
-		provider: provider,
-		verifier: provider.Verifier(&oidc.Config{ClientID: cfg.ClientID}),
+		cfg:         cfg,
+		google:      google,
+		entraIssuer: entraIssuer,
+		provider:    provider,
+		verifier:    provider.Verifier(verify),
 		oauth: &oauth2.Config{
 			ClientID:     cfg.ClientID,
 			ClientSecret: cfg.ClientSecret,
@@ -414,6 +438,11 @@ func (o *OIDC) verifiedIDToken(ctx context.Context, token *oauth2.Token) (*oidc.
 	if err != nil {
 		return nil, fmt.Errorf("verifying the id_token: %w", err)
 	}
+	if o.entraIssuer != "" {
+		if err := checkEntraIssuer(o.entraIssuer, idToken); err != nil {
+			return nil, fmt.Errorf("verifying the id_token: %w", err)
+		}
+	}
 	return idToken, nil
 }
 
@@ -443,10 +472,20 @@ func (o *OIDC) checkIdentity(id Identity, claims map[string]any, groupsClaim str
 	// not be unverified. A missing claim is trusted: most enterprise
 	// providers send none.
 	verified, present := emailVerified(claims)
+	if !present && o.entraIssuer != "" && isEntraPersonal(claims) {
+		verified, present = true, true
+	}
 	if present && !verified {
 		return fmt.Errorf("the identity provider says %s is not a verified "+
 			"address, and Keera places a sign-in in an organisation by its email domain; "+
 			"verify it in the directory, or map a verified claim for this client", id.Email)
+	}
+	// Any tenant's administrator can give their users any address, so only
+	// trust one whose domain the tenant has proven it owns.
+	if !present && o.entraIssuer != "" {
+		return fmt.Errorf("%s sign-in admits every Microsoft tenant, so it must prove each "+
+			"address, and Entra did not say %s is verified; add xms_edov as an optional "+
+			"ID-token claim on the app registration", o.cfg.Label(), id.Email)
 	}
 	// Except with sign-up on a provider for every domain: anyone it lets claim
 	// an address could take an invitation to it.

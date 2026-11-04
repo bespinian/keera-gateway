@@ -269,3 +269,40 @@ func TestAnLDAPProviderAmongOthersIsNotToldItMayVouchForAnyDomain(t *testing.T) 
 		t.Errorf("err = %v, want the directory's own message, which refuses %q", err, "*")
 	}
 }
+
+// Entra's issuer for every tenant admits any Microsoft account, and each
+// tenant decides its own groups and app roles.
+func TestEntraForEveryTenant(t *testing.T) {
+	t.Setenv("KEERA_OIDC_PROVIDERS", "entra")
+	t.Setenv("KEERA_OIDC_ENTRA_ISSUER", "https://login.microsoftonline.com/common/v2.0")
+	t.Setenv("KEERA_OIDC_ENTRA_CLIENT_ID", "entra-client")
+	t.Setenv("KEERA_OIDC_ENTRA_CLIENT_SECRET", "entra-secret")
+	load := func() Config {
+		return Config{PublicURL: "https://keera.example.ch", OIDC: oidcProviders("https://keera.example.ch")}
+	}
+
+	if err := load().validateOIDC(); err == nil || !strings.Contains(err.Error(), "KEERA_OIDC_ENTRA_DOMAINS") {
+		t.Errorf("without domains: err = %v, want it to name KEERA_OIDC_ENTRA_DOMAINS", err)
+	}
+
+	t.Setenv("KEERA_OIDC_ENTRA_DOMAINS", "*")
+	if err := load().validateOIDC(); err != nil {
+		t.Errorf("with domains: %v", err)
+	}
+
+	for _, setting := range []string{"KEERA_OIDC_ENTRA_ADMIN_GROUPS", "KEERA_OIDC_ENTRA_OPERATOR_GROUPS"} {
+		t.Run(setting, func(t *testing.T) {
+			t.Setenv(setting, "keera-admins")
+			if err := load().validateOIDC(); err == nil {
+				t.Errorf("%s was accepted for every tenant", setting)
+			}
+		})
+	}
+
+	// The same groups are fine with the tenant ID in the issuer.
+	t.Setenv("KEERA_OIDC_ENTRA_ISSUER", "https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/v2.0")
+	t.Setenv("KEERA_OIDC_ENTRA_ADMIN_GROUPS", "keera-admins")
+	if err := load().validateOIDC(); err != nil {
+		t.Errorf("one tenant with admin groups: %v", err)
+	}
+}

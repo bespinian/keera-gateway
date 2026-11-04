@@ -676,3 +676,122 @@ func TestRecheckRefusesClaimsASignInWouldRefuse(t *testing.T) {
 		t.Errorf("err = %v, want ErrDirectoryRefused", err)
 	}
 }
+
+func TestEntraIsForEveryTenantOnlyWithoutATenantID(t *testing.T) {
+	for issuer, want := range map[string]bool{
+		"https://login.microsoftonline.com/common/v2.0":                               true,
+		"https://login.microsoftonline.com/organizations/v2.0":                        true,
+		"https://login.microsoftonline.com/consumers/v2.0/":                           true,
+		"https://login.microsoftonline.us/common/v2.0":                                true,
+		"https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/v2.0": false,
+		"https://login.microsoftonline.com/common":                                    false,
+		"https://accounts.google.com":                                                 false,
+	} {
+		if got := (OIDCConfig{IssuerURL: issuer}).IsEntraAnyTenant(); got != want {
+			t.Errorf("%s: IsEntraAnyTenant = %v, want %v", issuer, got, want)
+		}
+	}
+}
+
+// Entra's issuer for every tenant reports a placeholder at discovery, and
+// each token's issuer names the tenant in its tid claim.
+func TestEntraForEveryTenantChecksEachTokensTenant(t *testing.T) {
+	const tenant = "11111111-2222-3333-4444-555555555555"
+	idp := oidctest.New(t)
+	o, err := NewOIDC(context.Background(), OIDCConfig{
+		Name: "entra", IssuerURL: idp.URL + "/common/v2.0", ClientID: "keera", ClientSecret: "secret",
+		RedirectURL: "https://keera.example.ch/auth/callback",
+		Mapping:     RoleMapping{Default: RoleMember}, Domains: []string{AnyDomain},
+	}, idp.Client())
+	if err != nil {
+		t.Fatalf("NewOIDC: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		claims func(m map[string]any)
+		ok     bool
+	}{
+		{"its own tenant", func(m map[string]any) {
+			m["iss"], m["tid"], m["xms_edov"] = idp.URL+"/"+tenant+"/v2.0", tenant, true
+		}, true},
+		{"another tenant's issuer", func(m map[string]any) {
+			m["iss"], m["tid"], m["xms_edov"] = idp.URL+"/99999999-2222-3333-4444-555555555555/v2.0", tenant, true
+		}, false},
+		{"no tenant", func(m map[string]any) {
+			m["iss"], m["xms_edov"] = idp.URL+"/"+tenant+"/v2.0", true
+		}, false},
+		{"the placeholder itself", func(m map[string]any) {
+			m["iss"], m["tid"], m["xms_edov"] = idp.URL+"/{tenantid}/v2.0", "{tenantid}", true
+		}, false},
+		{"another issuer", func(m map[string]any) {
+			m["iss"], m["tid"], m["xms_edov"] = "https://evil.example/"+tenant+"/v2.0", tenant, true
+		}, false},
+		// Any tenant can give its users any address.
+		{"an unproven address", func(m map[string]any) {
+			m["iss"], m["tid"] = idp.URL+"/"+tenant+"/v2.0", tenant
+		}, false},
+		{"an address the tenant does not own", func(m map[string]any) {
+			m["iss"], m["tid"], m["xms_edov"] = idp.URL+"/"+tenant+"/v2.0", tenant, false
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			flow := NewFlow()
+			idp.Claims = func(m map[string]any) {
+				m["nonce"] = flow.Nonce
+				tc.claims(m)
+			}
+			_, err := o.Exchange(context.Background(), "the-code", flow)
+			if (err == nil) != tc.ok {
+				t.Errorf("err = %v, want accepted %v", err, tc.ok)
+			}
+		})
+	}
+}
+
+// Personal Microsoft accounts send no xms_edov. Microsoft proves their address
+// at sign-up, so they are accepted, but only from their own tenant.
+func TestEntraForEveryTenantTrustsPersonalAccounts(t *testing.T) {
+	const personal = "9188040d-6c67-4c5b-b112-36a304b66dad"
+	const work = "11111111-2222-3333-4444-555555555555"
+	idp := oidctest.New(t)
+	o, err := NewOIDC(context.Background(), OIDCConfig{
+		Name: "entra", IssuerURL: idp.URL + "/common/v2.0", ClientID: "keera", ClientSecret: "secret",
+		RedirectURL: "https://keera.example.ch/auth/callback",
+		Mapping:     RoleMapping{Default: RoleMember}, Domains: []string{AnyDomain},
+	}, idp.Client())
+	if err != nil {
+		t.Fatalf("NewOIDC: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		claims func(m map[string]any)
+		ok     bool
+	}{
+		{"a personal account", func(m map[string]any) {
+			m["iss"], m["tid"] = idp.URL+"/"+personal+"/v2.0", personal
+		}, true},
+		{"a personal account Entra calls unverified", func(m map[string]any) {
+			m["iss"], m["tid"], m["xms_edov"] = idp.URL+"/"+personal+"/v2.0", personal, false
+		}, false},
+		{"a work account claiming the personal tenant", func(m map[string]any) {
+			m["iss"], m["tid"] = idp.URL+"/"+work+"/v2.0", personal
+		}, false},
+		{"a work account without xms_edov", func(m map[string]any) {
+			m["iss"], m["tid"] = idp.URL+"/"+work+"/v2.0", work
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			flow := NewFlow()
+			idp.Claims = func(m map[string]any) {
+				m["nonce"] = flow.Nonce
+				tc.claims(m)
+			}
+			_, err := o.Exchange(context.Background(), "the-code", flow)
+			if (err == nil) != tc.ok {
+				t.Errorf("err = %v, want accepted %v", err, tc.ok)
+			}
+		})
+	}
+}
