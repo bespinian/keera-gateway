@@ -63,7 +63,7 @@ function handOver(to) {
 
 // takeSignInError is why the last sign-in failed, read once. It is in a
 // cookie, not the address, which anyone can write into a link.
-function takeSignInError() {
+export function takeSignInError() {
   const name = "keera_sign_in_error=";
   const found = document.cookie.split("; ").find((c) => c.startsWith(name));
   document.cookie = name + "; Max-Age=0; Path=/";

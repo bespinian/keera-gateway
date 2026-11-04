@@ -23,6 +23,7 @@ import {
   signIn,
   passkeySignInFlow,
   passwordSignInFlow,
+  takeSignInError,
 } from "./views/signin.js";
 import { signUp, signUpFlow } from "./views/signup.js";
 import { passkeySetupView, managePasskeys } from "./views/passkeys.js";
@@ -943,6 +944,13 @@ async function boot() {
   await loadSetup();
   renderShell();
   await renderRoute();
+
+  // A sign-in for Keera Chat, Keera Agents or `keera login` can fail in a
+  // browser that is signed in here, which never shows the sign-in screen.
+  if (new URLSearchParams(location.search).has("sign_in_error")) {
+    toast("Sign-in failed: " + takeSignInError(), "bad");
+    history.replaceState({}, "", location.pathname + location.hash);
+  }
 }
 
 /** loadSetup reads the organisation's counts. A failure leaves them at zero,

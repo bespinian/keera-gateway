@@ -203,7 +203,6 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		State: flow.State, Verifier: flow.Verifier, Nonce: flow.Nonce,
 	})
 	if err != nil {
-		s.log.Warn("sign-in failed", "error", err)
 		s.signInFailed(w, r, err)
 		return
 	}
@@ -715,8 +714,10 @@ func (s *Server) publicOrigin(r *http.Request) string {
 const signInErrorCookie = "keera_sign_in_error"
 
 // signInFailed sends the browser back to the panel with a readable error,
-// rather than leaving it on a blank callback URL.
+// rather than leaving it on a blank callback URL. It logs the reason too: a
+// browser that is already signed in shows it only briefly.
 func (s *Server) signInFailed(w http.ResponseWriter, r *http.Request, err error) {
+	s.log.Warn("sign-in refused", "reason", err.Error(), "path", r.URL.Path)
 	// Unlike every other cookie here, the panel's script reads it.
 	http.SetCookie(w, &http.Cookie{
 		Name: signInErrorCookie, Value: url.PathEscape(err.Error()), Path: "/", MaxAge: 60,
