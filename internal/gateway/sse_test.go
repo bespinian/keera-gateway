@@ -3,9 +3,11 @@ package gateway
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -484,5 +486,116 @@ func (s stallUntil) Read([]byte) (int, error) {
 		return 0, io.EOF
 	case <-time.After(2 * time.Second):
 		return 0, errors.New("nothing was flushed while the upstream was quiet")
+	}
+}
+
+func TestFoldReadsChunksAsTheDecoderDid(t *testing.T) {
+	type got struct {
+		text    string
+		tools   []string
+		deltas  int
+		finish  string
+		usage   int
+		errText string
+	}
+	cases := map[string]struct {
+		chunk string
+		want  got
+	}{
+		"content": {
+			chunk: vllmChunk,
+			want:  got{text: " world", deltas: 1},
+		},
+		"escaped content": {
+			chunk: `{"choices":[{"delta":{"content":"a\"b\né"}}]}`,
+			want:  got{text: "a\"b\né", deltas: 1},
+		},
+		"escaped names": {
+			chunk: `{"choices":[{"delta":{"content":"x"}}]}`,
+			want:  got{text: "x", deltas: 1},
+		},
+		"invalid UTF-8 becomes the replacement character": {
+			chunk: "{\"choices\":[{\"delta\":{\"content\":\"a\xffb\"}}]}",
+			want:  got{text: "a�b", deltas: 1},
+		},
+		"reasoning counts but is not text": {
+			chunk: `{"choices":[{"delta":{"reasoning_content":"hm"}}]}`,
+			want:  got{deltas: 1},
+		},
+		"empty reasoning does not count": {
+			chunk: `{"choices":[{"delta":{"reasoning":"","content":null}}]}`,
+			want:  got{},
+		},
+		"only the first choice is read": {
+			chunk: `{"choices":[{"delta":{"content":"a"}},{"delta":{"content":"b"}}]}`,
+			want:  got{text: "a", deltas: 1},
+		},
+		"tool call": {
+			chunk: `{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"c1","function":{"name":"f","arguments":"{}"}}]}}]}`,
+			want:  got{tools: []string{"1 c1 f {}"}, deltas: 1},
+		},
+		"finish reason": {
+			chunk: stopChunk,
+			want:  got{finish: "stop"},
+		},
+		"null delta and finish reason": {
+			chunk: `{"choices":[{"delta":null,"finish_reason":null}]}`,
+			want:  got{},
+		},
+		"usage only": {
+			chunk: usageChunk,
+			want:  got{usage: 100},
+		},
+		"null choices": {
+			chunk: `{"choices":null,"usage":{"prompt_tokens":3}}`,
+			want:  got{usage: 3},
+		},
+		"upstream error": {
+			chunk: `{"error":{"message":"out of memory"}}`,
+			want:  got{errText: "out of memory"},
+		},
+		"null error": {
+			chunk: `{"error":null,"choices":[{"delta":{"content":"x"}}]}`,
+			want:  got{text: "x", deltas: 1},
+		},
+		"cut off": {
+			chunk: `{"choices":[{"delta":{"content":"hel`,
+			want:  got{},
+		},
+		"trailing data": {
+			chunk: `{"choices":[{"delta":{"content":"x"}}]} {}`,
+			want:  got{},
+		},
+		"not an object": {
+			chunk: `["x"]`,
+			want:  got{},
+		},
+		"bad usage skips the chunk": {
+			chunk: `{"choices":[{"delta":{"content":"x"}}],"usage":{"prompt_tokens":"many"}}`,
+			want:  got{},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var c chatChunks
+			var g got
+			err := c.fold([]byte(tc.chunk), func(s string) error {
+				g.text += s
+				return nil
+			}, func(index int, tc oaiToolCallDelta) error {
+				g.tools = append(g.tools, fmt.Sprintf("%d %s %s %s", index, tc.ID, tc.Function.Name, tc.Function.Arguments))
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			g.deltas, g.finish, g.errText = c.deltas, c.finishReason, c.upstreamErr
+			if c.usage != nil {
+				g.usage = c.usage.InputTokens
+			}
+			if !reflect.DeepEqual(g, tc.want) {
+				t.Errorf("got %+v, want %+v", g, tc.want)
+			}
+		})
 	}
 }

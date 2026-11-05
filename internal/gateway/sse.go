@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"io"
 	"net/http"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
@@ -446,20 +448,183 @@ func scanSSE(src io.Reader, limit int64, fn func(payload []byte) error) error {
 	}, complete)
 }
 
-// oaiStreamChunk is one chunk of a chat completion stream.
+// oaiStreamChunk is what fold reads of one chunk of a chat completion stream:
+// the first choice, the usage record and the error.
 type oaiStreamChunk struct {
-	Choices []struct {
-		Delta struct {
-			Content          string             `json:"content"`
-			ReasoningContent string             `json:"reasoning_content"`
-			Reasoning        string             `json:"reasoning"`
-			ToolCalls        []oaiToolCallDelta `json:"tool_calls"`
-		} `json:"delta"`
-		FinishReason string `json:"finish_reason"`
-	} `json:"choices"`
-	Usage *tokenUsage `json:"usage"`
-	// Error is what vLLM sends in place of a chunk when generation fails.
-	Error json.RawMessage `json:"error"`
+	content      string
+	reasoning    bool
+	toolCalls    []oaiToolCallDelta
+	finishReason string
+	hasChoice    bool
+	usage        *tokenUsage
+	// failed is set when vLLM sends an error in place of a chunk.
+	failed bool
+}
+
+// chunkReaders are reused, since one reads every token of a translated stream.
+var chunkReaders = sync.Pool{New: func() any { return new(chunkReader) }}
+
+type chunkReader struct {
+	buf bytes.Buffer
+	dec jsontext.Decoder
+}
+
+// readStreamChunk reads a chunk in one pass with a reused decoder, which
+// costs a fraction of decoding it into a struct. Only the usage record and
+// tool calls, which few chunks carry, are decoded.
+func readStreamChunk(payload []byte) (chunk oaiStreamChunk, ok bool) {
+	r := chunkReaders.Get().(*chunkReader)
+	// The decoder parses straight from a bytes.Buffer, without copying it.
+	r.buf = *bytes.NewBuffer(payload)
+	r.dec.Reset(&r.buf, jsontext.AllowDuplicateNames(true), jsontext.AllowInvalidUTF8(true))
+	defer func() {
+		// An empty buffer, so the pool does not keep payload alive.
+		r.buf = bytes.Buffer{}
+		r.dec.Reset(&r.buf)
+		chunkReaders.Put(r)
+	}()
+
+	dec := &r.dec
+	err := eachField(dec, func(name []byte) error {
+		switch string(name) {
+		case "usage":
+			v, err := dec.ReadValue()
+			if err != nil || bytes.Equal(v, nullLiteral) {
+				return err
+			}
+			// Decoded into its own variable, so that only this chunk
+			// allocates for it.
+			var usage *tokenUsage
+			err = json.Unmarshal(v, &usage)
+			chunk.usage = usage
+			return err
+		case "error":
+			v, err := dec.ReadValue()
+			chunk.failed = !bytes.Equal(v, nullLiteral)
+			return err
+		case "choices":
+			return readChoices(dec, &chunk)
+		}
+		return dec.SkipValue()
+	})
+	if err != nil {
+		return chunk, false
+	}
+	_, err = dec.ReadToken()
+	return chunk, err == io.EOF
+}
+
+// readChoices reads the first choice of a chunk and skips the others.
+func readChoices(dec *jsontext.Decoder, chunk *oaiStreamChunk) error {
+	return eachElem(dec, func(i int) error {
+		if i > 0 {
+			return dec.SkipValue()
+		}
+		chunk.hasChoice = true
+		return eachField(dec, func(name []byte) error {
+			switch string(name) {
+			case "delta":
+				return eachField(dec, func(name []byte) error { return readDelta(dec, name, chunk) })
+			case "finish_reason":
+				v, err := dec.ReadValue()
+				chunk.finishReason = stringValue(v)
+				return err
+			}
+			return dec.SkipValue()
+		})
+	})
+}
+
+func readDelta(dec *jsontext.Decoder, name []byte, chunk *oaiStreamChunk) error {
+	switch string(name) {
+	case "content":
+		v, err := dec.ReadValue()
+		chunk.content = stringValue(v)
+		return err
+	case "reasoning_content", "reasoning":
+		v, err := dec.ReadValue()
+		chunk.reasoning = chunk.reasoning || len(v) > 2 && v[0] == '"'
+		return err
+	case "tool_calls":
+		v, err := dec.ReadValue()
+		if err != nil {
+			return err
+		}
+		var calls []oaiToolCallDelta
+		err = json.Unmarshal(v, &calls)
+		chunk.toolCalls = calls
+		return err
+	}
+	return dec.SkipValue()
+}
+
+// eachField reads an object, or null, calling fn at each name, unquoted. fn
+// must read the value.
+func eachField(dec *jsontext.Decoder, fn func(name []byte) error) error {
+	if done, err := openValue(dec, '{'); done || err != nil {
+		return err
+	}
+	for dec.PeekKind() != '}' {
+		quoted, err := dec.ReadValue()
+		if err != nil {
+			return err
+		}
+		name := quoted[1 : len(quoted)-1]
+		if bytes.IndexByte(name, '\\') >= 0 {
+			// An escaped name, such as "\u0075sage", is decoded to compare.
+			if name, err = jsontext.AppendUnquote(nil, quoted); err != nil {
+				return err
+			}
+		}
+		if err := fn(name); err != nil {
+			return err
+		}
+	}
+	_, err := dec.ReadToken()
+	return err
+}
+
+// eachElem reads an array, or null, calling fn at each element. fn must read
+// the element.
+func eachElem(dec *jsontext.Decoder, fn func(i int) error) error {
+	if done, err := openValue(dec, '['); done || err != nil {
+		return err
+	}
+	for i := 0; dec.PeekKind() != ']'; i++ {
+		if err := fn(i); err != nil {
+			return err
+		}
+	}
+	_, err := dec.ReadToken()
+	return err
+}
+
+// openValue reads the start of an object or array. A null is read whole, and
+// done.
+func openValue(dec *jsontext.Decoder, kind jsontext.Kind) (done bool, err error) {
+	tok, err := dec.ReadToken()
+	switch {
+	case err != nil:
+		return true, err
+	case tok.Kind() == 'n':
+		return true, nil
+	case tok.Kind() != kind:
+		return true, errMalformed
+	}
+	return false, nil
+}
+
+// stringValue decodes a JSON string, or returns "" for anything else.
+func stringValue(v []byte) string {
+	if len(v) < 2 || v[0] != '"' {
+		return ""
+	}
+	if inner := v[1 : len(v)-1]; bytes.IndexByte(inner, '\\') < 0 && utf8.Valid(inner) {
+		return string(inner)
+	}
+	var s string
+	_ = json.Unmarshal(v, &s)
+	return s
 }
 
 // oaiToolCallDelta is one fragment of a streamed tool call.
@@ -493,39 +658,37 @@ type chatChunks struct {
 func (c *chatChunks) fold(payload []byte, text func(string) error,
 	tool func(index int, tc oaiToolCallDelta) error,
 ) error {
-	var chunk oaiStreamChunk
-	if json.Unmarshal(payload, &chunk) != nil {
+	chunk, ok := readStreamChunk(payload)
+	if !ok {
 		// An unreadable chunk is skipped; the rest is still worth delivering.
 		return nil
 	}
-	if chunk.Usage != nil {
-		c.usage = chunk.Usage
+	if chunk.usage != nil {
+		c.usage = chunk.usage
 	}
-	if len(chunk.Error) > 0 && !bytes.Equal(chunk.Error, []byte("null")) {
+	if chunk.failed {
 		c.upstreamErr = upstreamText(payload)
 		return nil
 	}
-	if len(chunk.Choices) == 0 {
+	if !chunk.hasChoice {
 		// The usage-only chunk. Its numbers go into the closing event.
 		return nil
 	}
-	choice := chunk.Choices[0]
-	if d := choice.Delta; d.Content != "" || d.ReasoningContent != "" || d.Reasoning != "" ||
-		len(d.ToolCalls) > 0 {
+	if chunk.content != "" || chunk.reasoning || len(chunk.toolCalls) > 0 {
 		if c.firstAt.IsZero() {
 			c.firstAt = time.Now()
 		}
 		c.deltas++
 	}
-	if choice.FinishReason != "" {
-		c.finishReason = choice.FinishReason
+	if chunk.finishReason != "" {
+		c.finishReason = chunk.finishReason
 	}
-	if t := choice.Delta.Content; t != "" {
-		if err := text(t); err != nil {
+	if chunk.content != "" {
+		if err := text(chunk.content); err != nil {
 			return err
 		}
 	}
-	for _, tc := range choice.Delta.ToolCalls {
+	for _, tc := range chunk.toolCalls {
 		index := 0
 		if tc.Index != nil {
 			index = *tc.Index
