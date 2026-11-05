@@ -139,8 +139,7 @@ func (c *client) fetch(ctx context.Context, method, path string, in any) ([]byte
 	raw, header, err := c.send(ctx, method, path, cred, in)
 	// A refused token means the sign-in ended: it expired, the role changed,
 	// or they signed out everywhere.
-	var apiErr *apiError
-	if c.key == "" && errors.As(err, &apiErr) && apiErr.Status == http.StatusUnauthorized {
+	if apiErr, ok := errors.AsType[*apiError](err); ok && c.key == "" && apiErr.Status == http.StatusUnauthorized {
 		return nil, nil, fmt.Errorf("your sign-in to %s is no longer valid: run 'keera login' again", c.base)
 	}
 	return raw, header, err
