@@ -99,6 +99,17 @@ func (s *Server) advise(msg string) string {
 	return msg + ". Your keys and their limits are at " + s.opts.PanelURL + "/access"
 }
 
+// expiredKey tells the holder of an expired key that they can rotate it
+// themselves, rather than wait for an administrator.
+func (s *Server) expiredKey() string {
+	where := "in the panel"
+	if s.opts.PanelURL != "" {
+		where = "at " + s.opts.PanelURL + "/keys"
+	}
+	return "this API key has expired; rotate it " + where + " or with 'keera key rotate', " +
+		"or ask whoever administers your organisation for a new one"
+}
+
 // told is what the client is told of a refusal.
 func (s *Server) told(ref refusal) string {
 	if ref.advise {

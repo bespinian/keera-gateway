@@ -340,8 +340,7 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, sh shape) 
 				"organisation to issue a new one"))
 	case errors.Is(err, policy.ErrKeyExpired):
 		sh.writeError(w, http.StatusUnauthorized, "invalid_request_error", "expired_api_key",
-			s.advise("this API key has expired; ask whoever administers your "+
-				"organisation to issue a new one"))
+			s.expiredKey())
 	case errors.Is(err, context.Canceled):
 		return nil, false
 	default:

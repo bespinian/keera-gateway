@@ -29,9 +29,14 @@ type fakeSource struct {
 	filters  map[string]policy.Filter
 	routers  map[string]policy.Router
 	mcp      map[string]policy.MCPServer
+	// refused is the error a presented key resolves to, such as an expired key's.
+	refused map[string]error
 }
 
 func (f *fakeSource) Resolve(_ context.Context, presented string) (*policy.Resolved, error) {
+	if err, ok := f.refused[presented]; ok {
+		return nil, err
+	}
 	if r, ok := f.resolved[presented]; ok {
 		return r, nil
 	}
@@ -1356,6 +1361,32 @@ func TestASpentBudgetSaysWhenItLiftsAndWhereToLook(t *testing.T) {
 	}
 	// This message is all the user sees, so it must say what to do.
 	for _, want := range []string{"your project", "1 October 2026", "https://keera.example.ch/access"} {
+		if !strings.Contains(envelope.Error.Message, want) {
+			t.Errorf("the refusal does not say %q: %s", want, envelope.Error.Message)
+		}
+	}
+}
+
+func TestAnExpiredKeySaysItCanBeRotated(t *testing.T) {
+	h := newHarnessWith(t, jsonBackend(`{}`), nil, nil,
+		Options{PanelURL: "https://keera.example.ch"})
+	h.src.refused = map[string]error{testKey: policy.ErrKeyExpired}
+
+	resp := h.post(t, "/v1/chat/completions", `{"model":"keera-code","messages":[]}`)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+	var envelope struct {
+		Error struct{ Message, Code string } `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error.Code != "expired_api_key" {
+		t.Errorf("code = %q, want expired_api_key", envelope.Error.Code)
+	}
+	// A member can rotate their own expired key, so the message says how.
+	for _, want := range []string{"https://keera.example.ch/keys", "keera key rotate"} {
 		if !strings.Contains(envelope.Error.Message, want) {
 			t.Errorf("the refusal does not say %q: %s", want, envelope.Error.Message)
 		}
