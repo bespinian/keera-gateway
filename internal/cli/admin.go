@@ -186,10 +186,18 @@ func printNone(w io.Writer, what, add string) {
 
 // handOver prints the secret alone on stdout, so 'KEY=$(keera key create …)'
 // captures it.
-func handOver(secret, said string) {
+// handOver prints a new secret on stdout, so it can be piped, and on stderr
+// what it is and next, what to do with it.
+func handOver(secret, said, next string) {
 	fmt.Println(secret)
-	fmt.Fprintf(os.Stderr, "\n%s %s\n", said, styleErr.warn("This is the only time it is shown."))
+	fmt.Fprintf(os.Stderr, "\n%s %s\n%s\n", said, styleErr.warn("This is the only time it is shown."), next)
 }
+
+// The step after a new key or a rotated one.
+const (
+	nextConnect = "'keera connect' shows how to set up an editor for the gateway."
+	nextReplace = "The old key no longer works: put this one wherever it was used."
+)
 
 // resolveOrg turns a name or id into an id. With none given, it is the only
 // organisation, as in every dedicated and on-premises deployment.

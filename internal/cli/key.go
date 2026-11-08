@@ -143,7 +143,7 @@ func (r *keyRun) create(ctx context.Context) error {
 			"panel, or with 'keera key activate %s'.\n", created.ID, owner.Email, created.ID)
 		return nil
 	}
-	handOver(created.Key, fmt.Sprintf("key %s created for %s.", created.ID, orgID))
+	handOver(created.Key, fmt.Sprintf("key %s created for %s.", created.ID, orgID), nextConnect)
 	return nil
 }
 
@@ -181,7 +181,7 @@ func (r *keyRun) activate(ctx context.Context) error {
 	if r.asJSON {
 		return out(true, created, nil)
 	}
-	handOver(created.Key, fmt.Sprintf("key %s (%s) is activated.", created.ID, created.Name))
+	handOver(created.Key, fmt.Sprintf("key %s (%s) is activated.", created.ID, created.Name), nextConnect)
 	return nil
 }
 
@@ -334,7 +334,7 @@ func (r *keyRun) rotate(ctx context.Context) error {
 	if r.asJSON {
 		return out(true, created, nil)
 	}
-	handOver(created.Key, fmt.Sprintf("key %s replaces %s (%s).", created.ID, old.ID, old.Name))
+	handOver(created.Key, fmt.Sprintf("key %s replaces %s (%s).", created.ID, old.ID, old.Name), nextReplace)
 	if !old.Limits.IsZero() {
 		fmt.Fprintln(os.Stderr, "Its guardrails were copied from the key it replaces.")
 	}
