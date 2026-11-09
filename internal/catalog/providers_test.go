@@ -27,9 +27,9 @@ func TestProviderFillsInEverythingButTheAlias(t *testing.T) {
 				if len(m.Backends) != 1 || m.Backends[0] != p.Endpoint {
 					t.Errorf("Backends = %v, want [%s]", m.Backends, p.Endpoint)
 				}
-				if m.Location != p.Location || m.MaxContext != known.MaxContext {
+				if m.Location != p.LocationOf(known.ID) || m.MaxContext != known.MaxContext {
 					t.Errorf("location, context = %q, %d, want %q, %d",
-						m.Location, m.MaxContext, p.Location, known.MaxContext)
+						m.Location, m.MaxContext, p.LocationOf(known.ID), known.MaxContext)
 				}
 				if m.InputMicrosPerMTok != known.InputMicrosPerMTok ||
 					m.OutputMicrosPerMTok != known.OutputMicrosPerMTok ||
@@ -298,6 +298,14 @@ func checkProviderModel(t *testing.T, p Provider, m ProviderModel, seenDescripti
 	}
 	if m.ReleaseDate != "" && !policy.ValidReleaseDate(m.ReleaseDate) {
 		t.Errorf("%s's release date %q is not YYYY-MM-DD", m.ID, m.ReleaseDate)
+	}
+	switch {
+	case m.Location == "":
+	case !policy.ValidLocation(m.Location) || m.Location == policy.LocationOnPrem:
+		t.Errorf("%s's location %q is not a provider's country", m.ID, m.Location)
+	case m.Location == p.Location:
+		// Only a model that runs elsewhere says so; the rest follow the provider.
+		t.Errorf("%s repeats its provider's location %q", m.ID, m.Location)
 	}
 	// Embedding and rerank models write nothing.
 	inputOnly := m.kindOrChat() == policy.KindEmbedding || m.kindOrChat() == policy.KindRerank
@@ -586,8 +594,9 @@ models:
 	}
 }
 
-// A model runs where its provider is. Without one, a backend inside the
-// network is onprem. An entry may say otherwise.
+// A model runs where its provider is, unless the table says the model runs
+// elsewhere. Without a provider, a backend inside the network is onprem. An
+// entry may say otherwise.
 func TestLocationComesFromTheProvider(t *testing.T) {
 	models, err := parseModelFile([]byte(`
 models:
@@ -609,11 +618,17 @@ models:
     backends: ["https://llm.stoney-cloud.com/v1"]
     backend_model: BAAI/bge-m3
     location: ch
+  - alias: keera-resold
+    provider: peakprivacy
+    backend_model: gpt-eu
+  - alias: keera-resold-swiss
+    provider: peakprivacy
+    backend_model: gpt-swiss
 `))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	for i, want := range []string{"usa", "ch", "onprem", "ch", "ch"} {
+	for i, want := range []string{"usa", "ch", "onprem", "ch", "ch", "eu", "ch"} {
 		if got := models[i].Location; got != want {
 			t.Errorf("%s: location = %q, want %q", models[i].Alias, got, want)
 		}

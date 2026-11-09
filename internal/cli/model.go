@@ -121,6 +121,12 @@ func applyModelFlags(m catalog.Model, f *modelFlags) catalog.Model {
 			m.DisplayName = ""
 			m.ReleaseDate = ""
 			if m.Provider != "" {
+				// A location the table gave goes too, as the next model may run
+				// elsewhere. One somebody set stays.
+				if p, ok := catalog.ProviderByName(m.Provider); ok &&
+					m.Location == p.LocationOf(m.BackendModel) {
+					m.Location = ""
+				}
 				m = clearModelValues(m)
 			}
 		}
@@ -526,7 +532,9 @@ func printProviders(w *table, providers []providerEntry) {
 		if p.Summary != "" {
 			_, _ = fmt.Fprintf(w, "  %s\n", p.Summary)
 		}
-		_, _ = fmt.Fprintf(w, "  runs in %s, serves %s\n", p.Location, kindNames(p.Kinds))
+		places := p.Locations()
+		_, _ = fmt.Fprintf(w, "  runs in %s, serves %s\n", strings.Join(places, ", "),
+			kindNames(p.Kinds))
 		if p.PlatformKey {
 			_, _ = fmt.Fprintf(w, "  this deployment holds its key, so a model here takes none\n")
 		}
@@ -534,13 +542,19 @@ func printProviders(w *table, providers []providerEntry) {
 			_, _ = fmt.Fprintf(w, "  its address is per customer, so a model "+
 				"here also needs --product-id\n")
 		}
+		// A location column only where the models run in more than one place.
 		// The description goes last, since a trailing cell is not padded.
+		where, at := "", func(string) string { return "" }
+		if len(places) > 1 {
+			where = "LOCATION\t"
+			at = func(id string) string { return p.LocationOf(id) + "\t" }
+		}
 		w.header(fmt.Sprintf(
-			"  MODEL\tNAME\tRELEASED\tCONTEXT\tIN/MTOK\tCACHED/MTOK\tWRITE/MTOK\t"+
-				"OUT/MTOK (%s)\tDESCRIPTION", policy.Currency))
+			"  MODEL\tNAME\t%sRELEASED\tCONTEXT\tIN/MTOK\tCACHED/MTOK\tWRITE/MTOK\t"+
+				"OUT/MTOK (%s)\tDESCRIPTION", where, policy.Currency))
 		for _, m := range p.Models {
-			_, _ = fmt.Fprintf(w, "  %s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\n", m.ID,
-				dash(m.DisplayName), dash(m.ReleaseDate),
+			_, _ = fmt.Fprintf(w, "  %s\t%s\t%s%s\t%d\t%s\t%s\t%s\t%s\t%s\n", m.ID,
+				dash(m.DisplayName), at(m.ID), dash(m.ReleaseDate),
 				m.MaxContext,
 				policy.FormatMicros(m.InputMicrosPerMTok),
 				optionalPrice(m.CachedInputMicrosPerMTok),

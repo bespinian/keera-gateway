@@ -29,7 +29,7 @@ type Provider struct {
 	// CachedInput says the provider publishes a discounted rate for tokens
 	// served from its prompt cache.
 	CachedInput bool `json:"cached_input"`
-	// Location is where prompts go: ch or usa. It is the default for its
+	// Location is where prompts go: ch, eu or usa. It is the default for its
 	// models.
 	Location string `json:"location"`
 	// Kinds are the APIs its models are served on. The table leaves it out:
@@ -68,6 +68,9 @@ type ProviderModel struct {
 	// Snapshot is the dated id the maker also names the model by, as in
 	// claude-haiku-4-5-20251001. Claude Code knows such a model only by it.
 	Snapshot string `json:"snapshot,omitempty"`
+	// Location is where this model runs, for a provider that resells models
+	// served in several places. Empty means the provider's.
+	Location string `json:"location,omitempty"`
 }
 
 // providers is the built-in table.
@@ -496,6 +499,67 @@ var providers = []Provider{{
 		Description:              "tiny - classification, extraction and other simple tasks",
 	}},
 }, {
+	Name:    "peakprivacy",
+	Summary: "Swiss and EU models, on PeakPrivacy's API in Switzerland.",
+	// The OpenAI-compatible path is /chat/completions. PeakPrivacy resells
+	// models served in Switzerland and the EU, so each model says where it
+	// runs. The models it resells from the USA are left out: the catalogue
+	// has them from their makers. Ids are PeakPrivacy's own and say no
+	// version, so a model whose version PeakPrivacy does not name has no
+	// release date. Prices are listed in CHF per thousand tokens, checked on
+	// 2026-11-06. Context windows are from PeakPrivacy's help centre. GPT
+	// Swiss and GPT EU are both gpt-oss-120b.
+	Endpoint: "https://api.peakprivacy.ch/v1/ai",
+	Location: "ch",
+	Models: []ProviderModel{{
+		ID: "gpt-swiss", DisplayName: "GPT Swiss",
+		MaxContext: 131_000, ReleaseDate: "2025-08-05",
+		InputMicrosPerMTok: 20_000_000, OutputMicrosPerMTok: 60_000_000,
+		Description: "mid-size, reasons before it answers - everyday work and tool use",
+	}, {
+		ID: "mistral-small-swiss", DisplayName: "Mistral Small Swiss",
+		MaxContext:         30_000,
+		InputMicrosPerMTok: 150_000, OutputMicrosPerMTok: 450_000,
+		Description: "small and fast - translation, summaries and simple chat",
+	}, {
+		ID: "glm5", DisplayName: "GLM-5.2",
+		MaxContext: 130_000, ReleaseDate: "2026-06-16",
+		InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 3_400_000,
+		Description: "large - long agent sessions, hard code and terminal work",
+	}, {
+		ID: "deepseek-v4-flash", DisplayName: "DeepSeek V4 Flash",
+		MaxContext: 1_000_000, ReleaseDate: "2026-07-31",
+		InputMicrosPerMTok: 150_000, OutputMicrosPerMTok: 390_000,
+		Description: "mid-size and quick - large codebases and long documents",
+	}, {
+		ID: "gpt-eu", DisplayName: "GPT EU",
+		MaxContext: 124_000, ReleaseDate: "2025-08-05", Location: "eu",
+		InputMicrosPerMTok: 20_000_000, OutputMicrosPerMTok: 60_000_000,
+		Description: "mid-size reasoning model - general questions and tool use",
+	}, {
+		ID: "deepseek-r1", DisplayName: "DeepSeek R1",
+		MaxContext: 128_000, ReleaseDate: "2025-01-20", Location: "eu",
+		InputMicrosPerMTok: 2_625_000, OutputMicrosPerMTok: 5_250_000,
+		Description: "large reasoning model that thinks at length - hard questions",
+	}, {
+		ID: "gemma-3", DisplayName: "Gemma 3",
+		MaxContext: 128_000, Location: "eu",
+		InputMicrosPerMTok: 17_000_000, OutputMicrosPerMTok: 40_000_000,
+		Description: "mid-size and quick - documents and answers from search results",
+	}, {
+		// PeakPrivacy says Qwen3 runs in Europe in one place and in
+		// Switzerland in another, and does not mark it Swiss in its price list.
+		ID: "qwen-3-fast", DisplayName: "Qwen3 Fast",
+		MaxContext: 262_000, Location: "eu",
+		InputMicrosPerMTok: 450_000, OutputMicrosPerMTok: 1_350_000,
+		Description: "mid-size and quick - everyday questions in many languages",
+	}, {
+		ID: "qwen-3", DisplayName: "Qwen3",
+		MaxContext: 256_000, Location: "eu",
+		InputMicrosPerMTok: 300_000, OutputMicrosPerMTok: 900_000,
+		Description: "mid-size, with a thinking mode - reasoning in many languages",
+	}},
+}, {
 	Name:    "infomaniak",
 	Summary: "Open-weight models, served in Switzerland.",
 	// The address carries the product id of your AI Service.
@@ -847,6 +911,25 @@ func provider(name string) (Provider, bool) {
 	return Provider{}, false
 }
 
+// LocationOf is where a model runs: its own location, or else the provider's.
+func (p Provider) LocationOf(backendModel string) string {
+	if m, ok := p.Model(backendModel); ok && m.Location != "" {
+		return m.Location
+	}
+	return p.Location
+}
+
+// Locations are the places the provider's models run, the provider's first.
+func (p Provider) Locations() []string {
+	out := []string{p.Location}
+	for _, m := range p.Models {
+		if m.Location != "" && !slices.Contains(out, m.Location) {
+			out = append(out, m.Location)
+		}
+	}
+	return out
+}
+
 // Model finds one of the provider's models by its id or its dated id.
 func (p Provider) Model(id string) (ProviderModel, bool) {
 	for _, m := range p.Models {
@@ -973,7 +1056,7 @@ func applyProvider(m Model) (Model, error) {
 	}
 	m.Backends = backends
 	if m.Location == "" {
-		m.Location = p.Location
+		m.Location = p.LocationOf(m.BackendModel)
 	}
 	if m.BackendModel == "" || !isKnown {
 		return m, nil

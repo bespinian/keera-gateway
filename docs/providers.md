@@ -1,8 +1,8 @@
 # Hosted models
 
 A hosted model runs outside your infrastructure: at Anthropic, OpenAI, Google,
-Mistral, Infomaniak, stepping stone, Phoeniqs, CSCS, or any other endpoint that
-speaks the OpenAI API.
+Mistral, PeakPrivacy, Infomaniak, stepping stone, Phoeniqs, CSCS, or any other
+endpoint that speaks the OpenAI API.
 
 To add one in the panel or on the command line, see
 [Models](https://docs.keera.ch/manage/models/). This page explains how hosted
@@ -15,6 +15,8 @@ how to keep it contained.
 Infomaniak, stepping stone, Phoeniqs and CSCS serve open-weight models from
 their own data centres in Switzerland, so those prompts stay under Swiss law. Mistral serves
 its models in the EU, and prompts to Anthropic, OpenAI and Google go to the USA.
+PeakPrivacy is a Swiss reseller: some of its models run in Switzerland, others
+in the EU.
 Everything below applies to all of them.
 
 ## Why offer one at all
@@ -55,7 +57,7 @@ write your own, as here.
 window, the prices (input, output, cached input, cache write, and the dearer
 ones for a long prompt where the provider charges more), a display name, a
 description, the release date and the location. The providers are `anthropic`, `openai`,
-`google`, `mistral`, `infomaniak`, `stepping-stone`, `phoeniqs` and `cscs`; `keera model catalogue`
+`google`, `mistral`, `peakprivacy`, `infomaniak`, `stepping-stone`, `phoeniqs` and `cscs`; `keera model catalogue`
 lists them with their models. For a `backend_model` not in that table, the entry
 must set `input_micros_per_mtok` and `output_micros_per_mtok` itself. A model
 the table names without a date, such as `claude-haiku-4-5`, may also be named by
@@ -63,7 +65,9 @@ its dated id, `claude-haiku-4-5-20251001`.
 
 The [location](gateway.md#the-alias-is-the-api-contract) is where the provider
 serves its models: `ch` for Infomaniak, stepping stone, Phoeniqs and CSCS, `eu`
-for Mistral, `usa` for Anthropic, OpenAI and Google.
+for Mistral, `usa` for Anthropic, OpenAI and Google. PeakPrivacy's models each
+have their own: `ch` for those it marks Swiss, such as `gpt-swiss`, and `eu` for
+the others, such as `gpt-eu`. `keera model catalogue` shows which is which.
 
 The entry always wins over the catalogue. So you can point
 `provider: anthropic` at a corporate egress proxy or a sovereign endpoint, or
@@ -88,6 +92,13 @@ models:
 An entry with its own `backends` needs no `product_id`. If that address has the
 same shape (for example an egress proxy that mirrors the path), write
 `{product_id}` in it and the id is filled in.
+
+#### PeakPrivacy caps API spending
+
+PeakPrivacy lets an account spend 50 CHF a month on its API until its support
+raises the limit. Ask before you offer its models to many people. Its ids, such
+as `qwen-3`, name no version, so PeakPrivacy may move one to a newer model
+without notice.
 
 ### In the panel and on the command line
 
@@ -174,7 +185,7 @@ provider's console.
 
 CSCS publishes a cache rate too, and the gateway charges it the same way.
 
-Infomaniak, stepping stone and Phoeniqs publish no cache discount. Their cached column is empty
+Infomaniak, stepping stone, Phoeniqs and PeakPrivacy publish no cache discount. Their cached column is empty
 and every input token is charged at the input price. That is correct, not a gap.
 
 This price matters most. A coding agent resends its whole context on every

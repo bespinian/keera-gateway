@@ -8597,6 +8597,7 @@ components:
           description: It publishes a cheaper rate for cached input.
         location:
           type: string
+          description: Where its models run, unless a model says otherwise.
         kinds:
           type: array
           items:
@@ -8657,6 +8658,9 @@ components:
         snapshot:
           type: string
           description: The dated id the maker also uses, such as `claude-haiku-4-5-20251001`.
+        location:
+          type: string
+          description: Where this model runs, when not where the provider is.
     MCPServer:
       type: object
       description: An MCP server the gateway stands in front of. See https://docs.keera.ch/manage/mcp/.

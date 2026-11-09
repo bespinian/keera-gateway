@@ -926,6 +926,32 @@ func TestProviderFlagBringsItsOwnLocation(t *testing.T) {
 	}
 }
 
+// At a provider whose models run in several places, another model brings its
+// own location, but one somebody set stays.
+func TestBackendModelFlagBringsItsOwnLocation(t *testing.T) {
+	for _, tc := range []struct{ was, want string }{
+		{was: "eu", want: "ch"},
+		{was: "onprem", want: "onprem"},
+	} {
+		current := declared(policy.Model{
+			Alias: "keera-resold", Kind: policy.KindChat, Provider: "peakprivacy",
+			Backends:     []string{"https://api.peakprivacy.ch/v1/ai"},
+			BackendModel: "gpt-eu", Location: tc.was, Enabled: true,
+		})
+		f := &modelFlags{
+			backendModel: "gpt-swiss",
+			maxContext:   -1, priceIn: -1, priceOut: -1, priceCached: -1,
+		}
+		got, err := catalog.ParseModel(applyModelFlags(current, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Location != tc.want {
+			t.Errorf("location was %q: now %q, want %q", tc.was, got.Location, tc.want)
+		}
+	}
+}
+
 // Otherwise requests would go to the wrong place at the wrong rate.
 func TestProviderFlagBringsItsOwnAddressAndPrices(t *testing.T) {
 	current := declared(policy.Model{

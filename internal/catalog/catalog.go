@@ -218,7 +218,7 @@ func CheckModel(m *policy.Model, priced bool) error {
 	m.Location = strings.ToLower(strings.TrimSpace(m.Location))
 	switch {
 	case m.Location == "" && known:
-		m.Location = prov.Location
+		m.Location = prov.LocationOf(m.BackendModel)
 	case m.Location == "":
 		loc, err := m.LocationFromBackends()
 		if err != nil {

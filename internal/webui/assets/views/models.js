@@ -361,8 +361,8 @@ export async function catalogueView(ctx) {
       {
         label: "Location",
         shrink: true,
-        sortKey: (r) => r.p.location || "",
-        cell: (r) => locationCell(r.p.location),
+        sortKey: (r) => runsIn(r) || "",
+        cell: (r) => locationCell(runsIn(r)),
       },
       {
         label: "Released",
@@ -436,17 +436,17 @@ export async function catalogueView(ctx) {
           r.m.description,
           r.p.name,
           providerName(r.p.name),
-          locationName(r.p.location),
+          locationName(runsIn(r)),
         ].join(" "),
       searchLabel: "models",
       tile: (r) => catalogueTile(ctx, r),
       choices: [
         {
           label: "Locations",
-          options: [...new Set(providers.map((p) => p.location))]
+          options: [...new Set(rows.map(runsIn))]
             .filter(Boolean)
             .map((l) => ({ value: l, label: locationName(l) })),
-          test: (r, v) => r.p.location === v,
+          test: (r, v) => runsIn(r) === v,
         },
         {
           label: "Providers",
@@ -485,6 +485,12 @@ export async function catalogueView(ctx) {
   return h("div", {}, head, list);
 }
 
+// runsIn is where a catalogue row's model runs. A provider that resells
+// models from several places says so per model.
+function runsIn(r) {
+  return r.m.location || r.p.location;
+}
+
 function catalogueTile(ctx, r) {
   // A price may wrap here: a tile is narrow.
   const price = (v) => chf(v) || dash();
@@ -509,7 +515,7 @@ function catalogueTile(ctx, r) {
           "span",
           { class: "faint small" },
           [
-            r.p.location && locationName(r.p.location),
+            runsIn(r) && locationName(runsIn(r)),
             r.m.release_date && releaseDay(r.m.release_date),
           ]
             .filter(Boolean)
@@ -869,6 +875,7 @@ const PROVIDER_NAMES = {
   openai: "OpenAI",
   google: "Google",
   mistral: "Mistral",
+  peakprivacy: "PeakPrivacy",
   infomaniak: "Infomaniak",
   "stepping-stone": "stepping stone",
   phoeniqs: "Phoeniqs",
@@ -975,7 +982,11 @@ const PRESET_FIELDS = [
     fromModel: true,
     of: (p, m) => (m && m.release_date ? m.release_date : null),
   },
-  { key: "location", label: "location", of: (p) => p.location || null },
+  {
+    key: "location",
+    label: "location",
+    of: (p, m) => (m && m.location) || p.location || null,
+  },
   {
     key: "priceIn",
     label: "list input price",
@@ -1071,7 +1082,9 @@ function editModel(ctx, existing, providers, pick) {
         "ch",
         "eu",
         "usa",
-        ...(providers || []).map((p) => p.location).filter(Boolean),
+        ...(providers || [])
+          .flatMap((p) => [p.location, ...(p.models || []).map((x) => x.location)])
+          .filter(Boolean),
         ...(m.location ? [m.location] : []),
       ]),
     ].map((l) => h("option", { value: l }, locationName(l))),

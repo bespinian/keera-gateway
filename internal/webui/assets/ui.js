@@ -414,6 +414,20 @@ const providerMarks = {
       { opacity: 1, path: "M0 4h3v1H0zM4 4h3v1H4z" },
     ],
   },
+  peakprivacy: {
+    // With a margin: a solid square filling the box looks larger than the
+    // other marks.
+    viewBox: "-3.5 -3.5 34.88 34.99",
+    // The icon without the wordmark: the square lighter, the corner darker,
+    // as in its colours.
+    layers: [
+      {
+        opacity: 0.7,
+        path: "M17.49 10.5H5.25V22.74H17.49V10.5H22.74V27.99H0L0 5.25H17.49V10.5Z",
+      },
+      { opacity: 1, path: "M27.88 5.25H22.63V0H27.88V5.25Z" },
+    ],
+  },
   infomaniak: {
     viewBox: "0 0 24 24",
     // A filled tile with the letter cut out: how the logo looks in one colour.
