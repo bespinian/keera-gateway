@@ -78,7 +78,7 @@ type ProviderModel struct {
 // Prices are micro-CHF per million tokens, at list price unless a provider
 // says otherwise; an entry can override them. Prices listed in USD are
 // converted at 0.96 CHF per USD. Last checked against each pricing page on
-// 2026-10-31.
+// 2026-11-09.
 //
 // Release dates come from each maker's announcement. An FP8 build takes the
 // date of its base model. Retired models are dropped before they retire.
@@ -124,12 +124,19 @@ var providers = []Provider{{
 		},
 		Description: "small and fast - short, simple, high-volume tasks",
 	}, {
+		ID: "claude-fable-5-2", DisplayName: "Claude Fable 5.2",
+		MaxContext: 1_000_000, ReleaseDate: "2026-11-09",
+		InputMicrosPerMTok: 7_680_000, OutputMicrosPerMTok: 38_400_000,
+		CachedInputMicrosPerMTok: 192_000,
+		CacheWriteMicrosPerMTok:  9_600_000,
+		Description:              "very large, always reasons first - demanding reasoning and agent sessions that run for hours",
+	}, {
 		ID: "claude-fable-5-1", DisplayName: "Claude Fable 5.1",
 		MaxContext: 1_000_000, ReleaseDate: "2026-09-01",
 		InputMicrosPerMTok: 9_600_000, OutputMicrosPerMTok: 48_000_000,
 		CachedInputMicrosPerMTok: 240_000,
 		CacheWriteMicrosPerMTok:  12_000_000,
-		Description:              "very large and slow - best at writing, weaker at code",
+		Description:              "very large and slow - best at writing, weaker at code; replaced by Claude Fable 5.2",
 	}, {
 		ID: "claude-sonnet-5", DisplayName: "Claude Sonnet 5",
 		MaxContext: 1_000_000, ReleaseDate: "2026-06-30",
@@ -177,7 +184,8 @@ var providers = []Provider{{
 	// input and 1.5 times for output. From gpt-5.6 on, a cache write costs a
 	// quarter more than input; before, the same. OpenAI retires GPT-4o, GPT-4o
 	// mini, GPT-4.1 and GPT-4.1 mini on 2027-01-14, and GPT-5.1 and GPT-5.4
-	// nano on 2027-04-01.
+	// nano on 2027-04-01. GPT-5.6 Sol's price is a promotion until 2026-11-30;
+	// OpenAI has not published the price after it.
 	Models: []ProviderModel{{
 		ID: "gpt-6-astra", DisplayName: "GPT-6 Astra",
 		MaxContext: 1_050_000, ReleaseDate: "2026-09-03",
@@ -405,23 +413,6 @@ var providers = []Provider{{
 		InputMicrosPerMTok: 240_000, OutputMicrosPerMTok: 1_440_000,
 		CachedInputMicrosPerMTok: 24_000,
 		Description:              "small and fast - simple, high-volume tasks; replaced by Gemini 3.5 Flash-Lite",
-	}, {
-		ID: "gemini-2.5-pro", DisplayName: "Gemini 2.5 Pro",
-		MaxContext: 1_048_576, ReleaseDate: "2025-06-17",
-		InputMicrosPerMTok: 1_200_000, OutputMicrosPerMTok: 9_600_000,
-		CachedInputMicrosPerMTok: 120_000,
-		LongPrompt: &policy.PriceTier{
-			AboveTokens:        200_000,
-			InputMicrosPerMTok: 2_400_000, OutputMicrosPerMTok: 14_400_000,
-			CachedInputMicrosPerMTok: 240_000,
-		},
-		Description: "large and slow - coding and hard reasoning; replaced by Gemini 3.1 Pro Preview",
-	}, {
-		ID: "gemini-2.5-flash", DisplayName: "Gemini 2.5 Flash",
-		MaxContext: 1_048_576, ReleaseDate: "2025-06-17",
-		InputMicrosPerMTok: 288_000, OutputMicrosPerMTok: 2_400_000,
-		CachedInputMicrosPerMTok: 28_800,
-		Description:              "mid-size and quick - everyday questions; replaced by Gemini 3.8 Flash",
 	}},
 }, {
 	Name:    "mistral",
@@ -436,7 +427,7 @@ var providers = []Provider{{
 		MaxContext: 1_000_000, ReleaseDate: "2026-10-06",
 		InputMicrosPerMTok: 672_000, OutputMicrosPerMTok: 2_016_000,
 		CachedInputMicrosPerMTok: 67_200,
-		Description:              "very large, in preview - hard coding, agent and reasoning work, with images",
+		Description:              "very large - hard coding, agent and reasoning work, with images",
 	}, {
 		ID: "mistral-medium-3-5", DisplayName: "Mistral Medium 3.5",
 		MaxContext: 262_144, ReleaseDate: "2026-04-28",
@@ -506,9 +497,9 @@ var providers = []Provider{{
 	// runs. The models it resells from the USA are left out: the catalogue
 	// has them from their makers. Ids are PeakPrivacy's own and say no
 	// version, so a model whose version PeakPrivacy does not name has no
-	// release date. Prices are listed in CHF per thousand tokens, checked on
-	// 2026-11-06. Context windows are from PeakPrivacy's help centre. GPT
-	// Swiss and GPT EU are both gpt-oss-120b.
+	// release date. Prices are listed in CHF per thousand tokens. Context
+	// windows are from PeakPrivacy's help centre. GPT Swiss and GPT EU are
+	// both gpt-oss-120b.
 	Endpoint: "https://api.peakprivacy.ch/v1/ai",
 	Location: "ch",
 	Models: []ProviderModel{{
@@ -642,7 +633,8 @@ var providers = []Provider{{
 	Endpoint: "https://llm.stoney-cloud.com/v1",
 	Location: "ch",
 	// Ids are the upstream names, capitals and all. The Nemotron id is spelled
-	// as stepping stone's documentation spells it.
+	// as stepping stone's documentation spells it. An embedding or a rerank
+	// writes nothing, so it has no output price.
 	Models: []ProviderModel{{
 		ID: "MiniMaxAI/MiniMax-M2.5", DisplayName: "MiniMax M2.5",
 		MaxContext: 196_608, ReleaseDate: "2026-02-12",
@@ -708,6 +700,16 @@ var providers = []Provider{{
 		MaxContext: 16_000, ReleaseDate: "2025-09-19",
 		InputMicrosPerMTok: 20_000, OutputMicrosPerMTok: 60_000,
 		Description: "document parsing - turns images of pages into text, tables and formulas; not for chat",
+	}, {
+		ID: "BAAI/bge-m3", DisplayName: "BGE M3",
+		Kind: policy.KindEmbedding, MaxContext: 8_192, ReleaseDate: "2024-01-30",
+		InputMicrosPerMTok: 100_000,
+		Description:        "embedding, 1024 dimensions - search and RAG in over 100 languages",
+	}, {
+		ID: "BAAI/bge-reranker-v2-m3", DisplayName: "BGE Reranker v2 M3",
+		Kind: policy.KindRerank, MaxContext: 8_192, ReleaseDate: "2024-03-18",
+		InputMicrosPerMTok: 100_000,
+		Description:        "reranker - orders search results by relevance, in many languages",
 	}},
 }, {
 	Name:     "phoeniqs",
@@ -813,27 +815,35 @@ var providers = []Provider{{
 	// Ids are the upstream names, capitals and all. A -thinking id is the same
 	// weights with reasoning on and tool calls off, so it keeps the date.
 	Models: []ProviderModel{{
-		// CSCS does not publish its context window; it takes the one CSCS gave
-		// GLM-5.2, the same base model.
 		ID: "zai-org/GLM-5.3", DisplayName: "GLM-5.3",
-		MaxContext: 976_000, ReleaseDate: "2026-08-14",
+		MaxContext: 1_048_576, ReleaseDate: "2026-08-14",
 		InputMicrosPerMTok: 181_100, OutputMicrosPerMTok: 6_642_000,
 		CachedInputMicrosPerMTok: 31_500,
 		Description:              "large - hard coding, agent and security work over very long inputs",
 	}, {
-		// CSCS does not publish its context window; it takes the one CSCS
-		// serves its other models with, the least any provider gives it.
 		ID: "zai-org/GLM-5.3-Flash", DisplayName: "GLM-5.3 Flash",
-		MaxContext: 262_144, ReleaseDate: "2026-08-26",
+		MaxContext: 1_048_576, ReleaseDate: "2026-08-26",
 		InputMicrosPerMTok: 74_700, OutputMicrosPerMTok: 1_822_500,
 		CachedInputMicrosPerMTok: 16_200,
 		Description:              "mid-size, quick all-rounder - code, reasoning and tool use",
+	}, {
+		ID: "Qwen/Qwen3.8-Flash-Next-FP8", DisplayName: "Qwen3.8 Flash Next FP8",
+		MaxContext: 262_144, ReleaseDate: "2026-08-26",
+		InputMicrosPerMTok: 34_800, OutputMicrosPerMTok: 2_019_500,
+		CachedInputMicrosPerMTok: 4_700,
+		Description:              "mid-size and quick, reads images and video - long inputs and everyday questions",
 	}, {
 		ID: "google/gemma-4-31B-it", DisplayName: "Gemma 4 31B",
 		MaxContext: 262_144, ReleaseDate: "2026-04-02",
 		InputMicrosPerMTok: 68_000, OutputMicrosPerMTok: 420_000,
 		CachedInputMicrosPerMTok: 13_600,
 		Description:              "mid-size and quick, reads images - documents, chatbots and ordinary code",
+	}, {
+		ID: "Qwen/Qwen3.8-27B-FP8", DisplayName: "Qwen3.8 27B FP8",
+		MaxContext: 262_144, ReleaseDate: "2026-08-14",
+		InputMicrosPerMTok: 23_400, OutputMicrosPerMTok: 504_900,
+		CachedInputMicrosPerMTok: 2_300,
+		Description:              "small but strong for its size, reads images - ordinary code and questions",
 	}, {
 		ID: "swiss-ai/Apertus-v1.5-70B", DisplayName: "Apertus v1.5 70B",
 		MaxContext: 262_144, ReleaseDate: "2026-07-24",

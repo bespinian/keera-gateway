@@ -39,8 +39,8 @@ func TestProviderFillsInEverythingButTheAlias(t *testing.T) {
 						known.InputMicrosPerMTok, known.OutputMicrosPerMTok,
 						known.CachedInputMicrosPerMTok)
 				}
-				if !m.Enabled || m.Kind != "chat" {
-					t.Errorf("model = %+v, want an enabled chat alias", m)
+				if !m.Enabled || m.Kind != known.kindOrChat() {
+					t.Errorf("model = %+v, want an enabled %s alias", m, known.kindOrChat())
 				}
 				// The name survives, to say where the values came from.
 				if m.Provider != p.Name {

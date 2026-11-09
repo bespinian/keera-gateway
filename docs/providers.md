@@ -266,9 +266,9 @@ model, are forwarded without being translated
 
 ### Also worth knowing
 
-- **Embedding and rerank models.** Infomaniak's are in the table and get
-  `kind: embedding` or `kind: rerank` from it; a chat entry for one is
-  refused. Infomaniak reranks on its Cohere-shaped API, so a rerank model's
+- **Embedding and rerank models.** Infomaniak's and stepping stone's are in the
+  table and get `kind: embedding` or `kind: rerank` from it; a chat entry for
+  one is refused. Infomaniak reranks on its Cohere-shaped API, so a rerank model's
   endpoint ends in `/cohere/v2`, not `/openai/v1`. An entry with its own
   `backends` writes that address. Another provider's embedding or rerank model
   needs its own entry, with no `provider`, the `kind`, the full address in
