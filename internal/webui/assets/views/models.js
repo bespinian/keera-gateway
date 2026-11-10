@@ -313,26 +313,28 @@ export async function catalogueView(ctx) {
 
   const price = (v) => (v ? h("span", { class: "nowrap" }, chf(v)) : dash());
 
-  // Self-hosted models are in no provider's table, so they are added here.
+  // Self-hosted models are in no provider's table, so they are added here,
+  // where every list has its add button.
   const head = h(
     "div",
-    { class: "detail-head row" },
-    crumb(ctx, "/models", "Models"),
-    h("div", { class: "spacer" }),
-    canEdit
-      ? h(
-          "button",
-          {
-            class: "btn",
-            title:
-              "A model on your own inference server, such as vLLM, " +
-              "Ollama or Keera Engine",
-            onClick: () => editModel(ctx, null, providers, null),
-          },
-          icon(icons.plus),
-          "Self-hosted model",
-        )
-      : null,
+    {},
+    h("div", { class: "detail-head row" }, crumb(ctx, "/models", "Models")),
+    listHead(null, [
+      canEdit
+        ? h(
+            "button",
+            {
+              class: "btn",
+              title:
+                "A model on your own inference server, such as vLLM, " +
+                "Ollama or Keera Engine",
+              onClick: () => editModel(ctx, null, providers, null),
+            },
+            icon(icons.plus),
+            "Add self-hosted model",
+          )
+        : null,
+    ]),
   );
 
   const list = table(
