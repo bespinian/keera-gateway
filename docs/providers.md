@@ -1,8 +1,8 @@
 # Hosted models
 
 A hosted model runs outside your infrastructure: at Anthropic, OpenAI, Google,
-Mistral, PeakPrivacy, Infomaniak, stepping stone, Phoeniqs, CSCS, or any other
-endpoint that speaks the OpenAI API.
+DeepSeek, Mistral, PeakPrivacy, Infomaniak, stepping stone, Phoeniqs, CSCS, or
+any other endpoint that speaks the OpenAI API.
 
 To add one in the panel or on the command line, see
 [Models](https://docs.keera.ch/manage/models/). This page explains how hosted
@@ -14,7 +14,8 @@ how to keep it contained.
 
 Infomaniak, stepping stone, Phoeniqs and CSCS serve open-weight models from
 their own data centres in Switzerland, so those prompts stay under Swiss law. Mistral serves
-its models in the EU, and prompts to Anthropic, OpenAI and Google go to the USA.
+its models in the EU, prompts to Anthropic, OpenAI and Google go to the USA,
+and prompts to DeepSeek go to China.
 PeakPrivacy is a Swiss reseller: some of its models run in Switzerland, others
 in the EU.
 Everything below applies to all of them.
@@ -57,7 +58,7 @@ write your own, as here.
 window, the prices (input, output, cached input, cache write, and the dearer
 ones for a long prompt where the provider charges more), a display name, a
 description, the release date and the location. The providers are `anthropic`, `openai`,
-`google`, `mistral`, `peakprivacy`, `infomaniak`, `stepping-stone`, `phoeniqs` and `cscs`; `keera model catalogue`
+`google`, `deepseek`, `mistral`, `peakprivacy`, `infomaniak`, `stepping-stone`, `phoeniqs` and `cscs`; `keera model catalogue`
 lists them with their models. For a `backend_model` not in that table, the entry
 must set `input_micros_per_mtok` and `output_micros_per_mtok` itself. A model
 the table names without a date, such as `claude-haiku-4-5`, may also be named by
@@ -65,7 +66,7 @@ its dated id, `claude-haiku-4-5-20251001`.
 
 The [location](gateway.md#the-alias-is-the-api-contract) is where the provider
 serves its models: `ch` for Infomaniak, stepping stone, Phoeniqs and CSCS, `eu`
-for Mistral, `usa` for Anthropic, OpenAI and Google. PeakPrivacy's models each
+for Mistral, `usa` for Anthropic, OpenAI and Google, `cn` for DeepSeek. PeakPrivacy's models each
 have their own: `ch` for those it marks Swiss, such as `gpt-swiss`, and `eu` for
 the others, such as `gpt-eu`. `keera model catalogue` shows which is which.
 
@@ -92,6 +93,14 @@ models:
 An entry with its own `backends` needs no `product_id`. If that address has the
 same shape (for example an egress proxy that mirrors the path), write
 `{product_id}` in it and the id is filled in.
+
+#### DeepSeek is cheaper off-peak
+
+DeepSeek charges half outside its peak hours, which are 01:00 to 04:00 and
+06:00 to 10:00 UTC on weekdays. The catalogue holds the full price, so a budget
+never runs over, but reports show more than DeepSeek bills. Set a lower price
+on the entry if you would rather they match. Its id `deepseek-flash`
+names no version, so DeepSeek may move it to a newer model without notice.
 
 #### PeakPrivacy caps API spending
 
@@ -176,9 +185,9 @@ The prices go stale; see [billing.md](billing.md#keep-in-mind).
 
 ### Cached input
 
-Anthropic, OpenAI, Google and Mistral charge less for a prompt they have
-already read, from a fortieth to half of the input price, and report how much of
-the prompt that was. OpenAI, Google and Mistral count it as part of the prompt. Anthropic counts it separately, and the
+Anthropic, OpenAI, Google, DeepSeek and Mistral charge less for a prompt they have
+already read, from a fiftieth to half of the input price, and report how much of
+the prompt that was. OpenAI, Google, DeepSeek and Mistral count it as part of the prompt. Anthropic counts it separately, and the
 gateway adds it back, so a row's input is always the whole prompt. The gateway
 charges the cached part at the cached rate, so a row's cost matches the
 provider's console.

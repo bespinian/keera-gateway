@@ -624,11 +624,14 @@ models:
   - alias: keera-resold-swiss
     provider: peakprivacy
     backend_model: gpt-swiss
+  - alias: keera-china
+    provider: deepseek
+    backend_model: deepseek-flash
 `))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	for i, want := range []string{"usa", "ch", "onprem", "ch", "ch", "eu", "ch"} {
+	for i, want := range []string{"usa", "ch", "onprem", "ch", "ch", "eu", "ch", "cn"} {
 		if got := models[i].Location; got != want {
 			t.Errorf("%s: location = %q, want %q", models[i].Alias, got, want)
 		}

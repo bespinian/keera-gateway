@@ -415,6 +415,28 @@ var providers = []Provider{{
 		Description:              "small and fast - simple, high-volume tasks; replaced by Gemini 3.5 Flash-Lite",
 	}},
 }, {
+	Name:    "deepseek",
+	Summary: "DeepSeek's own models, on DeepSeek's API in China.",
+	// DeepSeek charges half outside its peak hours. The table has one
+	// price, so it holds the full one: a budget never runs over. deepseek-flash is served by V4.1 Flash, so it takes that date.
+	// DeepSeek publishes no price for a cache write.
+	Endpoint:    "https://api.deepseek.com",
+	CachedInput: true,
+	Location:    "cn",
+	Models: []ProviderModel{{
+		ID: "deepseek-v4-pro", DisplayName: "DeepSeek V4 Pro",
+		MaxContext: 1_000_000, ReleaseDate: "2026-08-13",
+		InputMicrosPerMTok: 1_267_200, OutputMicrosPerMTok: 3_801_600,
+		CachedInputMicrosPerMTok: 42_240,
+		Description:              "very large, with reasoning - hard coding and long agent sessions",
+	}, {
+		ID: "deepseek-flash", DisplayName: "DeepSeek V4.1 Flash",
+		MaxContext: 1_000_000, ReleaseDate: "2026-10-17",
+		InputMicrosPerMTok: 288_000, OutputMicrosPerMTok: 1_152_000,
+		CachedInputMicrosPerMTok: 5_760,
+		Description:              "large and quick, reads images - coding, agent work and long documents",
+	}},
+}, {
 	Name:    "mistral",
 	Summary: "Mistral's own models and some open-weight ones, on Mistral's API in the EU.",
 	// Mistral publishes no price for a cache write. It retires Medium 3.5 and

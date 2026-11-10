@@ -874,6 +874,7 @@ const PROVIDER_NAMES = {
   anthropic: "Anthropic",
   openai: "OpenAI",
   google: "Google",
+  deepseek: "DeepSeek",
   mistral: "Mistral",
   peakprivacy: "PeakPrivacy",
   infomaniak: "Infomaniak",
