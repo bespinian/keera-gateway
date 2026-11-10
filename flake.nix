@@ -28,7 +28,7 @@
         # Nix fetches the modules itself and checks them against this hash.
         # When go.mod changes, set it to pkgs.lib.fakeHash, build, and copy the
         # hash Nix prints.
-        vendorHash = "sha256-eiPK2vpZ3C4DmXkDSpPXt8LgoI9eAtRCWp99hN3noZg=";
+        vendorHash = "sha256-vjtnbfju3WKr+E6+GmW51lo5ArRMh9sRVVWLaUVkjuQ=";
         subPackages = [
           "cmd/keera-gateway"
           "cmd/keera"

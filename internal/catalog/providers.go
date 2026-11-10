@@ -365,18 +365,24 @@ var providers = []Provider{{
 	Name:    "google",
 	Summary: "Google's own Gemini models, on the Gemini API.",
 	// The Gemini API's OpenAI-compatible surface. Gemini caches prompts
-	// without charging for the write. Gemini 4 Argon's prices double on
-	// 2026-12-01, and Gemini 3.8 and 3.6 Flash's on 2027-01-01. Google
-	// retires Gemini 3.1 Flash-Lite on 2027-05-07.
+	// without charging for the write. Gemini 4 Carbon and Argon's prices
+	// double on 2026-12-01, and Gemini 3.8 and 3.6 Flash's on 2027-01-01.
+	// Google retires Gemini 3.1 Flash-Lite on 2027-05-07.
 	Endpoint:    "https://generativelanguage.googleapis.com/v1beta/openai",
 	CachedInput: true,
 	Location:    "usa",
 	Models: []ProviderModel{{
+		ID: "gemini-4-carbon", DisplayName: "Gemini 4 Carbon",
+		MaxContext: 1_048_576, ReleaseDate: "2026-11-10",
+		InputMicrosPerMTok: 1_920_000, OutputMicrosPerMTok: 9_600_000,
+		CachedInputMicrosPerMTok: 96_000,
+		Description:              "flagship, thinks longest - the hardest coding, agent and science work",
+	}, {
 		ID: "gemini-4-argon", DisplayName: "Gemini 4 Argon",
 		MaxContext: 1_048_576, ReleaseDate: "2026-10-13",
 		InputMicrosPerMTok: 1_920_000, OutputMicrosPerMTok: 9_600_000,
 		CachedInputMicrosPerMTok: 96_000,
-		Description:              "flagship - hard coding, agent and science work",
+		Description:              "large and efficient - most coding, agent and knowledge work",
 	}, {
 		ID: "gemini-3.8-flash", DisplayName: "Gemini 3.8 Flash",
 		MaxContext: 1_048_576, ReleaseDate: "2026-09-02",
