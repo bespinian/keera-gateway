@@ -372,6 +372,12 @@ var providers = []Provider{{
 	CachedInput: true,
 	Location:    "usa",
 	Models: []ProviderModel{{
+		ID: "gemini-4-hydrogen", DisplayName: "Gemini 4 Hydrogen",
+		MaxContext: 1_048_576, ReleaseDate: "2026-11-12",
+		InputMicrosPerMTok: 1_440_000, OutputMicrosPerMTok: 7_200_000,
+		CachedInputMicrosPerMTok: 72_000,
+		Description:              "large and fast - everyday coding and quick agent steps",
+	}, {
 		ID: "gemini-4-carbon", DisplayName: "Gemini 4 Carbon",
 		MaxContext: 1_048_576, ReleaseDate: "2026-11-10",
 		InputMicrosPerMTok: 1_920_000, OutputMicrosPerMTok: 9_600_000,
