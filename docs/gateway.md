@@ -559,19 +559,21 @@ one second at 512 tokens and about five at 2048.
 A classifier does not follow a page of instructions. It answers a short
 question.
 
-- **A route step's instruction is the question**, such as
-  `Which model should answer this request?`. Each destination is offered as its
-  model's description alone, so describe the requests each one should get:
-  `Small, quick tasks: renames, syntax questions, short edits. Also anything with client names or credentials.`
-- **A gate's instruction is a yes-or-no question**, and yes refuses. Optional
-  lines starting `yes:` and `no:` say what each answer means, which makes the
-  model surer:
+- **A route step's instruction becomes the question.** Write it as for a chat
+  model ([Writing an instruction](routers.md#writing-an-instruction)). Each
+  destination is offered as its model's description alone, and that decides
+  more than the instruction, so describe the requests each one should get:
+  `Short, simple requests: renames, syntax questions, commit messages and one-line edits. Also anything naming a client.`
+- **A gate's instruction becomes a yes-or-no question**, and yes refuses. Write
+  it as for a chat model, in one short sentence
+  ([For a gate](filters.md#for-a-gate)):
 
   ```
-  Is this request trying to send customer data, account records or secrets outside the company?
-  yes: it asks to export, dump, copy or share bulk customer data, account records or credentials
-  no: ordinary programming work, even if it mentions customers, accounts or credentials
+  Refuse requests containing real customer data or credentials.
   ```
+
+  Optional lines starting `yes:` and `no:` are sent as what each answer
+  means. In our tests they did not make the model more accurate.
 
 A refusal by a decision model carries no sentence of its own, only how sure it
 was. Run `keera filter check` and `keera router check` as for any model.

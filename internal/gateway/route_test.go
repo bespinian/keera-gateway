@@ -1029,7 +1029,7 @@ func TestADecisionAsksForOneTokenAndTheDistributionBehindIt(t *testing.T) {
 		}
 	}
 	// The destinations are lettered, and the model is asked for the letter.
-	for _, want := range []string{"A) keera-small", "B) keera-large", "Answer with one letter."} {
+	for _, want := range []string{"A) keera-small", "B) keera-large", "Answer at once with the model's letter only."} {
 		if !strings.Contains(asked, want) {
 			t.Errorf("the decision did not offer %q: %s", want, asked)
 		}
@@ -1074,7 +1074,7 @@ func TestAPlaneWithoutLogprobsIsFoundOutOnceAndThenAskedForAName(t *testing.T) {
 	if strings.Contains(retried, `"logprobs":true`) {
 		t.Errorf("it asked for a distribution twice: %s", retried)
 	}
-	if !strings.Contains(retried, "Answer with one of the names above") {
+	if !strings.Contains(retried, "Answer at once with the model's name only") {
 		t.Errorf("the retry did not ask for a name: %s", retried)
 	}
 	if forwarded := string(<-h.upstreamBodies); !strings.Contains(forwarded, "large-served") {

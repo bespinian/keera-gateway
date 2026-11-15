@@ -44,8 +44,8 @@ models:
     provider: anthropic
     backend_model: claude-opus-5-5
     description: >-
-      Hosted outside this cluster and expensive. Design, multi-step reasoning
-      and whole-system questions. Must not be sent client data.
+      Design, architecture, multi-step reasoning and whole-system questions.
+      Never anything naming a client.
 ```
 
 The `description` is what a

@@ -278,6 +278,20 @@ The deciding model sees each destination's own model `description`
 The description lives on the model so it stays true when the model behind an
 alias changes. Clients see it on `/api/v1/models` too.
 
+**Describe the requests a model should get, not the model.** In our tests, this
+mattered more than the instruction or the model that decides. With
+descriptions such as "Fast and served inside this cluster… everyday work", a
+decision model sent most hard requests to the small model. With descriptions
+like these, it chose right four times in five, and small chat models nearly
+always:
+
+```
+keera-speed:    Short, simple requests: renames, syntax questions, commit
+                messages and one-line edits. Also anything naming a client.
+keera-frontier: Design, architecture, multi-step reasoning and whole-system
+                questions. Never anything naming a client.
+```
+
 Without descriptions it chooses between bare aliases, and `keera router check`
 warns about it.
 
@@ -385,9 +399,20 @@ Limits:
 - At most 16 destinations. With longer lists, a small model tends to pick
   whichever end it read last.
 
+Spell out which kind of request goes where, as above or with one line per
+destination. In our tests, a single sentence such as "Choose the cheapest model
+that can handle the request" or a question made chat models choose worse and
+more often fail to answer at all.
+
 The deciding model can also be a
 [decision model](gateway.md#decision-models), a classifier that picks in one
-pass and writes nothing. It needs its instruction written differently.
+pass and writes nothing. The same instruction works for it; its
+[descriptions](#descriptions-are-what-a-route-step-decides-on) matter most.
+
+**A route step is no data boundary.** Even with good descriptions, a small model
+sometimes sends a request naming a client to the hosted model. To keep client
+data in, put a filter on the hosted model's branch, as in
+[Writing one](#writing-one).
 
 ## Routing by size
 

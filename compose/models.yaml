@@ -14,11 +14,11 @@ models:
     # llama.cpp's --alias. If it is wrong, every request returns 404.
     backend_model: keera-speed
     max_context_tokens: 16384
-    # What this model is for, in a sentence. Clients see it on /v1/models, and
+    # The requests this model should get. Clients see it on /v1/models, and
     # routers choose by it. See docs/routers.md.
     description: >-
-      Fast and served inside this cluster. Short edits, syntax questions,
-      renames, commit messages and everyday work.
+      Short, simple requests: renames, syntax questions, commit messages and
+      one-line edits. Also anything naming a client.
     # No prices: a self-hosted model costs KEERA_BILLING_GATEWAY_FEE, or
     # nothing without one. See docs/billing.md#the-gateway-fee.
 
@@ -53,8 +53,8 @@ models:
 #    backend_model: claude-opus-5-5
 #    # Optional: the provider's description is used otherwise.
 #    description: >-
-#      Hosted outside this cluster and expensive. Design, multi-step reasoning
-#      and whole-system questions. Must not be sent client data.
+#      Design, architecture, multi-step reasoning and whole-system questions.
+#      Never anything naming a client.
 
 # The same without leaving Switzerland: Infomaniak serves open-weight models
 # from its own data centres. It needs your AI Service's product id and a key,

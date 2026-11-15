@@ -161,6 +161,28 @@ func TestFilterRewritesTheConversationBeforeItIsForwarded(t *testing.T) {
 	}
 }
 
+// A model shown < for < may copy the escape into its rewrite, which breaks
+// the code it hands on.
+func TestAFilterModelReadsCodeWithoutHTMLEscapes(t *testing.T) {
+	h := filterHarness(t, redactor, nil)
+
+	h.post(t, "/v1/chat/completions",
+		`{"model":"keera-code","messages":[{"role":"user","content":"case <-ctx.Done(): a && b > c"}]}`)
+
+	var sent struct {
+		Messages []struct {
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(<-h.upstreamBodies, &sent); err != nil || len(sent.Messages) < 2 {
+		t.Fatalf("the filter's call could not be read: %v", err)
+	}
+	if got := sent.Messages[1].Content; got != `["case <-ctx.Done(): a && b > c"]` {
+		t.Errorf("the filter's model read %s, want the code as written", got)
+	}
+	<-h.upstreamBodies
+}
+
 func TestFilterSpendIsChargedToTheSameBudget(t *testing.T) {
 	h := filterHarness(t, redactor, nil)
 

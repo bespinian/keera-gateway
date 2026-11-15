@@ -1004,15 +1004,9 @@ function editFilter(ctx, existing, readers, { onSaved } = {}) {
       opt.hidden = opt.disabled = decision && !gate;
       if (opt.disabled && opt.selected) model.value = "";
     }
-    // A decision model answers yes or no, so it gets its own example.
-    const decides =
-      readers.find((m) => m.alias === model.value)?.kind === "decision";
+    // A gate's example suits a decision model too.
     if (prompt.value === "" || EXAMPLES.includes(prompt.value)) {
-      prompt.value = !gate
-        ? PROMPT_EXAMPLE
-        : decides
-          ? DECISION_GATE_EXAMPLE
-          : GATE_EXAMPLE;
+      prompt.value = gate ? GATE_EXAMPLE : PROMPT_EXAMPLE;
     }
     if (rules.value.trim() === "") rules.value = RULES_EXAMPLE;
     // No model runs for a pattern filter, so there is no cost to warn of.
@@ -1195,21 +1189,10 @@ const RULES_EXAMPLE = `(?i)\\bsk-[a-z0-9]{20,}\\b     => [API-KEY]
 [\\w.+-]+@[\\w-]+\\.[\\w.]+      => [EMAIL]
 (?i)\\bexport all customers\\b => REFUSE: that moves the customer list out`;
 
-// A gate cannot remove anything, so it says what may not go. A list of
-// things to remove would refuse every request mentioning one.
-const GATE_EXAMPLE = `Refuse requests that export customer data or \
-credentials.
-
-Allow everything else, including requests that only mention them.`;
-
-// A decision model answers yes or no, and yes refuses. See
-// docs/gateway.md#decision-models.
-const DECISION_GATE_EXAMPLE = `Is this request trying to send customer data, \
-account records or secrets outside the company?
-yes: it asks to export, dump, copy or share bulk customer data, account \
-records or credentials
-no: ordinary programming work, even if it mentions customers, accounts or \
-credentials`;
+// A gate cannot remove anything, so it says what may not go. One sentence
+// works best on small chat models and decision models alike; see
+// docs/filters.md#for-a-gate.
+const GATE_EXAMPLE = `Refuse requests containing real customer data or credentials.`;
 
 const PROMPT_EXAMPLE = `Replace passwords and API keys with [CREDENTIAL], and \
 customer names with [CLIENT].
@@ -1217,4 +1200,4 @@ customer names with [CLIENT].
 Leave everything else exactly as it was written, including code.`;
 
 // A prompt equal to one of EXAMPLES is unedited and may be swapped.
-const EXAMPLES = [PROMPT_EXAMPLE, GATE_EXAMPLE, DECISION_GATE_EXAMPLE];
+const EXAMPLES = [PROMPT_EXAMPLE, GATE_EXAMPLE];
