@@ -165,6 +165,7 @@ func TestArgCount(t *testing.T) {
 		"<project> <new-name>":         {2, 2},
 		"[<client>] [flags]":           {0, 1},
 		"<email-or-id> <member|admin>": {2, 2},
+		"<alias> <prompt>...":          {2, -1},
 	} {
 		if lo, hi := argCount(spec); lo != want[0] || hi != want[1] {
 			t.Errorf("argCount(%q) = %d, %d; want %d, %d", spec, lo, hi, want[0], want[1])
