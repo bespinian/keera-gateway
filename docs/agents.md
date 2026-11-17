@@ -104,3 +104,21 @@ whoever relied on them.
 Removing a person from the directory only ends their sign-ins, as for every
 other key: the directory never sees API keys. Their agents keep working until
 they are disabled in Keera.
+
+## Workspaces from the command line
+
+Keera Agents also runs workspaces: machines people work in, with a coding
+agent. `keera workspace` reaches them with the person's `keera login`. It
+finds Keera Agents through `agents_url` in `GET /control/v1/me`, and Keera
+Agents takes the same sign-in.
+
+```sh
+keera workspace create api      # asks: terminal (pi) or VS Code (Cline)
+keera workspace open api        # in the browser, through this machine's loopback
+keera workspace forward api 3000
+keera workspace ssh-config      # then: ssh api.keera
+```
+
+The operator key cannot use workspaces: it belongs to nobody, and a
+workspace is a person's. How a workspace runs, and why, is in Keera Agents'
+`docs/workspaces.md`.

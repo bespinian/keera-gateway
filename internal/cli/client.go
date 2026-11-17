@@ -168,29 +168,38 @@ const requestTimeout = 30 * time.Second
 // seconds each.
 const probeTimeout = 10 * time.Minute
 
+// jsonRequest sends in as JSON, or no body when in is nil.
+func jsonRequest(ctx context.Context, method, url string, in any) (*http.Request, error) {
+	var body io.Reader
+	if in != nil {
+		raw, err := json.Marshal(in)
+		if err != nil {
+			return nil, err
+		}
+		body = bytes.NewReader(raw)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	if err != nil {
+		return nil, err
+	}
+	if in != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return req, nil
+}
+
 func (c *client) send(ctx context.Context, method, path, cred string, in any) ([]byte, http.Header, error) {
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, requestTimeout)
 		defer cancel()
 	}
-	var reader io.Reader
-	if in != nil {
-		raw, err := json.Marshal(in)
-		if err != nil {
-			return nil, nil, err
-		}
-		reader = bytes.NewReader(raw)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, c.base+httpx.ControlPrefix+path, reader)
+	req, err := jsonRequest(ctx, method, c.base+httpx.ControlPrefix+path, in)
 	if err != nil {
 		return nil, nil, err
 	}
 	if cred != "" {
 		req.Header.Set("Authorization", "Bearer "+cred)
-	}
-	if in != nil {
-		req.Header.Set("Content-Type", "application/json")
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {

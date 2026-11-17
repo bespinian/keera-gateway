@@ -69,6 +69,8 @@ func Run(ctx context.Context, args []string) error {
 		return sessionCmd(ctx, rest)
 	case "connect":
 		return connectCmd(ctx, rest)
+	case "workspace":
+		return workspaceCmd(ctx, rest)
 	case "doctor":
 		return doctorCmd(ctx, rest)
 	case "login":

@@ -61,6 +61,9 @@ type subcommand struct {
 	flags    []string
 	prose    string
 	examples []string
+	// hidden keeps a verb that only other programs run, such as ssh's
+	// ProxyCommand, out of the usage list. Its own help still works.
+	hidden bool
 }
 
 // commonAliases let the same word work on every command.
@@ -883,6 +886,66 @@ var commands = []command{
 			"keera connect claude-code --subscription",
 		},
 	},
+	{
+		name:    "workspace",
+		aliases: []string{"workspaces", "ws"},
+		summary: "machines of your own to work in, with a coding agent",
+		prose: "A workspace is a machine of yours in Keera Agents, with a coding agent that uses the " +
+			"models your key may use and the connectors you give it there. It is pi in a terminal " +
+			"in your browser, or VS Code in your browser with Cline. Nothing reaches it from " +
+			"outside: 'open', 'forward' and ssh go through Keera Agents with your sign-in, and " +
+			"only you get in. A workspace nobody is connected to is put to sleep, keeping its " +
+			"files, and wakes when you connect again.",
+		subs: []subcommand{
+			{name: "list", summary: "your workspaces", flags: []string{"all", "json"}},
+			{
+				name: "create", args: "<name>", summary: "make a workspace",
+				flags: []string{"terminal", "vscode", "model", "cpu", "memory", "disk", "json"},
+				prose: "Without --terminal or --vscode it asks which. The model is only the one " +
+					"the coding agent starts with.",
+			},
+			{name: "show", args: "<name>", summary: "one workspace and its state", flags: []string{"json"}},
+			{name: "start", args: "<name>", summary: "start a workspace someone stopped", flags: []string{"json"}},
+			{
+				name: "stop", args: "<name>", summary: "stop a workspace, keeping its files",
+				flags: []string{"json"},
+			},
+			{
+				name: "delete", args: "<name>", summary: "delete a workspace and every file in it",
+				flags: []string{"yes", "json"},
+			},
+			{
+				name: "open", args: "<name>", summary: "open it in your browser",
+				flags: []string{"port", "no-browser"},
+				prose: "Serves the workspace on this machine's loopback, as kubectl port-forward " +
+					"does, until Ctrl-C.",
+			},
+			{
+				name: "forward", args: "<name> <port> [<local-port>]",
+				summary: "reach a port in the workspace from this machine, as for a dev server",
+				flags:   []string{"port"},
+			},
+			{
+				name: "ssh", args: "<name>", summary: "sign in to it over SSH",
+				prose: "Makes ~/.ssh/keera_ed25519 if this machine has none, and adds it to your keys.",
+			},
+			{
+				name: "ssh-config", summary: "let ssh, scp and editors reach workspaces as <name>.keera",
+				prose: "Adds an entry for *.keera at the top of ~/.ssh/config, and adds this machine's " +
+					"key to yours. VS Code's Remote-SSH and JetBrains Gateway then work too.",
+			},
+			{
+				name: "ssh-proxy", args: "<host>", summary: "what ssh's ProxyCommand runs",
+				hidden: true,
+			},
+		},
+		examples: []string{
+			"keera workspace create api --vscode",
+			"keera workspace open api",
+			"keera workspace forward api 3000",
+			"keera workspace ssh-config && ssh api.keera",
+		},
+	},
 	{name: "version", summary: "the build version this command line reports"},
 	{name: "help", summary: "help for one command", args: "[<command> [<subcommand>]]", hidden: true},
 }
@@ -987,9 +1050,14 @@ func writeSubList(b *strings.Builder, c command) {
 	b.WriteString("\n" + style.head("Usage:") + "\n")
 	width := 0
 	for _, s := range c.subs {
-		width = max(width, len(s.name)+len(s.args)+1)
+		if !s.hidden {
+			width = max(width, len(s.name)+len(s.args)+1)
+		}
 	}
 	for _, s := range c.subs {
+		if s.hidden {
+			continue
+		}
 		line := s.name
 		if s.args != "" {
 			line += " " + s.args
@@ -1261,7 +1329,9 @@ func unknownSub(name, typed string) error {
 	}
 	verbs := make([]string, 0, len(c.subs))
 	for _, s := range c.subs {
-		verbs = append(verbs, s.name)
+		if !s.hidden {
+			verbs = append(verbs, s.name)
+		}
 	}
 	msg := fmt.Sprintf("keera %s has no subcommand %q", name, typed)
 	if near := suggestSub(name, typed); near != "" {
