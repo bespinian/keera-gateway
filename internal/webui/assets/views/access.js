@@ -259,7 +259,7 @@ function keyCard(k, ctx) {
       statePill(k.state),
       // A pending key is always the reader's to activate.
       k.state === "pending" ? activateButton(ctx, k, "btn btn-sm") : null,
-      (k.state === "active" || k.state === "pending") && canRevoke(ctx, k)
+      k.state !== "revoked" && canRevoke(ctx, k)
         ? h(
             "button",
             {

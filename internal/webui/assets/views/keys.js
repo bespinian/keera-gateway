@@ -278,7 +278,7 @@ export async function keysView(ctx) {
                   "Rotate",
                 )
               : null,
-            canRevoke(ctx, k) && isLive(k)
+            canRevoke(ctx, k) && canBeRevoked(k)
               ? h(
                   "button",
                   {
@@ -390,6 +390,12 @@ export function canRevoke(ctx, k) {
 
 // period is the span last_used_at covers. My access reads this month.
 function revokeBody(k, period = "this month") {
+  if (stateOf(k) === "expired") {
+    return (
+      `${k.name} has already expired, so no client can use it. ` +
+      "Revoking it lets its project be deleted. You cannot undo this."
+    );
+  }
   const base =
     `Clients using ${k.name} stop working within a second. ` +
     "You cannot undo this. To replace the key instead, rotate it.";
@@ -426,10 +432,9 @@ export function stateOf(k) {
   return "active";
 }
 
-// isLive is a key that works, or will once activated: what revoking takes away.
-export function isLive(k) {
-  const state = stateOf(k);
-  return state === "active" || state === "pending";
+// Expired keys can be revoked too: a project cannot be deleted until they are.
+export function canBeRevoked(k) {
+  return stateOf(k) !== "revoked";
 }
 
 // A pending key has no secret to replace yet, so it is activated instead. A

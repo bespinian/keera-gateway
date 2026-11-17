@@ -48,7 +48,7 @@ import {
   confirmRotate,
   renameKey,
   inPeriod,
-  isLive,
+  canBeRevoked,
   NO_USER,
   openKey,
   prefixOf,
@@ -285,7 +285,7 @@ export async function keyDetailView(ctx) {
             "Rotate",
           )
         : null,
-      canRevoke(ctx, key) && isLive(key)
+      canRevoke(ctx, key) && canBeRevoked(key)
         ? h(
             "button",
             {
