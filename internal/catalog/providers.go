@@ -78,7 +78,7 @@ type ProviderModel struct {
 // Prices are micro-CHF per million tokens, at list price unless a provider
 // says otherwise; an entry can override them. Prices listed in USD are
 // converted at 0.96 CHF per USD. Last checked against each pricing page on
-// 2026-11-09.
+// 2026-11-17.
 //
 // Release dates come from each maker's announcement. An FP8 build takes the
 // date of its base model. Retired models are dropped before they retire.
@@ -575,17 +575,17 @@ var providers = []Provider{{
 	}, {
 		ID: "glm5", DisplayName: "GLM-5.2",
 		MaxContext: 130_000, ReleaseDate: "2026-06-16",
-		InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 3_400_000,
+		InputMicrosPerMTok: 2_154_000, OutputMicrosPerMTok: 6_772_000,
 		Description: "large - long agent sessions, hard code and terminal work",
 	}, {
 		ID: "deepseek-v4-flash", DisplayName: "DeepSeek V4 Flash",
 		MaxContext: 1_000_000, ReleaseDate: "2026-07-31",
-		InputMicrosPerMTok: 150_000, OutputMicrosPerMTok: 390_000,
+		InputMicrosPerMTok: 375_000, OutputMicrosPerMTok: 1_500_000,
 		Description: "mid-size and quick - large codebases and long documents",
 	}, {
 		ID: "gpt-eu", DisplayName: "GPT EU",
 		MaxContext: 124_000, ReleaseDate: "2025-08-05", Location: "eu",
-		InputMicrosPerMTok: 20_000_000, OutputMicrosPerMTok: 60_000_000,
+		InputMicrosPerMTok: 375_000, OutputMicrosPerMTok: 1_500_000,
 		Description: "mid-size reasoning model - general questions and tool use",
 	}, {
 		ID: "deepseek-r1", DisplayName: "DeepSeek R1",
@@ -595,7 +595,7 @@ var providers = []Provider{{
 	}, {
 		ID: "gemma-3", DisplayName: "Gemma 3",
 		MaxContext: 128_000, Location: "eu",
-		InputMicrosPerMTok: 17_000_000, OutputMicrosPerMTok: 40_000_000,
+		InputMicrosPerMTok: 150_000, OutputMicrosPerMTok: 450_000,
 		Description: "mid-size and quick - documents and answers from search results",
 	}, {
 		// PeakPrivacy says Qwen3 runs in Europe in one place and in
@@ -785,11 +785,6 @@ var providers = []Provider{{
 		MaxContext: 131_072, ReleaseDate: "2026-06-16",
 		InputMicrosPerMTok: 1_077_000, OutputMicrosPerMTok: 3_386_000,
 		Description: "large - long agent sessions, hard code and terminal work",
-	}, {
-		ID: "inference-deepseek-v32", DisplayName: "DeepSeek V3.2",
-		MaxContext: 163_840, ReleaseDate: "2025-12-01",
-		InputMicrosPerMTok: 615_600, OutputMicrosPerMTok: 1_846_900,
-		Description: "large reasoning model - hard questions and planning",
 	}, {
 		ID: "inference-qwen3-vl-235b", DisplayName: "Qwen3 VL 235B",
 		MaxContext: 128_000, ReleaseDate: "2025-09-23",
