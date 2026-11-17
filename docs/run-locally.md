@@ -69,6 +69,50 @@ export KEERA_OPERATOR_KEY=$(sed -n 's/^KEERA_OPERATOR_KEY=//p' compose/.env)
 Then follow [First run](install.md#first-run) with `./build/keera`. The panel is
 at <http://127.0.0.1:8080>. Sign in with the operator key.
 
+## Demo data
+
+To show Keera to someone, fill an organisation with a month of made-up
+activity. With the two variables above set:
+
+```sh
+go run ./scripts/demo -org "Example Bank" -domain example-bank.example -live keera-speed
+```
+
+It creates the organisation with four projects, eight people, their keys and
+three for applications, four hosted models, two MCP servers, three filters,
+two routers, guardrails and budgets. Then it writes 30 days of traffic, up to
+now: about 30,000 requests in agent sessions, tool calls, filter runs and
+refusals. Requests fail only in two short provider outages, on two days. Every
+screen of the panel has something to show.
+
+With `-live`, it then keeps running and sends a short conversation to that
+model or router every few seconds, so the live map and the request log move
+during the demo. Ctrl+C stops it. The requests go out with the keys of Mia,
+Jonas and Nina, or of the people who may call the model when they may not.
+
+For an organisation that exists already, `-live` only sends the requests and
+leaves the rest as it is. The secrets of its keys are gone, so the keys it uses
+get new ones; they keep their names and history.
+
+- The setup goes through the installed `keera` command, so the gateway checks
+  it and the audit log records it. People and the traffic are written to Postgres
+  directly: the control API adds only people who can sign in, and no API
+  writes the past. `-database` names the database; the default is the one of
+  `make dev`.
+- The data ends when the script runs. Run it again before a demo with
+  `-replace`, which deletes the organisation and its request log first.
+- The hosted models are named after their models, such as
+  `claude-opus-5-5`. They have no API key, so they answer nothing. The history
+  costs nothing either: it is only rows.
+- On a deployment that takes payments, it grants the organisation CHF 500 of
+  credit. Without credit, the panel shows administrators Getting started
+  instead of the dashboard.
+- The models file must give new organisations `keera-speed` and
+  `keera-decider`, as `compose/models.yaml` does. The filters and routers run
+  on them.
+
+`go run ./scripts/demo -h` lists the flags.
+
 ## Stopping
 
 ```sh

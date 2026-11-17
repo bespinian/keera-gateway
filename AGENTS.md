@@ -42,7 +42,7 @@ image and the compose deployment, which is also the development loop.
 | `internal/version`   | The build version both binaries report.                          |
 | `Containerfile`      | The image the gateway ships in. `FROM scratch`.                  |
 | `compose`            | Single-host deployment, and the development loop.                |
-| `scripts`            | The third-party notices the image and the archives carry.        |
+| `scripts`            | Third-party notices, and demo data for an organisation.          |
 
 ## Commands
 
