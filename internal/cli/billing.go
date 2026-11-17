@@ -136,9 +136,14 @@ func printBilling(w *table, res billingResponse) {
 		if org == "" {
 			org = b.OrgID + " (deleted)"
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%d\t%d\t%d\t%s", org, billedModel(b),
-			b.Calls, b.InputTokens, b.CachedInputTokens, b.CacheWriteTokens,
-			b.OutputTokens,
+		used := fmt.Sprintf("%d\t%d\t%d\t%d\t%d", b.Calls, b.InputTokens, b.CachedInputTokens,
+			b.CacheWriteTokens, b.OutputTokens)
+		if b.Service != "" {
+			// An item has a quantity, not calls or tokens: it goes where the
+			// tokens would.
+			used = "\t" + policy.FormatQuantity(roundQuantity(b.QuantityMicros)) + " " + b.Unit + "\t\t\t"
+		}
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s", org, billedModel(b), used,
 			policy.FormatMoney(b.BilledMicros))
 		if res.Payments {
 			_, _ = fmt.Fprintf(w, "\t%s", policy.FormatMoney(b.CreditMicros))
@@ -151,13 +156,31 @@ func printBilling(w *table, res billingResponse) {
 }
 
 // billedModel names a row's model, and says when it is the gateway fee rather
-// than a list price.
+// than a list price. A row another service billed names the service and item.
 func billedModel(b store.BillingRow) string {
+	if b.Service != "" {
+		return serviceName(b.Service) + ": " + b.Item
+	}
 	name := cmp.Or(b.Provider, "self-hosted") + "/" + b.BackendModel
 	if b.GatewayFee {
 		name += " (gateway fee)"
 	}
 	return name
+}
+
+// serviceName is how a bill names the service that billed a row.
+func serviceName(service string) string {
+	if service == store.ServiceAgents {
+		return "Keera Agents"
+	}
+	return service
+}
+
+// roundQuantity rounds to two decimals, enough to read on a bill. The CSV
+// has the exact amount.
+func roundQuantity(micros int64) int64 {
+	const cent = 10_000
+	return (micros + cent/2) / cent * cent
 }
 
 type creditResponse struct {

@@ -213,16 +213,26 @@ func (c *client) send(ctx context.Context, method, path, cred string, in any) ([
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxAnswer+1))
+	raw, err := readAnswer(resp, c.base)
 	if err != nil {
 		return nil, nil, err
 	}
 	if resp.StatusCode >= 300 {
 		return nil, nil, &apiError{Status: resp.StatusCode, Message: errorMessage(raw)}
 	}
-	// Cut short, a file would be saved broken.
-	if len(raw) > maxAnswer {
-		return nil, nil, fmt.Errorf("the answer from %s is larger than %d MiB", c.base, maxAnswer>>20)
-	}
 	return raw, resp.Header, nil
+}
+
+// readAnswer reads the body of an answer from base. The caller turns an
+// error status into an error.
+func readAnswer(resp *http.Response, base string) ([]byte, error) {
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxAnswer+1))
+	if err != nil {
+		return nil, err
+	}
+	// Cut short, a file would be saved broken. An error's text is cut anyway.
+	if resp.StatusCode < 300 && len(raw) > maxAnswer {
+		return nil, fmt.Errorf("the answer from %s is larger than %d MiB", base, maxAnswer>>20)
+	}
+	return raw, nil
 }

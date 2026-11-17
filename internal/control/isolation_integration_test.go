@@ -120,6 +120,16 @@ var serviceCases = map[string][]isolationCase{
 	"GET /v1/service/catalog": {
 		{"/v1/service/catalog?org_id=org_b&project_id=project_a", ""},
 	},
+	"GET /v1/service/billing": {
+		{"/v1/service/billing?org_id=org_nobody", ""},
+	},
+}
+
+// serviceAnyOrg are Keera Agents' routes that name no organisation's rows to
+// keep apart, each with why. Only the service key may call them.
+var serviceAnyOrg = map[string]string{
+	"POST /v1/service/billing/lines": "Keera Agents bills every organisation's machines, " +
+		"and a line reads nothing back",
 }
 
 // notTenantData are the routes that only ever act on the caller, or read
@@ -263,13 +273,24 @@ func TestNoRouteLetsOneTenantReachAnother(t *testing.T) {
 		if !isServiceRoute(pattern) {
 			continue
 		}
+		method, route, _ := strings.Cut(pattern, " ")
+		if _, ok := serviceAnyOrg[pattern]; ok {
+			path := httpx.ControlPrefix + route
+			if code, body := send(method, path, `{}`); code != http.StatusUnauthorized {
+				t.Errorf("%s with a session = %d %s, want 401", pattern, code, body)
+			}
+			if code, body := send(method, path, `{}`,
+				"Authorization", "Bearer "+testOperatorKey); code != http.StatusUnauthorized {
+				t.Errorf("%s with the operator key = %d %s, want 401", pattern, code, body)
+			}
+			continue
+		}
 		cases, ok := serviceCases[pattern]
 		if !ok {
 			t.Errorf("%s has no case in serviceCases; add a request about another "+
 				"organisation's rows", pattern)
 			continue
 		}
-		method, _, _ := strings.Cut(pattern, " ")
 		for _, c := range cases {
 			path := httpx.ControlPrefix + c.path
 			// Eve's session and the operator key are not the service key.
@@ -294,6 +315,11 @@ func TestNoRouteLetsOneTenantReachAnother(t *testing.T) {
 	for pattern := range serviceCases {
 		if !slices.Contains(srv.routes, pattern) {
 			t.Errorf("%s is in serviceCases but no longer a route", pattern)
+		}
+	}
+	for pattern := range serviceAnyOrg {
+		if !slices.Contains(srv.routes, pattern) {
+			t.Errorf("%s is in serviceAnyOrg but no longer a route", pattern)
 		}
 	}
 	// The keys named above are still live: nothing was revoked by mistake.

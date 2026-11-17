@@ -138,3 +138,22 @@ func TestPaymentsWorkWithTheGatewayFeeAlone(t *testing.T) {
 		t.Error("payments are off")
 	}
 }
+
+// Keera Agents' machines are billed too, so payments need nothing else, and
+// the service key Keera Agents sends them with.
+func TestPaymentsWorkWithKeeraAgentsAlone(t *testing.T) {
+	key := strings.Repeat("s", 32)
+	c, err := loadWith(t, valid(map[string]string{
+		"KEERA_PUBLIC_URL":                   "https://keera.example",
+		"KEERA_AGENTS_SERVICE_KEY":           key,
+		"KEERA_BILLING_POSTFINANCE_SPACE_ID": "4711",
+		"KEERA_BILLING_POSTFINANCE_USER_ID":  "1",
+		"KEERA_BILLING_POSTFINANCE_AUTH_KEY": "c2VjcmV0",
+	}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Payments == nil {
+		t.Error("payments are off")
+	}
+}

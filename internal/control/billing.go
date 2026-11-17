@@ -19,7 +19,8 @@ type billingTotal struct {
 
 // billing is one month of billed use, per organisation and model: the
 // deployment's own provider keys at list price, and the gateway fee on every
-// other model. See docs/billing.md.
+// other model. Keera Agents' machines come after, per item. See
+// docs/billing.md.
 //
 // Administrators read their own organisation's. Operators read any, or all at
 // once.
@@ -84,6 +85,8 @@ func billingCSV(w http.ResponseWriter, month string, lines []store.BillingRow, p
 	if payments {
 		head = append(head, "from_credit")
 	}
+	// Last, so a script that reads the columns above by position still works.
+	head = append(head, "service", "item", "quantity", "unit")
 	_ = cw.Write(head)
 	for _, l := range lines {
 		rec := []string{
@@ -99,6 +102,11 @@ func billingCSV(w http.ResponseWriter, month string, lines []store.BillingRow, p
 		if payments {
 			rec = append(rec, policy.FormatMicros(l.CreditMicros))
 		}
+		quantity := ""
+		if l.Service != "" {
+			quantity = policy.FormatQuantity(l.QuantityMicros)
+		}
+		rec = append(rec, l.Service, l.Item, quantity, l.Unit)
 		_ = cw.Write(rec)
 	}
 	cw.Flush()

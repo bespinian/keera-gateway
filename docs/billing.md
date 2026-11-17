@@ -14,6 +14,9 @@ enters its own key, as described in [providers.md](providers.md).
 A deployment can also charge a [gateway fee](#the-gateway-fee) on every other
 model: self-hosted ones, and ones on the organisation's own keys.
 
+[Keera Agents](#keera-agents-machines) can bill the machines its agents and
+workspaces run on here too, so an organisation has one bill and one credit.
+
 With a PostFinance Checkout account, organisations also
 [pay in advance](#pay-in-advance), by card, and you can charge an organisation
 a [fixed fee every month or year](#recurring-charges).
@@ -119,6 +122,33 @@ included. Grant credit, or warn organisations, before you set it. Without
 payments, the fee is only in the monthly report, to bill by invoice. Payments
 need no provider key when the fee is set.
 
+## Keera Agents' machines
+
+Keera Agents runs a machine for each agent and workspace, and can bill them
+here, on the same bill and from the same credit as models. The gateway needs
+nothing but `KEERA_AGENTS_SERVICE_KEY` ([agents.md](agents.md#the-service-key)).
+Keera Agents decides: it bills once its operator sets prices, and its
+`docs/billing.md` says how, and what each costs. The gateway only records what
+it is sent:
+
+- **One line per organisation, hour and item**, such as an hour of CPU time,
+  with how much was used and what it costs. Each has Keera Agents' own id, so
+  a line sent again after a lost answer is billed once.
+- **From credit, like a billed call**, when organisations
+  [pay in advance](#pay-in-advance). Without payments, the lines are only on
+  the [monthly report](#the-monthly-report), to bill by invoice.
+- **Machines are refused** when a call would be: while a
+  [recurring charge](#recurring-charges) is due that no card can pay, when the
+  credit is used up, or, without payments, while the organisation is
+  [limited](sso.md#what-a-new-organisation-can-use). Keera Agents asks before
+  it starts or resumes a machine, and tells people why.
+
+On the report, each item is its own row, after the models, such as
+**Keera Agents: CPU** with its CPU-hours. The CSV adds the columns `service`,
+`item`, `quantity` and `unit` at the end. The panel's Billing shows them in a
+table of their own, CPU, memory and disk, below the models. With the service
+key, Billing appears in the panel even when nothing else is billed.
+
 ## What is billed
 
 Every call to a model on the deployment's key is billed, at list price: the
@@ -167,7 +197,8 @@ The same report is at `GET /control/v1/billing?month=2026-09`, and as CSV with
 `&format=csv`. Months are UTC, like budgets.
 
 In the panel, only administrators and operators see it, and only on a
-deployment that holds at least one provider key or charges the gateway fee.
+deployment that holds at least one provider key, charges the gateway fee or
+bills Keera Agents' machines.
 
 ## Pay in advance
 
@@ -206,8 +237,9 @@ KEERA_BILLING_VAT=8.1                   # optional
 | `KEERA_BILLING_VAT`                  | VAT added on top of each payment, in percent, such as `8.1`. Default 0. It applies to every organisation alike. |
 | `KEERA_BILLING_POSTFINANCE_URL`      | The API's address. Default `https://checkout.postfinance.ch`, which serves test spaces too.                     |
 
-Payments also need at least one `KEERA_PROVIDER_<NAME>_API_KEY` or
-[`KEERA_BILLING_GATEWAY_FEE`](#the-gateway-fee), and `KEERA_PUBLIC_URL` set to
+Payments also need at least one `KEERA_PROVIDER_<NAME>_API_KEY`,
+[`KEERA_BILLING_GATEWAY_FEE`](#the-gateway-fee) or
+[`KEERA_AGENTS_SERVICE_KEY`](#keera-agents-machines), and `KEERA_PUBLIC_URL` set to
 an `https` address: PostFinance sends people back
 there after they pay. On your own machine, `http://localhost`, any
 `*.localhost` name and a loopback address such as `http://127.0.0.1` work too.
@@ -216,7 +248,8 @@ A setting that cannot work stops the start: only some of the three
 `KEERA_BILLING_POSTFINANCE_*` settings, `KEERA_BILLING_POSTFINANCE_URL` or
 `KEERA_BILLING_VAT` without them, a space id that is not a number, an
 authentication key that is not base64, a VAT that is not a number from 0 to
-100, neither a provider key nor a gateway fee, or a `KEERA_PUBLIC_URL` that is
+100, none of a provider key, a gateway fee and Keera Agents' billing, or a
+`KEERA_PUBLIC_URL` that is
 not `https`.
 
 ### Turning it on

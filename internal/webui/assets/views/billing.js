@@ -1,5 +1,6 @@
-// The bill for the deployment's own provider keys and the gateway fee, and
-// the credit an organisation pays for them in advance. See docs/billing.md.
+// The bill for the deployment's own provider keys, the gateway fee and Keera
+// Agents' machines, and the credit an organisation pays for them in advance.
+// See docs/billing.md.
 
 import { api } from "../api.js";
 import {
@@ -18,7 +19,6 @@ import {
   field,
   sectionHead,
   dateTime,
-  plural,
   remembered,
   remember,
   formModal,
@@ -26,6 +26,37 @@ import {
   csvButton,
   capitalise,
 } from "../ui.js";
+
+// Keera Agents' items, in the order its table shows them.
+const machineItems = ["CPU", "Memory", "Disk"];
+
+const itemRank = (item) => {
+  const i = machineItems.indexOf(item);
+  return i < 0 ? machineItems.length : i;
+};
+
+/** machineRows are the rows Keera Agents billed, each organisation's in the
+ *  order of machineItems. The server sorts by organisation first. */
+export function machineRows(rows) {
+  const orgs = new Map();
+  for (const r of rows) if (!orgs.has(r.org_id)) orgs.set(r.org_id, orgs.size);
+  return rows
+    .filter((r) => r.service === "agents")
+    .sort(
+      (a, b) =>
+        orgs.get(a.org_id) - orgs.get(b.org_id) ||
+        itemRank(a.item) - itemRank(b.item),
+    );
+}
+
+// billed adds up what rows cost.
+const billed = (rows) => rows.reduce((sum, r) => sum + r.billed_micros, 0);
+
+// A quantity in millionths of its unit, to two decimals: 312.5 CPU-hours.
+function quantity(r) {
+  const n = Math.round(r.quantity_micros / 10_000) / 100;
+  return `${n.toLocaleString("en-GB")} ${r.unit}`;
+}
 
 // YYYY-MM in UTC, like the bill.
 function thisMonth() {
@@ -106,26 +137,46 @@ async function billSection(ctx) {
     ),
   );
 
-  const columns = [
-    allOrgs
-      ? {
-          label: "Organisation",
-          cell: (r) =>
+  const orgColumn = allOrgs
+    ? {
+        label: "Organisation",
+        cell: (r) =>
+          h(
+            "div",
+            { class: "stack" },
+            r.org_name
+              ? h("span", {}, r.org_name)
+              : h("span", { class: "faint" }, "Deleted"),
             h(
-              "div",
-              { class: "stack" },
-              r.org_name
-                ? h("span", {}, r.org_name)
-                : h("span", { class: "faint" }, "Deleted"),
-              h(
-                "span",
-                { class: "mono faint", style: { fontSize: "11px" } },
-                r.org_id,
-              ),
+              "span",
+              { class: "mono faint", style: { fontSize: "11px" } },
+              r.org_id,
             ),
-          sortKey: (r) => r.org_name || r.org_id,
+          ),
+        sortKey: (r) => r.org_name || r.org_id,
+      }
+    : null;
+  const amountColumns = [
+    {
+      label: "Amount",
+      num: true,
+      cell: (r) => h("strong", {}, money(r.billed_micros)),
+      sortKey: (r) => r.billed_micros,
+      sortDir: "desc",
+    },
+    payments
+      ? {
+          label: "From credit",
+          num: true,
+          cell: (r) => money(r.credit_micros),
+          sortKey: (r) => r.credit_micros,
+          sortDir: "desc",
         }
       : null,
+  ];
+
+  const modelColumns = [
+    orgColumn,
     {
       label: "Model",
       cell: (r) =>
@@ -177,52 +228,79 @@ async function billSection(ctx) {
       sortKey: (r) => r.output_tokens,
       sortDir: "desc",
     },
-    {
-      label: "Amount",
-      num: true,
-      cell: (r) => h("strong", {}, money(r.billed_micros)),
-      sortKey: (r) => r.billed_micros,
-      sortDir: "desc",
-    },
-    payments
-      ? {
-          label: "From credit",
-          num: true,
-          cell: (r) => money(r.credit_micros),
-          sortKey: (r) => r.credit_micros,
-          sortDir: "desc",
-        }
-      : null,
+    ...amountColumns,
   ].filter(Boolean);
 
-  const body = table(columns, rows, {
-    emptyTitle:
-      month === now
-        ? "Nothing billed this month"
-        : `Nothing billed in ${monthName(month)}`,
-    emptyBody: ctx.state.me.gateway_fee_micros
-      ? "Calls to your models, and the gateway fee on them, appear here."
-      : "Calls to models on this deployment's own provider keys appear here.",
-  });
+  const machineColumns = [
+    orgColumn,
+    {
+      label: "Item",
+      cell: (r) => r.item,
+      sortKey: (r) => itemRank(r.item),
+    },
+    {
+      label: "Used",
+      num: true,
+      cell: quantity,
+      sortKey: (r) => r.quantity_micros,
+      sortDir: "desc",
+    },
+    ...amountColumns,
+  ].filter(Boolean);
+
+  const emptyTitle =
+    month === now
+      ? "Nothing billed this month"
+      : `Nothing billed in ${monthName(month)}`;
+  const models = rows.filter((r) => !r.service);
+  const machines = machineRows(rows);
+  // Models show when the deployment bills them, machines when Keera Agents
+  // can bill here, and either when the month has rows of it. With neither,
+  // the models' table says nothing was billed.
+  const me = ctx.state.me;
+  const showMachines = me.agents_billing || machines.length > 0;
+  const showModels =
+    !showMachines ||
+    me.provider_keys ||
+    me.gateway_fee_micros > 0 ||
+    models.length > 0;
+  // Headings only tell the two tables apart, each with its subtotal.
+  const tableHead = (title, rows, marginTop) =>
+    showModels && showMachines
+      ? sectionHead(title, rows.length ? money(billed(rows)) : null, {
+          marginTop,
+        })
+      : null;
+
+  const body = [
+    showModels
+      ? [
+          tableHead("Models", models, "0"),
+          table(modelColumns, models, {
+            emptyTitle,
+            emptyBody: me.gateway_fee_micros
+              ? "Calls to your models, and the gateway fee on them, appear here."
+              : "Calls to models on this deployment's own provider keys appear here.",
+          }),
+        ]
+      : null,
+    showMachines
+      ? [
+          tableHead("Agents and Workspaces", machines, "24px"),
+          table(machineColumns, machines, {
+            emptyTitle,
+            emptyBody:
+              "The machines of your agents and workspaces in Keera Agents appear here.",
+          }),
+        ]
+      : null,
+  ];
 
   const foot =
     total &&
-    h(
-      "div",
-      { class: "card", style: { marginTop: "12px" } },
-      h(
-        "div",
-        { class: "card-body row" },
-        h("strong", {}, "Total"),
-        h("div", { class: "spacer" }),
-        h(
-          "span",
-          { class: "muted" },
-          `${num(total.calls)} ${plural(total.calls, "call")}`,
-        ),
-        h("strong", {}, money(total.billed_micros)),
-      ),
-    );
+    sectionHead("Total", h("strong", {}, money(total.billed_micros)), {
+      marginTop: "24px",
+    });
 
   return h(
     "div",

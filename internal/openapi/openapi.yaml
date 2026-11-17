@@ -730,6 +730,7 @@ paths:
                   - agents_url
                   - provider_keys
                   - billing
+                  - agents_billing
                   - gateway_fee_micros
                   - payments
                   - claude_subscriptions
@@ -783,7 +784,10 @@ paths:
                     description: Whether the deployment holds its own provider keys.
                   billing:
                     type: boolean
-                    description: Whether the deployment bills organisations, for its provider keys or the gateway fee.
+                    description: Whether the deployment bills organisations, for its provider keys, the gateway fee or Keera Agents' machines.
+                  agents_billing:
+                    type: boolean
+                    description: Whether Keera Agents bills its machines through this gateway.
                   gateway_fee_micros:
                     type: integer
                     format: int64
@@ -4210,7 +4214,7 @@ paths:
             text/csv:
               schema:
                 type: string
-                description: "Columns: month, org_id, org_name, provider, model, gateway_fee, calls, input_tokens, cached_input_tokens, cache_write_tokens, output_tokens, amount, and from_credit when the deployment takes payments."
+                description: "Columns: month, org_id, org_name, provider, model, gateway_fee, calls, input_tokens, cached_input_tokens, cache_write_tokens, output_tokens, amount, from_credit when the deployment takes payments, then service, item, quantity and unit."
           headers:
             Content-Disposition:
               description: "With `format=csv`: an attachment and its file name."
@@ -5138,6 +5142,141 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
           description: The organisation has no projects yet (`project_required`).
+        "501":
+          $ref: "#/components/responses/Disabled"
+          description: The deployment has no `KEERA_AGENTS_SERVICE_KEY` (`agents_disabled`).
+  /control/v1/service/billing:
+    get:
+      operationId: serviceBilling
+      tags: [service]
+      summary: Whether an organisation may run machines
+      description: |
+        For Keera Agents' server, before it starts or resumes an agent's or
+        a workspace's machine. `refusal` says why not, or is null. The rules
+        are the gateway's own for a billed call. See
+        https://docs.keera.ch/manage/billing/.
+      security:
+        - serviceKey: []
+      parameters:
+        - name: org_id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The organisation's credit, and whether it may run machines.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [payments, balance_micros, invoiced, refusal]
+                properties:
+                  payments:
+                    type: boolean
+                    description: Whether organisations pay in advance.
+                  balance_micros:
+                    type: integer
+                    format: int64
+                    description: The credit, in millionths of CHF. 0 without payments.
+                  invoiced:
+                    type: boolean
+                    description: Whether the organisation is billed by invoice, so it needs no credit.
+                  refusal:
+                    type: [object, "null"]
+                    description: Null while the organisation may run machines.
+                    required: [code, message]
+                    properties:
+                      code:
+                        type: string
+                        enum: [charge_due, credit_exhausted, org_limited]
+                      message:
+                        type: string
+                        description: Why, for the people who wanted the machine.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+          description: The organisation does not exist.
+        "501":
+          $ref: "#/components/responses/Disabled"
+          description: The deployment has no `KEERA_AGENTS_SERVICE_KEY` (`agents_disabled`).
+  /control/v1/service/billing/lines:
+    post:
+      operationId: serviceBillingLines
+      tags: [service]
+      summary: Bill Keera Agents' machines
+      description: |
+        For Keera Agents' server: lines to add to organisations' bills, such
+        as an hour of one organisation's CPU time. With payments, each is
+        taken from the organisation's credit. A line whose `id` was recorded
+        before is skipped, so sending again after a lost answer bills once.
+        The organisation is not checked: a bill outlives its organisation.
+      security:
+        - serviceKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lines]
+              properties:
+                lines:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items:
+                    type: object
+                    required: [id, org_id, ts, item, quantity_micros, micros]
+                    properties:
+                      id:
+                        type: string
+                        maxLength: 200
+                        description: Keera Agents' own id for the line, unique for good.
+                      org_id:
+                        type: string
+                      ts:
+                        type: string
+                        format: date-time
+                        description: When the use began. At most 40 days ago, and not in the future.
+                      item:
+                        type: string
+                        maxLength: 64
+                        description: What is billed, such as `CPU`.
+                      unit:
+                        type: string
+                        maxLength: 32
+                        description: What the quantity counts, such as `CPU-hours`.
+                      quantity_micros:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                        description: How much, in millionths of the unit.
+                      micros:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                        maximum: 1000000000000
+                        description: What it costs, in millionths of CHF, without VAT.
+      responses:
+        "200":
+          description: How many lines were new, and how many were recorded before.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [added, duplicates]
+                properties:
+                  added:
+                    type: integer
+                  duplicates:
+                    type: integer
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "501":
           $ref: "#/components/responses/Disabled"
           description: The deployment has no `KEERA_AGENTS_SERVICE_KEY` (`agents_disabled`).
@@ -9913,10 +10052,14 @@ components:
           description: Sessions by outcome, whichever outcome was asked for.
     BillingRow:
       type: object
-      description: One organisation's use of one model in a month, at list price or as the gateway fee.
+      description: One organisation's use of one model in a month, at list price or as the gateway fee, or of one item Keera Agents billed.
       required:
         - org_id
         - org_name
+        - service
+        - item
+        - unit
+        - quantity_micros
         - provider
         - backend_model
         - gateway_fee
@@ -9933,6 +10076,19 @@ components:
         org_name:
           type: string
           description: Empty for an organisation deleted since.
+        service:
+          type: string
+          description: Empty for a model's row; `agents` for an item Keera Agents billed, such as its machines' CPU time.
+        item:
+          type: string
+          description: What a service billed, such as `CPU`. Empty for a model's row.
+        unit:
+          type: string
+          description: What `quantity_micros` counts, such as `CPU-hours`.
+        quantity_micros:
+          type: integer
+          format: int64
+          description: How much of the item, in millionths of its unit.
         provider:
           type: string
           description: Empty for a self-hosted model.
@@ -9945,6 +10101,7 @@ components:
         calls:
           type: integer
           format: int64
+          description: 0 on a service's row, which counts hours, not calls.
         input_tokens:
           type: integer
           format: int64
@@ -9967,7 +10124,7 @@ components:
           description: The part paid from credit.
     BillingTotal:
       type: object
-      description: The month's rows added up.
+      description: The month's rows added up. `calls` counts models' calls only.
       required:
         - calls
         - billed_micros

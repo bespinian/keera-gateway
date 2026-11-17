@@ -24,16 +24,14 @@ func TestATryPrintsTheWholePromptAndTheInstructionOnce(t *testing.T) {
 		{
 			Prompt: "Summarise the Meier account", Outcome: store.FilterRefuse, Reason: "names a client",
 			Confidence: 0.97, Read: "probabilities",
-			Asked: gateway.Asked{
-				Explanation: "It names a client.",
-				Calls: []gateway.ModelCall{
-					call(system, `["Summarise the Meier account"]`, "REFUSED: names a client"),
-				},
+			Explanation: "It names a client.",
+			Calls: []gateway.ModelCall{
+				call(system, `["Summarise the Meier account"]`, "REFUSED: names a client"),
 			},
 		},
 		{
 			Prompt: "Rename tmp2", Outcome: store.FilterPass,
-			Asked: gateway.Asked{Calls: []gateway.ModelCall{call(system, `["Rename tmp2"]`, "ALLOW")}},
+			Calls: []gateway.ModelCall{call(system, `["Rename tmp2"]`, "ALLOW")},
 		},
 	}}
 
@@ -73,7 +71,7 @@ func TestARouterTryPrintsEveryDestinationsShare(t *testing.T) {
 		Trials: []gateway.RouteTrial{{
 			Prompt: "plan a migration", Chosen: "keera-frontier", Confidence: 0.62,
 			Shares: []float64{0.38, 0.62}, Read: "probabilities",
-			Asked: gateway.Asked{Calls: []gateway.ModelCall{call("Choose.", `["plan a migration"]`, "B")}},
+			Calls: []gateway.ModelCall{call("Choose.", `["plan a migration"]`, "B")},
 		}},
 	}}}
 

@@ -51,12 +51,14 @@ a `keera login` token. Each side is closed, so:
 - a person's sign-in cannot issue keys in somebody else's name through these
   routes.
 
-| Route                                  | What it does                                                                                    |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `POST /control/v1/service/keys`        | Issues a key for an agent, in one person's name, optionally with a monthly budget of its own.   |
-| `DELETE /control/v1/service/keys/{id}` | Revokes a key Keera Agents issued. Any other key answers 404.                                   |
-| `GET /control/v1/service/users`        | Finds a person in an organisation by address, ignoring case, or by id.                          |
-| `GET /control/v1/service/catalog`      | Lists an organisation's projects, and the models, routers and MCP servers a key in one may use. |
+| Route                                    | What it does                                                                                    |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `POST /control/v1/service/keys`          | Issues a key for an agent, in one person's name, optionally with a monthly budget of its own.   |
+| `DELETE /control/v1/service/keys/{id}`   | Revokes a key Keera Agents issued. Any other key answers 404.                                   |
+| `GET /control/v1/service/users`          | Finds a person in an organisation by address, ignoring case, or by id.                          |
+| `GET /control/v1/service/catalog`        | Lists an organisation's projects, and the models, routers and MCP servers a key in one may use. |
+| `GET /control/v1/service/billing`        | Says whether an organisation may run machines now, and if not, why.                             |
+| `POST /control/v1/service/billing/lines` | Adds lines for Keera Agents' machines to organisations' bills.                                  |
 
 The service key is one secret for the whole deployment, so it reaches every
 organisation. What keeps tenants apart is that every request names its
@@ -65,7 +67,10 @@ to it. A person, project or key of another organisation answers 404. The audit
 log names the actor `keera-agents`.
 
 Without `KEERA_AGENTS_SERVICE_KEY` the routes answer 501 with the code
-`agents_disabled`.
+`agents_disabled`. For the two billing routes, see
+[billing.md](billing.md#keera-agents-machines). Lines can name any
+organisation: the bill outlives an organisation, and a line reads nothing
+back.
 
 ## Keys issued for agents
 

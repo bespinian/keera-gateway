@@ -962,6 +962,21 @@ func FormatMoney(micros int64) string {
 	return Currency + " " + FormatAmount(micros)
 }
 
+// FormatQuantity renders an amount in millionths of a unit, such as the
+// CPU-hours on a bill, exactly and without trailing zeros: 1.5, not 1.500000.
+func FormatQuantity(micros int64) string {
+	sign := ""
+	if micros < 0 {
+		sign, micros = "-", -micros
+	}
+	whole, frac := micros/1_000_000, micros%1_000_000
+	if frac == 0 {
+		return sign + strconv.FormatInt(whole, 10)
+	}
+	return sign + strconv.FormatInt(whole, 10) + "." +
+		strings.TrimRight(fmt.Sprintf("%06d", frac), "0")
+}
+
 // FormatPrice is FormatMicros with the currency first.
 func FormatPrice(micros int64) string {
 	return Currency + " " + FormatMicros(micros)

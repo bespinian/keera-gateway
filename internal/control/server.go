@@ -334,6 +334,9 @@ func (s *Server) mux() *httpx.Mux {
 	service("DELETE /v1/service/keys/{id}", s.serviceRevokeKey)
 	service("GET /v1/service/users", s.serviceUser)
 	service("GET /v1/service/catalog", s.serviceCatalog)
+	// Keera Agents' machines, billed here. See agents_billing.go.
+	service("GET /v1/service/billing", s.serviceBilling)
+	service("POST /v1/service/billing/lines", s.serviceBillingLines)
 
 	// Everything under the control prefix is the API. Without this, a typo in
 	// a path would fall through to the panel and answer HTML with a 200.

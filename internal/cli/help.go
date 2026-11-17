@@ -724,8 +724,9 @@ var commands = []command{
 		subs: []subcommand{
 			{
 				name: "report", aliases: []string{"list", "ls"}, summary: "one month's bill",
-				flags:    []string{"month", "json"},
-				prose:    "Amounts are in CHF. 'keera billing' on its own is this.",
+				flags: []string{"month", "json"},
+				prose: "Amounts are in CHF. Keera Agents' machines, when it bills here, are rows of " +
+					"their own after the models, with their quantity. 'keera billing' on its own is this.",
 				examples: []string{"keera billing", "keera billing --month 2026-09 --json"},
 			},
 			{
@@ -1046,18 +1047,19 @@ func subHelpText(fs *flag.FlagSet, c command, sub subcommand) string {
 	return b.String()
 }
 
+// visibleSubs are the subcommands a usage list names.
+func visibleSubs(c command) []subcommand {
+	return slices.DeleteFunc(slices.Clone(c.subs), func(s subcommand) bool { return s.hidden })
+}
+
 func writeSubList(b *strings.Builder, c command) {
 	b.WriteString("\n" + style.head("Usage:") + "\n")
+	subs := visibleSubs(c)
 	width := 0
-	for _, s := range c.subs {
-		if !s.hidden {
-			width = max(width, len(s.name)+len(s.args)+1)
-		}
+	for _, s := range subs {
+		width = max(width, len(s.name)+len(s.args)+1)
 	}
-	for _, s := range c.subs {
-		if s.hidden {
-			continue
-		}
+	for _, s := range subs {
 		line := s.name
 		if s.args != "" {
 			line += " " + s.args
@@ -1327,11 +1329,9 @@ func unknownSub(name, typed string) error {
 		fmt.Print(helpText(nil, name, ""))
 		return fmt.Errorf("%s needs a subcommand", name)
 	}
-	verbs := make([]string, 0, len(c.subs))
-	for _, s := range c.subs {
-		if !s.hidden {
-			verbs = append(verbs, s.name)
-		}
+	var verbs []string
+	for _, s := range visibleSubs(c) {
+		verbs = append(verbs, s.name)
 	}
 	msg := fmt.Sprintf("keera %s has no subcommand %q", name, typed)
 	if near := suggestSub(name, typed); near != "" {

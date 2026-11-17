@@ -3,7 +3,6 @@ package cli
 import (
 	"bufio"
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -57,7 +56,7 @@ func workspaceCmd(ctx context.Context, args []string) error {
 	case "show":
 		return r.show(ctx)
 	case "start", "stop":
-		return r.setRunning(ctx, r.verb)
+		return r.setRunning(ctx)
 	case "delete":
 		return r.delete(ctx)
 	case "open":
@@ -123,13 +122,17 @@ func (r *workspaceRun) agents(ctx context.Context) (*agents, error) {
 	return &agents{
 		base:  strings.TrimRight(me.AgentsURL, "/"),
 		token: token,
-		// HTTP/1.1 only: a stream takes the connection over, which HTTP/2
-		// cannot.
-		http: &http.Client{Transport: &http.Transport{
-			Proxy:        http.ProxyFromEnvironment,
-			TLSNextProto: map[string]func(string, *tls.Conn) http.RoundTripper{},
-		}},
+		http:  &http.Client{Transport: http1Transport()},
 	}, nil
+}
+
+// http1Transport is the default transport, but HTTP/1.1 only: a stream takes
+// the connection over, which HTTP/2 cannot.
+func http1Transport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.Protocols = new(http.Protocols)
+	t.Protocols.SetHTTP1(true)
+	return t
 }
 
 func (a *agents) do(ctx context.Context, method, path string, in, out any) error {
@@ -144,7 +147,7 @@ func (a *agents) do(ctx context.Context, method, path string, in, out any) error
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxAnswer))
+	raw, err := readAnswer(resp, a.base)
 	if err != nil {
 		return err
 	}
@@ -188,11 +191,11 @@ func (a *agents) stream(ctx context.Context, name, port string) (io.ReadWriteClo
 	}
 	if resp.StatusCode != http.StatusSwitchingProtocols {
 		defer func() { _ = resp.Body.Close() }()
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-		if resp.StatusCode == http.StatusOK {
+		if resp.StatusCode < 300 {
 			return nil, errors.New("a proxy in front of Keera Agents does not pass connections through; " +
 				"it must pass Upgrade requests on, as for WebSockets")
 		}
+		raw, _ := readAnswer(resp, a.base)
 		return nil, agentsError(resp.StatusCode, raw)
 	}
 	rwc, ok := resp.Body.(io.ReadWriteCloser)
@@ -337,14 +340,14 @@ func (r *workspaceRun) create(ctx context.Context) error {
 	return nil
 }
 
-// setRunning starts or stops a workspace; verb is "start" or "stop".
-func (r *workspaceRun) setRunning(ctx context.Context, verb string) error {
+// setRunning starts or stops a workspace, as r.verb says.
+func (r *workspaceRun) setRunning(ctx context.Context) error {
 	a, err := r.agents(ctx)
 	if err != nil {
 		return err
 	}
 	var ws workspace
-	if err := a.do(ctx, "POST", workspacePath(r.fs.Arg(0))+"/"+verb, struct{}{}, &ws); err != nil {
+	if err := a.do(ctx, "POST", workspacePath(r.fs.Arg(0))+"/"+r.verb, struct{}{}, &ws); err != nil {
 		return err
 	}
 	return out(r.asJSON, ws, func(w *table) {

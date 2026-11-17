@@ -290,8 +290,10 @@ func (s *Server) TryFilter(ctx context.Context, f policy.Filter, prompts []strin
 		for _, prompt := range prompts {
 			start := time.Now()
 			out, hits, err := runPattern(rules, []string{prompt})
-			tr := FilterTrial{Prompt: prompt, Hits: hits}
-			tr.MS = time.Since(start).Milliseconds()
+			tr := FilterTrial{
+				Prompt: prompt, Hits: hits,
+				MS: time.Since(start).Milliseconds(),
+			}
 			tr.settle(out, err)
 			t.Trials = append(t.Trials, tr)
 		}

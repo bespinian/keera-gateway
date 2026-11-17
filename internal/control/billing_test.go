@@ -221,7 +221,7 @@ func TestAdministratorsReadOnlyTheirOwnBill(t *testing.T) {
 	}
 
 	w = invoke(s.billing, operator(), http.MethodGet, "/v1/billing?month=2026-09&format=csv", "")
-	if !strings.Contains(w.Body.String(), "2026-09,org_1,Example Bank,anthropic,claude-haiku-4-5,false,2,2000,0,0,200,0.003\n") {
+	if !strings.Contains(w.Body.String(), "2026-09,org_1,Example Bank,anthropic,claude-haiku-4-5,false,2,2000,0,0,200,0.003,,,,\n") {
 		t.Errorf("csv = %s", w.Body)
 	}
 	if w := invoke(s.billing, operator(), http.MethodGet, "/v1/billing?month=september", ""); w.Code != http.StatusBadRequest {
@@ -231,12 +231,19 @@ func TestAdministratorsReadOnlyTheirOwnBill(t *testing.T) {
 
 func TestThePanelShowsBillingOnlyWhenTheDeploymentBills(t *testing.T) {
 	for _, tt := range []struct {
-		platform catalog.Platform
-		fee      int64
-		want     bool
-	}{{nil, 0, false}, {testPlatform, 0, true}, {nil, 50_000, true}} {
+		platform   catalog.Platform
+		fee        int64
+		serviceKey string
+		want       bool
+	}{
+		{nil, 0, "", false},
+		{testPlatform, 0, "", true},
+		{nil, 50_000, "", true},
+		{nil, 0, testServiceKey, true},
+	} {
 		s := New(nil, nil, nil, nil, Options{
 			OperatorKey: testOperatorKey, Platform: tt.platform, GatewayFee: tt.fee,
+			AgentsServiceKey: tt.serviceKey,
 		}, slog.New(slog.DiscardHandler))
 		w := httptest.NewRecorder()
 		s.me(w, httptest.NewRequest(http.MethodGet, "/v1/me", nil), operator())
@@ -245,7 +252,7 @@ func TestThePanelShowsBillingOnlyWhenTheDeploymentBills(t *testing.T) {
 			t.Fatal(err)
 		}
 		if me["billing"] != tt.want || me["provider_keys"] != (tt.platform != nil) ||
-			me["gateway_fee_micros"] != float64(tt.fee) {
+			me["gateway_fee_micros"] != float64(tt.fee) || me["agents_billing"] != (tt.serviceKey != "") {
 			t.Errorf("with %d provider keys and a fee of %d: billing = %v, provider_keys = %v, "+
 				"gateway_fee_micros = %v", len(tt.platform), tt.fee, me["billing"],
 				me["provider_keys"], me["gateway_fee_micros"])

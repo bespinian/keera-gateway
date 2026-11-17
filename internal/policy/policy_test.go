@@ -569,3 +569,14 @@ func TestAnEmptyAllowListSurvivesJSON(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatQuantityIsExactWithoutTrailingZeros(t *testing.T) {
+	for micros, want := range map[int64]string{
+		0: "0", 1: "0.000001", 1_500_000: "1.5", 312_000_000: "312",
+		-250_000: "-0.25", 123_456_789: "123.456789",
+	} {
+		if got := FormatQuantity(micros); got != want {
+			t.Errorf("FormatQuantity(%d) = %q, want %q", micros, got, want)
+		}
+	}
+}

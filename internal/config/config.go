@@ -194,7 +194,7 @@ func Load() (Config, error) {
 	if c.GatewayFee, err = gatewayFee(env("KEERA_BILLING_GATEWAY_FEE", "")); err != nil {
 		return c, err
 	}
-	if c.Payments, err = payments(c.Platform, c.GatewayFee, c.PublicURL); err != nil {
+	if c.Payments, err = payments(c.Platform, c.GatewayFee, c.AgentsServiceKey != "", c.PublicURL); err != nil {
 		return c, err
 	}
 	// Parsed here, so a typo stops the start before the database is touched.

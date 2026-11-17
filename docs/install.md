@@ -161,6 +161,10 @@ their own address, such as Infomaniak, also needs
 `KEERA_BILLING_GATEWAY_FEE` charges a fee per million tokens on every other
 model, such as self-hosted ones. See [billing.md](billing.md#the-gateway-fee).
 
+With `KEERA_AGENTS_SERVICE_KEY`, Keera Agents can bill its machines here, on
+the same bill and from the same credit. See
+[billing.md](billing.md#keera-agents-machines).
+
 `KEERA_BILLING_POSTFINANCE_*` lets organisations pay in advance, and
 `KEERA_BILLING_VAT` adds VAT to each payment. See
 [billing.md](billing.md#set-it-up).

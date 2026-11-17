@@ -63,22 +63,23 @@ func missing(w http.ResponseWriter, msg string) {
 	httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "not_found", msg)
 }
 
-// serviceOrg checks a service request named an organisation that exists.
-func (s *Server) serviceOrg(w http.ResponseWriter, r *http.Request, orgID string) bool {
+// serviceOrg reads the organisation a service request named, or answers why
+// it cannot.
+func (s *Server) serviceOrg(w http.ResponseWriter, r *http.Request, orgID string) (store.Org, bool) {
 	if orgID == "" {
 		needOrg(w, "name the organisation in 'org_id'")
-		return false
+		return store.Org{}, false
 	}
-	_, err := s.st.OrgByID(r.Context(), orgID)
+	org, err := s.st.OrgByID(r.Context(), orgID)
 	if errors.Is(err, store.ErrNotFound) {
 		missing(w, "there is no organisation "+orgID)
-		return false
+		return store.Org{}, false
 	}
 	if err != nil {
 		s.fail(w, err)
-		return false
+		return store.Org{}, false
 	}
-	return true
+	return org, true
 }
 
 // serviceKeyRequest is the body of POST /v1/service/keys.
@@ -117,7 +118,7 @@ func (s *Server) serviceCreateKey(w http.ResponseWriter, r *http.Request, p *aut
 		badRequest(w, "'budget_micros' cannot be negative; leave it out for no budget of the key's own")
 		return
 	}
-	if !s.serviceOrg(w, r, in.OrgID) {
+	if _, ok := s.serviceOrg(w, r, in.OrgID); !ok {
 		return
 	}
 	// The person is who the spend is reported under, so they must be in this
@@ -276,7 +277,7 @@ func (s *Server) serviceCatalog(w http.ResponseWriter, r *http.Request, p *authn
 	}
 	q := r.URL.Query()
 	orgID, projectID := q.Get("org_id"), q.Get("project_id")
-	if !s.serviceOrg(w, r, orgID) {
+	if _, ok := s.serviceOrg(w, r, orgID); !ok {
 		return
 	}
 	projects, err := s.st.Projects(r.Context(), orgID)

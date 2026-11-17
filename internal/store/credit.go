@@ -80,14 +80,27 @@ type CreditRow struct {
 	ChargeDueAt time.Time
 }
 
+// creditRows selects what the gateway needs of each account to admit a request.
+const creditRows = `
+	SELECT a.org_id, a.balance_micros, a.invoiced,
+	       (SELECT min(` + chargeDue + `) FROM recurring_charges c
+	        WHERE c.org_id = a.org_id AND (a.card_token IS NULL OR c.error IS NOT NULL))
+	FROM credit_accounts a`
+
 // LoadCredit reads every organisation's balance. An organisation without a
 // row has none. Creating a recurring charge creates the row.
 func (s *Store) LoadCredit(ctx context.Context) ([]CreditRow, error) {
-	return queryAll(ctx, s.pool, scanCreditRow, `
-		SELECT a.org_id, a.balance_micros, a.invoiced,
-		       (SELECT min(`+chargeDue+`) FROM recurring_charges c
-		        WHERE c.org_id = a.org_id AND (a.card_token IS NULL OR c.error IS NOT NULL))
-		FROM credit_accounts a`)
+	return queryAll(ctx, s.pool, scanCreditRow, creditRows)
+}
+
+// CreditRowOf is LoadCredit for one organisation. An organisation without
+// an account has a zero row.
+func (s *Store) CreditRowOf(ctx context.Context, orgID string) (CreditRow, error) {
+	c, err := scanCreditRow(s.pool.QueryRow(ctx, creditRows+` WHERE a.org_id = $1`, orgID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CreditRow{OrgID: orgID}, nil
+	}
+	return c, err
 }
 
 func scanCreditRow(r row) (CreditRow, error) {

@@ -23,7 +23,7 @@ type Payments struct {
 
 // payments reads the PostFinance Checkout account and the VAT. Without an
 // account it is nil, and billed calls take nothing from credit.
-func payments(platform catalog.Platform, fee int64, publicURL string) (*Payments, error) {
+func payments(platform catalog.Platform, fee int64, agents bool, publicURL string) (*Payments, error) {
 	space := env("KEERA_BILLING_POSTFINANCE_SPACE_ID", "")
 	user := env("KEERA_BILLING_POSTFINANCE_USER_ID", "")
 	key := env("KEERA_BILLING_POSTFINANCE_AUTH_KEY", "")
@@ -53,10 +53,11 @@ func payments(platform catalog.Platform, fee int64, publicURL string) (*Payments
 			"authentication key PostFinance Checkout showed for the application user: " +
 			"it is base64")
 	}
-	if len(platform) == 0 && fee == 0 {
-		return nil, fmt.Errorf("payments are for the deployment's own provider keys and " +
-			"the gateway fee, and neither a KEERA_PROVIDER_<NAME>_API_KEY nor " +
-			"KEERA_BILLING_GATEWAY_FEE is set")
+	if len(platform) == 0 && fee == 0 && !agents {
+		return nil, fmt.Errorf("payments are for the deployment's own provider keys, " +
+			"the gateway fee and Keera Agents' machines, and none of " +
+			"KEERA_PROVIDER_<NAME>_API_KEY, KEERA_BILLING_GATEWAY_FEE and " +
+			"KEERA_AGENTS_SERVICE_KEY is set")
 	}
 	if !strings.HasPrefix(publicURL, "https://") && !onThisMachine(publicURL) {
 		return nil, fmt.Errorf("payments need KEERA_PUBLIC_URL to be an https address: " +
