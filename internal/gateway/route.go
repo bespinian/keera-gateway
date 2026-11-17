@@ -131,7 +131,7 @@ func (s *Server) route(ctx context.Context, rt policy.Route, b *body, kind polic
 	}
 
 	start := time.Now()
-	chose, err := s.decide(ctx, rt, m, offered, texts)
+	chose, err := s.decide(ctx, rt, m, offered, texts, nil)
 	d.took = time.Since(start)
 	d.micros, d.bills = chose.micros, chose.bills
 	if err != nil {
@@ -317,8 +317,13 @@ type decision struct {
 	alias string
 	// confidence is the chosen letter's share of probability among the
 	// letters offered: 1 when certain, near 1/n when guessing, 0 when unknown.
-	// Only a route step check reports it. See choice.go.
+	// Checks and tries report it. See choice.go.
 	confidence float64
+	// shares is each offered destination's share, when read from the
+	// probabilities.
+	shares []float64
+	// read is how the answer was read: ReadText or ReadProbabilities.
+	read string
 	// micros is set on every outcome: an unusable answer still used the GPU.
 	micros int64
 	bills  []policy.BillLine
@@ -339,9 +344,10 @@ func (e *unreadable) Unwrap() error { return e.err }
 // answer is one token, which is quicker and cannot name anything else (see
 // choice.go). Otherwise the model is asked for a name. The lettered question
 // is tried first; a backend that fails it is asked for names from then on,
-// which costs one retry per process.
+// which costs one retry per process. log keeps what was sent and answered, and
+// is nil on real traffic.
 func (s *Server) decide(ctx context.Context, rt policy.Route, m policy.Model,
-	offered, texts []string,
+	offered, texts []string, log *callLog,
 ) (decision, error) {
 	if len(offered) == 0 {
 		return decision{}, errors.New("none of this step's destinations can be served, so " +
@@ -351,14 +357,14 @@ func (s *Server) decide(ctx context.Context, rt policy.Route, m policy.Model,
 	// A decision model only answers with a distribution.
 	decides := m.Kind == policy.KindDecision
 	byLetter := labelled(offered) && (decides || s.readsLogprobs(m))
-	d, err := s.decideOnce(ctx, rt, m, offered, texts, byLetter)
+	d, err := s.decideOnce(ctx, rt, m, offered, texts, byLetter, log)
 	if !byLetter || decides {
 		return d, err
 	}
 
 	if _, ok := errors.AsType[*unreadable](err); ok {
 		s.dropLogprobs(m)
-		retry, retryErr := s.decideOnce(ctx, rt, m, offered, texts, false)
+		retry, retryErr := s.decideOnce(ctx, rt, m, offered, texts, false, log)
 		retry.micros += d.micros
 		retry.bills = append(retry.bills, d.bills...)
 		return retry, retryErr
@@ -373,7 +379,7 @@ func (s *Server) decide(ctx context.Context, rt policy.Route, m policy.Model,
 
 // decideOnce puts the question one way and reads the answer back.
 func (s *Server) decideOnce(ctx context.Context, rt policy.Route, m policy.Model,
-	offered, texts []string, byLetter bool,
+	offered, texts []string, byLetter bool, log *callLog,
 ) (decision, error) {
 	input, err := segmentsJSON(texts)
 	if err != nil {
@@ -390,42 +396,42 @@ func (s *Server) decideOnce(ctx context.Context, rt policy.Route, m policy.Model
 	ask := guardQuestion{
 		instruction: instruction, input: input, outputTokens: outputTokens,
 		timeout: routeTimeout, limit: maxRouteResponseBytes,
-		subject: "the model it decides with",
+		subject: "the model it decides with", log: log,
+		tooLarge: func(sent int) error {
+			return fmt.Errorf("the request is about %d tokens of text and the model "+
+				"it decides with, '%s', has a context of %d", sent, m.Alias, m.MaxContext)
+		},
 	}
 	if byLetter {
 		q := s.routeQuestion(rt.OrgID, rt.Prompt, offered)
 		ask.decision = &q
 	}
-	if m.MaxContext > 0 {
-		if sent, answer := ask.tokens(m); sent+answer > m.MaxContext {
-			return decision{}, fmt.Errorf("the request is about %d tokens of text and the model "+
-				"it decides with, '%s', has a context of %d", sent, m.Alias, m.MaxContext)
-		}
-	}
 	ans, err := s.askGuard(ctx, m, ask, byLetter)
-	// The cost is kept whatever the answer.
-	d := decision{micros: ans.micros, bills: ans.bills}
-	if err != nil {
-		return d, err
-	}
-	if ans.status >= 300 {
-		err := errors.New("the model it decides with answered " +
+	if err == nil && ans.status >= 300 {
+		err = errors.New("the model it decides with answered " +
 			upstreamComplaint(ans.raw, ans.status))
 		if rejectsLogprobs(ans.status) {
-			return d, &unreadable{err: err}
+			err = &unreadable{err: err}
 		}
-		return d, err
 	}
-	d.alias, d.confidence, err = readDecision(ans.raw, offered, byLetter)
+	var d decision
+	if err == nil {
+		d, err = readDecision(ans.raw, offered, byLetter)
+	}
+	// The cost is kept whatever the answer.
+	d.micros, d.bills = ans.micros, ans.bills
 	return d, err
 }
 
-// readDecision reads which offered destination the model chose, and how sure
-// it was when known.
-func readDecision(raw []byte, offered []string, byLetter bool) (string, float64, error) {
+// readDecision reads which offered destination the model chose, each one's
+// share when known, and whether that came from the probabilities or the text.
+func readDecision(raw []byte, offered []string, byLetter bool) (decision, error) {
 	if byLetter {
-		if i, share, ok := readChoice(raw, len(offered)); ok {
-			return offered[i], share, nil
+		if shares, ok := choiceShares(raw, len(offered)); ok {
+			i := likeliest(shares)
+			return decision{
+				alias: offered[i], confidence: shares[i], shares: shares, read: ReadProbabilities,
+			}, nil
 		}
 	}
 
@@ -433,24 +439,24 @@ func readDecision(raw []byte, offered []string, byLetter bool) (string, float64,
 	text, err := completionText(raw)
 	if err != nil {
 		if byLetter {
-			return "", 0, &unreadable{err: err}
+			return decision{}, &unreadable{err: err}
 		}
-		return "", 0, err
+		return decision{}, err
 	}
 	if byLetter {
 		if i := labelIndex(text, len(offered)); i >= 0 {
-			return offered[i], 0, nil
+			return decision{alias: offered[i], read: ReadText}, nil
 		}
-		return "", 0, &unreadable{err: errors.New("it answered with neither a distribution nor one " +
-			"of the letters it was offered")}
+		return decision{}, &unreadable{err: errors.New("it answered with neither a distribution " +
+			"nor one of the letters it was offered")}
 	}
 	chosen, ok := chosenDestination(text, offered)
 	if !ok {
-		return "", 0, errors.New("it answered with something that names none of this " +
+		return decision{}, errors.New("it answered with something that names none of this " +
 			"router's destinations; the model it decides with may be too small to hold the " +
 			"format, or its instruction may be asking for something other than a choice")
 	}
-	return chosen, 0, nil
+	return decision{alias: chosen, read: ReadText}, nil
 }
 
 // readsLogprobs reports whether this model's backend is still believed to
@@ -480,7 +486,7 @@ func (s *Server) destinationList(orgID string, offered []string, byLetter bool) 
 		}
 		b.WriteString(alias)
 		if m.Description != "" {
-			b.WriteString(" - " + m.Description)
+			b.WriteString(" (" + m.Description + ")")
 		}
 		b.WriteString("\n")
 	}

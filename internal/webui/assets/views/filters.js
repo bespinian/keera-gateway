@@ -25,7 +25,6 @@ import {
   currentRange,
   rangePicker,
   isAdmin,
-  checkButton,
   plural,
   pct,
   field,
@@ -45,6 +44,7 @@ import { areaChart, barList } from "../chart.js";
 import { orgNameOf } from "./orgs.js";
 import { facts, routerLinks } from "./detail.js";
 import { usedBy } from "./router-tree.js";
+import { tryFilter } from "./try.js";
 
 export async function filtersView(ctx) {
   const since = currentRange();
@@ -129,11 +129,6 @@ export async function filtersView(ctx) {
             : dash(),
       },
       canEdit && {
-        label: "Check",
-        shrink: true,
-        cell: (f) => checkCell(ctx, f),
-      },
-      canEdit && {
         label: "",
         shrink: true,
         cell: (f) =>
@@ -214,35 +209,6 @@ function trafficCell(st) {
   );
 }
 
-// Not cached: a small model may answer differently next time.
-function checkCell(ctx, f) {
-  return checkButton(
-    "Run this filter on a sample",
-    () => api.checkFilter(ctx.orgID, f.alias),
-    (probe) => verdict(probe),
-  );
-}
-
-function verdict(probe) {
-  const warned = (probe.warnings || []).length > 0;
-  // The sample holds things to refuse, so a refusal may mean it works; it
-  // still gets its own label.
-  const tone = probe.ok ? (probe.refused || warned ? "warn" : "good") : "bad";
-  const label = !probe.ok
-    ? "Not usable"
-    : probe.refused
-      ? "Refused the sample"
-      : warned
-        ? "Working, with notes"
-        : "Working";
-  return {
-    label,
-    tone,
-    title: "What the filter did to the sample",
-    open: () => report(probe),
-  };
-}
-
 // Before and after: only the reader can judge whether the right things were
 // removed.
 function report(probe) {
@@ -256,7 +222,7 @@ function report(probe) {
       : probe.mode === "gate"
         ? "The gate judged two requests: one it should stop, one it should not."
         : probe.refused
-          ? "The filter refused the sample. Nothing would be forwarded."
+          ? "A rule refused the sample. Nothing would be forwarded."
           : probe.mode === "pattern"
             ? "The rules ran on the sample. Real requests with the same text " +
               "get the same result."
@@ -281,8 +247,8 @@ function report(probe) {
               h(
                 "div",
                 {},
-                "It refused instead of rewriting. A request like this would " +
-                  "be dropped with a 403 and this reason:",
+                "A rule refused the sample. A request like this would be " +
+                  "dropped with a 403 and this reason:",
               ),
               h(
                 "div",
@@ -293,7 +259,8 @@ function report(probe) {
                 "div",
                 { class: "hint" },
                 "The samples contain a credential and a client name, so a " +
-                  "refusal may be right. But this run cannot show a rewrite.",
+                  "refusal may be right. But this run cannot show what the " +
+                  "other rules replace.",
               ),
             )
           : banner(
@@ -469,6 +436,22 @@ export async function filterDetailView(ctx) {
               { title: "Run this filter on a sample" },
               "Check",
               async () => report(await api.checkFilter(ctx.orgID, f.alias)),
+            )
+          : null,
+        f && canEdit
+          ? h(
+              "button",
+              {
+                class: "btn",
+                title:
+                  "Send your own prompts through this filter and see why it decided",
+                onClick: () =>
+                  tryFilter(ctx, f, {
+                    label: usesModel(f) ? "Instruction" : "Rules",
+                    text: usesModel(f) ? f.prompt : formatRules(f.rules),
+                  }),
+              },
+              "Try",
             )
           : null,
         f && canEdit
@@ -1026,7 +1009,8 @@ function editFilter(ctx, existing, readers, { onSaved } = {}) {
     promptHint.textContent = gate
       ? "Say which requests must be refused. The answer format is added for " +
         "you."
-      : "Write it as a rule about text.";
+      : "Write it as a rule about text. A rewrite filter cannot refuse a " +
+        "request; use a gate for that.";
     enforceHint.textContent = shadow
       ? gate
         ? "Shadow mode just reports and doesn't actually block the request. " +
@@ -1185,8 +1169,8 @@ function cutRefusal(s) {
 }
 
 // Patterns suit shapes, not judgements.
-const RULES_EXAMPLE = `(?i)\\bsk-[a-z0-9]{20,}\\b     => [API-KEY]
-[\\w.+-]+@[\\w-]+\\.[\\w.]+      => [EMAIL]
+const RULES_EXAMPLE = `(?i)\\bsk-[a-z0-9]{20,}\\b     => <API-KEY>
+[\\w.+-]+@[\\w-]+\\.[\\w.]+      => <EMAIL>
 (?i)\\bexport all customers\\b => REFUSE: that moves the customer list out`;
 
 // A gate cannot remove anything, so it says what may not go. One sentence
@@ -1194,10 +1178,8 @@ const RULES_EXAMPLE = `(?i)\\bsk-[a-z0-9]{20,}\\b     => [API-KEY]
 // docs/filters.md#for-a-gate.
 const GATE_EXAMPLE = `Refuse requests containing real customer data or credentials.`;
 
-const PROMPT_EXAMPLE = `Replace passwords and API keys with [CREDENTIAL], and \
-customer names with [CLIENT].
-
-Leave everything else exactly as it was written, including code.`;
+const PROMPT_EXAMPLE = `Replace passwords and API keys with <CREDENTIAL>, and \
+customer names with <CLIENT>.`;
 
 // A prompt equal to one of EXAMPLES is unedited and may be swapped.
 const EXAMPLES = [PROMPT_EXAMPLE, GATE_EXAMPLE];

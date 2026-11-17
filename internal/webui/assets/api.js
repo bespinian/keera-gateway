@@ -231,6 +231,10 @@ export const api = {
     request("DELETE", inOrg(orgID, "filters", alias)),
   checkFilter: (orgID, alias) =>
     request("POST", inOrg(orgID, "filters", alias, "/check")),
+  // Sends your own prompts through it, and shows what its model was sent,
+  // what it answered, and why.
+  tryFilter: (orgID, alias, prompts) =>
+    request("POST", inOrg(orgID, "filters", alias, "/try"), { prompts }),
   filterReport: (orgID, alias, since) =>
     get(path`/v1/filters/${alias}/report` + query({ org_id: orgID, since })),
 
@@ -247,6 +251,13 @@ export const api = {
   // Puts sample prompts through each route step.
   checkRouter: (orgID, alias) =>
     request("POST", inOrg(orgID, "routers", alias, "/check")),
+  // The same for its instruction steps, or the one named by step.
+  tryRouter: (orgID, alias, prompts, step) =>
+    request(
+      "POST",
+      path`/v1/routers/${alias}/try` + query({ org_id: orgID, step }),
+      { prompts },
+    ),
   routerReport: (orgID, alias, since) =>
     get(path`/v1/routers/${alias}/report` + query({ org_id: orgID, since })),
 

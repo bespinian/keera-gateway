@@ -94,6 +94,17 @@ var routeCheckSamples = []struct{ prompt, asks string }{
 	},
 }
 
+// readyToDecide sorts a step's destinations and finds the model it decides
+// with, or says why it cannot decide.
+func (s *Server) readyToDecide(rt policy.Route) (offered, dropped []string, m policy.Model, problem string) {
+	offered, dropped = s.sortDestinations(rt)
+	m, found := s.src.Model(rt.OrgID, rt.Model)
+	if problem = routeCheckProblem(rt, offered, m, found); problem == "" {
+		problem = s.checkCredit(rt.OrgID, m)
+	}
+	return offered, dropped, m, problem
+}
+
 // CheckRoute runs one route step over sample prompts and reports where each
 // went. A wrong router never fails a request; it silently picks the wrong
 // model. Like other checks, it has no rate limit, budget or usage row, but a
@@ -108,7 +119,8 @@ func (s *Server) CheckRoute(ctx context.Context, rt policy.Route) RouteProbe {
 	}
 	p.Model = rt.Model
 
-	p.Destinations, p.Dropped = s.sortDestinations(rt)
+	var m policy.Model
+	p.Destinations, p.Dropped, m, p.Error = s.readyToDecide(rt)
 	for _, alias := range p.Destinations {
 		if m, _ := s.src.Model(rt.OrgID, alias); m.Description == "" {
 			p.Warnings = append(p.Warnings, "the destination '"+alias+"' has no description, "+
@@ -118,17 +130,13 @@ func (s *Server) CheckRoute(ctx context.Context, rt policy.Route) RouteProbe {
 		}
 	}
 
-	m, found := s.src.Model(rt.OrgID, rt.Model)
-	if p.Error = routeCheckProblem(rt, p.Destinations, m, found); p.Error != "" {
-		return p
-	}
-	if p.Error = s.checkCredit(rt.OrgID, m); p.Error != "" {
+	if p.Error != "" {
 		return p
 	}
 
 	start := time.Now()
 	for _, sample := range routeCheckSamples {
-		chose, err := s.decide(ctx, rt, m, p.Destinations, []string{sample.prompt})
+		chose, err := s.decide(ctx, rt, m, p.Destinations, []string{sample.prompt}, nil)
 		p.CostMicros += chose.micros
 		s.billCheck(rt.OrgID, chose.bills)
 		d := SampleDecision{

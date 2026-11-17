@@ -24,10 +24,12 @@ const decisionPath = "/systemone"
 const decisionID = "decision"
 
 type decisionQuestion struct {
-	// Type is "noul" for yes or no, and "choice" for one of several labels.
+	// Type is set by decisionBody: every question is a choice.
 	Type         string            `json:"type"`
 	Instructions string            `json:"instructions"`
 	Criteria     map[string]string `json:"criteria,omitempty"`
+	// refuses is the label that refuses, on a gate's question.
+	refuses string
 }
 
 // text is all the question's words, to measure what the model is sent.
@@ -39,20 +41,22 @@ func (q decisionQuestion) text() string {
 	return strings.Join(parts, "\n")
 }
 
-// gateDecision turns a gate's instruction into a yes-or-no question, where yes
-// refuses. Lines starting 'yes:' and 'no:' describe each answer, which makes a
-// classifier surer; the rest is the question.
+// gateDecision turns a gate's instruction into a choice between refusing (A)
+// and allowing (B). Laya's yes-or-no type is not used, since its true and
+// false labels can outweigh the text (laya issue #156). Lines starting 'yes:'
+// and 'no:' say what each answer means; the rest is the question.
 func gateDecision(prompt string) decisionQuestion {
-	q := decisionQuestion{Type: "noul"}
+	q := decisionQuestion{
+		refuses:  "A",
+		Criteria: map[string]string{"A": "yes, refuse this request", "B": "no, allow this request"},
+	}
 	var question []string
 	for line := range strings.SplitSeq(prompt, "\n") {
 		label, text, ok := strings.Cut(line, ":")
-		answer := map[string]string{"yes": "true", "no": "false"}[strings.ToLower(strings.TrimSpace(label))]
-		if ok && answer != "" {
-			if q.Criteria == nil {
-				q.Criteria = map[string]string{}
-			}
-			q.Criteria[answer] = strings.TrimSpace(text)
+		label = strings.ToLower(strings.TrimSpace(label))
+		key := map[string]string{"yes": "A", "no": "B"}[label]
+		if ok && key != "" {
+			q.Criteria[key] = label + ", " + strings.TrimSpace(text)
 			continue
 		}
 		question = append(question, line)
@@ -62,17 +66,18 @@ func gateDecision(prompt string) decisionQuestion {
 }
 
 // routeQuestion turns a route step's instruction into a choice between
-// lettered destinations, each described by its model's description. The alias
-// is left out when there is one: on Laya it only added noise.
+// lettered destinations, each named by its alias and described by its model's
+// description, as a chat model is offered them. An instruction may name a
+// model, and the alias is how.
 func (s *Server) routeQuestion(orgID, prompt string, offered []string) decisionQuestion {
 	q := decisionQuestion{
-		Type: "choice", Instructions: strings.TrimSpace(prompt),
-		Criteria: make(map[string]string, len(offered)),
+		Instructions: strings.TrimSpace(prompt),
+		Criteria:     make(map[string]string, len(offered)),
 	}
 	for i, alias := range offered {
 		about := alias
 		if m, _ := s.src.Model(orgID, alias); m.Description != "" {
-			about = m.Description
+			about += " (" + m.Description + ")"
 		}
 		q.Criteria[string(choiceLetters[i])] = about
 	}
@@ -85,6 +90,7 @@ func decisionRequest(m policy.Model, q decisionQuestion, input []byte) ([]byte, 
 
 // decisionBody is decisionRequest unencoded, for a model check.
 func decisionBody(m policy.Model, q decisionQuestion, state any) map[string]any {
+	q.Type = "choice"
 	body := map[string]any{
 		"state":     state,
 		"questions": map[string]decisionQuestion{decisionID: q},
@@ -107,8 +113,6 @@ type decisionReply struct {
 		Type          string             `json:"type"`
 		Choice        string             `json:"choice"`
 		Probabilities map[string]float64 `json:"probabilities"`
-		// Noul is the probability of yes.
-		Noul *float64 `json:"noul"`
 	} `json:"answers"`
 	Usage struct {
 		InputTokens  int64 `json:"input_tokens"`
@@ -118,7 +122,8 @@ type decisionReply struct {
 
 // chatFromDecision turns a /systemone answer into a chat completion: the answer
 // as content and the probabilities as first-token logprobs. A gate refuses
-// when yes is more likely than no, matching what the logprobs decide.
+// when its refusing label is more likely than not, matching what the logprobs
+// decide.
 func chatFromDecision(raw []byte, q decisionQuestion) ([]byte, error) {
 	var r decisionReply
 	if err := json.Unmarshal(raw, &r); err != nil {
@@ -129,24 +134,18 @@ func chatFromDecision(raw []byte, q decisionQuestion) ([]byte, error) {
 		return nil, errors.New("its answer has no decision in it")
 	}
 
-	var content string
-	var dist map[string]float64
-	switch q.Type {
-	case "noul":
-		if a.Noul == nil {
-			return nil, errors.New("its answer has no probability for yes or no")
-		}
-		dist = map[string]float64{"ALLOW": 1 - *a.Noul, filterRefusalToken: *a.Noul}
+	if _, ok := q.Criteria[a.Choice]; !ok {
+		return nil, fmt.Errorf("it chose %q, which it was not offered", a.Choice)
+	}
+	dist, content := a.Probabilities, a.Choice
+	if q.refuses != "" {
+		refuse := a.Probabilities[q.refuses]
+		dist = map[string]float64{"ALLOW": 1 - refuse, filterRefusalToken: refuse}
 		content = "ALLOW"
-		if *a.Noul > 0.5 {
+		if refuse > 0.5 {
 			content = fmt.Sprintf("%s: the decision model judged it to be what this gate "+
-				"refuses (%.0f%% sure)", filterRefusalToken, *a.Noul*100)
+				"refuses (%.0f%% sure)", filterRefusalToken, refuse*100)
 		}
-	default:
-		if _, ok := q.Criteria[a.Choice]; !ok {
-			return nil, fmt.Errorf("it chose %q, which it was not offered", a.Choice)
-		}
-		dist, content = a.Probabilities, a.Choice
 	}
 
 	type logprob struct {

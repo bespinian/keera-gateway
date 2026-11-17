@@ -74,6 +74,28 @@ func firstToken(raw []byte) (map[string]float64, bool) {
 // pick returns the most likely of n answers and its share of the probability
 // among answer tokens. classify maps a token to its answer, or -1 to ignore it.
 func pick(seen map[string]float64, n int, classify func(string) int) (int, float64, bool) {
+	shares, ok := weigh(seen, n, classify)
+	if !ok {
+		return 0, 0, false
+	}
+	best := likeliest(shares)
+	return best, shares[best], true
+}
+
+// likeliest is the index of the largest share. The lowest index wins a tie,
+// so the result is stable.
+func likeliest(shares []float64) int {
+	best := 0
+	for i, share := range shares {
+		if share > shares[best] {
+			best = i
+		}
+	}
+	return best
+}
+
+// weigh is each of n answers' share of the probability among answer tokens.
+func weigh(seen map[string]float64, n int, classify func(string) int) ([]float64, bool) {
 	// Subtract the highest logprob, so very negative ones don't become 0/0.
 	high := math.Inf(-1)
 	for token, logprob := range seen {
@@ -82,9 +104,9 @@ func pick(seen map[string]float64, n int, classify func(string) int) (int, float
 		}
 	}
 	if math.IsInf(high, -1) {
-		return 0, 0, false
+		return nil, false
 	}
-	weights := make([]float64, n)
+	shares := make([]float64, n)
 	var total float64
 	for token, logprob := range seen {
 		i := classify(token)
@@ -92,32 +114,37 @@ func pick(seen map[string]float64, n int, classify func(string) int) (int, float
 			continue
 		}
 		w := math.Exp(logprob - high)
-		weights[i] += w
+		shares[i] += w
 		total += w
 	}
+	if total == 0 {
+		return nil, false
+	}
+	for i := range shares {
+		shares[i] /= total
+	}
+	return shares, true
+}
 
-	// The lowest index wins a tie, so the result is stable.
-	best := 0
-	for i, w := range weights {
-		if w > weights[best] {
-			best = i
-		}
+// choiceShares is each of n lettered destinations' share of the first token.
+// Only letters count, so a model that opens with '<think>' still chooses.
+func choiceShares(raw []byte, n int) ([]float64, bool) {
+	seen, got := firstToken(raw)
+	if !got {
+		return nil, false
 	}
-	if weights[best] == 0 {
-		return 0, 0, false
-	}
-	return best, weights[best] / total, true
+	return weigh(seen, n, func(token string) int { return labelIndex(token, n) })
 }
 
 // readChoice picks one of n destinations from the first token, with its share
-// among the letters. Only letters count, so a model that opens with '<think>'
-// still chooses.
+// among the letters.
 func readChoice(raw []byte, n int) (index int, share float64, ok bool) {
-	seen, got := firstToken(raw)
-	if !got {
+	shares, ok := choiceShares(raw, n)
+	if !ok {
 		return 0, 0, false
 	}
-	return pick(seen, n, func(token string) int { return labelIndex(token, n) })
+	index = likeliest(shares)
+	return index, shares[index], true
 }
 
 const (

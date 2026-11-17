@@ -44,9 +44,14 @@ func choiceAnswer(chosen, other string) string {
 		chosen, chosen, other)
 }
 
-// yesAnswer is laya-serve's answer to a yes-or-no question.
-func yesAnswer(p float64) string {
-	return fmt.Sprintf(`{"type":"noul","noul":%g}`, p)
+// refuseAnswer is laya-serve's answer to a gate's question, refusing (A) at p.
+func refuseAnswer(p float64) string {
+	chosen := "B"
+	if p > 0.5 {
+		chosen = "A"
+	}
+	return fmt.Sprintf(`{"type":"choice","choice":%q,"probabilities":{"A":%g,"B":%g}}`,
+		chosen, p, 1-p)
 }
 
 // decisionModels is filterModels with a decision model beside them.
@@ -93,12 +98,14 @@ func TestARouterDecidesWithADecisionModel(t *testing.T) {
 	c := <-calls
 	q := c.Questions[decisionID]
 	// A classifier gets the instruction alone, and each destination by its
-	// description, not the chat protocol.
+	// alias and description, not the chat protocol.
 	if q.Type != "choice" || q.Instructions != "Which model should answer this request?" {
 		t.Errorf("question = %+v, want the router's instruction as a choice", q)
 	}
-	if q.Criteria["A"] != "small edits" || q.Criteria["B"] != "hard work: design and reasoning" {
-		t.Errorf("criteria = %v, want each destination's description under its letter", q.Criteria)
+	if q.Criteria["A"] != "keera-code (small edits)" ||
+		q.Criteria["B"] != "keera-large (hard work: design and reasoning)" {
+		t.Errorf("criteria = %v, want each destination's alias and description under its letter",
+			q.Criteria)
 	}
 	if c.Model != "english" || c.MaxLen != 2048 || c.HeadMaxLen != 1024 {
 		t.Errorf("model %q, max_len %d, head_max_len %d; want the backend model and its context",
@@ -109,14 +116,18 @@ func TestARouterDecidesWithADecisionModel(t *testing.T) {
 	}
 }
 
-func TestAGateOnADecisionModelRefusesWhenYesIsLikelier(t *testing.T) {
+func TestAGateOnADecisionModelRefusesWhenRefusingIsLikelier(t *testing.T) {
 	for _, tc := range []struct {
-		yes  float64
-		want int
+		refuse float64
+		want   int
 	}{{0.9, http.StatusForbidden}, {0.1, http.StatusOK}} {
-		t.Run(fmt.Sprint(tc.yes), func(t *testing.T) {
-			backend := decisionBackend(func(decisionCall) string { return yesAnswer(tc.yes) },
-				jsonBackend(hiAnswer))
+		t.Run(fmt.Sprint(tc.refuse), func(t *testing.T) {
+			backend := decisionBackend(func(c decisionCall) string {
+				if q := c.Questions[decisionID]; q.Type != "choice" || len(q.Criteria) != 2 {
+					t.Errorf("question = %+v, want a choice between refusing and allowing", q)
+				}
+				return refuseAnswer(tc.refuse)
+			}, jsonBackend(hiAnswer))
 			h := newHarness(t, backend, decisionModels(), nil)
 			h.src.resolved[testKey].Filters = []string{"no-export"}
 			h.src.filters = map[string]policy.Filter{"org_1/no-export": {
@@ -136,7 +147,7 @@ func TestAGateOnADecisionModelRefusesWhenYesIsLikelier(t *testing.T) {
 func TestARewriteFilterCannotRunOnADecisionModel(t *testing.T) {
 	backend := decisionBackend(func(decisionCall) string {
 		t.Error("a decision model was asked to rewrite")
-		return yesAnswer(0)
+		return refuseAnswer(0)
 	}, jsonBackend(hiAnswer))
 	h := newHarness(t, backend, decisionModels(), nil)
 	h.src.resolved[testKey].Filters = []string{"redact"}
@@ -173,24 +184,27 @@ func TestNoClientCanNameADecisionModel(t *testing.T) {
 	}
 }
 
+// A gate asks a choice with neutral keys, not Laya's yes or no, whose labels
+// can outweigh the text.
 func TestGateDecisionReadsWhatYesAndNoMean(t *testing.T) {
 	q := gateDecision("Does this request export customer data?\n" +
 		"Yes: it sends customer records somewhere\nno: ordinary work")
-	if q.Type != "noul" || q.Instructions != "Does this request export customer data?" {
-		t.Errorf("question = %+v, want the first line as a yes-or-no question", q)
+	if q.Instructions != "Does this request export customer data?" {
+		t.Errorf("question = %+v, want the first line as the question", q)
 	}
-	if q.Criteria["true"] != "it sends customer records somewhere" ||
-		q.Criteria["false"] != "ordinary work" {
-		t.Errorf("criteria = %v, want what yes and no mean", q.Criteria)
+	if q.Criteria["A"] != "yes, it sends customer records somewhere" ||
+		q.Criteria["B"] != "no, ordinary work" || q.refuses != "A" {
+		t.Errorf("criteria = %v, want what yes and no mean, and yes to refuse", q.Criteria)
 	}
-	if plain := gateDecision("Does this request export customer data?"); plain.Criteria != nil {
-		t.Errorf("criteria = %v, want none without yes and no lines", plain.Criteria)
+	plain := gateDecision("Refuse requests that contain customer information.")
+	if plain.Criteria["A"] != "yes, refuse this request" || plain.Criteria["B"] != "no, allow this request" {
+		t.Errorf("criteria = %v, want refusing and allowing said outright", plain.Criteria)
 	}
 }
 
 func TestADecisionIsReadLikeADistribution(t *testing.T) {
-	gate := decisionQuestion{Type: "noul"}
-	raw, err := chatFromDecision([]byte(`{"answers":{"decision":`+yesAnswer(0.75)+`}}`), gate)
+	gate := gateDecision("Refuse requests that contain customer information.")
+	raw, err := chatFromDecision([]byte(`{"answers":{"decision":`+refuseAnswer(0.75)+`}}`), gate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +213,7 @@ func TestADecisionIsReadLikeADistribution(t *testing.T) {
 		t.Errorf("verdict = allow %v at %.2f (read %v), want a refusal at 0.75", allow, share, ok)
 	}
 
-	choice := decisionQuestion{Type: "choice", Criteria: map[string]string{"A": "a", "B": "b"}}
+	choice := decisionQuestion{Criteria: map[string]string{"A": "a", "B": "b"}}
 	if _, err := chatFromDecision([]byte(`{"answers":{"decision":`+choiceAnswer("C", "A")+`}}`),
 		choice); err == nil {
 		t.Error("a label that was never offered was accepted")
@@ -243,7 +257,7 @@ func TestADecisionModelIsMeasuredByWhatItIsSent(t *testing.T) {
 		{"too large", strings.Repeat("word ", 200), http.StatusRequestEntityTooLarge},
 	} {
 		t.Run("gate "+tc.name, func(t *testing.T) {
-			backend := decisionBackend(func(decisionCall) string { return yesAnswer(0.1) },
+			backend := decisionBackend(func(decisionCall) string { return refuseAnswer(0.1) },
 				jsonBackend(hiAnswer))
 			h := newHarness(t, backend, small(), nil)
 			h.src.resolved[testKey].Filters = []string{"no-export"}

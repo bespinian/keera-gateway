@@ -277,7 +277,6 @@ func servedWarnings(p Probe, m policy.Model) []string {
 // decisionProbe is the question a decision model's check asks. The answer is
 // obvious, so a wrong one means the model is not reading its input.
 var decisionProbe = decisionQuestion{
-	Type:         "choice",
 	Instructions: "Which language is this text written in?",
 	Criteria:     map[string]string{"A": "English", "B": "Go source code"},
 }

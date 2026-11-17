@@ -797,52 +797,6 @@ export function isAdmin(ctx) {
   return !!ctx.state.me.can_admin_org;
 }
 
-/** checkButton is a Check button with its verdict beside it once run.
- *  verdict turns run's result into { label, tone, title, open }: a pill that
- *  opens the full report. The result is not kept, as it is only true now. */
-export function checkButton(title, run, verdict) {
-  const slot = h("span");
-  const button = h(
-    "button",
-    {
-      class: "btn btn-sm btn-quiet",
-      title,
-      onClick: async () => {
-        button.disabled = true;
-        slot.replaceChildren(
-          h(
-            "span",
-            { class: "faint nowrap" },
-            h("span", { class: "blip" }),
-            " checking…",
-          ),
-        );
-        try {
-          slot.replaceChildren(verdictPill(verdict(await run())));
-        } catch (ex) {
-          slot.replaceChildren(
-            h("span", { class: "pill pill-bad" }, "Check failed"),
-          );
-          toast(ex.message, "bad");
-        } finally {
-          button.disabled = false;
-        }
-      },
-    },
-    "Check",
-  );
-  return h("div", { class: "row-tight" }, button, slot);
-}
-
-function verdictPill({ label, tone, title, open }) {
-  return h(
-    "button",
-    { class: "pill pill-" + tone + " pill-button", title, onClick: open },
-    h("span", { class: "dot" }),
-    label,
-  );
-}
-
 export function crumb(ctx, path, label) {
   return h(
     "a",

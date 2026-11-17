@@ -431,6 +431,11 @@ restart. Also:
   machines: remove leftover sandbox pods or containers yourself. The
   `KEERA_SANDBOX_*` and `KEERA_SANDBOXES_FILE` settings are ignored, and
   `keera sandbox` is gone.
+- **v0.14.0 takes refusing away from rewrite filters.** One whose instruction
+  still tells it to refuse now fails with `502` where it used to refuse with
+  `403`; the request is stopped either way. Move that part of the instruction
+  into a [gate](filters.md#for-a-gate) placed before it. `keera filter try`
+  shows which prompts it tries to refuse.
 - **A database created before v0.4.0 cannot be upgraded in place.** Its first
   schema file changed up to that release, and the gateway runs each file only
   once. Start from an empty database.

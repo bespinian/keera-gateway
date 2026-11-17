@@ -41,6 +41,24 @@ export function steps(start) {
   return out;
 }
 
+/** drawnOrder lists every step as the editor draws them: column by column
+ *  from the start, and top to bottom within a column. */
+export function drawnOrder(start) {
+  const out = [];
+  let column = start ? [start] : [];
+  while (column.length) {
+    out.push(...column);
+    column = column
+      .flatMap((s) =>
+        s.kind === "route"
+          ? (s.destinations || []).map((d) => (s.branches || {})[d])
+          : [s.next, s.exceeded],
+      )
+      .filter(Boolean);
+  }
+  return out;
+}
+
 /** newID names a step. A limit's counters are kept under the id, so it
  *  never changes. */
 export function newID(start) {

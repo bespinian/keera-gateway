@@ -67,6 +67,7 @@ import {
   limits,
   passes,
   steps,
+  drawnOrder,
   newID,
   summary,
   reaches,
@@ -74,6 +75,7 @@ import {
   warnings,
   clean,
 } from "./router-tree.js";
+import { tryRouter } from "./try.js";
 
 const KIND_TILES = [
   {
@@ -409,6 +411,24 @@ export async function routerDetailView(ctx) {
               { title: "Test its route steps with sample prompts" },
               "Check",
               async () => checkReport(await api.checkRouter(ctx.orgID, alias)),
+            )
+          : null,
+        // Only an instruction step reads the prompt, so only it can be tried.
+        saved && canEdit && savedSteps.some(decides)
+          ? h(
+              "button",
+              {
+                class: "btn",
+                title:
+                  "Send your own prompts through its route steps and see why each went where it did",
+                onClick: () =>
+                  tryRouter(
+                    ctx,
+                    alias,
+                    drawnOrder(saved.start).filter(decides),
+                  ),
+              },
+              "Try",
             )
           : null,
         saved && canEdit

@@ -127,8 +127,8 @@ makes to it. Each
 call is one row in `billing_lines`, written in the same batch as the usage
 row.
 
-`keera model check`, `keera filter check` and `keera router check` are billed
-too, and need credit like a request. They write no usage row. A model check
+`keera model check`, `keera filter check`, `keera router check` and the
+`try` of a filter or router are billed too, and need credit like a request. They write no usage row. A model check
 is billed at its output ceiling, because it does not read the usage record.
 
 Token counts are the provider's own. When a client hangs up, the gateway goes

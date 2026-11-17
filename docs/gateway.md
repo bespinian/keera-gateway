@@ -504,8 +504,8 @@ a route step whose model answers without them. A gate then reads only the words
 of the answer, and a route step asks for a destination's name instead of a
 letter. So a hosted model costs at most one retried call per gateway process.
 
-**Checks.** `keera filter check` and `keera router check` call the backend
-directly, with the credentials the data plane uses. A check is not rate-limited
+**Checks.** `keera filter check` and `keera router check`, and the `try` of
+each, call the backend directly, with the credentials the data plane uses. A check is not rate-limited
 or budgeted and writes no usage row. On the deployment's own provider key it
 needs credit and is billed ([billing.md](billing.md#what-is-billed)). It does
 put real requests on the GPUs.
@@ -561,19 +561,27 @@ question.
 
 - **A route step's instruction becomes the question.** Write it as for a chat
   model ([Writing an instruction](routers.md#writing-an-instruction)). Each
-  destination is offered as its model's description alone, and that decides
-  more than the instruction, so describe the requests each one should get:
+  destination is offered as its alias and its model's description, such as
+  `keera-speed (Short, simple requests...)`. The description decides more
+  than the instruction, so describe the requests each one should get:
   `Short, simple requests: renames, syntax questions, commit messages and one-line edits. Also anything naming a client.`
-- **A gate's instruction becomes a yes-or-no question**, and yes refuses. Write
-  it as for a chat model, in one short sentence
+- **A gate's instruction becomes a choice between two answers**: `A`, "yes,
+  refuse this request", and `B`, "no, allow this request". Write it as for a
+  chat model, in one short sentence
   ([For a gate](filters.md#for-a-gate)):
 
   ```
   Refuse requests containing real customer data or credentials.
   ```
 
-  Optional lines starting `yes:` and `no:` are sent as what each answer
-  means. In our tests they did not make the model more accurate.
+  Optional lines starting `yes:` and `no:` replace what each answer says, such
+  as `yes: it names a customer`.
+
+  Laya's own yes-or-no type is not used. It labels its answers `false` and
+  `true`, and on the English checkpoint those labels can outweigh the text: it
+  answers no to clearly positive input
+  ([laya#156](https://github.com/NandhaKishorM/laya/issues/156)). The model
+  card suggests a choice with neutral keys instead.
 
 A refusal by a decision model carries no sentence of its own, only how sure it
 was. Run `keera filter check` and `keera router check` as for any model.

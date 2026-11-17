@@ -265,12 +265,14 @@ func (s *Server) mux() *httpx.Mux {
 	route("PUT /v1/filters/{alias}", s.putFilter)
 	route("DELETE /v1/filters/{alias}", s.deleteFilter)
 	route("POST /v1/filters/{alias}/check", s.checkFilter)
+	route("POST /v1/filters/{alias}/try", s.tryFilter)
 	route("GET /v1/filters/{alias}/report", s.filterReport)
 
 	route("GET /v1/routers", s.listRouters)
 	route("PUT /v1/routers/{alias}", s.putRouter)
 	route("DELETE /v1/routers/{alias}", s.deleteRouter)
 	route("POST /v1/routers/{alias}/check", s.checkRouter)
+	route("POST /v1/routers/{alias}/try", s.tryRouter)
 	route("GET /v1/routers/{alias}/report", s.routerReport)
 
 	route("GET /v1/models", s.listModels)

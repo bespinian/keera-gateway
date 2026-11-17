@@ -11,23 +11,40 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// parseFilterReply reads a rewrite filter's answer: the rewritten segments, or
-// a refusal. It is lenient about what surrounds the array, such as a code
-// fence, but strict about the segment count, since a wrong count means part of
-// the request was lost. sent tells a real refusal from an echoed one.
-func parseFilterReply(raw []byte, sent []string) ([]string, error) {
-	want := len(sent)
+// parseFilterReply reads a rewrite filter's answer: the rewritten segments. It
+// is lenient about what surrounds the array, such as a code fence, but strict
+// about the segment count, since a wrong count means part of the request was
+// lost. A rewrite filter cannot refuse: stopping a request is a gate's job.
+func parseFilterReply(raw []byte, want int) ([]string, error) {
 	text, err := completionText(raw)
 	if err != nil {
 		return nil, err
 	}
 
-	// A single segment echoed back unchanged is not a verdict: the filter
-	// ignored the format.
-	if reason, ok := refusalReason(text); ok && (want != 1 || text != sent[0]) {
-		return nil, &filterRefusedError{reason: reason}
+	// An instruction that still says to refuse makes the model try. It fails
+	// like any answer that is not an array, but says what to change.
+	if _, ok := verdictReason(text, filterRefusalToken); ok {
+		return nil, errors.New("it answered REFUSED, but a rewrite filter cannot refuse a " +
+			"request; take the refusing out of its instruction, and put a gate before it to " +
+			"stop requests")
 	}
 
+	out, err := readSegments(text, want)
+	if err != nil {
+		// An answer that stopped at the output limit would be blamed on the
+		// format.
+		if choice, _, _ := firstChoice(raw); choice.FinishReason == "length" {
+			return nil, errors.New("its answer was cut off at the output limit; this " +
+				"filter's model may be thinking at length before it answers")
+		}
+		return nil, err
+	}
+	return out, nil
+}
+
+// readSegments reads the JSON array of want segments in a rewrite filter's
+// answer.
+func readSegments(text string, want int) ([]string, error) {
 	start, end := strings.IndexByte(text, '['), strings.LastIndexByte(text, ']')
 	if start < 0 || end < start {
 		return nil, errors.New("it answered with prose rather than a JSON array; " +
@@ -35,11 +52,8 @@ func parseFilterReply(raw []byte, sent []string) ([]string, error) {
 	}
 
 	var out []string
-	if err = json.Unmarshal([]byte(text[start:end+1]), &out); err != nil {
+	if err := json.Unmarshal([]byte(text[start:end+1]), &out); err != nil {
 		return nil, fmt.Errorf("its answer was not a JSON array of strings: %w", err)
-	}
-	if reason, ok := unanimousRefusal(out, sent); ok {
-		return nil, &filterRefusedError{reason: reason}
 	}
 	if len(out) != want {
 		return nil, fmt.Errorf("it returned %d segments where the request had %d, so part "+
@@ -71,52 +85,53 @@ func completionText(raw []byte) (string, error) {
 }
 
 // parseGateReply reads a gate's verdict and how sure the model was. A nil
-// error means the request may go.
+// error means the request may go. read says whether the verdict came from
+// the written word or the first token's probabilities.
 //
 // The written word decides when it is one of the two answers, since that is
 // what an administrator checked. The first token's distribution is used only
 // when the text says neither. Anything else is an error, so a gate only allows
 // a request by clearly saying so.
-func parseGateReply(raw []byte) (float64, error) {
-	allow, share, read := readVerdict(raw)
+func parseGateReply(raw []byte) (share float64, read string, err error) {
+	allow, share, weighed := readVerdict(raw)
 
 	text, err := completionText(raw)
 	if err != nil {
-		if !read {
-			return 0, err
+		if !weighed {
+			return 0, "", err
 		}
 		// It wrote nothing, so only the distribution is left.
 		if allow {
-			return share, nil
+			return share, ReadProbabilities, nil
 		}
-		return share, &filterRefusedError{reason: gateUnwrittenReason}
+		return share, ReadProbabilities, &filterRefusedError{reason: gateUnwrittenReason}
 	}
 
 	if reason, ok := anyVerdict(text, gateRefusalTokens); ok {
-		return share, &filterRefusedError{reason: reason}
+		return share, ReadText, &filterRefusedError{reason: reason}
 	}
 	if _, ok := anyVerdict(text, gateAllowTokens); ok {
-		return share, nil
+		return share, ReadText, nil
 	}
 	if strings.HasPrefix(text, "[") {
-		return share, errors.New("it answered with a rewrite rather than a verdict; a gate is " +
-			"asked whether a request may go, so its instruction has to say what to refuse " +
-			"rather than what to replace")
+		return share, ReadText, errors.New("it answered with a rewrite rather than a verdict; a " +
+			"gate is asked whether a request may go, so its instruction has to say what to " +
+			"refuse rather than what to replace")
 	}
-	if read {
+	if weighed {
 		if allow {
-			return share, nil
+			return share, ReadProbabilities, nil
 		}
 		// It explained instead of writing the word, so that is the reason.
 		reason := sanitizeReason(text)
 		if reason == "" {
 			reason = gateUnwrittenReason
 		}
-		return share, &filterRefusedError{reason: reason}
+		return share, ReadProbabilities, &filterRefusedError{reason: reason}
 	}
-	return 0, errors.New("it answered neither ALLOW nor REFUSED; this filter's model may be too " +
-		"small to hold the format, or its instruction may be asking for something other " +
-		"than a verdict")
+	return 0, "", errors.New("it answered neither ALLOW nor REFUSED; this filter's model " +
+		"may be too small to hold the format, or its instruction may be asking for something " +
+		"other than a verdict")
 }
 
 // gateUnwrittenReason stands in when a gate refused without a sentence.
@@ -140,13 +155,6 @@ func anyVerdict(s string, words []string) (string, bool) {
 	return "", false
 }
 
-// refusalReason reads a refusal from one line of a filter's answer. The word
-// must stand alone at the start: "REFUSEDXYZ" or a later mention is not a
-// verdict.
-func refusalReason(s string) (string, bool) {
-	return verdictReason(s, filterRefusalToken)
-}
-
 // verdictReason reports whether s starts with word, and returns any reason
 // after it.
 func verdictReason(s, word string) (string, bool) {
@@ -166,29 +174,6 @@ func verdictReason(s, word string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-// unanimousRefusal reads a refusal the filter put in every slot of the array
-// instead of on its own line. A segment returned as sent is an echo, not a
-// verdict: a user asking why their connection was REFUSED is not refused.
-func unanimousRefusal(out, sent []string) (string, bool) {
-	if len(out) == 0 {
-		return "", false
-	}
-	var reason string
-	for i, s := range out {
-		r, ok := refusalReason(s)
-		if !ok {
-			return "", false
-		}
-		if i < len(sent) && s == sent[i] {
-			return "", false
-		}
-		if reason == "" {
-			reason = r
-		}
-	}
-	return reason, true
 }
 
 // sanitizeReason reduces a model's sentence to one bounded line, since it ends

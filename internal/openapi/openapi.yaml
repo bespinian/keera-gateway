@@ -2200,6 +2200,46 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /control/v1/filters/{alias}/try:
+    post:
+      operationId: tryFilter
+      tags: [filters]
+      summary: Try a filter on your own prompts
+      description: |
+        Administrators only. Sends each prompt through the filter as a request
+        of its own, and shows what the filter would do with it, everything its
+        model was sent and answered, and why: what a reasoning model thought,
+        or what any other model says when asked afterwards. The prompts are not
+        stored. It runs the filter's
+        model, so it can cost money. See
+        https://docs.keera.ch/manage/filters/.
+      parameters:
+        - name: alias
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/OrgID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TryRequest"
+      responses:
+        "200":
+          description: One trial per prompt.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FilterTry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /control/v1/filters/{alias}/report:
     get:
       operationId: filterReport
@@ -2414,6 +2454,51 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RouterCheck"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /control/v1/routers/{alias}/try:
+    post:
+      operationId: tryRouter
+      tags: [routers]
+      summary: Try a router's route steps on your own prompts
+      description: |
+        Administrators only. Asks each instruction step, or the one named by
+        `step`, where each prompt should go, and shows every destination's
+        share, everything the deciding model was sent and answered, and why:
+        what a reasoning model thought, or what any other model says when
+        asked afterwards. The other modes read no
+        prompt; a router with none of this kind answers 400. The prompts are
+        not stored. It can cost money. See
+        https://docs.keera.ch/manage/routers/.
+      parameters:
+        - name: alias
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/OrgID"
+        - name: step
+          in: query
+          description: Try only the route step with this id.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TryRequest"
+      responses:
+        "200":
+          description: One try per route step.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RouterTry"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -8008,7 +8093,7 @@ components:
           type: string
         refused:
           type: boolean
-          description: It refused the sample instead of rewriting it.
+          description: A pattern rule refused the sample.
         refusal:
           type: string
           description: Its sentence when it refused.
@@ -8392,6 +8477,230 @@ components:
           description: Left out when the backend served no logprobs.
         error:
           type: string
+    TryRequest:
+      type: object
+      description: Prompts to try, each sent as a request of its own.
+      required: [prompts]
+      properties:
+        prompts:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            type: string
+            description: At most 64 KiB.
+    ModelCall:
+      type: object
+      description: One call to a filter's or route step's model, as sent and answered.
+      required: [purpose, model, path, sent]
+      properties:
+        purpose:
+          type: string
+          enum: [decide, retry, explain]
+          description: |
+            `retry` is the question asked again another way, after an answer
+            that could not be read. `explain` asks why, when the answer came
+            with no reasoning.
+        model:
+          type: string
+        path:
+          type: string
+          description: "`/chat/completions`, or `/systemone` for a decision model."
+        messages:
+          type: array
+          description: The chat request's messages. A decision model's request has none.
+          items:
+            $ref: "#/components/schemas/CallMessage"
+        request:
+          type: object
+          description: The body as sent, when it has no messages, as a decision model's has none.
+        sent:
+          type: boolean
+          description: False when it was built but not sent, such as one too large for the model.
+        status:
+          type: integer
+        answer:
+          type: string
+          description: What the model wrote.
+        reasoning:
+          type: string
+          description: What a reasoning model thought first, when the backend returns it.
+        response:
+          type: string
+          description: The body as received, cut at 256 KiB.
+        error:
+          type: string
+        ms:
+          type: integer
+          format: int64
+    CallMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+        content:
+          type: string
+    FilterTry:
+      type: object
+      required: [alias, mode, trials]
+      properties:
+        alias:
+          type: string
+        mode:
+          type: string
+          enum: [rewrite, gate, pattern]
+        model:
+          type: string
+        shadow:
+          type: boolean
+        trials:
+          type: array
+          items:
+            $ref: "#/components/schemas/FilterTrial"
+        cost_micros:
+          type: integer
+          format: int64
+        free:
+          type: boolean
+          description: No model ran.
+        error:
+          type: string
+          description: Why the filter could not run at all.
+    FilterTrial:
+      type: object
+      description: One prompt and what an enforcing filter would do with it.
+      required: [prompt, outcome]
+      properties:
+        prompt:
+          type: string
+        outcome:
+          type: string
+          enum: [pass, rewrite, refuse, error]
+        after:
+          type: string
+          description: The prompt as it would be forwarded, after a rewrite.
+        reason:
+          type: string
+          description: The refusal's sentence.
+        error:
+          type: string
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: A gate verdict's share of probability. Left out when unknown.
+        read:
+          type: string
+          enum: [text, probabilities]
+          description: How a gate's verdict was read.
+        hits:
+          type: array
+          items:
+            $ref: "#/components/schemas/FilterPatternHit"
+        calls:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelCall"
+        explanation:
+          type: string
+          description: |
+            The model's own account of its answer, asked for afterwards when
+            its call showed no reasoning. A decision model cannot be asked.
+        explain_error:
+          type: string
+          description: Why asking for the explanation failed.
+        ms:
+          type: integer
+          format: int64
+        cost_micros:
+          type: integer
+          format: int64
+    RouterTry:
+      type: object
+      required: [router, routes]
+      properties:
+        router:
+          type: string
+        routes:
+          type: array
+          items:
+            $ref: "#/components/schemas/RouteTry"
+    RouteTry:
+      type: object
+      required: [step, mode, destinations, trials]
+      properties:
+        step:
+          type: string
+        mode:
+          type: string
+          enum: [instruction, fallback, latency, least-busy, size, header]
+        model:
+          type: string
+        destinations:
+          type: array
+          description: What the step offered, in the order of its letters.
+          items:
+            type: string
+        dropped:
+          type: array
+          items:
+            type: string
+        trials:
+          type: array
+          items:
+            $ref: "#/components/schemas/RouteTrial"
+        cost_micros:
+          type: integer
+          format: int64
+        error:
+          type: string
+          description: Why the step could not decide at all.
+    RouteTrial:
+      type: object
+      description: One prompt and where the step sent it.
+      required: [prompt]
+      properties:
+        prompt:
+          type: string
+        chosen:
+          type: string
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Left out when unknown.
+        shares:
+          type: array
+          description: Each destination's share, in the order of `destinations`, when read from probabilities.
+          items:
+            type: number
+        read:
+          type: string
+          enum: [text, probabilities]
+        error:
+          type: string
+        becomes:
+          type: string
+          description: What happens to a request the step could not place.
+        calls:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelCall"
+        explanation:
+          type: string
+          description: |
+            The model's own account of its choice, asked for afterwards when
+            its call showed no reasoning. A decision model cannot be asked.
+        explain_error:
+          type: string
+          description: Why asking for the explanation failed.
+        ms:
+          type: integer
+          format: int64
+        cost_micros:
+          type: integer
+          format: int64
     RouteHop:
       type: object
       description: One destination of a trying step, in the order it would be tried.

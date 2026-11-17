@@ -79,6 +79,7 @@ func routerCmd(ctx context.Context, args []string) error {
 	r.reword("set", "display-name", "the router's name for people; an empty one clears it")
 	r.reword("set", "description", "what this router is for; an empty one clears it")
 	r.reword("check", "step", "check only the route step with this id")
+	r.reword("try", "step", "try only the route step with this id")
 
 	if done, err := r.parse(); done {
 		return err
@@ -103,6 +104,19 @@ func routerAlias(p policy.Router) string { return p.Alias }
 
 func (r *routerRun) find(ctx context.Context, alias string) (policy.Router, error) {
 	return findAlias(ctx, r.aliasRun, alias, routerAlias)
+}
+
+func (r *routerRun) try(ctx context.Context) error {
+	alias := r.fs.Arg(0)
+	path := r.path(alias, "/try")
+	if r.step != "" {
+		path += "&step=" + url.QueryEscape(r.step)
+	}
+	res, err := tryAlias[control.RouterTry](ctx, r.aliasRun, path, printRouterTry)
+	if err == nil && slices.ContainsFunc(res.Routes, func(t gateway.RouteTry) bool { return t.Error != "" }) {
+		err = fmt.Errorf("a route step of the router %s could not decide", alias)
+	}
+	return err
 }
 
 func (r *routerRun) list(ctx context.Context) error {

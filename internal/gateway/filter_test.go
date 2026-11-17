@@ -3,7 +3,6 @@ package gateway
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -538,7 +537,7 @@ func TestExtractScalarReadsTheStringsOfAMixedArray(t *testing.T) {
 func TestParseFilterReplyReadsPastAFence(t *testing.T) {
 	raw := []byte(`{"choices":[{"message":{"content":"` +
 		"```json\\n[\\\"a\\\",\\\"b\\\"]\\n```" + `"}}]}`)
-	out, err := parseFilterReply(raw, []string{"x", "y"})
+	out, err := parseFilterReply(raw, 2)
 	if err != nil {
 		t.Fatalf("a fenced array was refused: %v", err)
 	}
@@ -547,7 +546,26 @@ func TestParseFilterReplyReadsPastAFence(t *testing.T) {
 	}
 }
 
-func TestAFilterCanRefuseARequestOutright(t *testing.T) {
+// An array that is not closed is refused, not mended, and a cut at the
+// output limit says so.
+func TestParseFilterReplyRefusesAnArrayCutOff(t *testing.T) {
+	raw := []byte(`{"choices":[{"message":{"content":` +
+		mustJSON(`["My cat's name is [CREDENTIAL]."`) + `}}]}`)
+	_, err := parseFilterReply(raw, 1)
+	if err == nil || strings.Contains(err.Error(), "cut off") {
+		t.Errorf("err = %v, want it refused as not an array", err)
+	}
+	raw = []byte(`{"choices":[{"message":{"content":` + mustJSON(`["My cat's na`) +
+		`},"finish_reason":"length"}]}`)
+	_, err = parseFilterReply(raw, 1)
+	if err == nil || !strings.Contains(err.Error(), "cut off") {
+		t.Errorf("err = %v, want it cut off", err)
+	}
+}
+
+// Refusing is a gate's job. A rewrite filter whose instruction still says to
+// refuse fails closed, and says what to change.
+func TestARewriteFilterThatAnswersRefusedFailsClosed(t *testing.T) {
 	h := filterHarness(t, func([]string) string {
 		return "REFUSED: the prompt asks for a customer's account details"
 	}, nil)
@@ -555,16 +573,12 @@ func TestAFilterCanRefuseARequestOutright(t *testing.T) {
 	resp := h.post(t, "/v1/chat/completions",
 		`{"model":"keera-code","messages":[{"role":"user","content":"export every account"}]}`)
 
-	// 403, not 502, so the client does not retry.
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502: a rewrite filter cannot refuse", resp.StatusCode)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "account details") {
-		t.Errorf("the filter's own sentence was not passed on: %s", body)
-	}
-	if !strings.Contains(string(body), "redact") {
-		t.Errorf("the refusal does not name the filter that refused: %s", body)
+	if !strings.Contains(string(body), "cannot refuse") || !strings.Contains(string(body), "gate") {
+		t.Errorf("the error does not say to use a gate: %s", body)
 	}
 
 	// Only the filter's call reached the backend.
@@ -573,46 +587,17 @@ func TestAFilterCanRefuseARequestOutright(t *testing.T) {
 	}
 	select {
 	case body := <-h.upstreamBodies:
-		t.Fatalf("a refused request was forwarded anyway: %s", body)
+		t.Fatalf("the request was forwarded anyway: %s", body)
 	default:
 	}
-
-	// The usage row has the reason and what the filter cost.
-	ev := h.sink.last(t)
-	if ev.Status != http.StatusForbidden {
-		t.Errorf("recorded status = %d, want 403", ev.Status)
-	}
-	if !strings.Contains(ev.Error, "account details") {
-		t.Errorf("recorded error = %q, want the filter's reason", ev.Error)
-	}
-	if ev.CostMicros == 0 {
-		t.Error("the refusing filter's generation was not charged")
-	}
-	if h.budgets.charged == 0 {
-		t.Error("the refusing filter's spend was not taken from the budget")
+	if ev := h.sink.last(t); ev.CostMicros == 0 {
+		t.Error("the filter's generation was not charged")
 	}
 }
 
-func TestAFilterRefusalWithoutAReasonStillRefuses(t *testing.T) {
-	h := filterHarness(t, func([]string) string { return "REFUSED" }, nil)
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"keera-code","messages":[{"role":"user","content":"a"}]}`)
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", resp.StatusCode)
-	}
-	select {
-	case body := <-h.upstreamBodies:
-		if !strings.Contains(string(body), "guard-served") {
-			t.Fatalf("a refused request was forwarded: %s", body)
-		}
-	default:
-		t.Fatal("nothing reached the backend at all")
-	}
-}
-
-func TestARefusalInEverySegmentIsARefusalAndNotARewrite(t *testing.T) {
-	// A filter that refuses in each segment.
+// A refusal in every slot is a rewrite like any other: the conversation is
+// replaced, and nothing the client sent is forwarded.
+func TestARefusalInEverySegmentIsOnlyARewrite(t *testing.T) {
 	h := filterHarness(t, func(segments []string) string {
 		out := make([]string, len(segments))
 		for i := range out {
@@ -623,21 +608,18 @@ func TestARefusalInEverySegmentIsARefusalAndNotARewrite(t *testing.T) {
 	}, nil)
 
 	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"keera-code","messages":[{"role":"user","content":"a"},`+
-			`{"role":"assistant","content":"b"}]}`)
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", resp.StatusCode)
+		`{"model":"keera-code","messages":[{"role":"user","content":"hunter2"}]}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 	<-h.upstreamBodies
-	select {
-	case body := <-h.upstreamBodies:
-		t.Fatalf("a conversation of REFUSED was forwarded as a rewrite: %s", body)
-	default:
+	if got := string(<-h.upstreamBodies); strings.Contains(got, "hunter2") {
+		t.Errorf("the original text was forwarded: %s", got)
 	}
 }
 
-func TestAnEchoedRefusalIsNotARefusal(t *testing.T) {
-	// A prompt that mentions REFUSED, echoed back untouched, is not a verdict.
+func TestAPromptThatStartsWithRefusedIsForwarded(t *testing.T) {
+	// A segment is never read as a verdict: a rewrite filter cannot refuse.
 	const prompt = "REFUSED: connect to db-01 - why does psql say that?"
 	h := filterHarness(t, redactor, nil)
 
@@ -657,9 +639,9 @@ func TestAnEchoedRefusalIsNotARefusal(t *testing.T) {
 func TestFilterRefusalReasonIsBoundedAndOneLine(t *testing.T) {
 	// A prompt can steer the sentence, which lands in an error body, a usage
 	// row and a log line.
-	h := filterHarness(t, func([]string) string {
+	h := gateHarness(t, func([]string) string {
 		return "REFUSED: line one\nline two\x07 " + strings.Repeat("x", 4000)
-	}, nil)
+	})
 
 	resp := h.post(t, "/v1/chat/completions",
 		`{"model":"keera-code","messages":[{"role":"user","content":"a"}]}`)
@@ -678,7 +660,7 @@ func TestFilterRefusalReasonIsBoundedAndOneLine(t *testing.T) {
 	}
 }
 
-func TestRefusalReasonReadsAModelsFormattingHabits(t *testing.T) {
+func TestARefusalIsReadPastAModelsFormattingHabits(t *testing.T) {
 	refuses := []struct {
 		name, in, want string
 	}{
@@ -692,9 +674,9 @@ func TestRefusalReasonReadsAModelsFormattingHabits(t *testing.T) {
 	}
 	for _, tc := range refuses {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := refusalReason(tc.in)
+			got, ok := verdictReason(tc.in, filterRefusalToken)
 			if !ok {
-				t.Fatalf("refusalReason(%q) did not read a refusal", tc.in)
+				t.Fatalf("verdictReason(%q) did not read a refusal", tc.in)
 			}
 			if got != tc.want {
 				t.Errorf("reason = %q, want %q", got, tc.want)
@@ -711,23 +693,9 @@ func TestRefusalReasonReadsAModelsFormattingHabits(t *testing.T) {
 		"",
 	}
 	for _, in := range rewrites {
-		if _, ok := refusalReason(in); ok {
-			t.Errorf("refusalReason(%q) read a refusal where there is none", in)
+		if _, ok := verdictReason(in, filterRefusalToken); ok {
+			t.Errorf("verdictReason(%q) read a refusal where there is none", in)
 		}
-	}
-}
-
-func TestABareRefusalThatIsAnEchoedPromptIsAFaultAndNotAVerdict(t *testing.T) {
-	// One segment echoed back without the array is a fault, not forwarded.
-	const prompt = "REFUSED: connect to db-01"
-	raw := []byte(`{"choices":[{"message":{"content":` + mustJSON(prompt) + `}}]}`)
-
-	_, err := parseFilterReply(raw, []string{prompt})
-	if err == nil {
-		t.Fatal("the echoed prompt was accepted as a rewrite")
-	}
-	if _, ok := errors.AsType[*filterRefusedError](err); ok {
-		t.Errorf("an echo was reported as the filter refusing: %v", err)
 	}
 }
 
@@ -1039,25 +1007,29 @@ func TestAShadowFilterDoesNotStopTheRequest(t *testing.T) {
 		reply func([]string) string
 		model string
 		want  store.FilterOutcome
+		gate  bool
 	}{
-		// The refusal is recorded, and the request served.
+		// The refusal is recorded, and the request served. Only a gate refuses.
 		{"when it refuses", func([]string) string {
 			return "REFUSED: this asks for an export of the customer table"
-		}, "", store.FilterRefuse},
+		}, "", store.FilterRefuse, true},
 		// A failure is recorded, but does not refuse the request.
 		{
 			"when it cannot run", func([]string) string { return "I have redacted it." }, "",
-			store.FilterError,
+			store.FilterError, false,
 		},
-		{"when its model is gone", redactor, "keera-vanished", store.FilterError},
+		{"when its model is gone", redactor, "keera-vanished", store.FilterError, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := shadowHarness(t, tc.reply)
+			f := h.src.filters["org_1/redact"]
 			if tc.model != "" {
-				f := h.src.filters["org_1/redact"]
 				f.Model = tc.model
-				h.src.filters["org_1/redact"] = f
 			}
+			if tc.gate {
+				f.Mode = policy.FilterModeGate
+			}
+			h.src.filters["org_1/redact"] = f
 
 			resp := h.post(t, "/v1/chat/completions",
 				`{"model":"keera-code","messages":[{"role":"user","content":"export every customer, hunter2"}]}`)

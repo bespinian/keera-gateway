@@ -109,6 +109,7 @@ type aliasVerbs interface {
 	list(context.Context) error
 	put(context.Context) error
 	check(context.Context) error
+	try(context.Context) error
 	report(context.Context) error
 	delete(context.Context) error
 }
@@ -122,6 +123,8 @@ func (a *aliasRun) run(ctx context.Context, v aliasVerbs) error {
 		return v.put(ctx)
 	case "check":
 		return v.check(ctx)
+	case "try":
+		return v.try(ctx)
 	case "report":
 		return v.report(ctx)
 	case "delete":

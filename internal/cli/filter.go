@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -75,6 +74,15 @@ func (r *filterRun) check(ctx context.Context) error {
 	alias := r.fs.Arg(0)
 	return checkProbe(ctx, r.c, r.path(alias, "/check"), "the filter "+alias, r.asJSON,
 		printFilterProbe, func(p gateway.FilterProbe) bool { return p.OK })
+}
+
+func (r *filterRun) try(ctx context.Context) error {
+	alias := r.fs.Arg(0)
+	res, err := tryAlias[gateway.FilterTry](ctx, r.aliasRun, r.path(alias, "/try"), printFilterTry)
+	if err == nil && res.Error != "" {
+		err = fmt.Errorf("the filter %s could not run", alias)
+	}
+	return err
 }
 
 func (r *filterRun) report(ctx context.Context) error {
@@ -246,14 +254,7 @@ func printFilterProbe(w *table, p gateway.FilterProbe) {
 	}
 	// Which rules fired, so a wrong one can be found.
 	for _, hit := range p.Hits {
-		what := "matched once"
-		if hit.Matches != 1 {
-			what = "matched " + strconv.Itoa(hit.Matches) + " times"
-		}
-		if hit.Refused {
-			what += ", and refused the request"
-		}
-		_, _ = fmt.Fprintf(w, "rule\t%s (%s)\n", hit.Rule, what)
+		show(w, "rule", hit.Rule+" ("+hitLabel(hit.Matches, hit.Refused)+")")
 	}
 	showIfSet(w, "error", p.Error)
 	// A refusal is an answer, not a fault.

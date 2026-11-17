@@ -704,6 +704,32 @@ at least three requests for a step that decides, since a sample whose lettered
 answer cannot be read is asked again for a name, and one per destination for
 the other modes (two when a backend refuses tools).
 
+## Trying your own prompts
+
+When a real prompt went to the wrong model, try the step on it: **Try** on the
+router's screen, or `keera router try <alias> <prompt>...`. Only a step that
+decides reads a prompt, so only those are tried; `--step <id>` picks one. The
+panel numbers them Instruction 1, 2 and so on, left to right as the editor
+draws them.
+
+It works like a [filter try](filters.md#trying-your-own-prompts): each prompt
+is a request of its own, every call is shown exactly as sent, the model is
+asked why when it gave no reasoning, and it is billed like a check. The audit
+log keeps `router.try`. A router try also shows:
+
+- where it would go, and **every destination's share** of the first token, so
+  a close call shows as one;
+- whether the choice was read from the probabilities or from what the model
+  wrote ([How the answer is read](#how-the-answer-is-read));
+- if it could not decide, why, and whether the request would go to the fallback
+  or be refused;
+- in each call, the lettered destinations with their descriptions. When the
+  lettered question could not be read and the model was asked again for a
+  name, both calls are shown.
+
+A prompt longer than the [window](#cost-and-latency) a step reads is kept
+whole, as on a real request with one segment.
+
 ## What a client can see
 
 `GET /api/v1/models` lists routers next to the models. Their `destinations` are
@@ -780,8 +806,8 @@ report. Alert on a rising fallback rate.
 
 **Nothing a route step read is stored.** Also recorded:
 
-- `router.put`, `router.delete` and `router.check` in the audit log, with who
-  did it and in which organisation. The `router.put` entry holds the whole
+- `router.put`, `router.delete`, `router.check` and `router.try` in the audit
+  log, with who did it and in which organisation. The `router.put` entry holds the whole
   tree, instructions included.
 - One row per request in the request log: the router, and, when a route step ran,
   whether the last one decided and what deciding added to the wait. The model

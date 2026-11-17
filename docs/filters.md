@@ -22,7 +22,7 @@ out, a filter is a `rewrite`.
 | What decides           | a model reading prose               | a model reading prose            | a list of expressions             |
 | What it answers        | the request's text, rewritten       | one word                         | nothing - the rules are applied   |
 | Can it redact?         | yes                                 | no                               | yes, what its rules match         |
-| Can it stop a request? | yes, if its instruction says so     | yes                              | yes, with a `REFUSE` rule         |
+| Can it stop a request? | no - put a gate before it           | yes                              | yes, with a `REFUSE` rule         |
 | Cost per request       | a second generation, request-sized  | a few tokens                     | **nothing**                       |
 | Context it needs       | the request twice: read and written | the request once                 | none                              |
 | Same answer twice?     | usually, at temperature zero        | usually, at temperature zero     | always                            |
@@ -30,9 +30,6 @@ out, a filter is a `rewrite`.
 
 How to choose is in
 [Three kinds of filter](https://docs.keera.ch/manage/filters/#three-kinds-of-filter).
-When a request should be stopped, not edited, a gate beats a rewrite filter: it
-costs a verdict instead of a regenerated conversation, and it is the more
-reliable of the two at its job.
 
 ### Which one
 
@@ -57,8 +54,7 @@ Whether a filter _enforces_ is separate from its mode - see
 Every mode sees the same thing: the text of one request, as an ordered array of
 segments.
 
-- A `rewrite` filter returns the same number of segments, rewritten, or
-  [refuses](#refusing-a-request).
+- A `rewrite` filter returns the same number of segments, rewritten.
 - A `gate` returns a verdict and no text.
 - A `pattern` filter sends nothing anywhere. Its rules run on each segment in
   turn.
@@ -111,48 +107,35 @@ A refusal drops the request. The model never sees it, and the sender gets `403`
 with `filter_refused` and the filter's sentence. A refused MCP call gets a
 failed tool result instead ([mcp.md](mcp.md#filters)).
 
-On the wire, a refusal is one line in place of the mode's normal answer:
+A gate or a pattern rule refuses; a rewrite filter only edits. A gate costs a
+verdict instead of a regenerated conversation, and doing one thing makes each
+more reliable, so to redact some requests and stop others, put a gate before
+the rewrite filter. On the wire, a gate's refusal is one line:
 
 ```
 REFUSED: the prompt asks for a customer's account details
 ```
 
-A gate answers either that or the single word `ALLOW`. If neither the word nor
+A gate answers either that or `ALLOW`. If neither the word nor
 [the token behind it](#how-a-gates-verdict-is-read) gives a verdict, that is a
 fault, and the request is stopped like any filter that could not run.
 
 A filter [in shadow](#shadow-rolling-one-out) only records the refusal.
 
-**A rewrite filter refuses only if its instruction says so.** Say when:
-
-```
-Refuse the request outright - answer REFUSED and one short sentence saying why -
-if its purpose cannot survive the redaction above: a request to send a customer
-list somewhere, or one whose whole subject is a credential. Rewrite everything
-else.
-```
-
-If that clause does most of the work, use a gate instead.
-
 The reason is optional, and the line is read leniently: lowercase, a full stop
-instead of the colon, or a code fence or bold around it are all accepted. A gate
-also accepts `REFUSE` for `REFUSED` and `ALLOWED` for `ALLOW`.
+instead of the colon, or a code fence or bold around it are all accepted, as
+are `REFUSE` for `REFUSED` and `ALLOWED` for `ALLOW`. The word must end where
+the word ends: `REFUSEDXYZ` is no verdict.
 
-A rewrite filter's answer is prose, so two rules stop a request being dropped by
-accident:
+**A rewrite filter that answers `REFUSED`** has an instruction that still asks
+it to refuse. That answer is not an array, so the filter fails closed with
+`502`, and the error says to move the refusing into a gate. A `REFUSED` inside
+the array is only a rewrite: the text is replaced, and nothing the client sent
+goes on.
 
-- The word must end where the word ends. `REFUSEDXYZ`, and prose that mentions
-  the word later (`the connection was REFUSED: check the firewall`), are
-  rewrites.
-- A segment that comes back exactly as it was sent is an echo, not a verdict.
+What a refusal carries:
 
-A rewrite filter that answers the refusal in _every_ slot of the array counts as
-refusing. Otherwise the gateway would forward a conversation in which every
-message is the word `REFUSED`.
-
-What the refusal carries:
-
-- **The sentence** is written by the filter's model after reading the client's
+- **The sentence** is written by the gate's model after reading the client's
   prompt, so it is quoted as the filter's, not the gateway's. It is capped at
   240 bytes and collapsed to one line.
 - **The status is `403`**, not the `502` of a broken filter. **My access** shows
@@ -424,7 +407,7 @@ Write about the text, not about the gateway.
 
 Start from the tips in
 [Create a rewrite or gate filter](https://docs.keera.ch/manage/filters/#create-a-rewrite-or-gate-filter).
-If it should also [refuse some requests](#refusing-a-request), say which.
+It cannot refuse a request; see [Refusing a request](#refusing-a-request).
 
 The costly failure is not a filter that misses a secret. It is one that
 rewrites source code, reformats a stack trace or summarises the question.
@@ -432,10 +415,8 @@ rewrites source code, reformats a stack trace or summarises the question.
 A starting point, which is also what the panel's form offers:
 
 ```
-Replace passwords and API keys with [CREDENTIAL], and customer names with
-[CLIENT].
-
-Leave everything else exactly as it was written, including code.
+Replace passwords and API keys with <CREDENTIAL>, and customer names with
+<CLIENT>.
 ```
 
 ### For a gate
@@ -473,9 +454,7 @@ that nothing should touch.
 
 **A rewrite filter** gets all three in one request, and both sides of each are
 shown. If the first two come back unchanged, the filter does not do its job. If
-the function changes, the filter will change real code. A filter written to
-refuse credentials or client data refuses the whole sample, and then the run
-tells you nothing about its rewriting.
+the function changes, the filter will change real code.
 
 **A gate** gives one verdict per request, so it is checked twice: once with the
 two sensitive parts, which it should refuse, and once with the function, which
@@ -506,6 +485,43 @@ one request for a rewrite filter, and two for a gate, one per half of the
 sample.
 
 A check of a filter in shadow still runs it, and says so.
+
+## Trying your own prompts
+
+A check uses a fixed sample. When a real prompt was refused, rewritten or let
+through and you want to know why, try the filter on that prompt: **Try** on the
+filter's screen, or `keera filter try <alias> <prompt>...`.
+
+Each prompt is sent through the filter as a request of its own. The panel shows
+for each the answer, the model's reason and the whole prompt it was sent.
+`keera filter try` and the API show everything:
+
+- what an enforcing filter would do: let it through, rewrite it (and the text
+  that would be forwarded), refuse it (and the sentence the sender would get),
+  or fail;
+- for a gate, how sure it was, and whether the verdict was read from the word
+  or from [the first token](#how-a-gates-verdict-is-read);
+- **every call to the filter's model, exactly as sent**: the instruction with
+  the wire format the gateway adds, the prompt as the segments the model reads,
+  and the raw request and answer. A call that was built but not sent, such as
+  one too large for the model, is shown too;
+- for a pattern filter, which rules fired. No model runs.
+
+A reasoning model's thoughts, when its backend returns them
+(`reasoning_content` or `reasoning`), are the best account of why it answered
+as it did, so a try shows them. Most models return none, and a gate answers
+one word, with no room to give reasons. So when the answer came without
+reasoning, the gateway asks the model why afterwards, in the same conversation:
+the instruction, the prompt, its answer, then a request for one or two
+sentences. That is the model's own account, not a record of how it
+decided, but it usually shows which words it reacted to and which part of the
+instruction it applied. It costs a second generation per prompt. A decision
+model writes no text, so it is not asked; its probabilities are all it has.
+
+A try runs like a check: it calls the backend directly, is billed the same way,
+and works on a filter in shadow, which it says. The prompts are not stored. The
+audit log keeps `filter.try` with how many prompts there were, not what they
+said. At most 10 prompts of 64 KiB each go in one try.
 
 ## Who owns what
 
@@ -541,14 +557,14 @@ and shadow: `keera_filter_runs_total`, `keera_filter_cost_micros_total` and
 refusal gives, which is kept as the request's error. The filter log keeps one
 row per filter per request: the mode, whether it was enforcing, the outcome, how
 long it took, what it spent, and how many segments it was shown and changed.
-Which rule fired is not kept either; it appears only in `keera filter check`,
-against the sample. The log is kept as long as the request log
+Which rule fired is not kept either; it appears only in `keera filter check`
+and `keera filter try`, against what they were given. The log is kept as long as the request log
 (`KEERA_USAGE_RETENTION`).
 
 Also recorded:
 
-- `filter.put`, `filter.delete` and `filter.check` in the audit log, with who
-  did it and in which organisation. The `filter.put` entry includes the
+- `filter.put`, `filter.delete`, `filter.check` and `filter.try` in the audit
+  log, with who did it and in which organisation. The `filter.put` entry includes the
   instruction or rules, the mode and whether it enforces.
 - `guardrail.put` carries the filters a guardrail names.
 - Every refusal a filter caused is a usage event with its status.

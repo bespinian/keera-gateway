@@ -2,12 +2,12 @@ package gateway
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
+	"github.com/bespinian/keera-gateway/internal/store"
 )
 
 // FilterProbe is what one filter check found.
@@ -27,8 +27,8 @@ type FilterProbe struct {
 	// every request.
 	CostMicros int64  `json:"cost_micros,omitempty"`
 	Error      string `json:"error,omitempty"`
-	// Refused says the filter refused the sample instead of rewriting it, and
-	// Refusal is its sentence. That is not a fault, but there is no rewrite.
+	// Refused says a pattern rule refused the sample, and Refusal is its
+	// sentence. That is not a fault, but there is no rewrite.
 	Refused bool   `json:"refused,omitempty"`
 	Refusal string `json:"refusal,omitempty"`
 	// Verdicts is a gate's answer to each half of the sample: one that should
@@ -118,16 +118,11 @@ func (s *Server) CheckFilter(ctx context.Context, f policy.Filter) FilterProbe {
 	}
 
 	start := time.Now()
-	out, cost, err := s.runFilter(ctx, f, m, filterCheckSample)
+	out, cost, err := s.runFilter(ctx, f, m, filterCheckSample, nil)
 	p.TotalMS = time.Since(start).Milliseconds()
 	p.CostMicros = cost.micros
 	s.billCheck(f.OrgID, cost.bills)
 	if err != nil {
-		if refused, ok := errors.AsType[*filterRefusedError](err); ok {
-			p.OK = true
-			p.Refused, p.Refusal = true, refused.reason
-			return p
-		}
 		p.Error = err.Error()
 		return p
 	}
@@ -162,17 +157,16 @@ func (s *Server) checkGate(ctx context.Context, f policy.Filter, m policy.Model,
 
 	start := time.Now()
 	for _, half := range halves {
-		_, cost, err := s.runFilter(ctx, f, m, half.sent)
+		_, cost, err := s.runFilter(ctx, f, m, half.sent, nil)
 		p.CostMicros += cost.micros
 		s.billCheck(f.OrgID, cost.bills)
 		v := FilterVerdict{
 			Sent: half.sent, ExpectRefusal: half.expectRefusal, Confidence: cost.confidence,
 		}
-		refused, isRefusal := errors.AsType[*filterRefusedError](err)
-		switch {
-		case isRefusal:
-			v.Refused, v.Reason = true, refused.reason
-		case err != nil:
+		switch outcome, reason, _ := filterOutcome(half.sent, nil, err); outcome {
+		case store.FilterRefuse:
+			v.Refused, v.Reason = true, reason
+		case store.FilterError:
 			// Such a gate would refuse everything.
 			p.Error = err.Error()
 			p.TotalMS = time.Since(start).Milliseconds()
@@ -199,15 +193,14 @@ func (s *Server) checkPattern(f policy.Filter, p FilterProbe) FilterProbe {
 	p.TotalMS = time.Since(start).Milliseconds()
 	p.Hits = hits
 
-	refused, isRefusal := errors.AsType[*filterRefusedError](err)
-	switch {
-	case isRefusal:
-		// An answer, not a fault, as with a model's refusal.
+	switch outcome, reason, _ := filterOutcome(filterCheckSample, out, err); outcome {
+	case store.FilterRefuse:
+		// An answer, not a fault, as with a gate's refusal.
 		p.OK = true
-		p.Refused, p.Refusal = true, refused.reason
+		p.Refused, p.Refusal = true, reason
 		p.Warnings = refusingCodeWarnings(codeHits)
 		return p
-	case err != nil:
+	case store.FilterError:
 		// The rules do not compile, so every real request is refused.
 		p.Error = err.Error()
 		return p

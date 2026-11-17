@@ -3101,3 +3101,58 @@ a.pill-button:hover {
     margin: 0;
   }
 }
+
+/* A prompt to try, with its remove button in the corner. */
+.try-box {
+  position: relative;
+}
+.try-box > textarea {
+  display: block;
+  padding-right: 34px;
+}
+.try-box > .try-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+}
+
+/* A try. A prompt is named by its first line, cut to fit. */
+.try-prompt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.try-sent > summary {
+  font-size: 12.5px;
+  font-weight: 550;
+  cursor: pointer;
+}
+/* Each destination's share: name, bar, figure. */
+.try-shares {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 12.5px;
+}
+.try-shares .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.meter-fill.muted {
+  background: var(--faint);
+}
+
+/* A long instruction scrolls, so the prompts stay in sight. */
+.try-instruction,
+.try-sent .prompt-text {
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+.try-instruction {
+  max-height: 160px;
+}
+.try-sent .prompt-text {
+  max-height: 420px;
+}

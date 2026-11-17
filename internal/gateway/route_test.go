@@ -126,12 +126,12 @@ func lettered(instruction, alias string) (string, bool) {
 	var alternatives []string
 	for line := range strings.SplitSeq(instruction, "\n") {
 		line = strings.TrimSpace(line)
-		// "A) keera-small - a fast local model for short edits"
+		// "A) keera-small (a fast local model for short edits)"
 		if len(line) < 3 || line[1] != ')' {
 			continue
 		}
 		letter, rest := line[:1], strings.TrimSpace(line[2:])
-		name, _, _ := strings.Cut(rest, " - ")
+		name, _, _ := strings.Cut(rest, " (")
 		if name == alias {
 			chosen = letter
 			continue

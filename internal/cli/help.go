@@ -560,8 +560,9 @@ var commands = []command{
 		aliases: []string{"filters"},
 		summary: "what a request may contain, before it is forwarded",
 		prose: "A filter reads each request a guardrail applies it to, before it is forwarded. " +
-			"--mode rewrite (the default) and gate use a small model to take data out or refuse " +
-			"the request; --mode pattern applies --rules in the gateway and costs nothing. " +
+			"--mode rewrite (the default) uses a small model to take data out, and --mode gate " +
+			"one to refuse the request; --mode pattern applies --rules in the gateway and costs " +
+			"nothing. " +
 			"See https://docs.keera.ch/manage/filters/.",
 		subs: []subcommand{
 			{name: "list", summary: "this organisation's filters", flags: []string{"json"}},
@@ -593,6 +594,20 @@ var commands = []command{
 			{
 				name: "check", args: "<alias>", summary: "run it over a sample and show what it did",
 				flags: []string{"json"},
+			},
+			{
+				name: "try", args: "<alias> <prompt>...", summary: "send your own prompts through it and see why it decided",
+				flags: []string{"json"},
+				prose: "Each prompt is sent as a request of its own. For each, it shows what the " +
+					"filter would do, how sure a gate was, the whole prompt its model was " +
+					"sent, and what it thought and answered. A model that shows no reasoning " +
+					"is asked why afterwards, which costs one more generation. @path reads a " +
+					"prompt from a file, @- from stdin. Nothing is stored. See " +
+					"https://docs.keera.ch/manage/filters/.",
+				examples: []string{
+					"keera filter try no-client-data 'Summarise the Meier account' 'Rename tmp2'",
+					"keera filter try redact-keys @stacktrace.txt",
+				},
 			},
 			{
 				name: "report", args: "<alias>", summary: "what it has done to real traffic",
@@ -660,6 +675,19 @@ var commands = []command{
 				flags: []string{"step", "json"},
 				prose: "On a route step that reads nothing, it asks each destination in turn " +
 					"whether it is there and in what order it would be tried.",
+			},
+			{
+				name: "try", args: "<alias> <prompt>...", summary: "send your own prompts through its route steps and see why each went where it did",
+				flags: []string{"step", "json"},
+				prose: "Only instruction steps read a prompt, so only they are tried. For each " +
+					"prompt, it shows the destination chosen, every destination's share, and " +
+					"the whole prompt the deciding model was sent, and what it thought and " +
+					"answered. A model that shows no reasoning is asked why afterwards, which " +
+					"costs one more generation. @path reads a prompt from a file, @- from " +
+					"stdin. Nothing is stored. See https://docs.keera.ch/manage/routers/.",
+				examples: []string{
+					"keera router try auto 'rename tmp2 to total' 'plan an online migration'",
+				},
 			},
 			{
 				name: "report", args: "<alias>", summary: "how much went through it, and which models answered",
