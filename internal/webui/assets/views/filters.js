@@ -39,12 +39,18 @@ import {
   busyButton,
   banner,
   go,
+  confirm,
+  toast,
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
 import { orgNameOf } from "./orgs.js";
 import { facts, routerLinks } from "./detail.js";
 import { usedBy } from "./router-tree.js";
 import { tryFilter } from "./try.js";
+
+const DELETE_WARNING =
+  "A filter still used by a guardrail or a router cannot be " +
+  "deleted. Take it out of those first; the error lists them.";
 
 export async function filtersView(ctx) {
   const since = currentRange();
@@ -136,9 +142,7 @@ export async function filtersView(ctx) {
             editTitle: "Edit this filter",
             onEdit: () => editFilter(ctx, f, readers),
             deleteTitle: "Delete this filter",
-            body:
-              "A filter still used by a guardrail or a router cannot be " +
-              "deleted. Take it out of those first; the error lists them.",
+            body: DELETE_WARNING,
             confirmLabel: "Delete filter",
             remove: () => api.deleteFilter(ctx.orgID, f.alias),
           }),
@@ -459,6 +463,28 @@ export async function filterDetailView(ctx) {
               const r = await api.models(ctx.orgID);
               editFilter(ctx, f, (r.data || []).filter(canRun));
             })
+          : null,
+        f && canEdit
+          ? h(
+              "button",
+              {
+                class: "btn btn-danger",
+                title: "Delete this filter",
+                onClick: () =>
+                  confirm({
+                    title: `Delete ${f.alias}?`,
+                    body: DELETE_WARNING,
+                    confirmLabel: "Delete filter",
+                    danger: true,
+                    onConfirm: async () => {
+                      await api.deleteFilter(ctx.orgID, f.alias);
+                      toast(`${f.alias} deleted`, "good");
+                      ctx.navigate("/filters");
+                    },
+                  }),
+              },
+              "Delete",
+            )
           : null,
       ],
     ),
