@@ -187,6 +187,32 @@ var providers = []Provider{{
 	// nano on 2027-04-01. GPT-5.6 Sol's price is a promotion until 2026-11-30;
 	// OpenAI has not published the price after it.
 	Models: []ProviderModel{{
+		ID: "gpt-6.2-astra", DisplayName: "GPT-6.2 Astra",
+		MaxContext: 1_050_000, ReleaseDate: "2026-11-17",
+		InputMicrosPerMTok: 7_680_000, OutputMicrosPerMTok: 38_400_000,
+		CachedInputMicrosPerMTok: 384_000,
+		CacheWriteMicrosPerMTok:  9_600_000,
+		LongPrompt: &policy.PriceTier{
+			AboveTokens:        272_000,
+			InputMicrosPerMTok: 15_360_000, OutputMicrosPerMTok: 57_600_000,
+			CachedInputMicrosPerMTok: 768_000,
+			CacheWriteMicrosPerMTok:  19_200_000,
+		},
+		Description: "flagship and slow - the hardest problems",
+	}, {
+		ID: "gpt-6.2-sol", DisplayName: "GPT-6.2 Sol",
+		MaxContext: 1_050_000, ReleaseDate: "2026-11-17",
+		InputMicrosPerMTok: 1_920_000, OutputMicrosPerMTok: 9_600_000,
+		CachedInputMicrosPerMTok: 96_000,
+		CacheWriteMicrosPerMTok:  2_400_000,
+		LongPrompt: &policy.PriceTier{
+			AboveTokens:        272_000,
+			InputMicrosPerMTok: 3_840_000, OutputMicrosPerMTok: 14_400_000,
+			CachedInputMicrosPerMTok: 192_000,
+			CacheWriteMicrosPerMTok:  4_800_000,
+		},
+		Description: "large - hard coding and agent work",
+	}, {
 		ID: "gpt-6-astra", DisplayName: "GPT-6 Astra",
 		MaxContext: 1_050_000, ReleaseDate: "2026-09-03",
 		InputMicrosPerMTok: 9_600_000, OutputMicrosPerMTok: 48_000_000,
@@ -198,7 +224,7 @@ var providers = []Provider{{
 			CachedInputMicrosPerMTok: 1_920_000,
 			CacheWriteMicrosPerMTok:  24_000_000,
 		},
-		Description: "flagship and slow - the hardest problems",
+		Description: "flagship and slow - the hardest problems; replaced by GPT-6.2 Astra",
 	}, {
 		ID: "gpt-6.1-sol", DisplayName: "GPT-6.1 Sol",
 		MaxContext: 1_050_000, ReleaseDate: "2026-09-29",
@@ -211,7 +237,7 @@ var providers = []Provider{{
 			CachedInputMicrosPerMTok: 192_000,
 			CacheWriteMicrosPerMTok:  4_800_000,
 		},
-		Description: "large - hard coding and agent work",
+		Description: "large - hard coding and agent work; replaced by GPT-6.2 Sol",
 	}, {
 		ID: "gpt-6.1-terra", DisplayName: "GPT-6.1 Terra",
 		MaxContext: 1_050_000, ReleaseDate: "2026-10-26",
