@@ -500,8 +500,10 @@ var providers = []Provider{{
 }, {
 	Name:    "mistral",
 	Summary: "Mistral's own models and some open-weight ones, on Mistral's API in the EU.",
-	// Mistral publishes no price for a cache write. It retires Medium 3.5 and
-	// Large 3 on 2027-04-30.
+	// The models and prices are those on Mistral's pricing page,
+	// https://docs.mistral.ai/inference/pricing: a model not listed there is
+	// dropped. Each model's page there gives its API id, release date and
+	// context. Mistral publishes no price for a cache write.
 	Endpoint:    "https://api.mistral.ai/v1",
 	CachedInput: true,
 	Location:    "eu",
@@ -511,12 +513,6 @@ var providers = []Provider{{
 		InputMicrosPerMTok: 672_000, OutputMicrosPerMTok: 2_016_000,
 		CachedInputMicrosPerMTok: 67_200,
 		Description:              "very large - hard coding, agent and reasoning work, with images",
-	}, {
-		ID: "mistral-medium-3-5", DisplayName: "Mistral Medium 3.5",
-		MaxContext: 262_144, ReleaseDate: "2026-04-28",
-		InputMicrosPerMTok: 1_440_000, OutputMicrosPerMTok: 7_200_000,
-		CachedInputMicrosPerMTok: 144_000,
-		Description:              "mid-size, with reasoning - coding and agent work; replaced by Mistral Large 4",
 	}, {
 		ID: "mistral-small-2603", DisplayName: "Mistral Small 4",
 		MaxContext: 262_144, ReleaseDate: "2026-03-16",
@@ -547,12 +543,6 @@ var providers = []Provider{{
 		InputMicrosPerMTok: 288_000, OutputMicrosPerMTok: 1_152_000,
 		CachedInputMicrosPerMTok: 6_720,
 		Description:              "large and quick, in preview - large codebases and long documents",
-	}, {
-		ID: "mistral-large-2512", DisplayName: "Mistral Large 3",
-		MaxContext: 262_144, ReleaseDate: "2025-12-02",
-		InputMicrosPerMTok: 480_000, OutputMicrosPerMTok: 1_440_000,
-		CachedInputMicrosPerMTok: 48_000,
-		Description:              "large, no reasoning step - general chat and documents; replaced by Mistral Large 4",
 	}, {
 		ID: "ministral-14b-2512", DisplayName: "Ministral 3 14B",
 		MaxContext: 262_144, ReleaseDate: "2025-12-02",
@@ -585,6 +575,16 @@ var providers = []Provider{{
 		Kind: policy.KindTranscription, MaxContext: 32_768, ReleaseDate: "2026-10-20",
 		AudioMicrosPerMinute: 3_840,
 		Description:          "speech to text with speaker labels - hard audio, many speakers and languages",
+	}, {
+		ID: "mistral-embed", Snapshot: "mistral-embed-2312", DisplayName: "Mistral Embed",
+		Kind: policy.KindEmbedding, MaxContext: 8_192, ReleaseDate: "2023-12-11",
+		InputMicrosPerMTok: 96_000, CachedInputMicrosPerMTok: 9_600,
+		Description: "embedding, 1024 dimensions - search and RAG over text",
+	}, {
+		ID: "codestral-embed", Snapshot: "codestral-embed-2505", DisplayName: "Codestral Embed",
+		Kind: policy.KindEmbedding, MaxContext: 8_192, ReleaseDate: "2025-05-28",
+		InputMicrosPerMTok: 144_000, CachedInputMicrosPerMTok: 14_400,
+		Description: "code embedding, 1536 dimensions by default - code search and retrieval",
 	}},
 }, {
 	Name:    "peakprivacy",
