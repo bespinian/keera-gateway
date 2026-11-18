@@ -37,6 +37,7 @@ type modelFlags struct {
 	priceOut       float64
 	priceCached    float64
 	priceWrite     float64
+	priceAudio     float64
 	apiKey         string
 	noAPIKey       bool
 	subscription   bool
@@ -55,7 +56,8 @@ func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 			"carries - for infomaniak, your AI Service's product id")
 	fs.StringVar(&f.backendModel, "backend-model", "",
 		"the name the inference plane serves, which for vLLM is --served-model-name")
-	fs.StringVar(&f.kind, "kind", "", "chat, completion, embedding, rerank or decision (default chat)")
+	fs.StringVar(&f.kind, "kind", "",
+		"chat, completion, embedding, rerank, transcription or decision (default chat)")
 	fs.StringVar(&f.displayName, "display-name", "",
 		"the model's name for people, such as \"Claude Haiku 5.5\" "+
 			"(a --provider model starts with that provider's own)")
@@ -78,6 +80,8 @@ func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 	fs.Float64Var(&f.priceWrite, "price-cache-write", -1,
 		"price per million input tokens the provider wrote to its own prompt cache "+
 			"(default: the --provider's rate, else the input price)")
+	fs.Float64Var(&f.priceAudio, "price-audio", -1,
+		"price per minute of audio, in CHF, of a --provider transcription model sold by the minute")
 	fs.StringVar(&f.apiKey, "api-key", "",
 		"the provider key the gateway sends to the backend, stored encrypted; @path reads "+
 			"a file and @- reads stdin")
@@ -155,6 +159,7 @@ func applyModelFlags(m catalog.Model, f *modelFlags) catalog.Model {
 	setPrice(&m.OutputMicrosPerMTok, f.priceOut)
 	setPrice(&m.CachedInputMicrosPerMTok, f.priceCached)
 	setPrice(&m.CacheWriteMicrosPerMTok, f.priceWrite)
+	setPrice(&m.AudioMicrosPerMinute, f.priceAudio)
 	if f.subscription {
 		m.Subscription = true
 	}
@@ -178,11 +183,13 @@ func clearModelValues(m catalog.Model) catalog.Model {
 	m.CachedInputMicrosPerMTok = nil
 	m.CacheWriteMicrosPerMTok = nil
 	m.LongPrompt = nil
+	m.AudioMicrosPerMinute = nil
 	m.MaxContext = nil
 	return m
 }
 
-// setPrice takes CHF per million tokens; -1 means "not given".
+// setPrice takes CHF per million tokens, or per minute of audio; -1 means
+// "not given".
 func setPrice(dst **int64, units float64) {
 	if units >= 0 {
 		m := micros(units)
@@ -217,6 +224,7 @@ func credential(apiKey string, noAPIKey bool) (*string, error) {
 func declared(m policy.Model) catalog.Model {
 	in, outPrice, maxContext := m.InputMicrosPerMTok, m.OutputMicrosPerMTok, m.MaxContext
 	cachedPrice, writePrice := m.CachedInputMicrosPerMTok, m.CacheWriteMicrosPerMTok
+	audioPrice := m.AudioMicrosPerMinute
 	return catalog.Model{
 		Alias:        m.Alias,
 		Kind:         string(m.Kind),
@@ -231,6 +239,7 @@ func declared(m policy.Model) catalog.Model {
 		CachedInputMicrosPerMTok: &cachedPrice,
 		CacheWriteMicrosPerMTok:  &writePrice,
 		LongPrompt:               m.LongPrompt,
+		AudioMicrosPerMinute:     &audioPrice,
 		MaxContext:               &maxContext,
 		ReleaseDate:              m.ReleaseDate,
 		Location:                 m.Location,
@@ -258,7 +267,7 @@ func modelCmd(ctx context.Context, args []string) error {
 	r.reword("set", "display-name", "the model's name for people; an empty one clears it, "+
 		"or goes back to the provider's")
 	r.reword("set", "description", "what this model is for, in a sentence; an empty one clears it")
-	r.reword("set", "kind", "chat, completion, embedding, rerank or decision")
+	r.reword("set", "kind", "chat, completion, embedding, rerank, transcription or decision")
 	r.reword("set", "release-date", "the day the model came out, as YYYY-MM-DD")
 	r.reword("set", "location", "where the model runs, such as ch, usa or onprem")
 	if done, err := r.parse(); done {
@@ -354,8 +363,8 @@ func (r *modelRun) save(ctx context.Context, alias string, m catalog.Model) erro
 	parsed.OrgID = r.orgID
 	if parsed.SelfHosted() && r.f.pricesGiven() {
 		return errors.New("a self-hosted model costs this deployment's gateway fee, so its " +
-			"prices cannot be set; --price-in, --price-out, --price-cached and " +
-			"--price-cache-write are for a --provider model. See " +
+			"prices cannot be set; --price-in, --price-out, --price-cached, " +
+			"--price-cache-write and --price-audio are for a --provider model. See " +
 			"https://docs.keera.ch/manage/billing/")
 	}
 	if r.f.subscription && r.f.noSubscription {
@@ -458,7 +467,8 @@ func (r *modelRun) putModel(ctx context.Context, m policy.Model, cred *string) e
 
 // pricesGiven says a --price-* flag was given.
 func (f *modelFlags) pricesGiven() bool {
-	return f.priceIn >= 0 || f.priceOut >= 0 || f.priceCached >= 0 || f.priceWrite >= 0
+	return f.priceIn >= 0 || f.priceOut >= 0 || f.priceCached >= 0 || f.priceWrite >= 0 ||
+		f.priceAudio >= 0
 }
 
 // warnUnusedBackends says when the gateway ignored --backend, as it does for a
@@ -565,6 +575,10 @@ func printProviders(w *table, providers []providerEntry) {
 			if m.LongPrompt != nil {
 				_, _ = fmt.Fprintf(w, "  %s: %s\n", m.ID, longPromptPrices(*m.LongPrompt))
 			}
+			if m.AudioMicrosPerMinute > 0 {
+				_, _ = fmt.Fprintf(w, "  %s: %s per minute of audio\n", m.ID,
+					audioPrice(m.AudioMicrosPerMinute))
+			}
 		}
 	}
 }
@@ -627,6 +641,9 @@ func printModel(w *table, m policy.Model) {
 	}
 	show(w, "in/mtok", policy.FormatPrice(m.InputMicrosPerMTok))
 	show(w, "out/mtok", policy.FormatPrice(m.OutputMicrosPerMTok))
+	if m.AudioMicrosPerMinute > 0 {
+		show(w, "audio/minute", audioPrice(m.AudioMicrosPerMinute))
+	}
 	// In words rather than 0.00: an unstated rate is not free.
 	if m.CachedInputMicrosPerMTok > 0 {
 		show(w, "cached in/mtok", policy.FormatPrice(m.CachedInputMicrosPerMTok))
@@ -705,4 +722,10 @@ func kindNames(kinds []policy.Kind) string {
 		names = append(names, string(k))
 	}
 	return strings.Join(names, ", ")
+}
+
+// audioPrice shows a price per minute in full: it is a fraction of a cent,
+// which two decimals would round to 0.00.
+func audioPrice(micros int64) string {
+	return policy.Currency + " " + policy.FormatQuantity(micros)
 }

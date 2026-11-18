@@ -69,7 +69,7 @@ new organisations start with.
 | `KEERA_MAX_DB_CONNS`            | `16`                | Postgres pool size per replica. At least `4`.                                                                                               |
 | `KEERA_LOG_LEVEL`               | `info`              | `debug`, `info`, `warn` or `error`.                                                                                                         |
 | `KEERA_LOG_FORMAT`              | `text`              | `text` or `json`.                                                                                                                           |
-| `KEERA_MAX_BODY_BYTES`          | `33554432` (32 MiB) | Largest request body, in bytes. Coding agents send large contexts.                                                                          |
+| `KEERA_MAX_BODY_BYTES`          | `33554432` (32 MiB) | Largest request body, in bytes. Coding agents send large contexts, and a transcription its whole audio file.                                |
 | `KEERA_MAX_RESPONSE_BYTES`      | `67108864` (64 MiB) | Largest buffered upstream response, and largest streamed event, in bytes.                                                                   |
 | `KEERA_UPSTREAM_HEADER_TIMEOUT` | `2m`                | How long a backend may take to _start_ answering. Longer on [the deployment's own keys](billing.md#what-is-billed).                         |
 | `KEERA_CACHE_TTL`               | `30s`               | How long a checked key is reused. Models, filters and the rest reload every minute.                                                         |

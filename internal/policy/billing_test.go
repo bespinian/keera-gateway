@@ -144,3 +144,19 @@ func TestOnlyASelfHostedModelIsPricedAtTheFee(t *testing.T) {
 		t.Errorf("without a fee, a self-hosted model is priced %+v, want 0", free)
 	}
 }
+
+// Audio is charged by the minute; the gateway fee is per token, so a
+// transcript's tokens pay it and the audio does not.
+func TestAudioIsChargedByTheMinuteButNotInTheFee(t *testing.T) {
+	m := Model{Alias: "w", AudioMicrosPerMinute: 6_000, OutputMicrosPerMTok: 1_000_000}
+	used := Tokens{Output: 1_000, AudioMillis: 90_000}
+	// 1.5 minutes at 6000, and 1000 tokens at 1.00 a million.
+	if got := m.Cost(used); got != 9_000+1_000 {
+		t.Errorf("cost = %d, want 10000", got)
+	}
+	m.Billing = &Billing{FeeMicrosPerMTok: 50_000, AtProvider: true}
+	line, _ := m.Bill(used, used)
+	if line.AudioMillis != 0 || line.Micros != 50 {
+		t.Errorf("fee line = %+v, want 1000 tokens at 0.05 and no audio", line)
+	}
+}

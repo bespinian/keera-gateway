@@ -67,6 +67,9 @@ const (
 	// KindRerank scores documents against a query, on /v1/rerank and
 	// /v2/rerank. It writes no text.
 	KindRerank Kind = "rerank"
+	// KindTranscription turns audio into text, on /v1/audio/transcriptions.
+	// The request is a multipart form, not JSON.
+	KindTranscription Kind = "transcription"
 	// KindDecision answers a typed question with a probability per answer and
 	// writes no text, such as Laya behind laya-serve. Only route steps and gate
 	// filters use one; clients cannot name it.
@@ -75,7 +78,7 @@ const (
 
 func (k Kind) Valid() bool {
 	return k == KindChat || k == KindCompletion || k == KindEmbedding || k == KindRerank ||
-		k == KindDecision
+		k == KindTranscription || k == KindDecision
 }
 
 // Model is one of an organisation's models. Clients only ever name the Alias,
@@ -106,6 +109,9 @@ type Model struct {
 	// cache, which Anthropic and OpenAI charge more for. Zero means the input
 	// price.
 	CacheWriteMicrosPerMTok int64 `json:"cache_write_micros_per_mtok"`
+	// AudioMicrosPerMinute prices a minute of audio a transcription model
+	// heard, as Whisper is sold. A model priced by tokens leaves it zero.
+	AudioMicrosPerMinute int64 `json:"audio_micros_per_minute"`
 	// LongPrompt prices a prompt above its threshold, for providers that charge
 	// more for long prompts. Nil means one price for every length.
 	LongPrompt *PriceTier `json:"long_prompt,omitempty"`
@@ -161,6 +167,8 @@ type Tokens struct {
 	// minutes. Anthropic charges it at twice the input price.
 	CacheWriteHour int
 	Output         int
+	// AudioMillis is how much audio a transcription model heard.
+	AudioMillis int64
 }
 
 // clamped keeps the cache counts inside the input count, so a bad provider
@@ -169,6 +177,7 @@ func (t Tokens) clamped() Tokens {
 	t.CachedInput = min(max(t.CachedInput, 0), t.Input)
 	t.CacheWrite = min(max(t.CacheWrite, 0), t.Input-t.CachedInput)
 	t.CacheWriteHour = min(max(t.CacheWriteHour, 0), t.CacheWrite)
+	t.AudioMillis = max(t.AudioMillis, 0)
 	return t
 }
 
@@ -178,11 +187,25 @@ func (m Model) Cost(t Tokens) int64 {
 	t = t.clamped()
 	p := m.prices(t.Input)
 	// Divide once, so the total is rounded down only once.
-	return (int64(t.Input-t.CachedInput-t.CacheWrite)*p.InputMicrosPerMTok +
-		int64(t.CachedInput)*p.cachedInputMicros() +
-		int64(t.CacheWrite-t.CacheWriteHour)*p.cacheWriteMicros() +
-		int64(t.CacheWriteHour)*2*p.InputMicrosPerMTok +
-		int64(t.Output)*p.OutputMicrosPerMTok) / perM
+	return (int64(t.Input-t.CachedInput-t.CacheWrite)*p.InputMicrosPerMTok+
+		int64(t.CachedInput)*p.cachedInputMicros()+
+		int64(t.CacheWrite-t.CacheWriteHour)*p.cacheWriteMicros()+
+		int64(t.CacheWriteHour)*2*p.InputMicrosPerMTok+
+		int64(t.Output)*p.OutputMicrosPerMTok)/perM +
+		AudioCost(t.AudioMillis, m.AudioMicrosPerMinute)
+}
+
+// AudioCost is what millis of audio cost at a price per minute.
+func AudioCost(millis, microsPerMinute int64) int64 {
+	const msPerMinute = 60_000
+	return millis * microsPerMinute / msPerMinute
+}
+
+// AudioMinutesMicros is millis of audio in millionths of a minute, the
+// quantity a billing line states.
+func AudioMinutesMicros(millis int64) int64 {
+	const msPerMinute = 60_000
+	return millis * 1_000_000 / msPerMinute
 }
 
 func (m Model) prices(inputTokens int) PriceTier {

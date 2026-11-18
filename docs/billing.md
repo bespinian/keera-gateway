@@ -90,7 +90,8 @@ KEERA_BILLING_GATEWAY_FEE=0.05   # CHF per million tokens
 It applies to self-hosted models, models on the organisation's own provider
 keys, and [subscription models](subscriptions.md). A Claude plan pays for the
 model, not for the gateway. Every token costs the same, input, output, cached or
-not, since the gateway handles each one the same way.
+not, since the gateway handles each one the same way. The fee is per token,
+so a transcription pays it on its prompt and transcript, not on its audio.
 
 **Who counts the tokens.** A hosted provider's usage record is used as it is,
 when every backend of the model is on the provider's own host over https. Any
@@ -168,12 +169,20 @@ request's row then has the real token counts and the provider's status, still
 marked as cancelled. For the same reason, a provider gets 15 minutes to start
 answering, not `KEERA_UPSTREAM_HEADER_TIMEOUT`.
 
+A transcription model sold by the minute, such as Whisper, is billed for the
+minutes of audio its answer reports. Only `json` and `verbose_json` answers
+report them, so on the deployment's key other formats are refused. On the
+report, its row shows audio minutes where the tokens would be, and the CSV
+fills in `quantity` and `unit` for it.
+
 Cache writes are billed at their own rate, like the rest of Keera's accounting
 ([providers.md](providers.md#cache-writes)), including Anthropic's dearer
 one-hour cache writes.
 
 When no usage record comes back, the call is billed the most it may have used:
-its whole body as prompt and its whole output ceiling as answer. This happens
+its whole body as prompt and its whole output ceiling as answer. For a
+transcription, that is as many minutes as its file could hold at the lowest
+bitrate a speech codec uses. This happens
 when the answer is too large to read (`KEERA_MAX_RESPONSE_BYTES`), when the
 provider takes longer than the gateway waits, or when it sends no record. For
 the request's own call, its usage row is marked as an estimate and the gateway

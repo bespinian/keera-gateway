@@ -283,6 +283,15 @@ model, are forwarded without being translated
   needs its own entry, with no `provider`, the `kind`, the full address in
   `backends`, a `location` and its own prices. The gateway sends a rerank to
   `<backend>/rerank`.
+- **Transcription models.** OpenAI's Whisper and GPT-4o transcribers and
+  Mistral's Voxtral Mini and Small Transcribe 3 are in the table and get
+  `kind: transcription` from it. Whisper and Voxtral are priced per minute of
+  audio, `audio_micros_per_minute`; the GPT-4o transcribers per token, like a
+  chat model. Mistral's cheaper rate for cached audio is not used. Another
+  model sold by the minute states its own `audio_micros_per_minute`. Mistral's
+  `file_url` and `file_id` are refused: the gateway needs the audio in `file`. Infomaniak's Whisper is not in the table: it
+  answers with a batch id to fetch later, not with the transcript. The gateway
+  sends a transcription to `<backend>/audio/transcriptions`.
 - **Where to read more:** Phoeniqs on
   [documentation.phoeniqs.com](https://documentation.phoeniqs.com/maas/active-models/),
   CSCS on [docs.cscs.ch](https://docs.cscs.ch/services/inference/api/), its

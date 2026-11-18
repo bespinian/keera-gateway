@@ -35,6 +35,8 @@ type BillLine struct {
 	CachedInputTokens int
 	CacheWriteTokens  int
 	OutputTokens      int
+	// AudioMillis is how much audio a transcription model heard.
+	AudioMillis int64
 	// Micros is the bill; CreditMicros is what it takes from credit.
 	Micros       int64
 	CreditMicros int64
@@ -60,13 +62,15 @@ func (m Model) Bill(reported, counted Tokens) (BillLine, bool) {
 }
 
 // fee is the gateway fee for one call: every token at the same price, cached
-// or not, since the gateway handles each the same.
+// or not, since the gateway handles each the same. Audio is not in it: the
+// fee is per token, and a transcript's tokens pay it.
 func (m Model) fee(reported, counted Tokens) BillLine {
 	t := reported
 	if m.CountsTokens() {
 		t = counted
 	}
 	t = t.clamped()
+	t.AudioMillis = 0
 	const perM = 1_000_000
 	line := m.line(t, int64(t.Input+t.Output)*m.Billing.FeeMicrosPerMTok/perM)
 	line.GatewayFee = true
@@ -88,6 +92,7 @@ func (m Model) line(t Tokens, micros int64) BillLine {
 		CachedInputTokens: t.CachedInput,
 		CacheWriteTokens:  t.CacheWrite,
 		OutputTokens:      t.Output,
+		AudioMillis:       t.AudioMillis,
 		Micros:            micros,
 		CreditMicros:      credit,
 	}
@@ -114,6 +119,7 @@ func (m *Model) PriceAtFee(fee int64) bool {
 	}
 	m.InputMicrosPerMTok, m.OutputMicrosPerMTok = fee, fee
 	m.CachedInputMicrosPerMTok, m.CacheWriteMicrosPerMTok = fee, fee
+	m.AudioMicrosPerMinute = 0
 	m.LongPrompt = nil
 	return true
 }

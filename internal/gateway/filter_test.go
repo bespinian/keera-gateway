@@ -63,8 +63,8 @@ func filterHarnessAnswering(t *testing.T, filterReply func(instruction string, s
 	return h
 }
 
-// filterModels is a client's model, a filter's model, an embedding model and
-// a rerank model.
+// filterModels is a client's model, a filter's model, an embedding model, a
+// rerank model and a transcription model.
 func filterModels() map[string]policy.Model {
 	return map[string]policy.Model{
 		"keera-code": {
@@ -82,6 +82,10 @@ func filterModels() map[string]policy.Model {
 		"keera-rerank": {
 			Alias: "keera-rerank", Kind: policy.KindRerank, BackendModel: "rerank-served",
 			Enabled: true,
+		},
+		"keera-whisper": {
+			Alias: "keera-whisper", Kind: policy.KindTranscription, BackendModel: "whisper-served",
+			AudioMicrosPerMinute: 6_000, Enabled: true,
 		},
 	}
 }

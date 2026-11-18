@@ -43,6 +43,9 @@ type tokenUsage struct {
 		// hour, which costs more. Only Anthropic's own API reports it.
 		CacheWriteHourTokens int `json:"-"`
 	} `json:"prompt_tokens_details"`
+	// AudioMillis is how much audio a transcription heard. See
+	// transcriptionUsage.
+	AudioMillis int64 `json:"-"`
 }
 
 // cached is how much of the prompt the provider did not have to read again.

@@ -28,6 +28,11 @@ var (
 	// the backend's /rerank: vLLM and llama.cpp serve it under /v1,
 	// Infomaniak under /cohere/v2.
 	rerankSurface = surface{kind: policy.KindRerank, path: "/rerank", shape: openAIShape{}}
+	// transcriptionSurface takes a multipart form. See transcription.go.
+	transcriptionSurface = surface{
+		kind: policy.KindTranscription, path: "/audio/transcriptions",
+		shape: transcriptionShape{},
+	}
 	// messagesSurface is the Anthropic-shaped `/v1/messages`: chatSurface in
 	// another format.
 	messagesSurface = surface{
@@ -43,8 +48,11 @@ var (
 
 // usage reads the token counts of a buffered answer in the plane's shape.
 func (s surface) usage(raw []byte) *tokenUsage {
-	if s.kind == policy.KindRerank {
+	switch s.kind {
+	case policy.KindRerank:
 		return rerankUsage(raw)
+	case policy.KindTranscription:
+		return transcriptionUsage(raw)
 	}
 	return usageFromResponse(raw)
 }

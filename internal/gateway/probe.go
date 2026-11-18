@@ -3,6 +3,7 @@ package gateway
 import (
 	"cmp"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -90,6 +91,8 @@ func (s *Server) CheckModel(ctx context.Context, m policy.Model) Probe {
 		return s.checkEmbedding(ctx, m, p)
 	case policy.KindRerank:
 		return s.checkRerank(ctx, m, p)
+	case policy.KindTranscription:
+		return s.checkTranscription(ctx, m, p)
 	case policy.KindCompletion:
 		return s.checkCompletion(ctx, m, p)
 	case policy.KindDecision:
@@ -408,7 +411,18 @@ func (s *Server) probeCall(ctx context.Context, m policy.Model, path string,
 		p.Error = err.Error()
 		return nil
 	}
-	resp, err := s.send(ctx, m, outbound{path: path, payload: payload})
+	output, _ := request["max_tokens"].(int)
+	most := policy.Tokens{Input: len(payload) / bytesPerToken, Output: output}
+	return s.probeSend(ctx, m, outbound{path: path, payload: payload}, most, p)
+}
+
+// probeSend is probeCall for a request already encoded. A check is billed
+// most, what it may have used.
+func (s *Server) probeSend(ctx context.Context, m policy.Model, out outbound,
+	most policy.Tokens, p *Probe,
+) *http.Response {
+	path := out.path
+	resp, err := s.send(ctx, m, out)
 	if err != nil {
 		p.Error = unreachable(err)
 		return nil
@@ -417,8 +431,6 @@ func (s *Server) probeCall(ctx context.Context, m policy.Model, path string,
 	if resp.StatusCode < 300 {
 		// Billed at its maximum: a check may not read far enough to find the
 		// usage record, and the cost is small.
-		output, _ := request["max_tokens"].(int)
-		most := policy.Tokens{Input: len(payload) / bytesPerToken, Output: output}
 		if line, ok := m.Bill(most, most); ok {
 			s.billCheck(m.OrgID, []policy.BillLine{line})
 		}
@@ -492,4 +504,80 @@ func unreachable(err error) string {
 // characters.
 func sample(s string) string {
 	return shorten(strings.TrimSpace(s), 400)
+}
+
+// checkTranscription sends a second of silence. Whisper may hear a word or
+// two in it, so only an answer with a transcript is checked, not the text.
+func (s *Server) checkTranscription(ctx context.Context, m policy.Model, p Probe) Probe {
+	b := &body{fields: map[string]json.RawMessage{}}
+	b.setString("model", m.BackendModel)
+	b.setString("response_format", "json")
+	audio := &audioPart{filename: "silence.wav", contentType: "audio/wav", data: silentWAV()}
+	payload, contentType := formPayload(b, audio)
+	most := policy.Tokens{
+		Input: audioTokensAtMost(silenceMillis), Output: transcriptProbeTokens,
+		AudioMillis: silenceMillis,
+	}
+	start := time.Now()
+	resp := s.probeSend(ctx, m, outbound{
+		path: transcriptionSurface.path, payload: payload, contentType: contentType,
+	}, most, &p)
+	if resp == nil {
+		return p
+	}
+	defer func() { _ = resp.Body.Close() }()
+	answer, ok := s.probeBody(resp, &p)
+	if !ok {
+		return p
+	}
+	p.TotalMS = time.Since(start).Milliseconds()
+	var out struct {
+		Model string  `json:"model"`
+		Text  *string `json:"text"`
+	}
+	if json.Unmarshal(answer, &out) != nil || out.Text == nil {
+		p.Error = "the backend answered 200 but with no transcript: " + sample(string(answer))
+		return p
+	}
+	p.Served, p.Sample = out.Model, sample(*out.Text)
+	if u := transcriptionUsage(answer); m.AudioMicrosPerMinute > 0 && (u == nil || u.AudioMillis == 0) {
+		p.Warnings = append(p.Warnings, "the answer does not say how much audio it heard, "+
+			"so a price per minute cannot be charged for this model")
+	}
+	p.OK = true
+	p.Warnings = append(p.Warnings, servedWarnings(p, m)...)
+	return p
+}
+
+// silenceMillis is the length of the check's audio.
+const silenceMillis = 1000
+
+// transcriptProbeTokens is the most a transcript of silence may be.
+const transcriptProbeTokens = 100
+
+// silentWAV is a second of silence: 16 kHz, mono, 16-bit PCM, which every
+// transcriber reads.
+func silentWAV() []byte {
+	const (
+		rate     = 16_000
+		channels = 1
+		bits     = 16
+		size     = rate * channels * bits / 8 * silenceMillis / 1000
+	)
+	out := make([]byte, 0, 44+size)
+	le32 := func(v uint32) { out = binary.LittleEndian.AppendUint32(out, v) }
+	le16 := func(v uint16) { out = binary.LittleEndian.AppendUint16(out, v) }
+	out = append(out, "RIFF"...)
+	le32(36 + size)
+	out = append(out, "WAVEfmt "...)
+	le32(16)
+	le16(1)
+	le16(channels)
+	le32(rate)
+	le32(rate * channels * bits / 8)
+	le16(channels * bits / 8)
+	le16(bits)
+	out = append(out, "data"...)
+	le32(size)
+	return append(out, make([]byte, size)...)
 }

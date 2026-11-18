@@ -99,8 +99,10 @@ type Request struct {
 	// prompt cache.
 	CacheWriteTokens int64 `json:"cache_write_tokens"`
 	OutputTokens     int64 `json:"output_tokens"`
-	CostMicros       int64 `json:"cost_micros"`
-	LatencyMS        int64 `json:"latency_ms"`
+	// AudioMS is how much audio a transcription sent.
+	AudioMS    int64 `json:"audio_ms,omitempty"`
+	CostMicros int64 `json:"cost_micros"`
+	LatencyMS  int64 `json:"latency_ms"`
 	// TTFTMS is how long the client waited for the first token.
 	TTFTMS int64 `json:"ttft_ms"`
 	Stream bool  `json:"stream"`
@@ -127,7 +129,7 @@ const requestColumns = `id, ts, alias, status, COALESCE(error, ''),
 	output_tokens, cost_micros,
 	latency_ms, ttft_ms, stream, estimated, canceled, COALESCE(session_key, ''),
 	COALESCE(spans, spans_jsonb::json), COALESCE(request_id, ''),
-	COALESCE(client_request_id, ''), COALESCE(note, '')`
+	COALESCE(client_request_id, ''), COALESCE(note, ''), audio_ms`
 
 func scanRequest(r row) (Request, error) {
 	var q Request
@@ -137,7 +139,7 @@ func scanRequest(r row) (Request, error) {
 		&q.InputTokens, &q.CachedInputTokens, &q.CacheWriteTokens, &q.OutputTokens,
 		&q.CostMicros,
 		&q.LatencyMS, &q.TTFTMS, &q.Stream, &q.Estimated, &q.Canceled, &q.SessionKey,
-		&spans, &q.RequestID, &q.ClientRequestID, &q.Note)
+		&spans, &q.RequestID, &q.ClientRequestID, &q.Note, &q.AudioMS)
 	if err != nil {
 		return q, err
 	}

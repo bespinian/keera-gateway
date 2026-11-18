@@ -103,7 +103,7 @@ func billingCSV(w http.ResponseWriter, month string, lines []store.BillingRow, p
 			rec = append(rec, policy.FormatMicros(l.CreditMicros))
 		}
 		quantity := ""
-		if l.Service != "" {
+		if l.Unit != "" {
 			quantity = policy.FormatQuantity(l.QuantityMicros)
 		}
 		rec = append(rec, l.Service, l.Item, quantity, l.Unit)

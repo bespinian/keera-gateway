@@ -62,6 +62,9 @@ type ProviderModel struct {
 	// LongPrompt is the dearer prices for a long prompt, for a model priced
 	// by prompt length.
 	LongPrompt *policy.PriceTier `json:"long_prompt,omitempty"`
+	// AudioMicrosPerMinute prices a minute of audio, for a transcription model
+	// sold by the minute.
+	AudioMicrosPerMinute int64 `json:"audio_micros_per_minute,omitempty"`
 	// Description is the default for an entry that states none, so routers
 	// never choose between bare aliases.
 	Description string `json:"description"`
@@ -75,7 +78,8 @@ type ProviderModel struct {
 
 // providers is the built-in table.
 //
-// Prices are micro-CHF per million tokens, at list price unless a provider
+// Prices are micro-CHF per million tokens, or per minute of audio for a
+// transcription model sold by the minute, at list price unless a provider
 // says otherwise; an entry can override them. Prices listed in USD are
 // converted at 0.96 CHF per USD. Last checked against each pricing page on
 // 2026-11-17.
@@ -386,6 +390,25 @@ var providers = []Provider{{
 		InputMicrosPerMTok: 144_000, OutputMicrosPerMTok: 576_000,
 		CachedInputMicrosPerMTok: 72_000,
 		Description:              "small and fast, no reasoning step - short, simple tasks; replaced by GPT-6 Luna",
+	}, {
+		// Whisper is priced per minute of audio and reports its length. Its
+		// prompt holds at most 224 tokens.
+		ID: "whisper-1", DisplayName: "Whisper",
+		Kind: policy.KindTranscription, MaxContext: 224, ReleaseDate: "2023-03-01",
+		AudioMicrosPerMinute: 5_760,
+		Description:          "speech to text in many languages, with timestamps and subtitles",
+	}, {
+		// The GPT-4o transcribers are priced and report by token: audio in,
+		// text out.
+		ID: "gpt-4o-transcribe", DisplayName: "GPT-4o Transcribe",
+		Kind: policy.KindTranscription, MaxContext: 16_000, ReleaseDate: "2025-03-20",
+		InputMicrosPerMTok: 2_400_000, OutputMicrosPerMTok: 9_600_000,
+		Description: "accurate speech to text - noisy audio, accents and fast speech",
+	}, {
+		ID: "gpt-4o-mini-transcribe", DisplayName: "GPT-4o mini Transcribe",
+		Kind: policy.KindTranscription, MaxContext: 16_000, ReleaseDate: "2025-03-20",
+		InputMicrosPerMTok: 1_200_000, OutputMicrosPerMTok: 4_800_000,
+		Description: "quick speech to text - meetings, notes and voice messages",
 	}},
 }, {
 	Name:    "google",
@@ -548,6 +571,20 @@ var providers = []Provider{{
 		InputMicrosPerMTok: 96_000, OutputMicrosPerMTok: 96_000,
 		CachedInputMicrosPerMTok: 9_600,
 		Description:              "tiny - classification, extraction and other simple tasks",
+	}, {
+		// The Voxtral transcribers are priced per minute of audio and report
+		// it as prompt_audio_seconds. Mistral's cheaper rate for cached audio
+		// is not used: every minute is billed at the full rate. The realtime
+		// model is left out: it only streams.
+		ID: "voxtral-mini-transcribe-3-0", DisplayName: "Voxtral Mini Transcribe 3",
+		Kind: policy.KindTranscription, MaxContext: 32_768, ReleaseDate: "2026-10-20",
+		AudioMicrosPerMinute: 3_360,
+		Description:          "small speech to text with speaker labels - meetings, calls and notes",
+	}, {
+		ID: "voxtral-small-transcribe-3-0", DisplayName: "Voxtral Small Transcribe 3",
+		Kind: policy.KindTranscription, MaxContext: 32_768, ReleaseDate: "2026-10-20",
+		AudioMicrosPerMinute: 3_840,
+		Description:          "speech to text with speaker labels - hard audio, many speakers and languages",
 	}},
 }, {
 	Name:    "peakprivacy",
@@ -1152,7 +1189,8 @@ func (p Provider) Check(kind policy.Kind, backendModel string, priced bool) erro
 	if !isKnown && !priced {
 		return fmt.Errorf("%s is not in the Keera Gateway price table for %s "+
 			"(it knows: %s); "+
-			"state input_micros_per_mtok and output_micros_per_mtok for it - "+
+			"state input_micros_per_mtok and output_micros_per_mtok for it, or "+
+			"audio_micros_per_minute for a transcription model - "+
 			"0 to declare the model unbilled, which no budget can then hold",
 			backendModel, p.Name, p.modelIDs())
 	}
@@ -1190,6 +1228,9 @@ func fillFromTable(m Model, known ProviderModel) Model {
 	}
 	if m.LongPrompt == nil {
 		m.LongPrompt = known.longPrompt()
+	}
+	if m.AudioMicrosPerMinute == nil {
+		m.AudioMicrosPerMinute = &known.AudioMicrosPerMinute
 	}
 	return m
 }

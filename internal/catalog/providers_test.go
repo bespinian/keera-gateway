@@ -310,6 +310,14 @@ func checkProviderModel(t *testing.T, p Provider, m ProviderModel, seenDescripti
 	// Embedding and rerank models write nothing.
 	inputOnly := m.kindOrChat() == policy.KindEmbedding || m.kindOrChat() == policy.KindRerank
 	switch {
+	case m.AudioMicrosPerMinute != 0 && m.kindOrChat() != policy.KindTranscription:
+		t.Errorf("%s is a %s model with an audio price; it hears no audio", m.ID, m.kindOrChat())
+	case m.AudioMicrosPerMinute < 0:
+		t.Errorf("%s is priced %d per minute", m.ID, m.AudioMicrosPerMinute)
+	case m.AudioMicrosPerMinute > 0 && (m.InputMicrosPerMTok != 0 || m.OutputMicrosPerMTok != 0):
+		// Priced by the minute, it reports no tokens to charge.
+		t.Errorf("%s is priced both per minute and per token", m.ID)
+	case m.AudioMicrosPerMinute > 0:
 	case inputOnly && m.OutputMicrosPerMTok != 0:
 		t.Errorf("%s is a %s model with an output price; it writes nothing", m.ID, m.kindOrChat())
 	case inputOnly && m.InputMicrosPerMTok <= 0:
@@ -339,7 +347,8 @@ func checkProviderModel(t *testing.T, p Provider, m ProviderModel, seenDescripti
 			m.ID, m.CacheWriteMicrosPerMTok, m.InputMicrosPerMTok)
 	}
 	switch {
-	case p.CachedInput && m.CachedInputMicrosPerMTok <= 0:
+	// A transcription has no prompt to cache.
+	case p.CachedInput && m.CachedInputMicrosPerMTok <= 0 && m.kindOrChat() != policy.KindTranscription:
 		// Without it, cached tokens cost up to ten times the console's price.
 		t.Errorf("%s states no cached-input rate; a coding agent's resent "+
 			"context is then charged at the full input price", m.ID)
@@ -770,5 +779,43 @@ models:
 `))
 	if err == nil || !strings.Contains(err.Error(), "above_tokens") {
 		t.Errorf("err = %v, want one naming above_tokens", err)
+	}
+}
+
+// A transcription model sold by the minute is priced by the minute alone.
+func TestATranscriptionModelIsPricedByTheMinute(t *testing.T) {
+	const in = `
+models:
+  - alias: whisper
+    provider: openai
+    backend_model: whisper-1
+  - alias: whisper-next
+    provider: openai
+    kind: transcription
+    backend_model: whisper-2
+    audio_micros_per_minute: 4000
+`
+	models, err := parseModelFile([]byte(in))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if m := models[0]; m.Kind != policy.KindTranscription || m.AudioMicrosPerMinute != 5_760 {
+		t.Errorf("whisper-1 = %s at %d a minute, want transcription at the table's 5760",
+			m.Kind, m.AudioMicrosPerMinute)
+	}
+	if m := models[1]; m.AudioMicrosPerMinute != 4_000 {
+		t.Errorf("an unknown model = %d a minute, want its own 4000", m.AudioMicrosPerMinute)
+	}
+
+	const chat = `
+models:
+  - alias: a
+    backends: ["http://keera-engine:8000/v1"]
+    backend_model: m
+    audio_micros_per_minute: 4000
+`
+	if _, err := parseModelFile([]byte(chat)); err == nil ||
+		!strings.Contains(err.Error(), "transcription") {
+		t.Errorf("a chat model priced per minute: err = %v, want a refusal", err)
 	}
 }

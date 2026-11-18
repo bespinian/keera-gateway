@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"net"
@@ -97,6 +98,8 @@ type outbound struct {
 	// clientID is the client's X-Client-Request-Id, set only on the client's
 	// own request, not on a filter's or router's.
 	clientID string
+	// contentType is the payload's, or "" for JSON.
+	contentType string
 }
 
 // forward sends the request to the first destination that can answer it.
@@ -180,7 +183,7 @@ func (s *Server) send(ctx context.Context, model policy.Model, out outbound) (*h
 			return nil, err
 		}
 		req.ContentLength = int64(len(payload))
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", cmp.Or(out.contentType, "application/json"))
 		req.Header.Set("Accept", "text/event-stream, application/json")
 		if out.auth != nil {
 			out.auth(req.Header, model.APIKey)

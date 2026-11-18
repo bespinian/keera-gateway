@@ -138,10 +138,15 @@ func printBilling(w *table, res billingResponse) {
 		}
 		used := fmt.Sprintf("%d\t%d\t%d\t%d\t%d", b.Calls, b.InputTokens, b.CachedInputTokens,
 			b.CacheWriteTokens, b.OutputTokens)
-		if b.Service != "" {
+		quantity := policy.FormatQuantity(roundQuantity(b.QuantityMicros)) + " " + b.Unit
+		switch {
+		case b.Service != "":
 			// An item has a quantity, not calls or tokens: it goes where the
 			// tokens would.
-			used = "\t" + policy.FormatQuantity(roundQuantity(b.QuantityMicros)) + " " + b.Unit + "\t\t\t"
+			used = "\t" + quantity + "\t\t\t"
+		case b.Unit != "":
+			// A model priced per minute of audio has calls and minutes.
+			used = fmt.Sprintf("%d\t%s\t\t\t", b.Calls, quantity)
 		}
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s", org, billedModel(b), used,
 			policy.FormatMoney(b.BilledMicros))

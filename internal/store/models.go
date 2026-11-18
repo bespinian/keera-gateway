@@ -15,8 +15,8 @@ const modelColumns = `SELECT alias, org_id, kind, backends, backend_model, provi
 	display_name, description, input_micros_per_mtok, output_micros_per_mtok, cached_input_micros_per_mtok,
 	cache_write_micros_per_mtok, long_prompt_tokens, long_input_micros_per_mtok,
 	long_output_micros_per_mtok, long_cached_input_micros_per_mtok,
-	long_cache_write_micros_per_mtok, max_context, coalesce(to_char(release_date, 'YYYY-MM-DD'), ''), location,
-	api_key_ct, subscription, enabled`
+	long_cache_write_micros_per_mtok, audio_micros_per_minute, max_context,
+	coalesce(to_char(release_date, 'YYYY-MM-DD'), ''), location, api_key_ct, subscription, enabled`
 
 func scanModel(r row) (policy.Model, error) {
 	var (
@@ -27,7 +27,7 @@ func scanModel(r row) (policy.Model, error) {
 		&m.DisplayName, &m.Description, &m.InputMicrosPerMTok, &m.OutputMicrosPerMTok, &m.CachedInputMicrosPerMTok,
 		&m.CacheWriteMicrosPerMTok, &long.AboveTokens, &long.InputMicrosPerMTok,
 		&long.OutputMicrosPerMTok, &long.CachedInputMicrosPerMTok,
-		&long.CacheWriteMicrosPerMTok, &m.MaxContext, &m.ReleaseDate, &m.Location, &m.APIKeyCiphertext, &m.Subscription,
+		&long.CacheWriteMicrosPerMTok, &m.AudioMicrosPerMinute, &m.MaxContext, &m.ReleaseDate, &m.Location, &m.APIKeyCiphertext, &m.Subscription,
 		&m.Enabled); err != nil {
 		return policy.Model{}, err
 	}
@@ -87,9 +87,10 @@ func upsertModel(ctx context.Context, db querier, m policy.Model, cred Credentia
 		cached_input_micros_per_mtok, cache_write_micros_per_mtok, long_prompt_tokens,
 		long_input_micros_per_mtok, long_output_micros_per_mtok,
 		long_cached_input_micros_per_mtok, long_cache_write_micros_per_mtok, max_context,
-		release_date, location, subscription, enabled, display_name, api_key_ct, updated_at)
+		release_date, location, subscription, enabled, display_name, api_key_ct,
+		audio_micros_per_minute, updated_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
-			NULLIF($18, '')::date, $19,$20,$21,$22,$24, now())
+			NULLIF($18, '')::date, $19,$20,$21,$22,$24,$25, now())
 		ON CONFLICT (org_id, alias) DO UPDATE SET kind = EXCLUDED.kind, backends = EXCLUDED.backends,
 			backend_model = EXCLUDED.backend_model, provider = EXCLUDED.provider,
 			display_name = EXCLUDED.display_name, description = EXCLUDED.description,
@@ -102,6 +103,7 @@ func upsertModel(ctx context.Context, db querier, m policy.Model, cred Credentia
 			long_output_micros_per_mtok = EXCLUDED.long_output_micros_per_mtok,
 			long_cached_input_micros_per_mtok = EXCLUDED.long_cached_input_micros_per_mtok,
 			long_cache_write_micros_per_mtok = EXCLUDED.long_cache_write_micros_per_mtok,
+			audio_micros_per_minute = EXCLUDED.audio_micros_per_minute,
 			max_context = EXCLUDED.max_context, release_date = EXCLUDED.release_date,
 			location = EXCLUDED.location, subscription = EXCLUDED.subscription,
 			enabled = EXCLUDED.enabled,
@@ -112,7 +114,8 @@ func upsertModel(ctx context.Context, db querier, m policy.Model, cred Credentia
 		m.CacheWriteMicrosPerMTok, long.AboveTokens, long.InputMicrosPerMTok,
 		long.OutputMicrosPerMTok, long.CachedInputMicrosPerMTok,
 		long.CacheWriteMicrosPerMTok, m.MaxContext,
-		m.ReleaseDate, m.Location, m.Subscription, m.Enabled, m.DisplayName, cred.set, cred.sealed)
+		m.ReleaseDate, m.Location, m.Subscription, m.Enabled, m.DisplayName, cred.set, cred.sealed,
+		m.AudioMicrosPerMinute)
 	return err
 }
 

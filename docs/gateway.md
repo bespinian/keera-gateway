@@ -113,6 +113,23 @@ with only the model name changed. A rerank writes nothing, so only its input
 is billed. The context window check skips it: the window holds the query and
 one document, and the reranker shortens a long document itself.
 
+Transcription models answer `/api/v1/audio/transcriptions`, as OpenAI, vLLM
+and Ollama serve it. The request is a multipart form, not JSON: the audio in
+`file`, and text fields such as `model`, `prompt`, `language` and
+`response_format`. The gateway reads the text fields like any other request,
+so the alias, limits and [filters](filters.md) work as they do for chat, and
+sends the audio on unchanged to the backend's `/audio/transcriptions`. Only
+`file` may be a file: text in a file part would pass no filter, so it is
+refused. So is `stream`, since a streamed transcript carries no usage record
+the gateway reads. A `text`, `srt` or `vtt` answer is passed on as text.
+
+The whole form is read before it is sent, so the audio counts against
+`KEERA_MAX_BODY_BYTES` ([install.md](install.md#everything-else)). A
+transcription answers only when it is done, so a self-hosted backend has
+`KEERA_UPSTREAM_HEADER_TIMEOUT` to transcribe the whole file. Raise it for
+long recordings. The context window check skips a transcription: the audio has
+no length in tokens before it is heard.
+
 `GET /api/v1/models` lists the models a key may call, and
 `GET /api/v1/models/{alias}` describes one. The list carries the fields of both
 OpenAI's and Anthropic's model lists, so either SDK reads it. `HEAD

@@ -249,6 +249,7 @@ func (s *Server) mux() *httpx.Mux {
 	// same and goes on as the client sent it.
 	mux.Handle("POST "+httpx.InferencePrefix+"/v1/rerank", s.inference(rerankSurface))
 	mux.Handle("POST "+httpx.InferencePrefix+"/v2/rerank", s.inference(rerankSurface))
+	mux.Handle("POST "+httpx.InferencePrefix+"/v1/audio/transcriptions", s.inference(transcriptionSurface))
 	// The Anthropic-shaped surface. Clients post to
 	// /api/v1/messages?beta=true; the query string is not matched.
 	mux.Handle("POST "+httpx.InferencePrefix+"/v1/messages", s.inference(messagesSurface))

@@ -58,6 +58,7 @@ func (p Platform) Lock(m *policy.Model) error {
 	m.CachedInputMicrosPerMTok = known.CachedInputMicrosPerMTok
 	m.CacheWriteMicrosPerMTok = known.CacheWriteMicrosPerMTok
 	m.LongPrompt = known.longPrompt()
+	m.AudioMicrosPerMinute = known.AudioMicrosPerMinute
 	m.PlatformKey = true
 	return nil
 }

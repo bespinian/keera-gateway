@@ -91,14 +91,19 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		// Nil: a new model starts enabled, an existing one keeps its state.
 		Enabled *bool `json:"enabled"`
 		// Pointers, so a price left out can be told from one set to 0.
-		InputMicrosPerMTok  *int64 `json:"input_micros_per_mtok"`
-		OutputMicrosPerMTok *int64 `json:"output_micros_per_mtok"`
+		InputMicrosPerMTok   *int64 `json:"input_micros_per_mtok"`
+		OutputMicrosPerMTok  *int64 `json:"output_micros_per_mtok"`
+		AudioMicrosPerMinute *int64 `json:"audio_micros_per_minute"`
 	}
 	if !readJSON(w, r, &body) {
 		return
 	}
 	m := body.Model
-	priced := body.InputMicrosPerMTok != nil && body.OutputMicrosPerMTok != nil
+	priced := (body.InputMicrosPerMTok != nil && body.OutputMicrosPerMTok != nil) ||
+		body.AudioMicrosPerMinute != nil
+	if body.AudioMicrosPerMinute != nil {
+		m.AudioMicrosPerMinute = *body.AudioMicrosPerMinute
+	}
 	if body.InputMicrosPerMTok != nil {
 		m.InputMicrosPerMTok = *body.InputMicrosPerMTok
 	}

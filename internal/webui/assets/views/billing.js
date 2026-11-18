@@ -203,7 +203,9 @@ async function billSection(ctx) {
     {
       label: "Input",
       num: true,
-      cell: (r) => compact(r.input_tokens),
+      // A model priced per minute bills audio, not tokens.
+      cell: (r) =>
+        r.unit ? quantity(r) : compact(r.input_tokens),
       sortKey: (r) => r.input_tokens,
       sortDir: "desc",
     },

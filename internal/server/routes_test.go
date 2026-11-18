@@ -47,6 +47,7 @@ func TestRoutesSendEachPathToTheRightPlane(t *testing.T) {
 		{"openai embeddings", http.MethodPost, "/api/v1/embeddings", http.StatusUnauthorized},
 		{"rerank", http.MethodPost, "/api/v1/rerank", http.StatusUnauthorized},
 		{"cohere rerank", http.MethodPost, "/api/v2/rerank", http.StatusUnauthorized},
+		{"transcription", http.MethodPost, "/api/v1/audio/transcriptions", http.StatusUnauthorized},
 		{"anthropic messages", http.MethodPost, "/api/v1/messages", http.StatusUnauthorized},
 		{"the model catalogue clients read", http.MethodGet, "/api/v1/models", http.StatusUnauthorized},
 		// Anthropic clients append /api/hello to a base URL that already

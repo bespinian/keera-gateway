@@ -20,7 +20,7 @@ var (
 	modelFieldFlags = []string{
 		"provider", "backend", "product-id", "backend-model", "kind",
 		"display-name", "description", "max-context-tokens", "release-date", "location",
-		"price-in", "price-out", "price-cached", "price-cache-write",
+		"price-in", "price-out", "price-cached", "price-cache-write", "price-audio",
 	}
 	mcpFieldFlags    = []string{"endpoint", "description", "auth-header", "api-key"}
 	filterFieldFlags = []string{"mode", "model", "prompt", "rules", "description"}

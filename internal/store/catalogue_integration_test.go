@@ -46,19 +46,24 @@ func TestEveryModelKindCanBeStored(t *testing.T) {
 
 	for _, kind := range []policy.Kind{
 		policy.KindChat, policy.KindCompletion, policy.KindEmbedding,
-		policy.KindRerank, policy.KindDecision,
+		policy.KindRerank, policy.KindTranscription, policy.KindDecision,
 	} {
 		m := policy.Model{
 			OrgID: "org_1", Alias: "model-" + string(kind), Kind: kind,
 			Backends: []string{"http://x/v1"}, BackendModel: "x",
 			Location: policy.LocationOnPrem, Enabled: true,
 		}
+		if kind == policy.KindTranscription {
+			m.AudioMicrosPerMinute = 5_760
+		}
 		if err := st.UpsertModel(ctx, m, Credential{}); err != nil {
 			t.Errorf("UpsertModel(%s): %v", kind, err)
 			continue
 		}
-		if got, err := st.Model(ctx, "org_1", m.Alias); err != nil || got.Kind != kind {
-			t.Errorf("Model(%s) = %q, %v", kind, got.Kind, err)
+		got, err := st.Model(ctx, "org_1", m.Alias)
+		if err != nil || got.Kind != kind || got.AudioMicrosPerMinute != m.AudioMicrosPerMinute {
+			t.Errorf("Model(%s) = %q at %d a minute, %v", kind, got.Kind,
+				got.AudioMicrosPerMinute, err)
 		}
 	}
 }

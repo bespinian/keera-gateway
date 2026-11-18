@@ -71,6 +71,8 @@ type call struct {
 	// get the translation. Until then the OpenAI-shaped body is nil.
 	native     *body
 	translated bool
+	// audio is a transcription's audio, sent on as it came.
+	audio *audioPart
 
 	stream        bool
 	injectedUsage bool
@@ -289,9 +291,23 @@ func readAll(src io.Reader, size int) ([]byte, error) {
 // translate). Until then b is nil.
 func (s *Server) decode(c *call, raw []byte) (*body, bool) {
 	d := c.surf.dialect
-	b, err := parseBody(raw)
+	var (
+		b   *body
+		err error
+	)
+	if c.surf.kind == policy.KindTranscription {
+		b, c.audio, err = parseForm(c.r.Header.Get("Content-Type"), raw)
+	} else {
+		b, err = parseBody(raw)
+	}
 	if err != nil {
 		s.refuse(c, invalidBody(err.Error()))
+		return nil, false
+	}
+	// A streamed transcription's events carry no usage record the gateway
+	// reads, so it could not be billed.
+	if on, _ := b.boolean("stream"); on && c.surf.kind == policy.KindTranscription {
+		s.refuse(c, invalidBody("the gateway does not stream transcriptions; leave out 'stream'"))
 		return nil, false
 	}
 	// A backend that reads "true" or 1 as true would stream an answer the
@@ -782,6 +798,12 @@ func (s *Server) prepare(c *call, b *body) bool {
 			}
 		}
 	}
+	if c.chainOnKey() && c.surf.kind == policy.KindTranscription {
+		if why := unreportedFormat(b); why != "" {
+			s.refuse(c, invalidBody(why))
+			return false
+		}
+	}
 	if c.chainOnKey() {
 		// Hosted tools are removed on the deployment's key: the provider
 		// charges for them apart from tokens, which is not billed. The header
@@ -872,6 +894,11 @@ func (s *Server) answer(c *call, b *body) {
 	c.ev.Status = resp.StatusCode
 	streaming := c.stream && httpx.MediaType(resp.Header.Get("Content-Type")) == "text/event-stream"
 	copyResponseHeaders(c.w, resp, c.alias, streaming)
+	if c.audio != nil && resp.StatusCode < 300 {
+		if ct := transcriptContentType(resp.Header.Get("Content-Type")); ct != "" {
+			c.w.Header().Set("Content-Type", ct)
+		}
+	}
 	s.limitHeaders(c.w, c.res, c.now)
 	if c.model.Subscription {
 		passPlanHeaders(c.w, resp.Header)
@@ -898,9 +925,13 @@ func (s *Server) answer(c *call, b *body) {
 	if resp.StatusCode < 400 {
 		s.billUnreported(c, b)
 	}
-	if c.model.CountsTokens() && c.ev.Status < 300 {
+	switch {
+	case c.model.CountsTokens() && c.ev.Status < 300 && c.audio != nil:
+		// The payload is mostly audio; only the text fields are tokens.
+		c.counted.Input = estimateInputTokens(c.sent(b).encode())
+	case c.model.CountsTokens() && c.ev.Status < 300:
 		c.counted.Input = estimateInputTokens(fw.payload)
-	} else {
+	default:
 		c.counted = policy.Tokens{}
 	}
 	c.ev.Canceled = c.r.Context().Err() != nil
@@ -939,6 +970,13 @@ func (c *call) outbound(b *body) func(policy.Model) outbound {
 			}
 		}
 		b.setString("model", m.BackendModel)
+		if c.audio != nil {
+			payload, contentType := formPayload(b, c.audio)
+			return outbound{
+				path: c.surf.path, payload: payload, clientID: clientID,
+				contentType: contentType,
+			}
+		}
 		return outbound{path: c.surf.path, payload: b.encode(), clientID: clientID}
 	}
 }
@@ -1118,7 +1156,11 @@ func (s *Server) relayBuffered(c *call, resp *http.Response, answered time.Time,
 		setUsage(&c.ev, usage)
 	}
 	if c.model.CountsTokens() && resp.StatusCode < 300 {
-		c.counted.Output = writtenBytes(body) / bytesPerTokenTypical
+		written := writtenBytes(body)
+		if c.audio != nil {
+			written = transcriptBytes(body)
+		}
+		c.counted.Output = written / bytesPerTokenTypical
 	}
 }
 
@@ -1183,6 +1225,7 @@ func setUsage(ev *store.Event, u *tokenUsage) {
 	ev.CacheWriteTokens = u.InputDetails.CacheWriteTokens
 	ev.CacheWriteHourTokens = u.InputDetails.CacheWriteHourTokens
 	ev.OutputTokens = u.OutputTokens
+	ev.AudioMillis = u.AudioMillis
 }
 
 // finish charges the request and records it. Filter and router spend is
@@ -1195,7 +1238,7 @@ func (s *Server) finish(c *call) {
 	used := policy.Tokens{
 		Input: ev.InputTokens, CachedInput: ev.CachedInputTokens,
 		CacheWrite: ev.CacheWriteTokens, CacheWriteHour: ev.CacheWriteHourTokens,
-		Output: ev.OutputTokens,
+		Output: ev.OutputTokens, AudioMillis: ev.AudioMillis,
 	}
 	cost, bills := answerCost(c.model, used, c.counted)
 	ev.CostMicros, ev.Bills = cost, append(c.hookBills(), bills...)

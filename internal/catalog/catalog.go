@@ -54,7 +54,10 @@ type Model struct {
 	// LongPrompt is the price when the prompt is longer than above_tokens. A
 	// provider fills it in for a model priced by prompt length.
 	LongPrompt *policy.PriceTier `yaml:"long_prompt"`
-	MaxContext *int              `yaml:"max_context_tokens"`
+	// AudioMicrosPerMinute prices a minute of audio, for a transcription
+	// model sold by the minute.
+	AudioMicrosPerMinute *int64 `yaml:"audio_micros_per_minute"`
+	MaxContext           *int   `yaml:"max_context_tokens"`
 	// ReleaseDate is the day the model came out, as YYYY-MM-DD.
 	ReleaseDate string `yaml:"release_date"`
 	// Location is where the model runs: a country, such as ch or usa, or
@@ -174,13 +177,15 @@ func ParseModel(m Model) (policy.Model, error) {
 		CachedInputMicrosPerMTok: deref(m.CachedInputMicrosPerMTok),
 		CacheWriteMicrosPerMTok:  deref(m.CacheWriteMicrosPerMTok),
 		LongPrompt:               m.LongPrompt,
+		AudioMicrosPerMinute:     deref(m.AudioMicrosPerMinute),
 		MaxContext:               deref(m.MaxContext),
 		ReleaseDate:              m.ReleaseDate,
 		Location:                 m.Location,
 		Subscription:             m.Subscription,
 		Enabled:                  !m.Disabled,
 	}
-	priced := m.InputMicrosPerMTok != nil && m.OutputMicrosPerMTok != nil
+	priced := (m.InputMicrosPerMTok != nil && m.OutputMicrosPerMTok != nil) ||
+		m.AudioMicrosPerMinute != nil
 	if err := CheckModel(&parsed, priced); err != nil {
 		return policy.Model{}, err
 	}
@@ -189,7 +194,7 @@ func ParseModel(m Model) (policy.Model, error) {
 
 // CheckModel fills in what a model may leave out and says what is wrong with
 // it. Files, the command line and the control API all run it, so they agree.
-// priced says both prices were stated. Other provider defaults are not
+// priced says both token prices, or the audio price, were stated. Other provider defaults are not
 // applied: the control API is sent every value.
 func CheckModel(m *policy.Model, priced bool) error {
 	if err := m.CheckBackend(); err != nil {
@@ -199,7 +204,16 @@ func CheckModel(m *policy.Model, priced bool) error {
 		m.Kind = policy.KindChat
 	}
 	if !m.Kind.Valid() {
-		return fmt.Errorf("kind %q must be chat, completion, embedding, rerank or decision", m.Kind)
+		return fmt.Errorf("kind %q must be chat, completion, embedding, rerank, "+
+			"transcription or decision", m.Kind)
+	}
+	switch {
+	case m.AudioMicrosPerMinute < 0:
+		return errors.New("audio_micros_per_minute cannot be negative")
+	case m.AudioMicrosPerMinute > 0 && m.Kind != policy.KindTranscription:
+		// Only a transcription hears audio, so the price would never apply.
+		return fmt.Errorf("audio_micros_per_minute prices a transcription model, "+
+			"not a %s model", m.Kind)
 	}
 	// The gateway picks how to talk to the backend by provider, so it must
 	// be a known one.

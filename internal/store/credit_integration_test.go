@@ -440,3 +440,29 @@ func TestTheGatewayFeeIsItsOwnRowOfTheBill(t *testing.T) {
 		t.Errorf("balance = %d, want both taken", got)
 	}
 }
+
+// A model priced per minute bills audio minutes, and its request row keeps how
+// much audio it sent.
+func TestATranscriptionBillsItsAudioMinutes(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	now := time.Now()
+	line := policy.BillLine{
+		Alias: "whisper", Provider: "openai", BackendModel: "whisper-1",
+		AudioMillis: 90_000, Micros: 8_640, CreditMicros: 8_640,
+	}
+	if err := st.WriteEvents(ctx, []Event{{
+		TS: now, OrgID: f.orgID, Alias: "whisper", Status: 200, AudioMillis: 90_000,
+		RequestID: "req-audio", Bills: []policy.BillLine{line},
+	}}); err != nil {
+		t.Fatalf("WriteEvents: %v", err)
+	}
+	rows, err := st.Billing(ctx, f.orgID, now.Add(-time.Hour), now.Add(time.Hour))
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("billing = %+v, %v; want one row", rows, err)
+	}
+	if r := rows[0]; r.Unit != UnitAudioMinutes || r.QuantityMicros != 1_500_000 ||
+		r.Calls != 1 || r.BilledMicros != 8_640 {
+		t.Errorf("billing = %+v, want 1.5 audio minutes in one call", r)
+	}
+}

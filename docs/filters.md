@@ -67,6 +67,7 @@ segments.
 | `/api/v1/completions`              | the `prompt`, or each string in a `prompt` array                                                    |
 | `/api/v1/embeddings`               | the `input`, or each string in an `input` array                                                     |
 | `/api/v1/rerank`, `/api/v2/rerank` | the `query`, and each document: a string, or the `text` of an object                                |
+| `/api/v1/audio/transcriptions`     | the `prompt`, and each word in Mistral's `context_bias`; the audio is not read                      |
 
 A Messages or Responses request forwarded untranslated to its own provider (see
 [gateway.md](gateway.md#three-request-shapes)) is filtered in its own shape.
@@ -96,7 +97,7 @@ unknown content part type or a rerank document with text outside `text`, is
 refused with `400` rather than passed on: the model might read text no filter
 saw. So is a Messages or Responses request
 whose message content, tool result or tool output is neither text nor a list of
-parts.
+parts, and a transcription with a file in any field but `file`.
 
 For `rewrite` and `gate`, the gateway appends a wire format to the
 administrator's instruction. Each mode has its own.

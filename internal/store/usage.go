@@ -44,7 +44,10 @@ type Event struct {
 	// It only prices the request and is not stored.
 	CacheWriteHourTokens int
 	OutputTokens         int
-	CostMicros           int64
+	// AudioMillis is how much audio a transcription sent, as its model
+	// reported.
+	AudioMillis int64
+	CostMicros  int64
 	// ListCostMicros is what a subscription request would have cost at API
 	// prices. No budget is charged it.
 	ListCostMicros int64
@@ -244,9 +247,9 @@ func queueEvent(batch *pgx.Batch, e Event) {
 		client, input_tokens, cached_input_tokens, cache_write_tokens, output_tokens, cost_micros,
 		list_cost_micros, status, latency_ms, ttft_ms, stream, estimated, canceled, error,
 		session_key, router, router_outcome, router_ms, spans, request_id, client_request_id,
-		note)
+		note, audio_ms)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
-		$22,$23,$24,$25,$26,$27,$28)`,
+		$22,$23,$24,$25,$26,$27,$28,$29)`,
 		e.TS, e.OrgID, nullable(e.ProjectID), nullable(e.UserID), nullable(e.KeyID), e.Alias,
 		nullable(e.Client),
 		e.InputTokens, e.CachedInputTokens, e.CacheWriteTokens, e.OutputTokens, e.CostMicros,
@@ -256,7 +259,7 @@ func queueEvent(batch *pgx.Batch, e Event) {
 		nullable(truncate(e.Error, maxErrorBytes)), nullable(e.SessionKey),
 		nullable(e.Router), nullable(string(e.RouterOutcome)), e.RouterMS,
 		spansJSON(e.Spans, e.Alias, e.Status), nullable(e.RequestID), nullable(e.ClientRequestID),
-		nullable(truncate(e.Note, maxErrorBytes)))
+		nullable(truncate(e.Note, maxErrorBytes)), e.AudioMillis)
 	queueFilterRuns(batch, e)
 }
 

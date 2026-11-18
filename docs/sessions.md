@@ -68,7 +68,8 @@ sentence get two sessions, and another key can never join a key's session.
 **Only the chat surfaces get a session.** `/api/v1/chat/completions`,
 `/api/v1/messages` and `/api/v1/responses` carry a conversation.
 `/api/v1/completions` carries a bare prompt that is different on every request,
-and `/api/v1/embeddings` and the rerank routes have no conversation at all.
+and `/api/v1/embeddings`, the rerank routes and `/api/v1/audio/transcriptions`
+have no conversation at all.
 Requests to those belong to no session.
 
 ### What is actually stored

@@ -26,6 +26,10 @@ func extractText(b *body, kind policy.Kind) (textDoc, error) {
 		return extractScalar(b, "prompt"), nil
 	case policy.KindRerank:
 		return extractRerank(b)
+	case policy.KindTranscription:
+		// The audio is not text, as in a chat. The prompt and Mistral's
+		// context_bias are the words a model is steered with.
+		return extractScalar(b, "prompt", "context_bias"), nil
 	default:
 		return extractScalar(b, "input"), nil
 	}
@@ -227,18 +231,20 @@ func holdsText(v any) bool {
 	return false
 }
 
-// extractScalar is the text of a field that is one string or an array, such
-// as a completion's prompt. An array of token ids has no text.
-func extractScalar(b *body, field string) *treeDoc {
+// extractScalar is the text of fields that are each one string or an array,
+// such as a completion's prompt. An array of token ids has no text.
+func extractScalar(b *body, fields ...string) *treeDoc {
 	d := newTreeDoc()
-	v, _ := d.root(b, field)
-	if s, ok := v.(string); ok {
-		d.add(s, func(r string) { d.roots[field] = r })
-	}
-	arr, _ := v.([]any)
-	for i, e := range arr {
-		if s, ok := e.(string); ok {
-			d.add(s, func(r string) { arr[i] = r })
+	for _, field := range fields {
+		v, _ := d.root(b, field)
+		if s, ok := v.(string); ok {
+			d.add(s, func(r string) { d.roots[field] = r })
+		}
+		arr, _ := v.([]any)
+		for i, e := range arr {
+			if s, ok := e.(string); ok {
+				d.add(s, func(r string) { arr[i] = r })
+			}
 		}
 	}
 	return d

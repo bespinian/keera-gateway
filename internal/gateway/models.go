@@ -155,6 +155,8 @@ func (s *Server) servedAt(res *policy.Resolved, alias string) string {
 		return "/v1/embeddings"
 	case policy.KindRerank:
 		return "/v1/rerank or /v2/rerank"
+	case policy.KindTranscription:
+		return "/v1/audio/transcriptions"
 	}
 	return ""
 }

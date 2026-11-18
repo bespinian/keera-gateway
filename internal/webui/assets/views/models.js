@@ -215,13 +215,19 @@ export async function modelsView(ctx) {
         sortKey: (m) => m.input_micros_per_mtok || null,
         sortDir: "desc",
         cell: (m) =>
-          m.input_micros_per_mtok || m.output_micros_per_mtok
+          m.audio_micros_per_minute
             ? h(
                 "span",
                 { class: "nowrap muted" },
-                `${listPrice(m.input_micros_per_mtok)} in · ${listPrice(m.output_micros_per_mtok)} out`,
+                `${listPrice(m.audio_micros_per_minute)} / min of audio`,
               )
-            : h("span", { class: "faint" }, "not billed"),
+            : m.input_micros_per_mtok || m.output_micros_per_mtok
+              ? h(
+                  "span",
+                  { class: "nowrap muted" },
+                  `${listPrice(m.input_micros_per_mtok)} in · ${listPrice(m.output_micros_per_mtok)} out`,
+                )
+              : h("span", { class: "faint" }, "not billed"),
       },
       {
         // Enabled is the admin's switch; Check tests the backend.
@@ -551,6 +557,9 @@ function catalogueTile(ctx, r) {
       fact("Output / MTok", price(r.m.output_micros_per_mtok)),
       fact("Cached input / MTok", price(r.m.cached_input_micros_per_mtok)),
       fact("Cache write / MTok", price(r.m.cache_write_micros_per_mtok)),
+      r.m.audio_micros_per_minute
+        ? fact("Audio / minute", price(r.m.audio_micros_per_minute))
+        : null,
     ),
     r.aliases.length
       ? h(
@@ -705,6 +714,14 @@ function viewModel(ctx, m) {
                   "input is charged again."
                 : ""),
       ),
+      m.audio_micros_per_minute
+        ? readRow(
+            "Price per minute of audio (CHF)",
+            h("span", { class: "nowrap" }, listPrice(m.audio_micros_per_minute)),
+            "What each minute of audio sent to this model costs, as its " +
+              "answer reports it.",
+          )
+        : null,
       m.long_prompt
         ? readRow(
             "Price for long prompts (CHF)",
@@ -750,6 +767,8 @@ function surfaceOf(kind) {
       return "Answers /api/v1/embeddings.";
     case "rerank":
       return "Answers /api/v1/rerank and /api/v2/rerank.";
+    case "transcription":
+      return "Answers /api/v1/audio/transcriptions.";
     case "decision":
       return (
         "Answers no client. Routers and gate filters decide with it, " +
@@ -857,7 +876,14 @@ function report(probe, kind) {
   });
 }
 
-const KINDS = ["chat", "completion", "embedding", "rerank", "decision"];
+const KINDS = [
+  "chat",
+  "completion",
+  "embedding",
+  "rerank",
+  "transcription",
+  "decision",
+];
 
 function kindName(kind) {
   return (
@@ -866,6 +892,7 @@ function kindName(kind) {
       completion: "Completion",
       embedding: "Embedding",
       rerank: "Rerank",
+      transcription: "Transcription",
       decision: "Decision",
     }[kind] || kind
   );
@@ -1024,6 +1051,16 @@ const PRESET_FIELDS = [
         ? String(m.cache_write_micros_per_mtok / 1e6)
         : null,
   },
+  {
+    key: "priceAudio",
+    label: "list price per minute",
+    fromModel: true,
+    numeric: true,
+    of: (p, m) =>
+      m && m.audio_micros_per_minute
+        ? String(m.audio_micros_per_minute / 1e6)
+        : null,
+  },
 ];
 
 // pick is the catalogue's choice for a new model: a provider and one of its
@@ -1097,6 +1134,8 @@ function editModel(ctx, existing, providers, pick) {
   const priceOut = priceInput(m.output_micros_per_mtok);
   const priceCached = priceInput(m.cached_input_micros_per_mtok);
   const priceWrite = priceInput(m.cache_write_micros_per_mtok);
+  // A fraction of a cent, so any step.
+  const priceAudio = priceInput(m.audio_micros_per_minute, "any");
   const fields = {
     kind,
     backendModel,
@@ -1110,6 +1149,7 @@ function editModel(ctx, existing, providers, pick) {
     priceOut,
     priceCached,
     priceWrite,
+    priceAudio,
   };
   setKinds(kind, KINDS, m.kind || "chat");
 
@@ -1180,12 +1220,20 @@ function editModel(ctx, existing, providers, pick) {
   const lockFee = (self) => {
     feeNote.hidden = !self;
     cacheRow.hidden = self;
+    // Only a hosted transcription model is priced per minute; the fee is
+    // per token.
+    audioRow.hidden = self || kind.value !== "transcription";
     if (!self) return;
     for (const el of [priceIn, priceOut, priceCached, priceWrite]) {
       el.value = String(fee / 1e6);
       el.disabled = true;
     }
+    priceAudio.value = "";
+    priceAudio.disabled = true;
   };
+  kind.addEventListener("change", () => {
+    audioRow.hidden = !state.hosted || kind.value !== "transcription";
+  });
 
   // basics stays visible for a self-hosted model; extras is folded under
   // Advanced options. A hosted model folds both. See layout.
@@ -1253,6 +1301,18 @@ function editModel(ctx, existing, providers, pick) {
       marks.priceWrite,
     ),
   );
+  // Blank on a transcription model priced by token.
+  const audioRow = h(
+    "div",
+    { class: "field" },
+    field(
+      "Price / minute of audio (CHF)",
+      priceAudio,
+      "For a transcription model sold by the minute, such as Whisper. If " +
+        "blank, it is charged by its tokens.",
+      marks.priceAudio,
+    ),
+  );
   const extras = h(
     "div",
     {},
@@ -1282,6 +1342,7 @@ function editModel(ctx, existing, providers, pick) {
     ),
     feeNote,
     cacheRow,
+    audioRow,
     h(
       "div",
       { class: "field" },
@@ -1498,6 +1559,8 @@ function editModel(ctx, existing, providers, pick) {
         output_micros_per_mtok: statedMicros(priceOut.value),
         cached_input_micros_per_mtok: toMicros(priceCached.value),
         cache_write_micros_per_mtok: toMicros(priceWrite.value),
+        audio_micros_per_minute:
+          kind.value === "transcription" ? statedMicros(priceAudio.value) : null,
         long_prompt: longPrompt(),
         subscription: paidByPlan,
         enabled: enabled.checked,
@@ -1573,6 +1636,7 @@ function providerAnswers(p, known) {
     // No published rate leaves the field open. Blank means the input price.
     priceCached: !!known && !!known.cached_input_micros_per_mtok,
     priceWrite: !!known && !!known.cache_write_micros_per_mtok,
+    priceAudio: !!known,
   };
 }
 
@@ -1674,7 +1738,13 @@ function hostedFields(ctx, providers, form) {
     // On the operator's key the control plane sets endpoint and prices.
     if (p.platform_key) {
       fixed.backends = true;
-      for (const key of ["priceIn", "priceOut", "priceCached", "priceWrite"])
+      for (const key of [
+        "priceIn",
+        "priceOut",
+        "priceCached",
+        "priceWrite",
+        "priceAudio",
+      ])
         fixed[key] = !!m;
     }
     return fixed;
@@ -1860,12 +1930,12 @@ function sameValue(f, now, def, m) {
   return f.numeric ? Number(now) === Number(def) : now === def;
 }
 
-function priceInput(v) {
+function priceInput(v, step = "0.01") {
   return h("input", {
     class: "input",
     type: "number",
     min: "0",
-    step: "0.01",
+    step,
     placeholder: "0.00",
     value: v ? v / 1e6 : "",
   });

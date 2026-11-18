@@ -17,3 +17,13 @@ ALTER TABLE billing_lines
     ADD COLUMN external_id     text;
 CREATE UNIQUE INDEX billing_lines_external_idx ON billing_lines (service, external_id)
     WHERE external_id IS NOT NULL;
+
+-- A transcription model turns audio into text, on
+-- /api/v1/audio/transcriptions. It may be priced per minute of audio, as
+-- Whisper is sold, and each request records how much audio it sent.
+ALTER TABLE models DROP CONSTRAINT models_kind_check,
+    ADD CONSTRAINT models_kind_check
+        CHECK (kind IN ('chat', 'completion', 'embedding', 'rerank', 'transcription',
+                        'decision')),
+    ADD COLUMN audio_micros_per_minute bigint NOT NULL DEFAULT 0;
+ALTER TABLE usage_events ADD COLUMN audio_ms bigint NOT NULL DEFAULT 0;
