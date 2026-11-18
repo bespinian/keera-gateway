@@ -577,7 +577,7 @@ func printProviders(w *table, providers []providerEntry) {
 			}
 			if m.AudioMicrosPerMinute > 0 {
 				_, _ = fmt.Fprintf(w, "  %s: %s per minute of audio\n", m.ID,
-					audioPrice(m.AudioMicrosPerMinute))
+					policy.FormatPrice(m.AudioMicrosPerMinute))
 			}
 		}
 	}
@@ -642,7 +642,7 @@ func printModel(w *table, m policy.Model) {
 	show(w, "in/mtok", policy.FormatPrice(m.InputMicrosPerMTok))
 	show(w, "out/mtok", policy.FormatPrice(m.OutputMicrosPerMTok))
 	if m.AudioMicrosPerMinute > 0 {
-		show(w, "audio/minute", audioPrice(m.AudioMicrosPerMinute))
+		show(w, "audio/minute", policy.FormatPrice(m.AudioMicrosPerMinute))
 	}
 	// In words rather than 0.00: an unstated rate is not free.
 	if m.CachedInputMicrosPerMTok > 0 {
@@ -722,10 +722,4 @@ func kindNames(kinds []policy.Kind) string {
 		names = append(names, string(k))
 	}
 	return strings.Join(names, ", ")
-}
-
-// audioPrice shows a price per minute in full: it is a fraction of a cent,
-// which two decimals would round to 0.00.
-func audioPrice(micros int64) string {
-	return policy.Currency + " " + policy.FormatQuantity(micros)
 }

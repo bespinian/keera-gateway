@@ -159,7 +159,7 @@ takes about 250 ms. Reading one session takes under a millisecond.
 
 ## Configuration
 
-[`KEERA_SESSION_GAP`](install.md#everything-else) is the idle time that ends a
+[`KEERA_SESSION_GAP`](https://docs.keera.ch/operate/settings/#traffic) is the idle time that ends a
 task. Within a task,
 requests are seconds or a minute or two apart; between tasks there is a
 meeting, a lunch or a night. Much under ten minutes splits one task into

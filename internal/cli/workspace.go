@@ -33,6 +33,8 @@ type workspaceRun struct {
 	all               bool
 	port              int
 	noBrowser         bool
+	name, description string
+	follow            bool
 }
 
 func workspaceCmd(ctx context.Context, args []string) error {
@@ -47,6 +49,10 @@ func workspaceCmd(ctx context.Context, args []string) error {
 	fs.BoolVar(&r.all, "all", false, "every workspace in the organisation, for an administrator")
 	fs.IntVar(&r.port, "port", 0, "the port on this machine; 0 picks a free one")
 	fs.BoolVar(&r.noBrowser, "no-browser", false, "do not open a browser; the address is printed either way")
+	fs.StringVar(&r.name, "name", "", "a new name")
+	fs.StringVar(&r.description, "description", "", "what it is for; empty clears it")
+	fs.BoolVar(&r.follow, "follow", false, "keep printing what it prints next, until Ctrl-C")
+	r.reword("set", "model", "the model the coding agent starts with")
 	if done, err := r.parse(); done {
 		return err
 	}
@@ -65,10 +71,20 @@ func workspaceCmd(ctx context.Context, args []string) error {
 		return r.forward(ctx)
 	case "ssh":
 		return r.ssh(ctx)
-	case "ssh-config":
-		return r.sshConfig(ctx)
+	case "configure-ssh":
+		return r.configureSSH(ctx)
 	case "ssh-proxy":
 		return r.sshProxy(ctx)
+	case "set":
+		return r.set(ctx)
+	case "logs":
+		return r.logs(ctx)
+	case "cost":
+		return r.cost(ctx)
+	case "ssh-keys":
+		return r.sshKeys(ctx)
+	case "remove-ssh-key":
+		return r.removeSSHKey(ctx)
 	default:
 		return r.list(ctx)
 	}
@@ -76,102 +92,22 @@ func workspaceCmd(ctx context.Context, args []string) error {
 
 // workspace is a workspace as Keera Agents answers it.
 type workspace struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Experience  string `json:"experience"`
-	Model       string `json:"model"`
-	State       string `json:"state"`
-	StateDetail string `json:"state_detail"`
-	Enabled     bool   `json:"enabled"`
-	OwnerEmail  string `json:"owner_email"`
-	Class       struct {
-		CPU    string `json:"cpu"`
-		Memory string `json:"memory"`
-		Disk   string `json:"disk"`
-	} `json:"class"`
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Experience  string       `json:"experience"`
+	Model       string       `json:"model"`
+	State       string       `json:"state"`
+	StateDetail string       `json:"state_detail"`
+	Enabled     bool         `json:"enabled"`
+	OwnerEmail  string       `json:"owner_email"`
+	Description string       `json:"description"`
+	Class       machineClass `json:"class"`
+	CreatedAt   time.Time    `json:"created_at"`
 }
 
-// agents is Keera Agents, reached with this machine's sign-in.
-type agents struct {
-	base  string
-	token string
-	http  *http.Client
-}
-
-// agents finds Keera Agents through the gateway. Only a person's sign-in
-// works there: the operator key belongs to nobody, and a workspace is
-// somebody's.
+// agents finds Keera Agents, for a workspace's verbs.
 func (r *workspaceRun) agents(ctx context.Context) (*agents, error) {
-	c := r.c
-	if c.key != "" {
-		return nil, errors.New("workspaces are a person's: unset KEERA_OPERATOR_KEY and run 'keera login'")
-	}
-	token, err := c.credential()
-	if err != nil {
-		return nil, err
-	}
-	var me struct {
-		AgentsURL string `json:"agents_url"`
-	}
-	if err := c.do(ctx, "GET", "/v1/me", nil, &me); err != nil {
-		return nil, err
-	}
-	if me.AgentsURL == "" {
-		return nil, fmt.Errorf("%s has no Keera Agents connected, so it has no workspaces", c.base)
-	}
-	return &agents{
-		base:  strings.TrimRight(me.AgentsURL, "/"),
-		token: token,
-		http:  &http.Client{Transport: http1Transport()},
-	}, nil
-}
-
-// http1Transport is the default transport, but HTTP/1.1 only: a stream takes
-// the connection over, which HTTP/2 cannot.
-func http1Transport() *http.Transport {
-	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.Protocols = new(http.Protocols)
-	t.Protocols.SetHTTP1(true)
-	return t
-}
-
-func (a *agents) do(ctx context.Context, method, path string, in, out any) error {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	req, err := jsonRequest(ctx, method, a.base+path, in)
-	if err != nil {
-		return err
-	}
-	resp, err := a.send(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	raw, err := readAnswer(resp, a.base)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode >= 300 {
-		return agentsError(resp.StatusCode, raw)
-	}
-	return decode(raw, nil, out)
-}
-
-// send sends req with this machine's sign-in.
-func (a *agents) send(req *http.Request) (*http.Response, error) {
-	req.Header.Set("Authorization", "Bearer "+a.token)
-	resp, err := a.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("reaching Keera Agents at %s: %w", a.base, err)
-	}
-	return resp, nil
-}
-
-func agentsError(status int, raw []byte) error {
-	if status == http.StatusUnauthorized {
-		return errors.New("your sign-in was not accepted by Keera Agents: run 'keera login' again")
-	}
-	return &apiError{Status: status, Message: errorMessage(raw)}
+	return connectAgents(ctx, r.c)
 }
 
 // stream opens a connection to port in the workspace: web, ssh or a number.
@@ -216,11 +152,8 @@ func printWorkspaces(w *table, owners bool, list ...workspace) {
 	}
 	w.header(head)
 	for _, ws := range list {
-		state := ws.State
-		if !ws.Enabled {
-			state = "stopped"
-		}
-		row := ws.Name + "\t" + experienceLabel(ws.Experience) + "\t" + state + "\t" + ws.Model + "\t" + ws.ID
+		row := ws.Name + "\t" + experienceLabel(ws.Experience) + "\t" + machineState(ws.State, ws.Enabled) +
+			"\t" + ws.Model + "\t" + ws.ID
 		if owners {
 			row += "\t" + ws.OwnerEmail
 		}
@@ -270,6 +203,10 @@ func (r *workspaceRun) show(ctx context.Context) error {
 	}
 	return out(r.asJSON, ws, func(w *table) {
 		printWorkspaces(w, false, ws)
+		_, _ = fmt.Fprintln(w)
+		show(w, "machine", ws.Class)
+		showIfSet(w, "owner", ws.OwnerEmail)
+		showIfSet(w, "description", ws.Description)
 		if ws.StateDetail != "" {
 			_, _ = fmt.Fprintf(w, "\n%s\n", ws.StateDetail)
 		}
@@ -335,7 +272,7 @@ func (r *workspaceRun) create(ctx context.Context) error {
 		return out(true, ws, nil)
 	}
 	fmt.Printf("Created %s. It is starting; open it with:\n\n  keera workspace open %s\n\n"+
-		"or reach it over SSH after 'keera workspace ssh-config' with:\n\n  ssh %s.keera\n",
+		"or reach it over SSH after 'keera workspace configure-ssh' with:\n\n  ssh %s.keera\n",
 		ws.Name, ws.Name, ws.Name)
 	return nil
 }
@@ -544,9 +481,9 @@ func ensureSSHKey(ctx context.Context, a *agents) (string, error) {
 	return key, err
 }
 
-// The block sshConfig writes is marked, so running it again replaces it.
+// The block configureSSH writes is marked, so running it again replaces it.
 const (
-	sshBlockStart = "# keera workspaces: written by 'keera workspace ssh-config'"
+	sshBlockStart = "# keera workspaces: written by 'keera workspace configure-ssh'"
 	sshBlockEnd   = "# end of keera workspaces"
 )
 
@@ -608,7 +545,7 @@ func (r *workspaceRun) sshSetup(ctx context.Context) (key, keera string, err err
 	return key, keera, err
 }
 
-func (r *workspaceRun) sshConfig(ctx context.Context) error {
+func (r *workspaceRun) configureSSH(ctx context.Context) error {
 	key, keera, err := r.sshSetup(ctx)
 	if err != nil {
 		return err
@@ -630,7 +567,7 @@ func (r *workspaceRun) sshConfig(ctx context.Context) error {
 	return nil
 }
 
-// ssh signs in to a workspace, without needing ssh-config first.
+// ssh signs in to a workspace, without needing configure-ssh first.
 func (r *workspaceRun) ssh(ctx context.Context) error {
 	name := r.fs.Arg(0)
 	key, keera, err := r.sshSetup(ctx)
@@ -644,4 +581,144 @@ func (r *workspaceRun) ssh(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return cmd.Run()
+}
+
+// ------------------------------------------------------------ changes
+
+// set changes what a workspace is. Keera Agents restarts it for a new
+// experience or machine size, and keeps its files.
+func (r *workspaceRun) set(ctx context.Context) error {
+	if !changesSomething(r.fs) {
+		return nothingToChange("workspace set")
+	}
+	body := map[string]any{}
+	if given(r.fs, "name") {
+		body["name"] = r.name
+	}
+	if given(r.fs, "description") {
+		body["description"] = r.description
+	}
+	if given(r.fs, "model") {
+		body["model"] = r.model
+	}
+	if r.terminal || r.vscode {
+		experience, err := r.chooseExperience()
+		if err != nil {
+			return err
+		}
+		body["experience"] = experience
+	}
+	a, err := r.agents(ctx)
+	if err != nil {
+		return err
+	}
+	path := workspacePath(r.fs.Arg(0))
+	if given(r.fs, "cpu") || given(r.fs, "memory") {
+		// The whole class is sent, so the isolation and disk stay as they are.
+		var ws workspace
+		if err := a.do(ctx, "GET", path, nil, &ws); err != nil {
+			return err
+		}
+		if given(r.fs, "cpu") {
+			ws.Class.CPU = r.cpu
+		}
+		if given(r.fs, "memory") {
+			ws.Class.Memory = r.memory
+		}
+		body["class"] = ws.Class
+	}
+	var ws workspace
+	if err := a.do(ctx, "PATCH", path, body, &ws); err != nil {
+		return err
+	}
+	return out(r.asJSON, ws, func(w *table) {
+		printWorkspaces(w, false, ws)
+	})
+}
+
+// logs prints what the workspace's machine printed: its start, and what
+// went wrong when it does not come up.
+func (r *workspaceRun) logs(ctx context.Context) error {
+	a, err := r.agents(ctx)
+	if err != nil {
+		return err
+	}
+	return a.copyText(ctx, logsPath(workspacePath(r.fs.Arg(0)), r.follow), os.Stdout)
+}
+
+func (r *workspaceRun) cost(ctx context.Context) error {
+	a, err := r.agents(ctx)
+	if err != nil {
+		return err
+	}
+	name := r.fs.Arg(0)
+	var c machineCost
+	if err := a.do(ctx, "GET", workspacePath(name)+"/cost", nil, &c); err != nil {
+		return err
+	}
+	return out(r.asJSON, c, func(w *table) { printMachineCost(w, name, c) })
+}
+
+// ------------------------------------------------------------ ssh keys
+
+// sshKey is a public key its owner signs in to their workspaces with.
+type sshKey struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	PublicKey   string    `json:"public_key"`
+	Fingerprint string    `json:"fingerprint"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+func (r *workspaceRun) sshKeys(ctx context.Context) error {
+	a, err := r.agents(ctx)
+	if err != nil {
+		return err
+	}
+	keys, err := listOf[sshKey](ctx, a, "/api/v1/me/ssh-keys")
+	if err != nil {
+		return err
+	}
+	return out(r.asJSON, keys, func(w *table) {
+		if len(keys) == 0 {
+			printNone(w, "SSH keys", "keera workspace configure-ssh")
+			return
+		}
+		w.header("NAME\tFINGERPRINT\tADDED\tID")
+		for _, k := range keys {
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", dash(k.Name), k.Fingerprint,
+				k.CreatedAt.Local().Format("2006-01-02"), k.ID)
+		}
+	})
+}
+
+// removeSSHKey takes the key by id, fingerprint or name. The machine that
+// holds it no longer gets in; configure-ssh there adds it again.
+func (r *workspaceRun) removeSSHKey(ctx context.Context) error {
+	a, err := r.agents(ctx)
+	if err != nil {
+		return err
+	}
+	keys, err := listOf[sshKey](ctx, a, "/api/v1/me/ssh-keys")
+	if err != nil {
+		return err
+	}
+	ref := r.fs.Arg(0)
+	k, err := pickOne(keys, ref, "SSH key", "workspace ssh-keys", func(k sshKey) (string, string) {
+		if k.Fingerprint == ref {
+			return ref, ""
+		}
+		return k.ID, k.Name
+	})
+	if err != nil {
+		return err
+	}
+	if err := a.do(ctx, "DELETE", "/api/v1/me/ssh-keys/"+url.PathEscape(k.ID), nil, nil); err != nil {
+		return err
+	}
+	if r.asJSON {
+		return out(true, map[string]string{"deleted": k.ID}, nil)
+	}
+	fmt.Printf("Removed the SSH key %s (%s).\n", dash(k.Name), k.Fingerprint)
+	return nil
 }

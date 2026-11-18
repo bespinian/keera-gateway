@@ -1136,7 +1136,8 @@ paths:
       description: |
         Replaces any earlier link. Turns a person who has not signed in yet
         into a passkey account. Needs an administrator of their organisation,
-        and, for one, an address at the organisation's email domain.
+        and, for one, an address at the organisation's email domain. Nobody
+        gets a link for themselves.
       parameters:
         - name: id
           in: path

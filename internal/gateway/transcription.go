@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,8 +13,6 @@ import (
 	"net/textproto"
 	"slices"
 	"strings"
-
-	"github.com/bespinian/keera-gateway/internal/httpx"
 )
 
 // A transcription is a multipart form, not JSON: the audio and a few text
@@ -54,24 +53,30 @@ func parseForm(contentType string, raw []byte) (*body, *audioPart, error) {
 			return nil, nil, fmt.Errorf("the form could not be read: %w", err)
 		}
 		name := part.FormName()
-		data, err := io.ReadAll(part)
-		if err != nil {
-			return nil, nil, fmt.Errorf("the form could not be read: %w", err)
-		}
 		switch {
 		case name == "":
 			return nil, nil, errors.New("every part of the form needs a name")
 		case name == audioField && audio != nil:
 			return nil, nil, errors.New("send one audio file in the 'file' field")
-		case name == audioField:
+		case name != audioField && part.FileName() != "":
+			return nil, nil, fmt.Errorf("the field '%s' is a file; only 'file' may be one", name)
+		}
+		if name == audioField {
+			// The audio is most of the form, so room for all of it is made once.
+			data, err := readAll(part, len(raw))
+			if err != nil {
+				return nil, nil, fmt.Errorf("the form could not be read: %w", err)
+			}
 			audio = &audioPart{
 				filename:    part.FileName(),
 				contentType: part.Header.Get("Content-Type"),
 				data:        data,
 			}
 			continue
-		case part.FileName() != "":
-			return nil, nil, fmt.Errorf("the field '%s' is a file; only 'file' may be one", name)
+		}
+		data, err := io.ReadAll(part)
+		if err != nil {
+			return nil, nil, fmt.Errorf("the form could not be read: %w", err)
 		}
 		if _, seen := values[name]; !seen {
 			order = append(order, name)
@@ -81,19 +86,24 @@ func parseForm(contentType string, raw []byte) (*body, *audioPart, error) {
 	if audio == nil || len(audio.data) == 0 {
 		return nil, nil, errors.New("the 'file' field with the audio is required")
 	}
-	b := &body{fields: make(map[string]json.RawMessage, len(order)), order: order}
+	b := &body{fields: make(map[string]json.RawMessage, len(order))}
 	for _, name := range order {
 		var raw []byte
 		switch v := values[name]; {
+		case name == "stream":
+			// A streamed transcription's events carry no usage record the
+			// gateway reads, so it could not be billed. false is kept as a
+			// boolean, as in a JSON body.
+			if !slices.Equal(v, []string{"false"}) {
+				return nil, nil, errors.New("the gateway does not stream transcriptions; leave out 'stream'")
+			}
+			raw = []byte("false")
 		case len(v) > 1:
 			raw, _ = json.Marshal(v)
-		case name == "stream" && (v[0] == "true" || v[0] == "false"):
-			// A boolean, so the gateway reads it as it reads a JSON body's.
-			raw = []byte(v[0])
 		default:
 			raw, _ = json.Marshal(v[0])
 		}
-		b.fields[name] = raw
+		b.set(name, raw)
 	}
 	if err := checkKeys(b.fields); err != nil {
 		return nil, nil, err
@@ -116,11 +126,7 @@ func formPayload(b *body, audio *audioPart) ([]byte, string) {
 	h := make(textproto.MIMEHeader)
 	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name=%q; filename=%q`,
 		audioField, formFilename(audio.filename)))
-	if audio.contentType != "" {
-		h.Set("Content-Type", audio.contentType)
-	} else {
-		h.Set("Content-Type", "application/octet-stream")
-	}
+	h.Set("Content-Type", cmp.Or(audio.contentType, "application/octet-stream"))
 	part, _ := w.CreatePart(h)
 	_, _ = part.Write(audio.data)
 	_ = w.Close()
@@ -187,11 +193,7 @@ func transcriptionUsage(raw []byte) *tokenUsage {
 	if usage := answer.Usage; usage != nil {
 		u.InputTokens = max(usage.Input, usage.Prompt)
 		u.OutputTokens = max(usage.Output, usage.Completion)
-		if usage.Seconds != nil {
-			seconds = usage.Seconds
-		} else if usage.AudioSeconds != nil {
-			seconds = usage.AudioSeconds
-		}
+		seconds = cmp.Or(usage.Seconds, usage.AudioSeconds, seconds)
 	}
 	if seconds != nil && *seconds > 0 && !math.IsInf(*seconds, 0) {
 		// Rounded up, as providers bill a started second.
@@ -218,7 +220,8 @@ func mostAudioMillis(bytes int) int64 {
 }
 
 // audioTokensAtMost is the most tokens a model priced by token can count
-// for this much audio. The GPT-4o transcribers count about ten a second.
+// for this much audio. The GPT-4o transcribers count about ten a second;
+// five times that leaves room for a model that counts more.
 func audioTokensAtMost(millis int64) int {
 	const perSecond = 50
 	return int(millis * perSecond / 1000)
@@ -257,15 +260,6 @@ func unreportedFormat(b *body) string {
 // transcriptMediaTypes are the text answers a transcription may give. They
 // are passed on as they are: none renders as a page.
 var transcriptMediaTypes = []string{"text/plain", "text/vtt", "application/x-subrip"}
-
-// transcriptContentType is the content type to answer a transcription with,
-// or "" to keep what copyResponseHeaders chose.
-func transcriptContentType(ct string) string {
-	if slices.Contains(transcriptMediaTypes, httpx.MediaType(ct)) {
-		return ct
-	}
-	return ""
-}
 
 // transcriptionShape is the OpenAI shape, except that a text answer is not
 // JSON and keeps the model name it never had.

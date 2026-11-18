@@ -171,6 +171,11 @@ type Tokens struct {
 	AudioMillis int64
 }
 
+// Any says something was used: tokens or audio.
+func (t Tokens) Any() bool {
+	return t.Input+t.Output > 0 || t.AudioMillis > 0
+}
+
 // clamped keeps the cache counts inside the input count, so a bad provider
 // response cannot make a negative cost and refund a budget.
 func (t Tokens) clamped() Tokens {
@@ -192,21 +197,10 @@ func (m Model) Cost(t Tokens) int64 {
 		int64(t.CacheWrite-t.CacheWriteHour)*p.cacheWriteMicros()+
 		int64(t.CacheWriteHour)*2*p.InputMicrosPerMTok+
 		int64(t.Output)*p.OutputMicrosPerMTok)/perM +
-		AudioCost(t.AudioMillis, m.AudioMicrosPerMinute)
+		t.AudioMillis*m.AudioMicrosPerMinute/msPerMinute
 }
 
-// AudioCost is what millis of audio cost at a price per minute.
-func AudioCost(millis, microsPerMinute int64) int64 {
-	const msPerMinute = 60_000
-	return millis * microsPerMinute / msPerMinute
-}
-
-// AudioMinutesMicros is millis of audio in millionths of a minute, the
-// quantity a billing line states.
-func AudioMinutesMicros(millis int64) int64 {
-	const msPerMinute = 60_000
-	return millis * 1_000_000 / msPerMinute
-}
+const msPerMinute = 60_000
 
 func (m Model) prices(inputTokens int) PriceTier {
 	if t := m.LongPrompt; t != nil && inputTokens > t.AboveTokens {

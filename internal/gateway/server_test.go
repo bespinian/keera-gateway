@@ -1143,7 +1143,7 @@ func TestACancelledStreamIsStillCharged(t *testing.T) {
 	h := newHarness(t, backend, nil, nil)
 	t.Cleanup(func() { close(released) })
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
 		h.url("/v1/chat/completions"),
 		strings.NewReader(`{"model":"keera-code","messages":[],"stream":true}`))

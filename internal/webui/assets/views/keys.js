@@ -107,7 +107,7 @@ export async function keysView(ctx) {
                         "Issued by Keera Agents for an agent, which holds the " +
                         "only copy. Revoke it to stop the agent.",
                     },
-                    pill("Keera Agent"),
+                    pill("Keera Agents"),
                   )
                 : null,
             ),

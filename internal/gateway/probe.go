@@ -421,7 +421,6 @@ func (s *Server) probeCall(ctx context.Context, m policy.Model, path string,
 func (s *Server) probeSend(ctx context.Context, m policy.Model, out outbound,
 	most policy.Tokens, p *Probe,
 ) *http.Response {
-	path := out.path
 	resp, err := s.send(ctx, m, out)
 	if err != nil {
 		p.Error = unreachable(err)
@@ -436,7 +435,7 @@ func (s *Server) probeSend(ctx context.Context, m policy.Model, out outbound,
 		}
 	}
 	if resp.Request != nil && resp.Request.URL != nil {
-		p.Backend = strings.TrimSuffix(resp.Request.URL.String(), path)
+		p.Backend = strings.TrimSuffix(resp.Request.URL.String(), out.path)
 	}
 	if resp.StatusCode >= 300 {
 		// A body too large to read still leaves the status to report.

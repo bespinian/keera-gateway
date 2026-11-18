@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -204,7 +203,7 @@ func TestRouterAddSendsTheFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, read := quiet(t)
-	err := Run(context.Background(), []string{
+	err := Run(t.Context(), []string{
 		"router", "add", "guarded",
 		"--file", file, "--display-name", "Guarded",
 	})
@@ -231,7 +230,7 @@ func TestRouterAddWithOneRouteStep(t *testing.T) {
 		},
 	})
 	t.Setenv("KEERA_ORG", "org_1")
-	if err := Run(context.Background(), []string{
+	if err := Run(t.Context(), []string{
 		"router", "add", "auto", "--model", "picker",
 		"--destinations", "small,big", "--fallback", "small", "--prompt", "Choose.",
 	}); err != nil {
@@ -265,11 +264,11 @@ func TestRouterSetChangesOneRouteStep(t *testing.T) {
 	})
 	t.Setenv("KEERA_ORG", "org_1")
 
-	err := Run(context.Background(), []string{"router", "set", "guarded", "--destinations", "c,e"})
+	err := Run(t.Context(), []string{"router", "set", "guarded", "--destinations", "c,e"})
 	if err == nil || !strings.Contains(err.Error(), "--step") {
 		t.Fatalf("two route steps and no --step: err = %v", err)
 	}
-	if err := Run(context.Background(), []string{
+	if err := Run(t.Context(), []string{
 		"router", "set", "guarded", "--step", "second",
 		"--destinations", "c,e",
 	}); err != nil {
@@ -300,7 +299,7 @@ func TestRouterDecidingFlagsNeedADecidingStep(t *testing.T) {
 	newFakeControl(t, map[string]any{"GET /v1/routers": map[string]any{"data": []any{}}})
 	t.Setenv("KEERA_ORG", "org_1")
 	for _, flag := range []string{"--fallback", "--model"} {
-		err := Run(context.Background(), []string{
+		err := Run(t.Context(), []string{
 			"router", "add", "x", "--mode", "least-busy",
 			"--destinations", "small,big", flag, "small",
 		})
@@ -321,7 +320,7 @@ func TestRouterAddWithAHeaderStep(t *testing.T) {
 		},
 	})
 	t.Setenv("KEERA_ORG", "org_1")
-	if err := Run(context.Background(), []string{
+	if err := Run(t.Context(), []string{
 		"router", "add", "byapp", "--mode", "header",
 		"--header", "X-Keera-Route", "--values", "hard=big", "--fallback", "small",
 	}); err != nil {
@@ -340,7 +339,7 @@ func TestRouterHeaderFlagsNeedAHeaderStep(t *testing.T) {
 	newFakeControl(t, map[string]any{"GET /v1/routers": map[string]any{"data": []any{}}})
 	t.Setenv("KEERA_ORG", "org_1")
 	for _, flag := range []string{"--header", "--values"} {
-		err := Run(context.Background(), []string{
+		err := Run(t.Context(), []string{
 			"router", "add", "x", "--mode", "fallback",
 			"--destinations", "small,big", flag, "hard=big",
 		})
@@ -353,7 +352,7 @@ func TestRouterHeaderFlagsNeedAHeaderStep(t *testing.T) {
 func TestRouterAddNeedsAFileOrARouteStep(t *testing.T) {
 	newFakeControl(t, map[string]any{})
 	t.Setenv("KEERA_ORG", "org_1")
-	err := Run(context.Background(), []string{"router", "add", "x"})
+	err := Run(t.Context(), []string{"router", "add", "x"})
 	if err == nil || !strings.Contains(err.Error(), "--file or a route step's flags") {
 		t.Errorf("err = %v", err)
 	}

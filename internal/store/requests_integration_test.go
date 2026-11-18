@@ -543,7 +543,7 @@ func TestWriteEventsAnnouncesThatTheLogGrew(t *testing.T) {
 	}
 	// Closed rather than released, so the LISTEN does not leak into later tests.
 	conn := pooled.Hijack()
-	defer conn.Close(context.Background())
+	defer conn.Close(t.Context())
 	if _, err := conn.Exec(ctx, "LISTEN "+EventsChannel); err != nil {
 		t.Fatalf("LISTEN: %v", err)
 	}

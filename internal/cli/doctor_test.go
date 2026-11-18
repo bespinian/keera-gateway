@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"testing"
 )
 
@@ -13,7 +12,7 @@ func TestDoctorFailsOnAFailedCheck(t *testing.T) {
 		newFakeControl(t, map[string]any{
 			"GET /v1/diagnostics": map[string]any{"checks": []any{}, "failures": 1},
 		})
-		if err := doctorCmd(context.Background(), args); err == nil {
+		if err := doctorCmd(t.Context(), args); err == nil {
 			t.Errorf("doctor %v: no error for a failed check", args)
 		}
 	}

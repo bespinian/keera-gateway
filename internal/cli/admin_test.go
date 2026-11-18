@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"flag"
 	"io"
@@ -153,7 +152,7 @@ func quiet(t *testing.T) (stdout, stderr func() string) {
 func capture(t *testing.T, args ...string) string {
 	t.Helper()
 	stdout, _ := quiet(t)
-	if err := Run(context.Background(), args); err != nil {
+	if err := Run(t.Context(), args); err != nil {
 		t.Fatalf("keera %s: %v", strings.Join(args, " "), err)
 	}
 	return stdout()
@@ -174,7 +173,7 @@ func TestOrgCreateSendsTheDomain(t *testing.T) {
 		},
 	})
 
-	if err := Run(context.Background(), []string{
+	if err := Run(t.Context(), []string{
 		"org", "create", "Another Bank",
 		"--domain", "AnotherBank.CH",
 	}); err != nil {
@@ -192,7 +191,7 @@ func TestOrgSetPatchesTheDomain(t *testing.T) {
 		"PATCH /v1/orgs/org_2": map[string]any{"id": "org_2", "email_domain": "anotherbank.ch"},
 	})
 
-	if err := Run(context.Background(), []string{
+	if err := Run(t.Context(), []string{
 		"org", "set", "org_2",
 		"--domain", "anotherbank.ch",
 	}); err != nil {
@@ -209,7 +208,7 @@ func TestOrgSetRenamesWithoutTouchingTheDomain(t *testing.T) {
 		"PATCH /v1/orgs/org_2": map[string]any{"id": "org_2", "name": "Another Bank AG"},
 	})
 
-	if err := Run(context.Background(), []string{
+	if err := Run(t.Context(), []string{
 		"org", "set", "org_2",
 		"--name", " Another Bank AG ",
 	}); err != nil {
@@ -232,7 +231,7 @@ func TestOrgSetFindsTheOnlyOrganisation(t *testing.T) {
 		"PATCH /v1/orgs/org_1": map[string]any{"id": "org_1", "email_domain": "example.ch"},
 	})
 
-	if err := Run(context.Background(), []string{"org", "set", "--domain", "example.ch"}); err != nil {
+	if err := Run(t.Context(), []string{"org", "set", "--domain", "example.ch"}); err != nil {
 		t.Fatal(err)
 	}
 	if !f.called("PATCH", "/v1/orgs/org_1") {
@@ -249,7 +248,7 @@ func TestOrgSetNamesTheArgumentWhenThereAreSeveral(t *testing.T) {
 	})
 
 	// Not "pass --org <id>": this command has no such flag.
-	err := Run(context.Background(), []string{"org", "set", "--domain", "example.ch"})
+	err := Run(t.Context(), []string{"org", "set", "--domain", "example.ch"})
 	if err == nil || !strings.Contains(err.Error(), "keera org set <org>") {
 		t.Fatalf("error = %v, want it to name the argument", err)
 	}
@@ -261,7 +260,7 @@ func TestOrgSetClearsTheDomainOnlyWithItsOwnFlag(t *testing.T) {
 		"PATCH /v1/orgs/org_2": map[string]any{"id": "org_2", "email_domain": ""},
 	})
 
-	if err := Run(context.Background(), []string{"org", "set", "org_2", "--no-domain"}); err != nil {
+	if err := Run(t.Context(), []string{"org", "set", "org_2", "--no-domain"}); err != nil {
 		t.Fatal(err)
 	}
 	// Sent as "", since the endpoint keeps an absent field.
@@ -277,7 +276,7 @@ func TestOrgSetRefusesSomethingThatIsNotADomain(t *testing.T) {
 
 	// The refusal says which domain to type instead.
 	for _, given := range []string{"alice@example.ch", "https://example.ch/", "example.ch:443"} {
-		err := Run(context.Background(), []string{"org", "set", "org_2", "--domain", given})
+		err := Run(t.Context(), []string{"org", "set", "org_2", "--domain", given})
 		if err == nil {
 			t.Errorf("--domain %q was accepted", given)
 			continue
@@ -287,7 +286,7 @@ func TestOrgSetRefusesSomethingThatIsNotADomain(t *testing.T) {
 		}
 	}
 	// A typo has nothing to suggest, so it names what is wrong.
-	err := Run(context.Background(), []string{"org", "set", "org_2", "--domain", "exam ple.ch"})
+	err := Run(t.Context(), []string{"org", "set", "org_2", "--domain", "exam ple.ch"})
 	if err == nil || !strings.Contains(err.Error(), "cannot appear") {
 		t.Errorf("error = %v, want it to name the character", err)
 	}
@@ -305,7 +304,7 @@ func TestOrgCreateWarnsAboutAnOrganisationWithNoDomain(t *testing.T) {
 		}},
 	})
 
-	if err := Run(context.Background(), []string{"org", "create", "Another Bank"}); err != nil {
+	if err := Run(t.Context(), []string{"org", "create", "Another Bank"}); err != nil {
 		t.Fatal(err)
 	}
 	if !f.called("GET", "/v1/orgs") {
@@ -324,7 +323,7 @@ func TestOrgCreateSaysNothingOnTheFirstOrganisation(t *testing.T) {
 	})
 
 	// One organisation needs no domain: everyone lands in it.
-	if err := Run(context.Background(), []string{"org", "create", "Example Bank"}); err != nil {
+	if err := Run(t.Context(), []string{"org", "create", "Example Bank"}); err != nil {
 		t.Fatal(err)
 	}
 	if said := stderr(); said != "" {
@@ -341,7 +340,7 @@ func TestUserRoleResolvesAnEmailToAnID(t *testing.T) {
 		"PATCH /v1/users/user_1": map[string]any{"id": "user_1", "role": "admin"},
 	})
 
-	if err := userCmd(context.Background(), []string{"role", "alice@example.com", "admin"}); err != nil {
+	if err := userCmd(t.Context(), []string{"role", "alice@example.com", "admin"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.request("PATCH", "/v1/users/user_1").body["role"]; got != "admin" {
@@ -353,7 +352,7 @@ func TestUserRoleRefusesARoleTheControlPlaneWouldReject(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, map[string]any{})
 
-	err := userCmd(context.Background(), []string{"role", "alice@example.com", "owner"})
+	err := userCmd(t.Context(), []string{"role", "alice@example.com", "owner"})
 	if err == nil || !strings.Contains(err.Error(), "member, admin") {
 		t.Fatalf("error = %v, want it to name the roles", err)
 	}
@@ -368,7 +367,7 @@ func TestUserAddRefusesSomebodyWhoIsAlreadyThere(t *testing.T) {
 	})
 
 	// Upserting would silently change their role and keep their sessions.
-	err := userCmd(context.Background(), []string{"add", "alice@example.com", "--role", "admin"})
+	err := userCmd(t.Context(), []string{"add", "alice@example.com", "--role", "admin"})
 	if err == nil || !strings.Contains(err.Error(), "keera user role") {
 		t.Fatalf("error = %v, want it to point at keera user role", err)
 	}
@@ -386,7 +385,7 @@ func TestUserAddSendsTheRole(t *testing.T) {
 		"POST /v1/users": map[string]any{"id": "user_2", "email": "bob@example.com", "role": "admin"},
 	})
 
-	if err := userCmd(context.Background(), []string{"add", "bob@example.com", "--role", "admin"}); err != nil {
+	if err := userCmd(t.Context(), []string{"add", "bob@example.com", "--role", "admin"}); err != nil {
 		t.Fatal(err)
 	}
 	body := f.request("POST", "/v1/users").body
@@ -405,7 +404,7 @@ func TestKeyCreateAttributesAPersonByEmail(t *testing.T) {
 		"POST /v1/keys": map[string]any{"id": "key_1", "key": "sk-keera-secret"},
 	})
 
-	if err := keyCmd(context.Background(), []string{"create", "--user", "alice@example.com", "--name", "laptop"}); err != nil {
+	if err := keyCmd(t.Context(), []string{"create", "--user", "alice@example.com", "--name", "laptop"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.request("POST", "/v1/keys").body["user_id"]; got != "user_1" {
@@ -434,7 +433,7 @@ func TestKeyRotateAsksTheControlPlane(t *testing.T) {
 		},
 	})
 
-	if err := keyCmd(context.Background(),
+	if err := keyCmd(t.Context(),
 		[]string{"rotate", "a developer's laptop", "--name", "new laptop", "--yes"}); err != nil {
 		t.Fatal(err)
 	}
@@ -454,14 +453,14 @@ func TestKeySetRenamesTheKeyItFinds(t *testing.T) {
 		"PATCH /v1/keys/key_old": map[string]any{"id": "key_old", "name": "old laptop"},
 	})
 
-	if err := keyCmd(context.Background(),
+	if err := keyCmd(t.Context(),
 		[]string{"rename", "a developer's laptop", "--name", " old laptop "}); err != nil {
 		t.Fatal(err)
 	}
 	if sent := f.request("PATCH", "/v1/keys/key_old").body; sent["name"] != "old laptop" {
 		t.Errorf("sent %v, want the new name", sent)
 	}
-	if err := keyCmd(context.Background(), []string{"set", "key_old"}); err == nil ||
+	if err := keyCmd(t.Context(), []string{"set", "key_old"}); err == nil ||
 		!strings.Contains(err.Error(), "nothing to change") {
 		t.Errorf("err = %v, want nothing to change", err)
 	}
@@ -476,7 +475,7 @@ func TestKeyRotateRefusesAKeyThatIsAlreadyRevoked(t *testing.T) {
 		}}},
 	})
 
-	err := keyCmd(context.Background(), []string{"rotate", "key_old"})
+	err := keyCmd(t.Context(), []string{"rotate", "key_old"})
 	if err == nil || !strings.Contains(err.Error(), "keera key create") {
 		t.Errorf("error = %v, want one pointing at keera key create", err)
 	}
@@ -496,7 +495,7 @@ func TestKeyRotateSendsAMemberWithARevokedKeyToAnAdministrator(t *testing.T) {
 
 	// By id, the key is found and then refused; by name, no live key is found.
 	for _, who := range []string{"key_old", "laptop"} {
-		err := keyCmd(context.Background(), []string{"rotate", who})
+		err := keyCmd(t.Context(), []string{"rotate", who})
 		if err == nil || !strings.Contains(err.Error(), "ask an administrator") ||
 			strings.Contains(err.Error(), "keera key create") {
 			t.Errorf("%s: error = %v, want one pointing at an administrator", who, err)
@@ -529,7 +528,7 @@ func TestKeyRotateAndRevokeResolveANameAmongTheKeysThatStillWork(t *testing.T) {
 				tc.method + " /v1/keys/key_live" + tc.suffix: tc.reply,
 			})
 
-			if err := keyCmd(context.Background(), []string{tc.verb, "laptop", "--yes"}); err != nil {
+			if err := keyCmd(t.Context(), []string{tc.verb, "laptop", "--yes"}); err != nil {
 				t.Fatal(err)
 			}
 			if !f.called(tc.method, "/v1/keys/key_live"+tc.suffix) {
@@ -550,7 +549,7 @@ func TestKeyRotateAndRevokeRefuseAnAmbiguousName(t *testing.T) {
 				}},
 			})
 
-			err := keyCmd(context.Background(), []string{tc.verb, "laptop"})
+			err := keyCmd(t.Context(), []string{tc.verb, "laptop"})
 			if err == nil {
 				t.Fatalf("%s picked one of two keys with the same name", tc.verb)
 			}
@@ -574,7 +573,7 @@ func TestKeyRevokeByIdLooksNothingUp(t *testing.T) {
 		"DELETE /v1/keys/" + keyID: map[string]any{},
 	})
 
-	if err := keyCmd(context.Background(), []string{"revoke", keyID, "--yes"}); err != nil {
+	if err := keyCmd(t.Context(), []string{"revoke", keyID, "--yes"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.seen) != 1 || !f.called("DELETE", "/v1/keys/"+keyID) {
@@ -594,7 +593,7 @@ func TestKeyRevokeAsksBeforeItRevokes(t *testing.T) {
 		"DELETE /v1/keys/" + keyID: map[string]any{},
 	})
 
-	if err := keyCmd(context.Background(), []string{"revoke", "laptop"}); err == nil {
+	if err := keyCmd(t.Context(), []string{"revoke", "laptop"}); err == nil {
 		t.Fatal("revoke went ahead without a confirmation")
 	}
 	if f.called("DELETE", "/v1/keys/"+keyID) {
@@ -613,7 +612,7 @@ func TestModelAddFillsInTheProviderDefaults(t *testing.T) {
 		"PUT /v1/models/keera-frontier": map[string]any{"alias": "keera-frontier"},
 	})
 
-	err := modelCmd(context.Background(), []string{
+	err := modelCmd(t.Context(), []string{
 		"add", "keera-frontier", "--provider", "anthropic", "--backend-model", "claude-opus-5",
 	})
 	if err != nil {
@@ -661,7 +660,7 @@ func TestModelSetChangesWhatItIsGivenAndKeepsTheRest(t *testing.T) {
 				"PUT /v1/models/keera-speed": map[string]any{"alias": "keera-speed"},
 			})
 
-			if err := modelCmd(context.Background(),
+			if err := modelCmd(t.Context(),
 				[]string{"set", "keera-speed", tc.flag, tc.value}); err != nil {
 				t.Fatal(err)
 			}
@@ -706,7 +705,7 @@ func TestASelfHostedModelTakesNoPrice(t *testing.T) {
 				}}},
 				"PUT /v1/models/keera-speed": map[string]any{"alias": "keera-speed"},
 			})
-			err := modelCmd(context.Background(), args)
+			err := modelCmd(t.Context(), args)
 			if err == nil || !strings.Contains(err.Error(), "gateway fee") {
 				t.Fatalf("err = %v, want the prices refused", err)
 			}
@@ -729,7 +728,7 @@ func TestModelDisableKeepsTheEntryAndOnlyStopsServingIt(t *testing.T) {
 		"PUT /v1/models/keera-speed": map[string]any{"alias": "keera-speed"},
 	})
 
-	if err := modelCmd(context.Background(), []string{"disable", "keera-speed"}); err != nil {
+	if err := modelCmd(t.Context(), []string{"disable", "keera-speed"}); err != nil {
 		t.Fatal(err)
 	}
 	body := f.request("PUT", "/v1/models/keera-speed").body
@@ -750,7 +749,7 @@ func TestModelSetStoresACredentialAndKeepsTheRest(t *testing.T) {
 		"PUT /v1/models/keera-frontier": map[string]any{"alias": "keera-frontier"},
 	})
 
-	if err := modelCmd(context.Background(), []string{"set", "keera-frontier", "--api-key", "sk-live"}); err != nil {
+	if err := modelCmd(t.Context(), []string{"set", "keera-frontier", "--api-key", "sk-live"}); err != nil {
 		t.Fatal(err)
 	}
 	body := f.request("PUT", "/v1/models/keera-frontier").body
@@ -773,7 +772,7 @@ func TestModelCheckFailsWhenTheProbeDoes(t *testing.T) {
 	})
 
 	// A failed check fails the command.
-	err := modelCmd(context.Background(), []string{"check", "keera-speed"})
+	err := modelCmd(t.Context(), []string{"check", "keera-speed"})
 	if err == nil || !strings.Contains(err.Error(), "did not pass") {
 		t.Fatalf("error = %v, want a failed command", err)
 	}
@@ -797,7 +796,7 @@ func TestModelApplyUpsertsEveryModelInTheFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := modelCmd(context.Background(), []string{"apply", path}); err != nil {
+	if err := modelCmd(t.Context(), []string{"apply", path}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.request("PUT", "/v1/models/keera-speed").body["backend_model"]; got != "qwen3-8b" {
@@ -823,7 +822,7 @@ func TestModelApplyValidatesBeforeItWritesAnything(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := modelCmd(context.Background(), []string{"apply", path}); err == nil {
+	if err := modelCmd(t.Context(), []string{"apply", path}); err == nil {
 		t.Fatal("a catalogue with a broken entry was applied")
 	}
 	if len(f.seen) != 0 {
@@ -995,7 +994,7 @@ func TestBackendModelFlagBringsTheNewModelsValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.InputMicrosPerMTok != 400_000 || got.OutputMicrosPerMTok != 1_600_000 ||
-		got.CachedInputMicrosPerMTok != 0 || got.MaxContext != 128_000 ||
+		got.CachedInputMicrosPerMTok != 0 || got.MaxContext != 131_072 ||
 		got.ReleaseDate != "2025-08-05" || got.Description == "made for code" ||
 		got.DisplayName != "gpt-oss-120b" {
 		t.Errorf("the old model's values were kept: %+v", got)
@@ -1073,7 +1072,7 @@ func TestFilterAddSendsTheModelAndTheInstruction(t *testing.T) {
 		},
 	})
 
-	if err := Run(context.Background(), []string{
+	if err := Run(t.Context(), []string{
 		"filter", "add", "redact-secrets",
 		"--model", "keera-guard", "--prompt", "Remove credentials.",
 	}); err != nil {
@@ -1102,7 +1101,7 @@ func TestSetClearsADescriptionAndRefusesNothing(t *testing.T) {
 				}}},
 				"PUT /v1/" + kind + "s/a": map[string]any{"alias": "a"},
 			})
-			if err := Run(context.Background(), []string{kind, "set", "a", "--description", ""}); err != nil {
+			if err := Run(t.Context(), []string{kind, "set", "a", "--description", ""}); err != nil {
 				t.Fatalf("%s set: %v", kind, err)
 			}
 			if d := f.request("PUT", "/v1/"+kind+"s/a").body["description"]; d != "" {
@@ -1118,7 +1117,7 @@ func TestSetClearsADescriptionAndRefusesNothing(t *testing.T) {
 	} {
 		quiet(t)
 		f := newFakeControl(t, map[string]any{})
-		if err := Run(context.Background(), args); err == nil ||
+		if err := Run(t.Context(), args); err == nil ||
 			!strings.Contains(err.Error(), "nothing to change") {
 			t.Errorf("%v = %v, want nothing to change", args, err)
 		}
@@ -1152,7 +1151,7 @@ func TestFilterAndRouterSetKeepTheRest(t *testing.T) {
 					"PUT /v1/filters/redact-secrets": map[string]any{"alias": "redact-secrets"},
 				})
 				args := append([]string{"filter", verb, "redact-secrets"}, c.flags...)
-				if err := Run(context.Background(), args); err != nil {
+				if err := Run(t.Context(), args); err != nil {
 					t.Fatal(err)
 				}
 				body := f.request("PUT", "/v1/filters/redact-secrets").body
@@ -1180,7 +1179,7 @@ func TestFilterAndRouterSetKeepTheRest(t *testing.T) {
 				}}},
 				"PUT /v1/routers/auto": map[string]any{"alias": "auto"},
 			})
-			if err := Run(context.Background(), []string{
+			if err := Run(t.Context(), []string{
 				"router", verb, "auto",
 				"--description", "changed",
 			}); err != nil {
@@ -1215,7 +1214,7 @@ func TestFilterAddEnforcesUnlessShadow(t *testing.T) {
 			"filter", "add", "redact-secrets",
 			"--model", "keera-guard", "--prompt", "Remove credentials.",
 		}, tc.flags...)
-		if err := Run(context.Background(), args); err != nil {
+		if err := Run(t.Context(), args); err != nil {
 			t.Fatalf("filter add %v: %v", tc.flags, err)
 		}
 		if req := f.request("PUT", "/v1/filters/redact-secrets"); req.body["shadow"] != tc.want {
@@ -1275,7 +1274,7 @@ func TestPolicySetAppliesFiltersAndClearsThemByFlag(t *testing.T) {
 		"PUT /v1/guardrails/project/project_1": map[string]any{},
 	})
 
-	if err := Run(context.Background(), []string{
+	if err := Run(t.Context(), []string{
 		"guardrail", "set", "project", "project_1",
 		"--filters", "redact-secrets,redact-clients",
 	}); err != nil {
@@ -1301,7 +1300,7 @@ func TestPolicySetClearsFiltersOnlyWithItsOwnFlag(t *testing.T) {
 		"PUT /v1/guardrails/project/project_1": map[string]any{},
 	})
 
-	if err := Run(context.Background(), []string{
+	if err := Run(t.Context(), []string{
 		"guardrail", "set", "project", "project_1",
 		"--no-filters",
 	}); err != nil {
@@ -1328,7 +1327,7 @@ func TestAnOperatorsModelGoesToTheOnlyOrganisation(t *testing.T) {
 		"PUT /v1/models/keera-frontier": map[string]any{"alias": "keera-frontier"},
 	})
 
-	if err := modelCmd(context.Background(), []string{
+	if err := modelCmd(t.Context(), []string{
 		"add", "mine",
 		"--backend", "http://vllm:8000/v1", "--backend-model", "qwen",
 	}); err != nil {
@@ -1341,7 +1340,7 @@ func TestAnOperatorsModelGoesToTheOnlyOrganisation(t *testing.T) {
 		t.Errorf("the models were listed for %q, want org_id=org_1", got)
 	}
 
-	if err := modelCmd(context.Background(), []string{
+	if err := modelCmd(t.Context(), []string{
 		"set", "keera-frontier",
 		"--api-key", "sk-test",
 	}); err != nil {
@@ -1360,7 +1359,7 @@ func TestAnOrganisationsGuardrailNeedsNoID(t *testing.T) {
 		"PUT /v1/guardrails/org/org_1": map[string]any{"allowed_models": []string{"keera-speed"}},
 	})
 
-	if err := guardrailCmd(context.Background(),
+	if err := guardrailCmd(t.Context(),
 		[]string{"set", "org", "--models", "keera-speed"}); err != nil {
 		t.Fatal(err)
 	}
@@ -1368,7 +1367,7 @@ func TestAnOrganisationsGuardrailNeedsNoID(t *testing.T) {
 		t.Errorf("the guardrail was not written to the caller's organisation: %v", f.seen)
 	}
 	// A project or a key still has to be named.
-	if err := guardrailCmd(context.Background(), []string{"get", "project"}); err == nil {
+	if err := guardrailCmd(t.Context(), []string{"get", "project"}); err == nil {
 		t.Error("a project guardrail was read without naming the project")
 	}
 }
@@ -1384,7 +1383,7 @@ func TestModelListUsesTheChosenOrganisation(t *testing.T) {
 	})
 
 	t.Setenv("KEERA_ORG", "org_b")
-	if err := modelCmd(context.Background(), []string{"list"}); err != nil {
+	if err := modelCmd(t.Context(), []string{"list"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.request("GET", "/v1/models").query; got != "org_id=org_b" {
@@ -1416,7 +1415,7 @@ func TestModelUsersNamesTheFiltersAndRoutersOnIt(t *testing.T) {
 		}},
 	})
 
-	filters, routers, err := modelUsers(context.Background(), newClient(), "org_1", "keera-guard")
+	filters, routers, err := modelUsers(t.Context(), newClient(), "org_1", "keera-guard")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1436,7 +1435,7 @@ func TestAnAdministratorsModelNeedsNoOrg(t *testing.T) {
 		"PUT /v1/models/mine": map[string]any{"alias": "mine", "org_id": "org_1"},
 	})
 
-	if err := modelCmd(context.Background(), []string{
+	if err := modelCmd(t.Context(), []string{
 		"add", "mine",
 		"--backend", "http://vllm:8000/v1", "--backend-model", "qwen",
 	}); err != nil {
@@ -1470,7 +1469,7 @@ func TestReportsTakeAProjectByNameAndAPersonByEmail(t *testing.T) {
 		"GET /v1/requests": map[string]any{"data": []any{}},
 	})
 
-	if err := Run(context.Background(), []string{
+	if err := Run(t.Context(), []string{
 		"failures",
 		"--project", "payments platform", "--user", "Ada@example.ch",
 	}); err != nil {
@@ -1489,14 +1488,14 @@ func TestFailuresTakeAStatusOrAClass(t *testing.T) {
 		"GET /v1/requests": map[string]any{"data": []any{}},
 	})
 	for _, status := range []string{"502", "5xx"} {
-		if err := Run(context.Background(), []string{"failures", "--status", status}); err != nil {
+		if err := Run(t.Context(), []string{"failures", "--status", status}); err != nil {
 			t.Fatalf("--status %s: %v", status, err)
 		}
 		if q := f.seen[len(f.seen)-1].query; !strings.Contains(q, "status="+status) {
 			t.Errorf("query = %q, want status=%s", q, status)
 		}
 	}
-	if err := Run(context.Background(), []string{"failures", "--status", "bad"}); err == nil {
+	if err := Run(t.Context(), []string{"failures", "--status", "bad"}); err == nil {
 		t.Error("--status bad was sent, and would have filtered nothing")
 	}
 }
@@ -1534,7 +1533,7 @@ func TestGuardrailTakesAProjectByName(t *testing.T) {
 
 		"GET /v1/guardrails/project/project_1/effective": map[string]any{},
 	})
-	if err := Run(context.Background(), []string{"limit", "project", "payments", "--requests", "60"}); err != nil {
+	if err := Run(t.Context(), []string{"limit", "project", "payments", "--requests", "60"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := rateLimits(f.request("PUT", "/v1/guardrails/project/project_1").body); len(got) != 1 ||
@@ -1566,7 +1565,7 @@ func TestLimitCountsPerDayWithPer(t *testing.T) {
 
 		"GET /v1/guardrails/project/project_1/effective": map[string]any{},
 	})
-	if err := Run(context.Background(), []string{
+	if err := Run(t.Context(), []string{
 		"limit", "project", "payments",
 		"--tokens", "5000000", "--per", "day",
 	}); err != nil {
@@ -1577,7 +1576,7 @@ func TestLimitCountsPerDayWithPer(t *testing.T) {
 		got[1]["tokens"] != float64(5_000_000) || got[1]["period"] != "day" {
 		t.Errorf("rate_limits = %v, want 60 requests a minute and 5000000 tokens a day", got)
 	}
-	err := Run(context.Background(), []string{"limit", "project", "payments", "--per", "week"})
+	err := Run(t.Context(), []string{"limit", "project", "payments", "--per", "week"})
 	if err == nil || !strings.Contains(err.Error(), "--per must be minute, day or month") {
 		t.Errorf("err = %v, want --per refused", err)
 	}
@@ -1595,12 +1594,12 @@ func TestGuardrailTakesAProjectByNameInOneOfSeveralOrgs(t *testing.T) {
 
 		"GET /v1/guardrails/project/project_1/effective": map[string]any{},
 	})
-	if err := Run(context.Background(), []string{"budget", "project", "payments"}); err == nil ||
+	if err := Run(t.Context(), []string{"budget", "project", "payments"}); err == nil ||
 		!strings.Contains(err.Error(), "keera org switch") {
 		t.Errorf("without a chosen organisation = %v, want to be told to choose one", err)
 	}
 	t.Setenv("KEERA_ORG", "org_1")
-	if err := Run(context.Background(), []string{
+	if err := Run(t.Context(), []string{
 		"budget", "project", "payments",
 		"--budget", "500",
 	}); err != nil {
@@ -1619,7 +1618,7 @@ func TestDeleteLooksTheAliasUpBeforeAsking(t *testing.T) {
 		"GET /v1/routers": map[string]any{"data": []any{}},
 	})
 	for _, cmd := range []string{"filter", "router"} {
-		err := Run(context.Background(), []string{cmd, "delete", "typo"})
+		err := Run(t.Context(), []string{cmd, "delete", "typo"})
 		if err == nil || !strings.Contains(err.Error(), `no `+cmd+` "typo"`) {
 			t.Errorf("%s delete typo: err = %v, want the alias refused", cmd, err)
 		}
@@ -1655,7 +1654,7 @@ func TestRefusedBeforeAnyCall(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			quiet(t)
 			f := newFakeControl(t, map[string]any{})
-			err := Run(context.Background(), tc.args)
+			err := Run(t.Context(), tc.args)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("keera %s: err = %v, want %q", strings.Join(tc.args, " "), err, tc.want)
 			}
@@ -1673,7 +1672,7 @@ func TestRotatingARevokedKeyWithNoProjectSuggestsNoProject(t *testing.T) {
 			{"id": "key_1", "name": "ci", "revoked_at": "2026-01-01T00:00:00Z"},
 		}},
 	})
-	err := keyCmd(context.Background(), []string{"rotate", "key_1", "--org", "org_1", "--yes"})
+	err := keyCmd(t.Context(), []string{"rotate", "key_1", "--org", "org_1", "--yes"})
 	if err == nil || strings.Contains(err.Error(), "--project") {
 		t.Errorf("err = %v, want a hint without --project", err)
 	}
@@ -1695,7 +1694,7 @@ func TestAddRefusesAnAliasThatExists(t *testing.T) {
 		{"mcp", "add", "a", "--endpoint", "https://mcp.example.ch"},
 		{"model", "add", "a", "--backend", "http://vllm:8000/v1", "--backend-model", "qwen"},
 	} {
-		err := Run(context.Background(), args)
+		err := Run(t.Context(), args)
 		if err == nil || !strings.Contains(err.Error(), "keera "+args[0]+" set a") {
 			t.Errorf("keera %s: err = %v, want it to point at set", strings.Join(args, " "), err)
 		}
@@ -1715,7 +1714,7 @@ func TestKeyRotateAsksBeforeItRotates(t *testing.T) {
 		"POST /v1/keys/key_old/rotate": map[string]any{"id": "key_new", "key": "keera_sk_new"},
 	})
 
-	if err := keyCmd(context.Background(), []string{"rotate", "a developer's laptop"}); err == nil {
+	if err := keyCmd(t.Context(), []string{"rotate", "a developer's laptop"}); err == nil {
 		t.Fatal("rotate went ahead without a confirmation")
 	}
 	if f.called("POST", "/v1/keys/key_old/rotate") {
@@ -1741,14 +1740,14 @@ func TestKeyCreateExpiresByDefault(t *testing.T) {
 			"POST /v1/keys": map[string]any{"id": "key_1", "key": "keera_sk_new"},
 		})
 		args := append([]string{"create", "laptop"}, tc.flags...)
-		if err := keyCmd(context.Background(), args); err != nil {
+		if err := keyCmd(t.Context(), args); err != nil {
 			t.Fatal(err)
 		}
 		if got := f.request("POST", "/v1/keys").body["expires_in_seconds"]; got != tc.want {
 			t.Errorf("%v: expires_in_seconds = %v, want %v", tc.flags, got, tc.want)
 		}
 	}
-	if err := keyCmd(context.Background(), []string{"rotate", "laptop", "--expires", "never"}); err == nil {
+	if err := keyCmd(t.Context(), []string{"rotate", "laptop", "--expires", "never"}); err == nil {
 		t.Error("rotate accepted --expires never, which the control API reads as keeping the old lifetime")
 	}
 }
@@ -1760,7 +1759,7 @@ func TestKeyCreateExpiresOnADay(t *testing.T) {
 		"POST /v1/keys": map[string]any{"id": "key_1", "key": "keera_sk_new"},
 	})
 	day := time.Now().AddDate(0, 1, 0).Format(time.DateOnly)
-	if err := keyCmd(context.Background(), []string{"create", "laptop", "--expires", day}); err != nil {
+	if err := keyCmd(t.Context(), []string{"create", "laptop", "--expires", day}); err != nil {
 		t.Fatal(err)
 	}
 	sent := f.request("POST", "/v1/keys").body
@@ -1774,7 +1773,7 @@ func TestKeyCreateExpiresOnADay(t *testing.T) {
 	}
 
 	past := time.Now().AddDate(0, 0, -1).Format(time.DateOnly)
-	if err := keyCmd(context.Background(), []string{"create", "laptop", "--expires", past}); err == nil {
+	if err := keyCmd(t.Context(), []string{"create", "laptop", "--expires", past}); err == nil {
 		t.Error("create accepted a day that has already passed")
 	}
 }
@@ -1798,11 +1797,11 @@ func TestALeadingFlagIsTheListing(t *testing.T) {
 		"GET /v1/projects": map[string]any{"data": []any{}},
 	})
 	t.Setenv("KEERA_ORG", "org_1")
-	if err := Run(context.Background(), []string{"project", "--json"}); err != nil {
+	if err := Run(t.Context(), []string{"project", "--json"}); err != nil {
 		t.Fatal(err)
 	}
 	f.request("GET", "/v1/projects")
-	err := Run(context.Background(), []string{"guardrail", "--json"})
+	err := Run(t.Context(), []string{"guardrail", "--json"})
 	if err == nil || !strings.Contains(err.Error(), "needs a subcommand") {
 		t.Errorf("guardrail --json: err = %v, want it to ask for a subcommand", err)
 	}
@@ -1834,7 +1833,7 @@ func TestOrgCommandsTakeAName(t *testing.T) {
 		{"org", "delete", "Example Bank", "--yes"},
 		{"billing", "invoiced", "--org", "Example Bank"},
 	} {
-		if err := Run(context.Background(), args); err != nil {
+		if err := Run(t.Context(), args); err != nil {
 			t.Fatalf("%v: %v", args, err)
 		}
 	}
@@ -1850,7 +1849,7 @@ func TestBillingInvoicedOff(t *testing.T) {
 	f := newFakeControl(t, map[string]any{
 		"PATCH /v1/billing/account": map[string]any{"org_id": "org_1"},
 	})
-	if err := Run(context.Background(), []string{"billing", "invoiced", "--org", "org_1", "--off"}); err != nil {
+	if err := Run(t.Context(), []string{"billing", "invoiced", "--org", "org_1", "--off"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.request("PATCH", "/v1/billing/account").body["invoiced"]; got != false {
@@ -1871,14 +1870,14 @@ func TestBillingForgetCardConfirms(t *testing.T) {
 	})
 	stdin(t, "no\n")
 	t.Setenv("KEERA_ORG", "org_1")
-	if err := Run(context.Background(), []string{"billing", "forget-card"}); err == nil {
+	if err := Run(t.Context(), []string{"billing", "forget-card"}); err == nil {
 		t.Error("a wrong answer forgot the card")
 	}
 	if f.called("DELETE", "/v1/billing/account/card") {
 		t.Error("the card was deleted without a confirmation")
 	}
 
-	if err := Run(context.Background(), []string{"billing", "forget-card", "--yes"}); err != nil {
+	if err := Run(t.Context(), []string{"billing", "forget-card", "--yes"}); err != nil {
 		t.Fatal(err)
 	}
 	f.request("DELETE", "/v1/billing/account/card")
@@ -1906,7 +1905,7 @@ func TestGuardrailClearsWithNoFlags(t *testing.T) {
 		},
 		"PUT /v1/guardrails/org/org_1": map[string]any{},
 	})
-	if err := Run(context.Background(), []string{
+	if err := Run(t.Context(), []string{
 		"guardrail", "set", "org", "org_1",
 		"--no-models", "--no-tools",
 	}); err != nil {
@@ -1917,7 +1916,7 @@ func TestGuardrailClearsWithNoFlags(t *testing.T) {
 		t.Errorf("sent %v, want both cleared", body)
 	}
 
-	err := Run(context.Background(), []string{
+	err := Run(t.Context(), []string{
 		"guardrail", "set", "org", "org_1",
 		"--models", "any", "--no-models",
 	})
@@ -1932,7 +1931,7 @@ func TestUsageNarrowsLikeTheOtherReports(t *testing.T) {
 		"GET /v1/projects": paymentsProject,
 		"GET /v1/usage":    map[string]any{"data": []any{}},
 	})
-	if err := Run(context.Background(), []string{
+	if err := Run(t.Context(), []string{
 		"usage", "--project", "payments",
 		"--model", "keera-speed",
 	}); err != nil {
@@ -1952,14 +1951,14 @@ func TestKeyCreateIsTheCallersByDefault(t *testing.T) {
 		"POST /v1/keys": map[string]any{"id": "key_1", "key": "sk-keera-secret"},
 	})
 
-	if err := keyCmd(context.Background(), []string{"create", "laptop"}); err != nil {
+	if err := keyCmd(t.Context(), []string{"create", "laptop"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.request("POST", "/v1/keys").body["user_id"]; got != "user_me" {
 		t.Errorf("user_id sent = %v, want the caller's", got)
 	}
 
-	if err := keyCmd(context.Background(), []string{"create", "pipeline", "--no-user"}); err != nil {
+	if err := keyCmd(t.Context(), []string{"create", "pipeline", "--no-user"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, set := f.seen[len(f.seen)-1].body["user_id"]; set {
@@ -1977,7 +1976,7 @@ func TestKeyCreatePendingNeedsAPersonAndPrintsNoSecret(t *testing.T) {
 		"POST /v1/keys": map[string]any{"id": "key_1", "user_id": "user_1", "pending": true},
 	})
 
-	if err := keyCmd(context.Background(),
+	if err := keyCmd(t.Context(),
 		[]string{"create", "laptop", "--user", "alice@example.com", "--pending"}); err != nil {
 		t.Fatal(err)
 	}
@@ -1985,7 +1984,7 @@ func TestKeyCreatePendingNeedsAPersonAndPrintsNoSecret(t *testing.T) {
 		t.Errorf("pending sent = %v, want true", got)
 	}
 
-	err := keyCmd(context.Background(), []string{"create", "ci", "--no-user", "--pending"})
+	err := keyCmd(t.Context(), []string{"create", "ci", "--no-user", "--pending"})
 	if err == nil || !strings.Contains(err.Error(), "--user") {
 		t.Errorf("err = %v, want a pending key to need a person", err)
 	}
@@ -2000,7 +1999,7 @@ func TestKeyActivateAsksTheControlPlane(t *testing.T) {
 		"POST /v1/keys/key_p/activate": map[string]any{"id": "key_p", "key": "keera_sk_new"},
 	})
 
-	if err := keyCmd(context.Background(), []string{"activate", "laptop"}); err != nil {
+	if err := keyCmd(t.Context(), []string{"activate", "laptop"}); err != nil {
 		t.Fatal(err)
 	}
 	if !f.called("POST", "/v1/keys/key_p/activate") {
@@ -2047,13 +2046,13 @@ func TestBillingChargeNamesTheOrganisationAndThePeriod(t *testing.T) {
 		},
 		"DELETE /v1/billing/charges/charge_1": map[string]any{"id": "charge_1", "deleted": true},
 	})
-	if err := Run(context.Background(), []string{
+	if err := Run(t.Context(), []string{
 		"billing", "charge", "--name", "Dedicated model",
 		"--amount", "2000", "--every", "month",
 	}); err == nil {
 		t.Error("a charge without --org was sent")
 	}
-	if err := Run(context.Background(), []string{
+	if err := Run(t.Context(), []string{
 		"billing", "charge", "--org", "Example Bank",
 		"--name", "Dedicated model", "--amount", "2000", "--every", "month", "--start", "2027-01-01",
 	}); err != nil {
@@ -2064,7 +2063,7 @@ func TestBillingChargeNamesTheOrganisationAndThePeriod(t *testing.T) {
 		body["every"] != "month" || body["starts_on"] != "2027-01-01" || body["name"] != "Dedicated model" {
 		t.Errorf("body = %v", body)
 	}
-	if err := Run(context.Background(), []string{"billing", "end-charge", "charge_1"}); err != nil {
+	if err := Run(t.Context(), []string{"billing", "end-charge", "charge_1"}); err != nil {
 		t.Fatal(err)
 	}
 	f.request("DELETE", "/v1/billing/charges/charge_1")
@@ -2080,7 +2079,7 @@ func TestBillingForgetCardKeepsTheCardOfRecurringCharges(t *testing.T) {
 		"DELETE /v1/billing/account/card": nil,
 	})
 	t.Setenv("KEERA_ORG", "org_1")
-	if err := Run(context.Background(), []string{"billing", "forget-card"}); err == nil ||
+	if err := Run(t.Context(), []string{"billing", "forget-card"}); err == nil ||
 		!strings.Contains(err.Error(), "recurring charges") {
 		t.Errorf("err = %v", err)
 	}
@@ -2095,7 +2094,7 @@ func TestGuardrailSetLocationsKeepsTheModels(t *testing.T) {
 		"GET /v1/guardrails/org/org_1": map[string]any{"allowed_models": []string{"keera-speed"}},
 		"PUT /v1/guardrails/org/org_1": map[string]any{},
 	})
-	if err := Run(context.Background(), []string{
+	if err := Run(t.Context(), []string{
 		"guardrail", "set", "org", "org_1", "--locations", "ch, onprem",
 	}); err != nil {
 		t.Fatal(err)

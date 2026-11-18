@@ -24,7 +24,7 @@ func (sh responsesShape) pipe(dst io.Writer, flush func(), src io.Reader, alias 
 	return pipeEvents(dst, flush, src, limit, 0, func(send func([]byte) error) eventStream {
 		return &responsesStream{
 			alias: alias, tools: sh.tools, respID: id.New("resp"),
-			createdAt: time.Now().Unix(), open: -1, send: send,
+			createdAt: time.Now().Unix(), open: -1, send: send, held: heldText{limit: limit},
 		}
 	})
 }
@@ -49,6 +49,8 @@ type responsesStream struct {
 	call  map[string]any
 	text  strings.Builder
 	input inputStream
+	// held counts text and done together, since done keeps every item's text.
+	held heldText
 
 	chatChunks
 }
@@ -62,6 +64,9 @@ func (s *responsesStream) textDelta(text string) error {
 		return err
 	}
 	if err := s.enter(false, 0, s.closeItem, s.openMessage); err != nil {
+		return err
+	}
+	if err := s.held.add(len(text)); err != nil {
 		return err
 	}
 	s.text.WriteString(text)
@@ -82,6 +87,9 @@ func (s *responsesStream) toolDelta(index int, tc oaiToolCallDelta) error {
 	}
 	if tc.Function.Arguments == "" {
 		return nil
+	}
+	if err := s.held.add(len(tc.Function.Arguments)); err != nil {
+		return err
 	}
 	s.text.WriteString(tc.Function.Arguments)
 	if s.call["type"] == "custom_tool_call" {

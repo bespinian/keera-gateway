@@ -31,7 +31,7 @@ func testStore(t *testing.T) (*store.Store, context.Context) {
 	if dsn == "" {
 		t.Skip("set KEERA_TEST_DATABASE_URL to run the control-plane tests that need one")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	t.Cleanup(cancel)
 
 	st, err := store.Open(ctx, dsn, 8)

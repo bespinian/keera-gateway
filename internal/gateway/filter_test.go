@@ -212,7 +212,7 @@ func TestFilterSpendIsChargedToTheSameBudget(t *testing.T) {
 
 func TestAClientThatHangsUpAfterAFilterIsStillCharged(t *testing.T) {
 	// Without a row, hanging up would make a filter free.
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	h := filterHarnessAnswering(t, func(_ string, segments []string) string {
 		return redactor(segments)
 	}, nil, func(_ http.ResponseWriter, r *http.Request) {
@@ -893,7 +893,7 @@ func TestCheckingAGateSendsBothHalvesOfTheSampleSeparately(t *testing.T) {
 		return "ALLOW"
 	})
 
-	p := h.server().CheckFilter(context.Background(), h.src.filters["org_1/redact"])
+	p := h.server().CheckFilter(t.Context(), h.src.filters["org_1/redact"])
 
 	if !p.OK || p.Error != "" {
 		t.Fatalf("the check failed: ok = %v, error = %q", p.OK, p.Error)
@@ -927,7 +927,7 @@ func TestCheckingAGateThatRefusesEverythingWarnsAboutIt(t *testing.T) {
 	// The costly mistake: every request the guardrail covers is stopped.
 	h := gateHarness(t, func([]string) string { return "REFUSED: it mentions a system" })
 
-	p := h.server().CheckFilter(context.Background(), h.src.filters["org_1/redact"])
+	p := h.server().CheckFilter(t.Context(), h.src.filters["org_1/redact"])
 
 	if !p.OK {
 		t.Fatalf("the check failed rather than warning: %q", p.Error)
@@ -940,7 +940,7 @@ func TestCheckingAGateThatRefusesEverythingWarnsAboutIt(t *testing.T) {
 func TestCheckingAGateWhoseModelCannotAnswerIsAFailure(t *testing.T) {
 	h := gateHarness(t, func([]string) string { return "I would allow this, probably." })
 
-	p := h.server().CheckFilter(context.Background(), h.src.filters["org_1/redact"])
+	p := h.server().CheckFilter(t.Context(), h.src.filters["org_1/redact"])
 
 	if p.OK {
 		t.Fatal("a gate whose answer cannot be read passed its check")

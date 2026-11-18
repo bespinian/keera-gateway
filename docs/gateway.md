@@ -124,11 +124,14 @@ refused. So is `stream`, since a streamed transcript carries no usage record
 the gateway reads. A `text`, `srt` or `vtt` answer is passed on as text.
 
 The whole form is read before it is sent, so the audio counts against
-`KEERA_MAX_BODY_BYTES` ([install.md](install.md#everything-else)). A
+[`KEERA_MAX_BODY_BYTES`](https://docs.keera.ch/operate/settings/#traffic). A
 transcription answers only when it is done, so a self-hosted backend has
 `KEERA_UPSTREAM_HEADER_TIMEOUT` to transcribe the whole file. Raise it for
 long recordings. The context window check skips a transcription: the audio has
-no length in tokens before it is heard.
+no length in tokens before it is heard. A backend that reports only the
+audio's length reports no tokens, so the gateway counts the prompt and the
+transcript at 4 bytes a token. They count against token limits, and pay the
+[gateway fee](billing.md#the-gateway-fee).
 
 `GET /api/v1/models` lists the models a key may call, and
 `GET /api/v1/models/{alias}` describes one. The list carries the fields of both
@@ -208,10 +211,8 @@ says, so it tells what is connected, not who may connect.
 
 How to run it: see
 [Connect your tools](https://docs.keera.ch/use/connect/#claude-code).
-`keera connect claude-code` gives the machine a key of its own and writes it
-into `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`), so nobody
-copies it. The rest of the file is kept. The key always belongs to a person, so
-the command needs a sign-in and refuses the operator key.
+The key always belongs to a person, so the command needs a sign-in and refuses
+the operator key.
 
 The key is named `claude-code on <hostname> (<id>)`. The id is random and kept
 in keera's configuration directory, so machines that share a hostname keep
@@ -282,34 +283,21 @@ GitLab sends every Duo request to that AI Gateway, and the AI Gateway sends it
 to a model server. Keera can be that model server, so Duo gets the same
 guardrails, budgets and audit log as everything else.
 
+How to set it up:
+[GitLab Duo](https://docs.keera.ch/use/connect/#gitlab-duo).
+
 GitLab's AI Gateway calls models through LiteLLM. Code completion, code
 generation, Duo Chat and the Agent Platform all send chat completions, even
-for fill-in-the-middle: the fill-in-the-middle tokens are in the message. In
-**Admin > GitLab Duo > Configure models for GitLab Duo**, each model is:
+for fill-in-the-middle: the fill-in-the-middle tokens are in the message.
 
-| Field            | Value                                                               |
-| ---------------- | ------------------------------------------------------------------- |
-| Endpoint         | `https://keera.example.ch/api/v1`                                   |
-| API key          | A Keera key, in a project of its own, such as `gitlab-duo`          |
-| Model identifier | `custom_openai/<alias>`, or `openai/<alias>` for an embedding model |
-| Model family     | The model's family if GitLab lists it, otherwise **General**        |
-
-For a Claude model, `anthropic/<alias>` with the endpoint
-`https://keera.example.ch/api` sends the Messages API, and LiteLLM adds
-`/v1/messages` itself. The request then goes to Anthropic as it is, with its
-prompt caching (see [Three request shapes](#three-request-shapes)). LiteLLM
+For a Claude model, `anthropic/<alias>` sends the Messages API, and LiteLLM
+adds `/v1/messages` itself. The request then goes to Anthropic as it is, with
+its prompt caching (see [Three request shapes](#three-request-shapes)). LiteLLM
 sends the key as `x-api-key`, which the gateway takes.
 
-On the AI Gateway, set:
-
-```sh
-AIGW_CUSTOM_MODELS__ENABLED=true
-AIGW_CUSTOM_MODELS__EXTRA_HEADERS='{"X-Keera-Client": "gitlab-duo"}'
-```
-
-The second line makes its requests show as **GitLab Duo**. Without it, they
-show as the OpenAI SDK, which is what LiteLLM sends with. The AI Gateway does
-not add the header to embedding requests.
+Without `X-Keera-Client`, its requests show as the OpenAI SDK, which is what
+LiteLLM sends with. The AI Gateway does not add the header to embedding
+requests.
 
 What the gateway does for it:
 
@@ -324,26 +312,17 @@ The Agent Platform and Duo Chat's agentic mode need tool calls. Run
 [`keera model check`](install.md#keera-model-check-is-the-acceptance-test) on
 each model before you give it to Duo.
 
-**All GitLab users share one key.** Reports, budgets and guardrails see the
-project the key is in, not who asked. GitLab can send its user id in a header
+**All GitLab users share one key.** GitLab can send its user id in a header
 (`AIGW_CUSTOM_MODELS__USER_ID_HEADER`), but the gateway does not read it: the
-id is GitLab's, not a Keera person, and nothing proves it. Set the budgets and
-guardrails for Duo on its project.
+id is GitLab's, not a Keera person, and nothing proves it.
 
 ## The tenancy model
 
-Three levels: organisation, project, key. A guardrail can attach at any of them.
-
-The combining rule is **restrict-only**. A level can narrow what it inherits but
-never widen it. Allow-lists intersect, and ceilings take the minimum.
-
-The exceptions:
-
-- **Rate limits and budgets are kept per level and checked separately**, not
-  merged. An organisation cap of 10,000 and a project cap of 1,000 are two limits
-  that must both hold, and each level's rate limit is counted on its own.
-- **System prompts and filters accumulate**, outermost first. A level may add to
-  what it inherits but may not drop it.
+Three levels: organisation, project, key. A guardrail can attach at any of
+them, and how the levels combine is in
+[How levels combine](https://docs.keera.ch/manage/guardrails/#how-levels-combine).
+In the code, allow-lists intersect, ceilings take the minimum, and rate limits
+and budgets are not merged: each level's is counted on its own.
 
 When an organisation's guardrail lists allowed models, a model the organisation
 adds is put on that list, whether it was added in the panel, with
@@ -633,7 +612,7 @@ are checked one by one, since each has to fit on its own.
 
 A coding agent keeps one response open for minutes. So the gateway limits only
 how long the inference plane may take to _start_ responding
-([`KEERA_UPSTREAM_HEADER_TIMEOUT`](install.md#everything-else)), never the response
+([`KEERA_UPSTREAM_HEADER_TIMEOUT`](https://docs.keera.ch/operate/settings/#traffic)), never the response
 itself. A route step uses the same timeout to decide that a destination did not
 answer in time. A model on the deployment's own provider key gets longer
 ([billing.md](billing.md#what-is-billed)).
@@ -673,7 +652,7 @@ once, over Postgres LISTEN/NOTIFY, so a revoked key stops working right away.
 A change to one key, such as issuing or revoking it, drops only that key. Any other change, such as a model or a guardrail, drops the keys of
 its organisation and reloads that organisation alone. In case a
 notification is lost, a checked key is reused for at most
-[`KEERA_CACHE_TTL`](install.md#everything-else), and models, filters, routers and
+[`KEERA_CACHE_TTL`](https://docs.keera.ch/operate/settings/#traffic), and models, filters, routers and
 MCP servers are reloaded every minute. Spend is refreshed separately, every
 `KEERA_SPEND_REFRESH`.
 
@@ -687,7 +666,7 @@ The token buckets behind a rate limit per minute live in each process. With N
 replicas behind a load balancer, a limit of 600 requests per minute is 600 per
 replica, and up to 600N in total. Spend is reconciled through Postgres, so a
 budget means the same thing however many gateways are running. Each replica
-reads spend again every [`KEERA_SPEND_REFRESH`](install.md#everything-else), so
+reads spend again every [`KEERA_SPEND_REFRESH`](https://docs.keera.ch/operate/settings/#traffic), so
 a budget can be overshot by about that much traffic. A rate limit per day or
 month is counted the same way, with the same overshoot. A request still running
 counts at once on its own replica, but on the others only once it has ended.
@@ -718,25 +697,12 @@ Answers say what is left of the allowance, so a client can see a limit coming
 ([Headers you get back](https://docs.keera.ch/use/api/#headers-you-get-back)).
 The budget headers are sent when some level has a budget, and the request
 headers when some level limits requests per minute. They describe only the
-tightest level, which these name:
+tightest level. A limit on tokens, or one per day or month, has no header. When
+any limit is hit, the message says which one and its value. When the provider
+itself refuses, its `Retry-After` and `X-Should-Retry` are passed on.
 
-| Header                       | What it holds                        |
-| ---------------------------- | ------------------------------------ |
-| `X-Keera-Budget-Limit`       | the budget                           |
-| `X-Keera-Budget-Scope`       | the level: `org`, `project` or `key` |
-| `X-RateLimit-Limit-Requests` | the requests per minute              |
-| `X-Keera-RateLimit-Scope`    | the level: `org`, `project` or `key` |
-
-A limit on tokens, or one per day or month, has no header. When a limit is hit,
-the message says which limit and its value. A rate limit answers 429 with `Retry-After`. A budget answers
-402, and its message gives the day it resets. When the provider itself refuses,
-its `Retry-After` and `X-Should-Retry` are passed on.
-
-Two more name what was taken out of a request sent on the deployment's own
-provider key: `X-Keera-Removed-Tools` the hosted tools
-([mcp.md](mcp.md#hosted-tools)), and `X-Keera-Removed-Fields` the fields
-([billing.md](billing.md)). An `X-Request-Id` the client sends is kept if it is
-up to 64 of `A-Z a-z 0-9 . _ : -`.
+An `X-Request-Id` the client sends is kept if it is up to 64 of
+`A-Z a-z 0-9 . _ : -`.
 
 ### Naming a request yourself
 
@@ -752,16 +718,9 @@ request.
 ## Errors
 
 [Errors](https://docs.keera.ch/reference/errors/) lists the codes and what to
-do about them. These are not on it:
-
-| Status | Code                                                                      |
-| ------ | ------------------------------------------------------------------------- |
-| 400    | `subscription_model`                                                      |
-| 401    | `subscription_key`, `missing_claude_sign_in`                              |
-| 404    | `mcp_server_not_found`; `not_found`: no such route                        |
-| 415    | `unsupported_encoding`: a body compressed other than with gzip or deflate |
-| 502    | `mcp_credential_refused`, `mcp_unavailable`                               |
-| 503    | `router_unavailable`                                                      |
+do about them, and
+[Claude plans](https://docs.keera.ch/operate/claude-plans/#errors) the ones of
+subscription keys.
 
 ## Metrics
 

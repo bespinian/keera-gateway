@@ -1,7 +1,6 @@
 package authn_test
 
 import (
-	"context"
 	"errors"
 	"slices"
 	"strings"
@@ -34,7 +33,7 @@ func TestLDAPSignInOpenLDAP(t *testing.T) {
 		t.Fatal("an LDAP provider asks for a password")
 	}
 
-	id, err := o.Authenticate(context.Background(), " alice ", "right", nil)
+	id, err := o.Authenticate(t.Context(), " alice ", "right", nil)
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
@@ -68,7 +67,7 @@ func TestLDAPSignInActiveDirectory(t *testing.T) {
 	cfg.Mapping.AdminGroups = []string{"cn=keera admins, ou=groups, dc=corp, dc=example, dc=ch"}
 	o := ldaptest.New(t, cfg, dir)
 
-	id, err := o.Authenticate(context.Background(), "ada@corp.example.ch", "right", nil)
+	id, err := o.Authenticate(t.Context(), "ada@corp.example.ch", "right", nil)
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
@@ -85,7 +84,7 @@ func TestLDAPSignInActiveDirectory(t *testing.T) {
 
 	// AD refuses a disabled account's bind itself, but a re-check only reads.
 	dir.Entries = []*ldap.Entry{ldaptest.ADUser("ada", "ada@corp.example.ch", adGUID, "514", admins)}
-	if _, _, err := o.Recheck(context.Background(), guidText); !errors.Is(err, authn.ErrDirectoryRefused) {
+	if _, _, err := o.Recheck(t.Context(), guidText); !errors.Is(err, authn.ErrDirectoryRefused) {
 		t.Errorf("Recheck of a disabled account = %v, want ErrDirectoryRefused", err)
 	}
 }
@@ -98,7 +97,7 @@ func TestLDAPRefusals(t *testing.T) {
 		Passwords: map[string]string{alice.DN: "right"},
 	}
 	o := ldaptest.New(t, ldaptest.Config("corp"), dir)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for _, tc := range []struct{ name, user, pass string }{
 		{"wrong password", "alice", "wrong"},
@@ -166,7 +165,7 @@ func TestLDAPAdmitSeesTheAccountBeforeThePassword(t *testing.T) {
 	admit := func(dn string) error { seen = append(seen, dn); return stop }
 	// Two usernames for one account are one account to admit.
 	for _, user := range []string{"alice", "alice@corp.example.ch"} {
-		if _, err := o.Authenticate(context.Background(), user, "right", admit); !errors.Is(err, stop) {
+		if _, err := o.Authenticate(t.Context(), user, "right", admit); !errors.Is(err, stop) {
 			t.Errorf("%s: err = %v, want admit's", user, err)
 		}
 	}
@@ -185,7 +184,7 @@ func TestLDAPRecheck(t *testing.T) {
 		ldaptest.Person("alice", "alice@corp.example.ch", aliceUUID),
 	}}
 	o := ldaptest.New(t, ldaptest.Config("corp"), dir)
-	ctx := context.Background()
+	ctx := t.Context()
 	subject := strings.ToLower(aliceUUID)
 
 	id, fresh, err := o.Recheck(ctx, subject)

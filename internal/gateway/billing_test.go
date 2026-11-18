@@ -266,7 +266,7 @@ func TestAnAnswerOnTheDeploymentsKeyIsReadToTheEndAfterAHangUp(t *testing.T) {
 			h := newHarness(t, backend, nil, nil)
 			onPlatformKey(h, "keera-code")
 
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(t.Context())
 			go func() {
 				req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
 					h.url("/v1/chat/completions"), strings.NewReader(
@@ -311,7 +311,7 @@ func TestShutdownCutsOffAnAnswerReadAfterAHangUp(t *testing.T) {
 	t.Cleanup(func() { close(left) })
 	onPlatformKey(h, "keera-code")
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	go func() {
 		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, h.url("/v1/chat/completions"),
 			strings.NewReader(`{"model":"keera-code","messages":[],"stream":true,"max_tokens":50}`))
@@ -451,7 +451,7 @@ func TestAModelCheckOnTheDeploymentsKeyIsBilled(t *testing.T) {
 	h := filterHarness(t, redactor, nil)
 	onPlatformKey(h, "keera-code")
 
-	h.server().CheckModel(context.Background(), h.src.models["keera-code"])
+	h.server().CheckModel(t.Context(), h.src.models["keera-code"])
 	ev := h.sink.last(t)
 	if !ev.BillsOnly || len(ev.Bills) != 1 || ev.Bills[0].OutputTokens != 128 {
 		t.Errorf("event = %+v, want one bill at the check's ceiling and no usage row", ev)
@@ -459,7 +459,7 @@ func TestAModelCheckOnTheDeploymentsKeyIsBilled(t *testing.T) {
 
 	h.budgets.creditErr = &policy.ErrNoCredit{}
 	<-h.upstreamBodies
-	p := h.server().CheckModel(context.Background(), h.src.models["keera-code"])
+	p := h.server().CheckModel(t.Context(), h.src.models["keera-code"])
 	if !p.NoCredit || p.Reachable {
 		t.Errorf("probe = %+v, want it refused for credit", p)
 	}
@@ -474,14 +474,14 @@ func TestAFilterCheckOnTheDeploymentsKeyIsBilled(t *testing.T) {
 	h := filterHarness(t, redactor, nil)
 	onPlatformKey(h, "keera-guard")
 
-	h.server().CheckFilter(context.Background(), h.src.filters["org_1/redact"])
+	h.server().CheckFilter(t.Context(), h.src.filters["org_1/redact"])
 	ev := h.sink.last(t)
 	if !ev.BillsOnly || len(ev.Bills) != 1 || ev.Bills[0].Alias != "keera-guard" {
 		t.Errorf("event = %+v, want the filter model's call billed", ev)
 	}
 
 	h.budgets.creditErr = &policy.ErrNoCredit{}
-	p := h.server().CheckFilter(context.Background(), h.src.filters["org_1/redact"])
+	p := h.server().CheckFilter(t.Context(), h.src.filters["org_1/redact"])
 	if p.OK || !strings.Contains(p.Error, "credit") {
 		t.Errorf("probe = %+v, want it refused for credit", p)
 	}

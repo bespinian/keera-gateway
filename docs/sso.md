@@ -38,28 +38,25 @@ an LDAP directory, which sends the browser nowhere.
 
 ### Settings
 
-Discovery runs at start-up, so a wrong issuer URL stops the gateway with the URL
-in the error, instead of breaking sign-in later. Lists, such as addresses,
-groups, domains and scopes, are comma-separated. An LDAP directory's groups are
-separated by `;`, since a DN holds commas itself.
+Every setting is listed in
+[Settings](https://docs.keera.ch/operate/settings/#sign-in). Discovery runs at
+start-up, so a wrong issuer URL stops the gateway with the URL in the error,
+instead of breaking sign-in later.
 
-| Variable                            | Default                                                 | What it is                                                                                                                                                                                 |
-| ----------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `KEERA_OIDC_PROVIDERS`              | unset                                                   | The provider names, comma-separated.                                                                                                                                                       |
-| `KEERA_OPERATORS`                   | unset                                                   | The addresses that are operators, whichever provider signs them in. See [Where a role comes from](#where-a-role-comes-from).                                                               |
-| `KEERA_OIDC_<NAME>_ISSUER`          | unset                                                   | The provider's issuer URL.                                                                                                                                                                 |
-| `KEERA_OIDC_<NAME>_CLIENT_ID`       | unset                                                   | The OAuth client registered with the provider.                                                                                                                                             |
-| `KEERA_OIDC_<NAME>_CLIENT_SECRET`   | unset                                                   | Its secret.                                                                                                                                                                                |
-| `KEERA_OIDC_<NAME>_LABEL`           | from the name, such as `Google`                         | The text on the sign-in button.                                                                                                                                                            |
-| `KEERA_OIDC_<NAME>_SCOPES`          | `openid,profile,email`, and `offline_access` off Google | What Keera asks the provider for. See [Asking the directory again](#asking-the-directory-again), and [GitHub](#github) for its scopes.                                                     |
-| `KEERA_OIDC_<NAME>_GROUPS_CLAIM`    | `groups`, and `memberOf` for LDAP                       | The claim that holds the person's groups.                                                                                                                                                  |
-| `KEERA_OIDC_<NAME>_ADMIN_GROUPS`    | unset                                                   | Groups whose members are administrators. Set, the directory decides roles. See [Where a role comes from](#where-a-role-comes-from).                                                        |
-| `KEERA_OIDC_<NAME>_OPERATOR_GROUPS` | unset                                                   | Groups whose members are operators.                                                                                                                                                        |
-| `KEERA_OIDC_<NAME>_DEFAULT_ROLE`    | `member`                                                | `admin` or `member`, for someone in no admin group.                                                                                                                                        |
-| `KEERA_OIDC_<NAME>_DOMAINS`         | unset                                                   | The email domains this provider may sign people in with, `*` for any. Needed with several providers ([Several directories](#several-directories-at-once)), and always for GitHub and LDAP. |
-| `KEERA_OIDC_<NAME>_SIGNUP`          | `false`                                                 | Lets someone whose sign-in matches no organisation create one. See [Letting people sign up](#letting-people-sign-up).                                                                      |
-| `KEERA_OIDC_<NAME>_LDAP_*`          | unset                                                   | The settings of an LDAP directory. See [LDAP and Active Directory](#ldap-and-active-directory).                                                                                            |
-| `KEERA_PASSKEYS`                    | `false`                                                 | Lets administrators create accounts that sign in with a passkey. See [Passkeys](#passkeys).                                                                                                |
+Those with a default:
+
+| Variable                         | Default                                                                        |
+| -------------------------------- | ------------------------------------------------------------------------------ |
+| `KEERA_OIDC_<NAME>_LABEL`        | from the name, such as `Google`                                                |
+| `KEERA_OIDC_<NAME>_SCOPES`       | `openid,profile,email`, and `offline_access` off Google; see [GitHub](#github) |
+| `KEERA_OIDC_<NAME>_GROUPS_CLAIM` | `groups`, and `memberOf` for LDAP                                              |
+| `KEERA_OIDC_<NAME>_DEFAULT_ROLE` | `member`; `admin` is the only other value                                      |
+| `KEERA_OIDC_<NAME>_SIGNUP`       | `false`; see [Letting people sign up](#letting-people-sign-up)                 |
+| `KEERA_PASSKEYS`                 | `false`; see [Passkeys](#passkeys)                                             |
+
+`KEERA_OIDC_<NAME>_DOMAINS` is needed with
+[several providers](#several-directories-at-once), and always for
+[GitHub](#github) and [LDAP](#ldap-and-active-directory).
 
 ## Where a role comes from
 
@@ -599,7 +596,7 @@ Keera Agents signs people in the same way, at the address in
 Put the gateway's port behind a TLS terminator, then change two things: the
 authorised redirect URI in each provider's console, and `KEERA_PUBLIC_URL`.
 
-[`KEERA_SECURE_COOKIES`](install.md#everything-else) follows the scheme, so the
+[`KEERA_SECURE_COOKIES`](https://docs.keera.ch/operate/settings/#traffic) follows the scheme, so the
 session cookie becomes `Secure` without another setting.
 
 ## Asking the directory again
@@ -624,6 +621,9 @@ the person is active.
 - If the stored refresh token cannot be decrypted, usually because
   `KEERA_SECRET_KEY` [changed](install.md#changing-the-secret-key), the person is
   signed out, as if the directory had refused. Signing in again stores a new one.
+- If the provider they signed in through is no longer configured, the person is
+  signed out, as if it had refused. So removing a compromised provider ends its
+  sign-ins within 15 minutes.
 
 When `KEERA_OIDC_<NAME>_SCOPES` is unset, Keera asks for `offline_access`, which
 is what gets a refresh token from most providers. On Google it asks for offline
@@ -640,18 +640,13 @@ organisation they were in.
 
 Removing a person from the directory ends their sessions and `keera login`
 tokens ([Asking the directory again](#asking-the-directory-again)), but not
-their API keys. The directory never sees
-those. So disable them in Keera as well; see
+their API keys. The directory never sees those. So disable them in Keera as
+well; see
 [When someone leaves](https://docs.keera.ch/manage/users/#when-someone-leaves).
 It acts in one organisation: someone in several is disabled in each.
-Immediately:
-
-- they cannot sign in, and all their sessions and `keera login` tokens end
-- every key attributed to them is revoked for good
 
 The panel hides disabled people until you tick **Show disabled**. An
-administrator can disable anyone in
-their organisation except themselves. Nobody can disable an operator this way;
+administrator can disable anyone in their organisation except themselves. Nobody can disable an operator this way;
 take them out of `KEERA_OPERATORS` or the operator group instead.
 
 Keys attributed to nobody, such as a build pipeline's, are not affected. Give a
@@ -679,7 +674,8 @@ a new link replaces the last one. Opening it creates the passkey and signs the
 person in.
 
 Adding a passkey for another device needs a browser sign-in from the last 15
-minutes, so a stolen session cannot plant a passkey of its own. A person can
+minutes, so a stolen session cannot plant a passkey of its own. For the same
+reason, nobody gets a set-up link for themselves. A person can
 remove one, but not their last. Removing someone else's passkey also signs them
 out everywhere.
 
@@ -746,7 +742,7 @@ with the operator key. On such a gateway, `keera login` needs no `--provider`.
 | `keera login`: "has to come back to a loopback address"        | The command line is older than the gateway, or something rewrote its redirect. Rebuild it.                                                                                  |
 | `keera login`: the browser signs in and nothing happens        | The browser is not on the same machine as the command, usually because of ssh. See above.                                                                                   |
 | A command says "your sign-in is no longer valid"               | It expired, a role change ended it, or someone ran `keera logout --all`. Run `keera login` again.                                                                           |
-| Entra: "did not match the issuer URL returned by provider"     | The issuer names neither a tenant ID nor `common`, `organizations` or `consumers`, or does not end in `/v2.0`. See [Every Microsoft tenant](#every-microsoft-tenant).      |
+| Entra: "did not match the issuer URL returned by provider"     | The issuer names neither a tenant ID nor `common`, `organizations` or `consumers`, or does not end in `/v2.0`. See [Every Microsoft tenant](#every-microsoft-tenant).       |
 | Boot fails with "KEERA_PASSKEYS: passkeys need …"              | `KEERA_PUBLIC_URL` is unset, plain http on a name other than `localhost` or `*.localhost`, or an IP address. Browsers refuse passkeys there.                                |
 | "this set-up link has expired, was already used, or …"         | Links work once, for 24 hours, and a new one replaces the last. Ask for a new one: `keera user passkey-link <email>`.                                                       |
 | "that passkey was not accepted"                                | The passkey was removed, belongs to a disabled person, or is for another host name. The gateway log says which.                                                             |

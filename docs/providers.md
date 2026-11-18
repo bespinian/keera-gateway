@@ -9,16 +9,8 @@ To add one in the panel or on the command line, see
 models work and why.
 
 **Prompts sent to a hosted model leave your infrastructure.** Treat it as a
-deliberate exception. This page covers what to weigh before you offer one and
-how to keep it contained.
-
-Infomaniak, stepping stone, Phoeniqs and CSCS serve open-weight models from
-their own data centres in Switzerland, so those prompts stay under Swiss law. Mistral serves
-its models in the EU, prompts to Anthropic, OpenAI and Google go to the USA,
-and prompts to DeepSeek go to China.
-PeakPrivacy is a Swiss reseller: some of its models run in Switzerland, others
-in the EU.
-Everything below applies to all of them.
+deliberate exception. Where each provider sends them is in
+[Add a hosted model](https://docs.keera.ch/manage/models/#add-a-hosted-model).
 
 ## Why offer one at all
 
@@ -146,7 +138,7 @@ uses that key and is billed at list price. See [billing.md](billing.md). The
 rest of this section is about keys an organisation enters itself.
 
 The key is stored on the model, encrypted with AES-GCM under
-[`KEERA_SECRET_KEY`](install.md#required), so a Postgres dump holds only
+[`KEERA_SECRET_KEY`](install.md#changing-the-secret-key), so a Postgres dump holds only
 ciphertext. Each model holds its organisation's own key, and so does a model
 from a [template file](gateway.md#template-files) once someone stores it.
 Operators and the organisation's administrators can set it.
@@ -158,13 +150,6 @@ else set up at a host of their own and read its key.
 
 The deployment's own provider keys only ever go to the provider's own endpoint
 ([billing.md](billing.md)).
-
-## Put a guardrail on it
-
-Without a guardrail, every key in the organisation can reach a hosted model;
-see [Guardrails](https://docs.keera.ch/manage/guardrails/). A
-[filter](filters.md) cleans or refuses what goes out, and a
-[router](routers.md) keeps everyday work local.
 
 ## What the prices are, and are not
 
@@ -275,8 +260,8 @@ model, are forwarded without being translated
 
 ### Also worth knowing
 
-- **Embedding and rerank models.** Infomaniak's, stepping stone's and
-  Mistral's embedding models are in the table and get `kind: embedding` or
+- **Embedding and rerank models.** Infomaniak's, stepping stone's, Phoeniqs's
+  and Mistral's embedding models are in the table and get `kind: embedding` or
   `kind: rerank` from it; a chat entry for
   one is refused. Infomaniak reranks on its Cohere-shaped API, so a rerank model's
   endpoint ends in `/cohere/v2`, not `/openai/v1`. An entry with its own
@@ -284,15 +269,16 @@ model, are forwarded without being translated
   needs its own entry, with no `provider`, the `kind`, the full address in
   `backends`, a `location` and its own prices. The gateway sends a rerank to
   `<backend>/rerank`.
-- **Transcription models.** OpenAI's Whisper and GPT-4o transcribers and
-  Mistral's Voxtral Mini and Small Transcribe 3 are in the table and get
-  `kind: transcription` from it. Whisper and Voxtral are priced per minute of
-  audio, `audio_micros_per_minute`; the GPT-4o transcribers per token, like a
-  chat model. Mistral's cheaper rate for cached audio is not used. Another
-  model sold by the minute states its own `audio_micros_per_minute`. Mistral's
-  `file_url` and `file_id` are refused: the gateway needs the audio in `file`. Infomaniak's Whisper is not in the table: it
-  answers with a batch id to fetch later, not with the transcript. The gateway
-  sends a transcription to `<backend>/audio/transcriptions`.
+- **Transcription models.** OpenAI's GPT-Transcribe, Mistral's Voxtral Mini
+  and Small Transcribe 3, stepping stone's Whisper Large v3 and Voxtral Mini,
+  and Phoeniqs's Whisper Large v3 and Swiss German model are in the table and
+  get `kind: transcription` from it. They are priced per minute of audio,
+  `audio_micros_per_minute`. Mistral's cheaper rate for cached audio is not
+  used. Another model sold by the minute states its own
+  `audio_micros_per_minute`; one sold by the token states input and output
+  prices, like a chat model. Mistral's `file_url` and `file_id` do not work:
+  the gateway needs the audio in `file`. Infomaniak's Whisper is not in the
+  table: it answers with a batch id to fetch later, not with the transcript.
 - **Where to read more:** Phoeniqs on
   [documentation.phoeniqs.com](https://documentation.phoeniqs.com/maas/active-models/),
   CSCS on [docs.cscs.ch](https://docs.cscs.ch/services/inference/api/), its

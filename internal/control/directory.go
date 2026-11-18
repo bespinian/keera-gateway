@@ -66,7 +66,10 @@ func (s *Server) checkDirectory(r *http.Request, user store.User, d store.Direct
 	}
 	provider := s.directoryOf(user)
 	if provider == nil {
-		return user, true
+		// A directory vouched for them, and it is no longer configured. An
+		// operator who removes a compromised one expects its sign-ins to end.
+		return user, s.directoryFailed(r, user, fmt.Errorf(
+			"%w: its provider is no longer configured", authn.ErrDirectoryRefused))
 	}
 	// Not the request's context: a client that hangs up must not abandon a
 	// refresh the provider has already rotated.

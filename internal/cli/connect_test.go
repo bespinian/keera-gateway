@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"maps"
 	"strings"
 	"testing"
@@ -142,7 +141,7 @@ func TestConnectRefusesAKeyThatIsNotTheCallers(t *testing.T) {
 		map[string]any{"GET /v1/access": twoKeys}))
 
 	for _, name := range []string{"somebody-else", "old", "plan"} {
-		err := connectCmd(context.Background(), []string{"pi", "--key", name})
+		err := connectCmd(t.Context(), []string{"pi", "--key", name})
 		if err == nil {
 			t.Fatalf("connect configured the key %s", name)
 		}
@@ -162,7 +161,7 @@ func TestConnectRefusesAKeyThatMayCallNoChatModel(t *testing.T) {
 			},
 		}}}))
 
-	err := connectCmd(context.Background(), []string{"pi"})
+	err := connectCmd(t.Context(), []string{"pi"})
 	if err == nil || !strings.Contains(err.Error(), "guardrails") {
 		t.Errorf("error = %v, want it to say the key's guardrails allow no chat model", err)
 	}
@@ -174,7 +173,7 @@ func TestConnectRefusesAModelOutsideASubscription(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, connectRoutes("https://keera.example.ch/api", nil))
 
-	err := connectCmd(context.Background(), []string{"opencode", "--model", "keera-code"})
+	err := connectCmd(t.Context(), []string{"opencode", "--model", "keera-code"})
 	if err == nil || !strings.Contains(err.Error(), "--key") {
 		t.Errorf("error = %v, want it to point at --key", err)
 	}
@@ -184,7 +183,7 @@ func TestConnectRefusesAClientItDoesNotKnow(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, connectRoutes("https://keera.example.ch/api", nil))
 
-	err := connectCmd(context.Background(), []string{"emacs"})
+	err := connectCmd(t.Context(), []string{"emacs"})
 	if err == nil || !strings.Contains(err.Error(), "opencode") {
 		t.Errorf("error = %v, want it to list the clients it can configure", err)
 	}
@@ -225,7 +224,7 @@ func TestConnectRefusesWhenNothingChatIsServed(t *testing.T) {
 		"GET /v1/routers": map[string]any{"data": []any{}},
 	}))
 
-	err := connectCmd(context.Background(), []string{"opencode"})
+	err := connectCmd(t.Context(), []string{"opencode"})
 	if err == nil || !strings.Contains(err.Error(), "keera model add") {
 		t.Errorf("error = %v, want it to point at adding a model", err)
 	}

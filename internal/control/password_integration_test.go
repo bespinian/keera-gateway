@@ -1,7 +1,6 @@
 package control
 
 import (
-	"context"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -75,7 +74,7 @@ func TestAPasswordSignsInThroughTheDirectory(t *testing.T) {
 
 	// Taken out of the directory, the next due check signs her out.
 	e.dir.Change(func(d *ldaptest.Directory) { d.Entries = nil })
-	if _, err := e.st.Pool().Exec(context.Background(),
+	if _, err := e.st.Pool().Exec(t.Context(),
 		"UPDATE identities SET directory_checked_at = now() - interval '1 hour' WHERE external_id = $1",
 		"corp:"+aliceSubject); err != nil {
 		t.Fatal(err)

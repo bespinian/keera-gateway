@@ -13,6 +13,7 @@ import {
   money,
   amount,
   ms,
+  duration,
   ago,
   dateTime,
   tokens,
@@ -528,7 +529,9 @@ export function showRequest(ctx, q, names) {
     q.audio_ms
       ? [
           "Audio",
-          audioLength(q.audio_ms) + (q.estimated ? " (estimated)" : ""),
+          // Rounded up to the second, as it is billed.
+          duration(Math.ceil(q.audio_ms / 1000) * 1000) +
+            (q.estimated ? " (estimated)" : ""),
         ]
       : null,
     ["Cost", money(q.cost_micros) + (q.estimated ? " (estimated)" : "")],
@@ -624,10 +627,4 @@ function textBlock(title, text) {
       text,
     ),
   );
-}
-
-// audioLength is how long a transcription's audio was: 42 s, or 12 min 5 s.
-function audioLength(v) {
-  const s = Math.ceil(v / 1000);
-  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
 }

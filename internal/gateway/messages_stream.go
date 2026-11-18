@@ -24,7 +24,10 @@ func (anthropicShape) pipe(dst io.Writer, flush func(), src io.Reader, alias str
 ) (streamStats, error) {
 	return pipeEvents(dst, flush, src, limit, anthropicPingInterval,
 		func(send func([]byte) error) eventStream {
-			return &messagesStream{alias: alias, msgID: id.New("msg"), open: -1, send: send}
+			return &messagesStream{
+				alias: alias, msgID: id.New("msg"), open: -1, send: send,
+				held: heldText{limit: limit},
+			}
 		})
 }
 
@@ -37,6 +40,7 @@ type messagesStream struct {
 	buf  []byte
 	// args holds the open tool call's arguments until its block closes.
 	args []byte
+	held heldText
 
 	started   bool
 	nextIndex int
@@ -69,6 +73,9 @@ func (s *messagesStream) toolCall(index int, tc oaiToolCallDelta) error {
 	}
 	// The arguments are held until the call is whole and checked, since an
 	// Anthropic SDK fails the whole answer on arguments that are not JSON.
+	if err := s.held.add(len(tc.Function.Arguments)); err != nil {
+		return err
+	}
 	s.args = append(s.args, tc.Function.Arguments...)
 	return nil
 }
@@ -117,7 +124,7 @@ func (s *messagesStream) closeBlock() error {
 	}
 	if s.isTool {
 		args := toolInput(string(s.args))
-		s.args = s.args[:0]
+		s.args, s.held.n = s.args[:0], 0
 		if string(args) != "{}" {
 			if err := s.delta("input_json_delta", "partial_json", string(args)); err != nil {
 				return err

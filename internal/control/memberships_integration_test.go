@@ -1,7 +1,6 @@
 package control
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -165,7 +164,7 @@ func (s orgsSetup) switchTo(t *testing.T, session *http.Cookie, orgID string) (i
 
 func (s orgsSetup) roleIn(t *testing.T, orgID, externalID string) string {
 	t.Helper()
-	ms, err := s.st.Memberships(context.Background(), externalID, "", false)
+	ms, err := s.st.Memberships(t.Context(), externalID, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +178,7 @@ func (s orgsSetup) roleIn(t *testing.T, orgID, externalID string) string {
 
 func TestAPersonWorksInSeveralOrganisationsWithARoleInEach(t *testing.T) {
 	s := membershipServer(t, false)
-	ctx := context.Background()
+	ctx := t.Context()
 	// Insurer invites Ada, who belongs to the Bank by her domain.
 	if _, err := s.st.AddUser(ctx, "user_inv", "org_b", "ada@example.ch", "", "admin"); err != nil {
 		t.Fatal(err)
@@ -255,7 +254,7 @@ func TestSwitchingNeedsAnOrganisationThePersonIsIn(t *testing.T) {
 	}
 
 	// Turned off at Insurer: still listed nowhere, and refused.
-	ctx := context.Background()
+	ctx := t.Context()
 	u, err := s.st.AddUser(ctx, "user_b", "org_b", "ada@example.ch", "test:sub-ada", "member")
 	if err != nil {
 		t.Fatal(err)
@@ -274,7 +273,7 @@ func TestSwitchingNeedsAnOrganisationThePersonIsIn(t *testing.T) {
 
 func TestTheDirectoryDecidesTheAdminRoleOnlyInItsOwnOrganisation(t *testing.T) {
 	s := membershipServer(t, true)
-	ctx := context.Background()
+	ctx := t.Context()
 	if _, err := s.st.AddUser(ctx, "user_inv", "org_b", "ada@example.ch", "", "member"); err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +295,7 @@ func TestTheDirectoryDecidesTheAdminRoleOnlyInItsOwnOrganisation(t *testing.T) {
 
 func TestTheOperatorRoleGoesWhereThePersonGoes(t *testing.T) {
 	s := membershipServer(t, false)
-	ctx := context.Background()
+	ctx := t.Context()
 	if _, err := s.st.AddUser(ctx, "user_inv", "org_b", "op@example.ch", "", "member"); err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +310,7 @@ func TestTheOperatorRoleGoesWhereThePersonGoes(t *testing.T) {
 
 func TestSigningOutEverywhereEndsEveryOrganisationsSessions(t *testing.T) {
 	s := membershipServer(t, false)
-	ctx := context.Background()
+	ctx := t.Context()
 	if _, err := s.st.AddUser(ctx, "user_inv", "org_b", "ada@example.ch", "", "member"); err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +333,7 @@ func TestSigningOutEverywhereEndsEveryOrganisationsSessions(t *testing.T) {
 // person's organisations is checked against the directory.
 func TestADirectoryCheckReachesEveryOrganisation(t *testing.T) {
 	s := membershipServer(t, false)
-	ctx := context.Background()
+	ctx := t.Context()
 	if _, err := s.st.AddUser(ctx, "user_inv", "org_b", "ada@example.ch", "", "member"); err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +358,7 @@ func TestADirectoryCheckReachesEveryOrganisation(t *testing.T) {
 // the role they have there, so KEERA_ORG keeps working.
 func TestATerminalTokenActsInTheOrganisationItNames(t *testing.T) {
 	s := membershipServer(t, false)
-	ctx := context.Background()
+	ctx := t.Context()
 	user, err := s.st.AddUser(ctx, "user_a", "org_a", "ada@example.ch", "test:sub-ada", "member")
 	if err != nil {
 		t.Fatal(err)

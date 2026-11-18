@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -36,7 +35,7 @@ func TestCheckModelCatchesAToolCallReturnedAsText(t *testing.T) {
 		`{"model":"keera-code","choices":[{"delta":{"content":", \"arguments\": {}}</tool_call>"}}]}`))
 	defer upstream.Close()
 
-	p := probeServer(t).CheckModel(context.Background(), chatAlias(upstream.URL))
+	p := probeServer(t).CheckModel(t.Context(), chatAlias(upstream.URL))
 	if p.OK {
 		t.Fatal("a tool call returned as text must not pass the check")
 	}
@@ -56,7 +55,7 @@ func TestCheckModelPassesOnARealToolCall(t *testing.T) {
 		`{"index":0,"function":{"name":"get_build_status","arguments":"{}"}}]}}]}`))
 	defer upstream.Close()
 
-	p := probeServer(t).CheckModel(context.Background(), chatAlias(upstream.URL))
+	p := probeServer(t).CheckModel(t.Context(), chatAlias(upstream.URL))
 	if !p.OK {
 		t.Fatalf("check failed on a well-formed tool call: %s", p.Error)
 	}
@@ -71,7 +70,7 @@ func TestCheckModelReportsAModelThatCallsNoTool(t *testing.T) {
 	upstream := httptest.NewServer(sseBackend(`{"model":"keera-code","choices":[{"delta":{"content":"I cannot know that."}}]}`))
 	defer upstream.Close()
 
-	p := probeServer(t).CheckModel(context.Background(), chatAlias(upstream.URL))
+	p := probeServer(t).CheckModel(t.Context(), chatAlias(upstream.URL))
 	switch {
 	case p.OK:
 		t.Fatal("a model that called no tool must not pass")
@@ -99,7 +98,7 @@ func TestCheckModelWarnsWhenTheBackendRefusesTools(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p := probeServer(t).CheckModel(context.Background(), chatAlias(upstream.URL))
+	p := probeServer(t).CheckModel(t.Context(), chatAlias(upstream.URL))
 	if !p.OK {
 		t.Fatalf("a backend that answers without tools should pass: %s", p.Error)
 	}
@@ -121,7 +120,7 @@ func TestCheckModelWarnsWhenTheBackendDoesNotStream(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p := probeServer(t).CheckModel(context.Background(), chatAlias(upstream.URL))
+	p := probeServer(t).CheckModel(t.Context(), chatAlias(upstream.URL))
 	if !p.OK {
 		t.Fatalf("a buffered but correct answer should pass: %s", p.Error)
 	}
@@ -140,7 +139,7 @@ func TestCheckModelWarnsWhenTheBackendServesAnotherModel(t *testing.T) {
 		`[{"index":0,"function":{"name":"get_build_status"}}]}}]}`))
 	defer upstream.Close()
 
-	p := probeServer(t).CheckModel(context.Background(), chatAlias(upstream.URL))
+	p := probeServer(t).CheckModel(t.Context(), chatAlias(upstream.URL))
 	if !p.OK {
 		t.Fatalf("check failed: %s", p.Error)
 	}
@@ -166,7 +165,7 @@ func TestCheckModelSurfacesTheBackendsOwnError(t *testing.T) {
 			}))
 			m := chatAlias(upstream.URL)
 			m.Kind = kind
-			p := probeServer(t).CheckModel(context.Background(), m)
+			p := probeServer(t).CheckModel(t.Context(), m)
 			upstream.Close()
 			switch {
 			case p.OK:
@@ -187,7 +186,7 @@ func TestCheckModelReportsABackendThatCannotBeReached(t *testing.T) {
 	url := upstream.URL
 	upstream.Close() // nothing listens here now
 
-	p := probeServer(t).CheckModel(context.Background(), chatAlias(url))
+	p := probeServer(t).CheckModel(t.Context(), chatAlias(url))
 	if p.OK || p.Reachable {
 		t.Fatal("a closed backend must be reported as unreachable")
 	}
@@ -198,7 +197,7 @@ func TestCheckModelReportsABackendThatCannotBeReached(t *testing.T) {
 
 func TestCheckModelRefusesAModelWithNoBackend(t *testing.T) {
 	m := policy.Model{Alias: "keera-code", Kind: policy.KindChat, Enabled: true}
-	p := probeServer(t).CheckModel(context.Background(), m)
+	p := probeServer(t).CheckModel(t.Context(), m)
 	if p.OK || p.Reachable {
 		t.Fatal("a model with no backend cannot be healthy")
 	}
@@ -220,7 +219,7 @@ func TestCheckModelChecksAnEmbeddingModelOnItsOwnTerms(t *testing.T) {
 	m := chatAlias(upstream.URL)
 	m.Kind = policy.KindEmbedding
 	m.BackendModel = "bge-m3"
-	p := probeServer(t).CheckModel(context.Background(), m)
+	p := probeServer(t).CheckModel(t.Context(), m)
 	if !p.OK {
 		t.Fatalf("check failed: %s", p.Error)
 	}
@@ -257,7 +256,7 @@ func TestCheckModelChecksARerankModelOnItsOwnTerms(t *testing.T) {
 		m := chatAlias(upstream.URL)
 		m.Kind = policy.KindRerank
 		m.BackendModel = "bge"
-		p := probeServer(t).CheckModel(context.Background(), m)
+		p := probeServer(t).CheckModel(t.Context(), m)
 		upstream.Close()
 		if p.OK != tc.ok {
 			t.Errorf("%s: ok = %v (%s), want %v", tc.name, p.OK, p.Error, tc.ok)
@@ -277,7 +276,7 @@ func TestCheckModelFailsAnEmbeddingModelThatReturnsNoVector(t *testing.T) {
 
 	m := chatAlias(upstream.URL)
 	m.Kind = policy.KindEmbedding
-	if p := probeServer(t).CheckModel(context.Background(), m); p.OK {
+	if p := probeServer(t).CheckModel(t.Context(), m); p.OK {
 		t.Fatal("200 with no embedding must not pass")
 	}
 }
@@ -297,7 +296,7 @@ func TestCheckModelPresentsTheModelCredential(t *testing.T) {
 	srv := New(&fakeSource{}, &fakeBudgets{}, ratelimit.New(), &fakeSink{}, metrics.New(),
 		Options{}, slog.New(slog.DiscardHandler))
 
-	if p := srv.CheckModel(context.Background(), m); !p.OK {
+	if p := srv.CheckModel(t.Context(), m); !p.OK {
 		t.Fatalf("check failed: %s", p.Error)
 	}
 	if got := <-seen; got != "Bearer sk-ant-upstream" {

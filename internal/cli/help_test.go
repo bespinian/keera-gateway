@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"flag"
 	"regexp"
 	"strings"
@@ -22,7 +21,7 @@ func TestEveryFlagIsDocumented(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			var fs *flag.FlagSet
 			printHelp = func(f *flag.FlagSet, _, _ string) error { fs = f; return nil }
-			if err := Run(context.Background(), []string{c.name, "--help"}); err != nil {
+			if err := Run(t.Context(), []string{c.name, "--help"}); err != nil {
 				t.Fatal(err)
 			}
 			if fs == nil {
@@ -105,7 +104,8 @@ func TestEveryDispatchedCommandIsRegistered(t *testing.T) {
 		"model", "models", "filter", "filters", "router", "routers", "router", "routers",
 		"guardrail", "guardrails",
 		"mcp", "limit", "limits", "budget", "budgets", "usage", "failure", "failures", "sessions",
-		"session", "connect", "doctor", "login", "logout", "whoami",
+		"session", "connect", "doctor", "login", "logout", "whoami", "audit",
+		"agent", "agents", "task", "tasks", "schedule", "schedules", "workspace", "workspaces", "ws",
 		"version", "help",
 	}
 	for _, name := range dispatched {
@@ -247,7 +247,7 @@ func TestUsageComesFromTheRegistry(t *testing.T) {
 		{[]string{"limit"}, "usage: keera limit <scope> [<id>]"},
 		{[]string{"key", "create", "a", "b"}, "usage: keera key create [<name>]"},
 	} {
-		err := Run(context.Background(), tc.args)
+		err := Run(t.Context(), tc.args)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("keera %s: err = %v, want %q", strings.Join(tc.args, " "), err, tc.want)
 		}

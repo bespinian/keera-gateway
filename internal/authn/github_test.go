@@ -1,7 +1,6 @@
 package authn
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -90,7 +89,7 @@ func (f *fakeGitHub) connect(cfg OIDCConfig) *OIDC {
 
 func TestGitHubNeedsNoDiscovery(t *testing.T) {
 	// github.com publishes no discovery document.
-	o, err := NewOIDC(context.Background(), OIDCConfig{
+	o, err := NewOIDC(t.Context(), OIDCConfig{
 		Name: "github", IssuerURL: "https://github.com/", ClientID: "keera",
 		ClientSecret: "secret", RedirectURL: "https://keera.example.ch/control/auth/callback",
 	}, &http.Client{Transport: refuseAll{}})
@@ -134,7 +133,7 @@ func TestGitHubSignIn(t *testing.T) {
 	f := newFakeGitHub(t)
 	o := f.connect(OIDCConfig{Mapping: RoleMapping{Default: RoleMember}})
 	flow := NewFlow()
-	id, err := o.Exchange(context.Background(), "the-code", flow)
+	id, err := o.Exchange(t.Context(), "the-code", flow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +151,7 @@ func TestGitHubSignIn(t *testing.T) {
 
 	// Without a name, the login stands in.
 	f.user["name"] = ""
-	if id, err = o.Exchange(context.Background(), "the-code", NewFlow()); err != nil || id.Name != "alice" {
+	if id, err = o.Exchange(t.Context(), "the-code", NewFlow()); err != nil || id.Name != "alice" {
 		t.Errorf("name = %q (%v), want the login", id.Name, err)
 	}
 }
@@ -187,7 +186,7 @@ func TestGitHubPicksAVerifiedAddress(t *testing.T) {
 			f := newFakeGitHub(t)
 			f.emails = tc.emails
 			o := f.connect(OIDCConfig{Mapping: RoleMapping{Default: RoleMember}, Domains: tc.domains})
-			id, err := o.Exchange(context.Background(), "the-code", NewFlow())
+			id, err := o.Exchange(t.Context(), "the-code", NewFlow())
 			switch {
 			case tc.want == "" && err == nil:
 				t.Errorf("signed in as %s, want refused", id.Email)
@@ -204,7 +203,7 @@ func TestGitHubGroupsAreOrgsAndTeams(t *testing.T) {
 	f.teams = [][2]string{{"bespinian", "keera-admins"}}
 
 	o := f.connect(OIDCConfig{Mapping: RoleMapping{Default: RoleMember}})
-	id, err := o.Exchange(context.Background(), "the-code", NewFlow())
+	id, err := o.Exchange(t.Context(), "the-code", NewFlow())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +217,7 @@ func TestGitHubGroupsAreOrgsAndTeams(t *testing.T) {
 	if !slices.Contains(o.oauth.Scopes, "read:org") {
 		t.Errorf("scopes = %v, want read:org where groups decide a role", o.oauth.Scopes)
 	}
-	id, err = o.Exchange(context.Background(), "the-code", NewFlow())
+	id, err = o.Exchange(t.Context(), "the-code", NewFlow())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,26 +233,26 @@ func TestGitHubRecheck(t *testing.T) {
 	f := newFakeGitHub(t)
 	o := f.connect(OIDCConfig{Mapping: RoleMapping{Default: RoleMember}})
 
-	id, fresh, err := o.Recheck(context.Background(), "gho_token")
+	id, fresh, err := o.Recheck(t.Context(), "gho_token")
 	if err != nil || !fresh || id.Subject != "42" || id.RefreshToken != "gho_token" {
 		t.Errorf("Recheck = %+v, %v, %v; want a fresh identity keeping the token", id, fresh, err)
 	}
 
 	// A revoked token is an answer about the person.
-	if _, _, err := o.Recheck(context.Background(), "gho_revoked"); !errors.Is(err, ErrDirectoryRefused) {
+	if _, _, err := o.Recheck(t.Context(), "gho_revoked"); !errors.Is(err, ErrDirectoryRefused) {
 		t.Errorf("revoked token: err = %v, want ErrDirectoryRefused", err)
 	}
 
 	// The rate limit is not.
 	f.status = http.StatusForbidden
-	if _, _, err := o.Recheck(context.Background(), "gho_token"); err == nil || errors.Is(err, ErrDirectoryRefused) {
+	if _, _, err := o.Recheck(t.Context(), "gho_token"); err == nil || errors.Is(err, ErrDirectoryRefused) {
 		t.Errorf("rate limited: err = %v, want an error that keeps the sign-in", err)
 	}
 
 	// An account that lost its last verified address can no longer be placed.
 	f.status = 0
 	f.emails = nil
-	if _, _, err := o.Recheck(context.Background(), "gho_token"); !errors.Is(err, ErrDirectoryRefused) {
+	if _, _, err := o.Recheck(t.Context(), "gho_token"); !errors.Is(err, ErrDirectoryRefused) {
 		t.Errorf("no address left: err = %v, want ErrDirectoryRefused", err)
 	}
 }

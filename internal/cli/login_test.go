@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"encoding/json"
 	"io/fs"
 	"net"
@@ -112,7 +111,7 @@ func TestAnExpiredSignInIsRefusedBeforeItIsSpent(t *testing.T) {
 		t.Fatalf("storing the sign-in: %v", err)
 	}
 
-	err := newClient().do(context.Background(), "GET", "/v1/me", nil, nil)
+	err := newClient().do(t.Context(), "GET", "/v1/me", nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "keera login") {
 		t.Errorf("error = %v, want one that says to sign in again", err)
 	}
@@ -133,6 +132,37 @@ func TestTheOperatorKeyWinsOverASignIn(t *testing.T) {
 	if got := newClient().bearer(); got != "the-deployments-own" {
 		t.Errorf("credential = %q, want the operator key from the environment", got)
 	}
+}
+
+// A key in a shell profile must not reach a gateway nobody named for this
+// command: the one last signed in to, or the hosted one, may be another
+// deployment.
+func TestTheOperatorKeyOnlyGoesToANamedGateway(t *testing.T) {
+	t.Setenv("KEERA_OPERATOR_KEY", "the-deployments-own")
+	t.Setenv("KEERA_CONTROL_URL", "")
+
+	t.Run("the default", func(t *testing.T) {
+		t.Setenv("KEERA_CONFIG_DIR", t.TempDir())
+		c := newClient()
+		if got := c.bearer(); got != "" {
+			t.Errorf("credential = %q, want none", got)
+		}
+		_, err := c.credential()
+		if err == nil || !strings.Contains(err.Error(), "KEERA_CONTROL_URL") {
+			t.Errorf("error = %v, want one naming KEERA_CONTROL_URL", err)
+		}
+	})
+	t.Run("the gateway last signed in to", func(t *testing.T) {
+		t.Setenv("KEERA_CONFIG_DIR", t.TempDir())
+		if err := saveSignIn("https://other.example.ch", signIn{
+			Token: "keera_cli_mine", ExpiresAt: time.Now().Add(time.Hour),
+		}); err != nil {
+			t.Fatalf("storing the sign-in: %v", err)
+		}
+		if got := newClient().bearer(); got != "keera_cli_mine" {
+			t.Errorf("credential = %q, want the sign-in to that gateway", got)
+		}
+	})
 }
 
 // A deployment with two directories says so in the terminal rather than open
@@ -194,7 +224,7 @@ func TestTheDirectoryToSignInThroughIsSettledFirst(t *testing.T) {
 
 			t.Setenv("KEERA_CONTROL_URL", srv.URL)
 			t.Setenv("KEERA_CONFIG_DIR", t.TempDir())
-			got, err := chooseProvider(context.Background(), newClient(), tc.asked)
+			got, err := chooseProvider(t.Context(), newClient(), tc.asked)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("error = %v, want one naming %q", err, tc.wantErr)
@@ -219,7 +249,7 @@ func TestALoopbackCallbackIsOnlyAcceptedWithItsOwnState(t *testing.T) {
 
 	handed := make(chan string, 1)
 	go func() {
-		code, err := waitForCallback(context.Background(), ln, "the-state")
+		code, err := waitForCallback(t.Context(), ln, "the-state")
 		if err != nil {
 			handed <- "error: " + err.Error()
 			return
@@ -336,7 +366,7 @@ func TestAWholeSignInFromTheTerminal(t *testing.T) {
 	}
 	t.Cleanup(func() { openInBrowser = openBrowser })
 
-	if err := loginCmd(context.Background(), nil); err != nil {
+	if err := loginCmd(t.Context(), nil); err != nil {
 		t.Fatalf("keera login: %v", err)
 	}
 

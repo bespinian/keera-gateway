@@ -27,15 +27,11 @@ a [fixed fee every month or year](#recurring-charges).
 KEERA_PROVIDER_ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-The variables are named after the provider: `KEERA_PROVIDER_<NAME>_API_KEY`,
-with the name in capitals and hyphens as underscores, such as
+The settings are in
+[Hosted providers and billing](https://docs.keera.ch/operate/settings/#hosted-providers-and-billing).
+The name is in capitals, with hyphens as underscores, such as
 `KEERA_PROVIDER_STEPPING_STONE_API_KEY`. `keera model catalogue` lists the
 names.
-
-| Setting                                | What it does                                                        |
-| -------------------------------------- | ------------------------------------------------------------------- |
-| `KEERA_PROVIDER_<NAME>_API_KEY`        | The deployment's key at that provider.                              |
-| `KEERA_PROVIDER_INFOMANIAK_PRODUCT_ID` | Required with an Infomaniak key: the product id of your AI Service. |
 
 A misspelt `KEERA_PROVIDER_*` setting stops the start, so a key never quietly
 goes unused. So does a product id without its key, or for a provider that takes
@@ -83,15 +79,12 @@ every request still goes through the gateway. The gateway fee charges for that:
 KEERA_BILLING_GATEWAY_FEE=0.05   # CHF per million tokens
 ```
 
-| Setting                     | What it does                                                                                        |
-| --------------------------- | --------------------------------------------------------------------------------------------------- |
-| `KEERA_BILLING_GATEWAY_FEE` | CHF per million tokens on every model not on the deployment's keys. Default 0: no fee. At most 100. |
-
 It applies to self-hosted models, models on the organisation's own provider
 keys, and [subscription models](subscriptions.md). A Claude plan pays for the
 model, not for the gateway. Every token costs the same, input, output, cached or
 not, since the gateway handles each one the same way. The fee is per token,
-so a transcription pays it on its prompt and transcript, not on its audio.
+so a transcription pays it on its prompt and transcript, not on its audio. When
+the backend reports only the audio's length, the gateway counts them itself.
 
 **Who counts the tokens.** A hosted provider's usage record is used as it is,
 when every backend of the model is on the provider's own host over https. Any
@@ -100,8 +93,10 @@ itself. That includes a self-hosted model, and a model that names a provider
 but is sent elsewhere, such as through an egress proxy. The count is made from
 what the gateway passed on: the whole request body it sent, and the
 text that came back (content, reasoning and tool calls), at 4 bytes a token. An
-image counts by its size in the request. The usage row still shows the
-backend's own numbers, but its cost is the gateway's count.
+image counts by its size in the request. A failure counts too, the request and
+the error that came back, since such a backend could send a whole answer under
+an error status. The usage row still shows the backend's own numbers, but its
+cost is the gateway's count.
 
 **Self-hosted models cost the fee.** The fee is every price of a self-hosted
 model: input, output, cached and cache write. Without a fee, they are 0. Nobody
@@ -182,12 +177,12 @@ one-hour cache writes.
 When no usage record comes back, the call is billed the most it may have used:
 its whole body as prompt and its whole output ceiling as answer. For a
 transcription, that is as many minutes as its file could hold at the lowest
-bitrate a speech codec uses. This happens
-when the answer is too large to read (`KEERA_MAX_RESPONSE_BYTES`), when the
-provider takes longer than the gateway waits, or when it sends no record. For
-the request's own call, its usage row is marked as an estimate and the gateway
-logs a warning. The calls of filters and routers are billed the same way, but
-without the mark or the warning.
+bitrate a speech codec uses, also when the answer reports tokens but no length
+for a model priced by the minute. This happens when the answer is too large to read
+(`KEERA_MAX_RESPONSE_BYTES`), when the provider takes longer than the gateway
+waits, or when it sends no record. For the request's own call, its usage row is
+marked as an estimate and the gateway logs a warning. The calls of filters and
+routers are billed the same way, but without the mark or the warning.
 
 ## The monthly report
 
@@ -238,13 +233,10 @@ KEERA_BILLING_POSTFINANCE_AUTH_KEY=...  # the authentication key, as shown
 KEERA_BILLING_VAT=8.1                   # optional
 ```
 
-| Setting                              | What it does                                                                                                    |
-| ------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `KEERA_BILLING_POSTFINANCE_SPACE_ID` | Your space in PostFinance Checkout. All three settings switch payments on.                                      |
-| `KEERA_BILLING_POSTFINANCE_USER_ID`  | The application user's id.                                                                                      |
-| `KEERA_BILLING_POSTFINANCE_AUTH_KEY` | The application user's authentication key, in base64 as PostFinance shows it.                                   |
-| `KEERA_BILLING_VAT`                  | VAT added on top of each payment, in percent, such as `8.1`. Default 0. It applies to every organisation alike. |
-| `KEERA_BILLING_POSTFINANCE_URL`      | The API's address. Default `https://checkout.postfinance.ch`, which serves test spaces too.                     |
+The settings are in
+[Hosted providers and billing](https://docs.keera.ch/operate/settings/#hosted-providers-and-billing).
+The authentication key is in base64, as PostFinance shows it. The VAT
+defaults to 0 and applies to every organisation alike.
 
 Payments also need at least one `KEERA_PROVIDER_<NAME>_API_KEY`,
 [`KEERA_BILLING_GATEWAY_FEE`](#the-gateway-fee) or
@@ -346,25 +338,17 @@ start day, so one from the 31st is charged on the last day of shorter months.
 `--start` is today or later, so no past period is charged at once. Ending a
 charge keeps its payments; a period not paid by then is no longer due.
 
-**A recurring charge needs a saved card.** While a period is due and no saved
-card can pay it, every call of the organisation is refused with
-`402 charge_due`, whichever model, the organisation's own ones too. This is
-the case when:
-
-- there is no saved card. Start the charge a few days ahead to give the
-  organisation time to save one.
-- PostFinance declined the card. It is not tried again until a payment goes
-  through.
-
-An administrator then pays the period on the payment page, under **Billing**
-or with `keera billing pay-charge`, which also saves the card. Any paid
+**A recurring charge needs a saved card.** What the organisation sees, and how
+an administrator pays, is in
+[Recurring charges](https://docs.keera.ch/manage/billing/#recurring-charges).
+Start a charge a few days ahead to give the organisation time to save a card.
+A declined card is not tried again until a payment goes through. Any paid
 payment clears a declined charge, so the card is tried again on the next
 round. Paying ahead is refused while a card that works will pay the period,
 and so is paying a period the saved card is being charged for.
 
 The panel shows a banner on every screen while a charge is due, or will be
-without a card. The card stays while the organisation has charges: it can be
-replaced by paying with another, not forgotten.
+without a card.
 
 A charge works like an automatic top-up: one replica charges due periods
 every 30 seconds, at most one at a time per charge, and not again within 10

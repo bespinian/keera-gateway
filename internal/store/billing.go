@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-
-	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
 // queueBills adds an event's billable calls to the batch, to be written with
@@ -17,17 +15,14 @@ func queueBills(batch *pgx.Batch, e Event) {
 	for _, b := range e.Bills {
 		// A model priced per minute of audio bills a quantity, as another
 		// service's item does.
-		unit := ""
-		if b.AudioMillis > 0 {
-			unit = UnitAudioMinutes
-		}
+		unit, quantity := b.Quantity()
 		batch.Queue(`INSERT INTO billing_lines (ts, org_id, alias, provider, backend_model,
 			input_tokens, cached_input_tokens, cache_write_tokens, output_tokens,
 			micros, credit_micros, gateway_fee, unit, quantity_micros)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
 			e.TS, e.OrgID, b.Alias, b.Provider, b.BackendModel,
 			b.InputTokens, b.CachedInputTokens, b.CacheWriteTokens, b.OutputTokens,
-			b.Micros, b.CreditMicros, b.GatewayFee, unit, policy.AudioMinutesMicros(b.AudioMillis))
+			b.Micros, b.CreditMicros, b.GatewayFee, unit, quantity)
 	}
 }
 
@@ -116,9 +111,6 @@ func scanBillingRow(r row) (BillingRow, error) {
 		&b.BilledMicros, &b.CreditMicros)
 	return b, err
 }
-
-// UnitAudioMinutes is the unit of a transcription model's billing line.
-const UnitAudioMinutes = "audio minutes"
 
 // ServiceAgents is the service of the lines Keera Agents bills.
 const ServiceAgents = "agents"

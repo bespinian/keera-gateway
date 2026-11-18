@@ -51,7 +51,7 @@ func (m Model) Bill(reported, counted Tokens) (BillLine, bool) {
 	if m.Billing == nil {
 		return BillLine{}, false
 	}
-	if m.Billing.FeeMicrosPerMTok > 0 {
+	if m.PaysFee() {
 		return m.fee(reported, counted), true
 	}
 	if m.Subscription {
@@ -61,12 +61,32 @@ func (m Model) Bill(reported, counted Tokens) (BillLine, bool) {
 	return m.line(t, m.Cost(t)), true
 }
 
+// Any says the line bills something used: tokens or audio.
+func (l BillLine) Any() bool {
+	return Tokens{Input: l.InputTokens, Output: l.OutputTokens, AudioMillis: l.AudioMillis}.Any()
+}
+
+// UnitAudioMinutes is the unit of a line for a model priced per minute of
+// audio.
+const UnitAudioMinutes = "audio minutes"
+
+// Quantity is what the line bills besides tokens, in millionths of its unit:
+// the minutes of audio a transcription model heard, or nothing.
+func (l BillLine) Quantity() (unit string, micros int64) {
+	if l.AudioMillis <= 0 {
+		return "", 0
+	}
+	return UnitAudioMinutes, l.AudioMillis * 1_000_000 / msPerMinute
+}
+
 // fee is the gateway fee for one call: every token at the same price, cached
 // or not, since the gateway handles each the same. Audio is not in it: the
-// fee is per token, and a transcript's tokens pay it.
+// fee is per token, and a transcript's tokens pay it. A transcriber that
+// reports only the audio's length is charged on the gateway's count, or it
+// would pay no fee at all.
 func (m Model) fee(reported, counted Tokens) BillLine {
 	t := reported
-	if m.CountsTokens() {
+	if m.CountsTokens() || reported.Input+reported.Output <= 0 && reported.AudioMillis > 0 {
 		t = counted
 	}
 	t = t.clamped()
@@ -102,7 +122,12 @@ func (m Model) line(t Tokens, micros int64) BillLine {
 // a gateway fee and is not served by its provider's own endpoint. Naming a
 // provider is not enough, or any server could be named one and report nothing.
 func (m Model) CountsTokens() bool {
-	return m.Billing != nil && m.Billing.FeeMicrosPerMTok > 0 && !m.Billing.AtProvider
+	return m.PaysFee() && !m.Billing.AtProvider
+}
+
+// PaysFee says m is charged the gateway fee.
+func (m Model) PaysFee() bool {
+	return m.Billing != nil && m.Billing.FeeMicrosPerMTok > 0
 }
 
 // SelfHosted says m runs on a server of the organisation's, not at a hosted

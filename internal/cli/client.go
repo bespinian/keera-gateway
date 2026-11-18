@@ -64,9 +64,13 @@ func newClient() *client {
 	c := &client{
 		base:     base,
 		baseFrom: from,
-		key:      env("KEERA_OPERATOR_KEY"),
 		// send sets the timeout per request.
 		http: &http.Client{},
+	}
+	if namedBase(from) {
+		// The key belongs to one deployment. A saved or default gateway may be
+		// another one, and would receive it.
+		c.key = env("KEERA_OPERATOR_KEY")
 	}
 	if c.key == "" {
 		c.signedIn = creds.Gateways[gatewayKey(base)]
@@ -77,6 +81,12 @@ func newClient() *client {
 		c.org, c.orgFrom = org, "keera org switch"
 	}
 	return c
+}
+
+// namedBase reports whether the gateway was named for this command, by --url
+// or KEERA_CONTROL_URL, rather than remembered or defaulted.
+func namedBase(from string) bool {
+	return from == "--url" || from == "KEERA_CONTROL_URL"
 }
 
 func (c *client) bearer() string {
@@ -114,10 +124,14 @@ func errorMessage(raw []byte) string {
 func (c *client) credential() (string, error) {
 	cred := c.bearer()
 	switch {
+	case cred == "" && env("KEERA_OPERATOR_KEY") != "":
+		return "", fmt.Errorf("not signed in to %s (%s): KEERA_OPERATOR_KEY is only "+
+			"sent to the gateway --url or KEERA_CONTROL_URL names", c.base, c.baseFrom)
 	case cred == "":
 		return "", fmt.Errorf("not signed in to %s (%s): run "+
 			"'keera login --url <your deployment>', or set KEERA_OPERATOR_KEY to the "+
-			"deployment's own credential", c.base, c.baseFrom)
+			"deployment's own credential and KEERA_CONTROL_URL to its address",
+			c.base, c.baseFrom)
 	case c.key == "" && c.signedIn.expired():
 		return "", fmt.Errorf("your sign-in to %s ran out on %s: run 'keera login' again",
 			c.base, c.signedIn.ExpiresAt.Local().Format("2 January 2006"))

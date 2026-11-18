@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 	"testing/iotest"
+	"testing/synctest"
 	"time"
 )
 
@@ -206,17 +207,19 @@ const pause = 50 * time.Millisecond
 func TestPipeSSEDoesNotCountTheOpeningAsTheFirstToken(t *testing.T) {
 	// A role chunk and a keep-alive can come long before the first token, so
 	// they do not count.
-	opening := ": keep-alive\n\n" +
-		`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}` + "\n\n"
-	start := time.Now()
-	stats, err := pipeSSE(io.Discard, func() {}, paused(pause, opening, sseStream(deltaChunk)),
-		"", true, DefaultMaxResponseBytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := stats.firstAt.Sub(start); got < pause {
-		t.Errorf("first token after %v, want at least %v: the opening was counted", got, pause)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		opening := ": keep-alive\n\n" +
+			`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}` + "\n\n"
+		start := time.Now()
+		stats, err := pipeSSE(io.Discard, func() {}, paused(pause, opening, sseStream(deltaChunk)),
+			"", true, DefaultMaxResponseBytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := stats.firstAt.Sub(start); got < pause {
+			t.Errorf("first token after %v, want at least %v: the opening was counted", got, pause)
+		}
+	})
 }
 
 func TestPipeSSEWithoutTokensHasNoFirstToken(t *testing.T) {

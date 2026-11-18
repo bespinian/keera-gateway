@@ -103,10 +103,11 @@ func loginCmd(ctx context.Context, args []string) error {
 	fmt.Printf("Commands on this machine now talk to it; 'keera whoami' says which.\n")
 	fmt.Printf("This sign-in expires on %s. 'keera logout' ends it sooner.\n",
 		token.ExpiresAt.Local().Format("2 January 2006"))
-	if env("KEERA_OPERATOR_KEY") != "" {
+	if env("KEERA_OPERATOR_KEY") != "" && env("KEERA_CONTROL_URL") != "" {
 		// Otherwise nothing they run next uses the sign-in.
-		fmt.Fprintln(os.Stderr, styleErr.warn("\nNote: KEERA_OPERATOR_KEY is set in this "+
-			"shell, and it wins. Unset it to run commands as yourself."))
+		fmt.Fprintln(os.Stderr, styleErr.warn("\nNote: KEERA_OPERATOR_KEY and "+
+			"KEERA_CONTROL_URL are set in this shell, and the key wins there. "+
+			"Unset it to run commands as yourself."))
 	}
 	return nil
 }

@@ -86,12 +86,12 @@ func TestRunningAndClosingTheLimiterIsSafeInBothShapes(t *testing.T) {
 		{},
 		{Redis: unreachable()},
 	} {
-		_, run, closeLimiter := buildLimiter(context.Background(), cfg,
+		_, run, closeLimiter := buildLimiter(t.Context(), cfg,
 			metrics.New(), slog.New(slog.DiscardHandler))
 		if run == nil || closeLimiter == nil {
 			t.Fatal("buildLimiter returned no runner or closer; serve uses both unconditionally")
 		}
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		done := make(chan struct{})
 		go func() { run(ctx); close(done) }()
 		cancel()

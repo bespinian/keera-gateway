@@ -1,7 +1,6 @@
 package control
 
 import (
-	"context"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -78,7 +77,7 @@ func signedInThroughADirectory(t *testing.T, refreshToken string) directorySetup
 // makeDue moves the last check back, as if the person signed in a while ago.
 func (d directorySetup) makeDue(t *testing.T) {
 	t.Helper()
-	if _, err := d.st.Pool().Exec(context.Background(),
+	if _, err := d.st.Pool().Exec(t.Context(),
 		"UPDATE identities SET directory_checked_at = now() - interval '1 hour' WHERE external_id = $1",
 		d.user.ExternalID); err != nil {
 		t.Fatal(err)
@@ -98,7 +97,7 @@ func TestADirectoryThatRefusesEndsEverySignIn(t *testing.T) {
 	if got := asToken(t, d.ts, d.token, nil); got != http.StatusUnauthorized {
 		t.Errorf("status = %d on the next request, want 401", got)
 	}
-	if linked, _ := d.st.HasRefreshToken(context.Background(), d.user.ExternalID); linked {
+	if linked, _ := d.st.HasRefreshToken(t.Context(), d.user.ExternalID); linked {
 		t.Error("the refresh token is still stored")
 	}
 }
@@ -132,7 +131,7 @@ func TestADirectoryCheckAppliesTheCurrentRole(t *testing.T) {
 // operator role they lost must go from every organisation they are in.
 func TestADirectoryCheckDemotesAnOperatorEverywhere(t *testing.T) {
 	d := signedInThroughADirectory(t, "rt-1")
-	ctx := context.Background()
+	ctx := t.Context()
 	if _, err := d.st.CreateOrg(ctx, store.Org{ID: "org_2", Name: "Other Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +196,7 @@ func TestADirectoryOutageKeepsPeopleSignedIn(t *testing.T) {
 		t.Fatalf("status = %d, want 200 once the directory answers", got)
 	}
 	var failing *time.Time
-	if err := d.st.Pool().QueryRow(context.Background(),
+	if err := d.st.Pool().QueryRow(t.Context(),
 		"SELECT directory_failing_since FROM identities WHERE external_id = $1",
 		d.user.ExternalID).Scan(&failing); err != nil {
 		t.Fatal(err)
@@ -213,7 +212,7 @@ func TestADirectoryThatStaysDownEndsTheSignIn(t *testing.T) {
 	d := signedInThroughADirectory(t, "rt-1")
 	d.makeDue(t)
 	d.idp.FailRefresh = true
-	if _, err := d.st.Pool().Exec(context.Background(),
+	if _, err := d.st.Pool().Exec(t.Context(),
 		"UPDATE identities SET directory_failing_since = now() - interval '13 hours' WHERE external_id = $1",
 		d.user.ExternalID); err != nil {
 		t.Fatal(err)
@@ -222,7 +221,7 @@ func TestADirectoryThatStaysDownEndsTheSignIn(t *testing.T) {
 	if got := asToken(t, d.ts, d.token, nil); got != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401 after 13 hours without an answer", got)
 	}
-	if linked, _ := d.st.HasRefreshToken(context.Background(), d.user.ExternalID); linked {
+	if linked, _ := d.st.HasRefreshToken(t.Context(), d.user.ExternalID); linked {
 		t.Error("the refresh token is still stored")
 	}
 }
@@ -240,6 +239,21 @@ func TestATokenNoKeyOpensEndsTheSignIn(t *testing.T) {
 
 	if got := asToken(t, d.ts, d.token, nil); got != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401 once KEERA_SECRET_KEY no longer opens the token", got)
+	}
+}
+
+// An operator who removes a compromised provider expects its sign-ins to end,
+// not to live out their 30 days unasked.
+func TestARemovedProviderEndsItsSignIns(t *testing.T) {
+	d := signedInThroughADirectory(t, "rt-1")
+	d.makeDue(t)
+	d.srv.opts.Providers = nil
+
+	if got := asToken(t, d.ts, d.token, nil); got != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 once the provider is gone", got)
+	}
+	if linked, _ := d.st.HasRefreshToken(t.Context(), d.user.ExternalID); linked {
+		t.Error("the refresh token is still stored")
 	}
 }
 

@@ -151,12 +151,11 @@ what was removed.
 
 ## Limits
 
-- **One identity upstream.** The server sees the same credential for every key:
-  the organisation's own, stored on the server entry. So its own per-user
-  permissions do not apply. The allow-list is the control. Signing each person
-  in to the server is not built yet.
-- **Only remote servers.** An MCP server that an agent starts as a local process
-  never passes through the gateway, so the gateway cannot see or limit it.
+- **One identity upstream**
+  ([MCP servers](https://docs.keera.ch/manage/mcp/)). Signing each person in to
+  the server is not built yet.
+- **Only remote servers**
+  ([Add a server](https://docs.keera.ch/manage/mcp/#add-a-server)).
 - **One tool call per request.** A JSON-RPC batch that holds a tool call is
   refused. MCP removed batches in its 2025-06-18 version.
 - **A tool call needs an id.** One sent as a notification is refused with

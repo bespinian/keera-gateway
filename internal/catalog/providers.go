@@ -82,7 +82,7 @@ type ProviderModel struct {
 // transcription model sold by the minute, at list price unless a provider
 // says otherwise; an entry can override them. Prices listed in USD are
 // converted at 0.96 CHF per USD. Last checked against each pricing page on
-// 2026-11-17.
+// 2026-11-18.
 //
 // Release dates come from each maker's announcement. An FP8 build takes the
 // date of its base model. Retired models are dropped before they retire.
@@ -186,10 +186,8 @@ var providers = []Provider{{
 	Location:    "usa",
 	// Past 272k input tokens, OpenAI's newer models cost twice as much for
 	// input and 1.5 times for output. From gpt-5.6 on, a cache write costs a
-	// quarter more than input; before, the same. OpenAI retires GPT-4o, GPT-4o
-	// mini, GPT-4.1 and GPT-4.1 mini on 2027-01-14, and GPT-5.1 and GPT-5.4
-	// nano on 2027-04-01. GPT-5.6 Sol's price is a promotion until 2026-11-30;
-	// OpenAI has not published the price after it.
+	// quarter more than input; before, the same. GPT-5.6 Sol's price is a
+	// promotion until 2026-11-30; OpenAI has not published the price after it.
 	Models: []ProviderModel{{
 		ID: "gpt-6.2-astra", DisplayName: "GPT-6.2 Astra",
 		MaxContext: 1_050_000, ReleaseDate: "2026-11-17",
@@ -349,66 +347,19 @@ var providers = []Provider{{
 		CachedInputMicrosPerMTok: 72_000,
 		Description:              "small and quick - light reasoning",
 	}, {
-		ID: "gpt-5.4-nano", DisplayName: "GPT-5.4 nano",
-		MaxContext: 400_000, ReleaseDate: "2026-03-17",
-		InputMicrosPerMTok: 192_000, OutputMicrosPerMTok: 1_200_000,
-		CachedInputMicrosPerMTok: 19_200,
-		Description:              "tiny and fast - short, simple, high-volume tasks; replaced by GPT-6 Luna",
-	}, {
 		ID: "gpt-5.2", DisplayName: "GPT-5.2",
 		MaxContext: 400_000, ReleaseDate: "2025-12-11",
 		InputMicrosPerMTok: 1_680_000, OutputMicrosPerMTok: 13_440_000,
 		CachedInputMicrosPerMTok: 168_000,
 		Description:              "mid-size and slow - reasons before it answers",
 	}, {
-		ID: "gpt-5.1", DisplayName: "GPT-5.1",
-		MaxContext: 400_000, ReleaseDate: "2025-11-13",
-		InputMicrosPerMTok: 1_200_000, OutputMicrosPerMTok: 9_600_000,
-		CachedInputMicrosPerMTok: 120_000,
-		Description:              "large and slow - reasons at length before it answers; replaced by GPT-6 Sol",
-	}, {
-		ID: "gpt-4.1", DisplayName: "GPT-4.1",
-		MaxContext: 1_047_576, ReleaseDate: "2025-04-14",
-		InputMicrosPerMTok: 1_920_000, OutputMicrosPerMTok: 7_680_000,
-		CachedInputMicrosPerMTok: 480_000,
-		Description:              "mid-size and quick, no reasoning step - long documents; replaced by GPT-6 Luna",
-	}, {
-		ID: "gpt-4.1-mini", DisplayName: "GPT-4.1 mini",
-		MaxContext: 1_047_576, ReleaseDate: "2025-04-14",
-		InputMicrosPerMTok: 384_000, OutputMicrosPerMTok: 1_536_000,
-		CachedInputMicrosPerMTok: 96_000,
-		Description:              "small and quick, no reasoning step - long documents; replaced by GPT-6 Luna",
-	}, {
-		ID: "gpt-4o", DisplayName: "GPT-4o",
-		MaxContext: 128_000, ReleaseDate: "2024-05-13",
-		InputMicrosPerMTok: 2_400_000, OutputMicrosPerMTok: 9_600_000,
-		CachedInputMicrosPerMTok: 1_200_000,
-		Description:              "mid-size and quick, no reasoning step - ordinary chat; replaced by GPT-6 Luna",
-	}, {
-		ID: "gpt-4o-mini", DisplayName: "GPT-4o mini",
-		MaxContext: 128_000, ReleaseDate: "2024-07-18",
-		InputMicrosPerMTok: 144_000, OutputMicrosPerMTok: 576_000,
-		CachedInputMicrosPerMTok: 72_000,
-		Description:              "small and fast, no reasoning step - short, simple tasks; replaced by GPT-6 Luna",
-	}, {
-		// Whisper is priced per minute of audio and reports its length. Its
-		// prompt holds at most 224 tokens.
-		ID: "whisper-1", DisplayName: "Whisper",
-		Kind: policy.KindTranscription, MaxContext: 224, ReleaseDate: "2023-03-01",
-		AudioMicrosPerMinute: 5_760,
-		Description:          "speech to text in many languages, with timestamps and subtitles",
-	}, {
-		// The GPT-4o transcribers are priced and report by token: audio in,
-		// text out.
-		ID: "gpt-4o-transcribe", DisplayName: "GPT-4o Transcribe",
-		Kind: policy.KindTranscription, MaxContext: 16_000, ReleaseDate: "2025-03-20",
-		InputMicrosPerMTok: 2_400_000, OutputMicrosPerMTok: 9_600_000,
-		Description: "accurate speech to text - noisy audio, accents and fast speech",
-	}, {
-		ID: "gpt-4o-mini-transcribe", DisplayName: "GPT-4o mini Transcribe",
-		Kind: policy.KindTranscription, MaxContext: 16_000, ReleaseDate: "2025-03-20",
-		InputMicrosPerMTok: 1_200_000, OutputMicrosPerMTok: 4_800_000,
-		Description: "quick speech to text - meetings, notes and voice messages",
+		// Priced per minute of audio, so it reports its length. OpenAI
+		// publishes no limit for its prompt: 16k is what its GPT-4o
+		// transcribers took.
+		ID: "gpt-transcribe", DisplayName: "GPT-Transcribe",
+		Kind: policy.KindTranscription, MaxContext: 16_000, ReleaseDate: "2026-07-28",
+		AudioMicrosPerMinute: 4_320,
+		Description:          "speech to text in many languages - takes keywords for names and jargon",
 	}},
 }, {
 	Name:    "google",
@@ -416,11 +367,16 @@ var providers = []Provider{{
 	// The Gemini API's OpenAI-compatible surface. Gemini caches prompts
 	// without charging for the write. Gemini 4 Carbon and Argon's prices
 	// double on 2026-12-01, and Gemini 3.8 and 3.6 Flash's on 2027-01-01.
-	// Google retires Gemini 3.1 Flash-Lite on 2027-05-07.
 	Endpoint:    "https://generativelanguage.googleapis.com/v1beta/openai",
 	CachedInput: true,
 	Location:    "usa",
 	Models: []ProviderModel{{
+		ID: "gemini-4-neon", DisplayName: "Gemini 4 Neon",
+		MaxContext: 1_048_576, ReleaseDate: "2026-11-18",
+		InputMicrosPerMTok: 2_880_000, OutputMicrosPerMTok: 14_400_000,
+		CachedInputMicrosPerMTok: 144_000,
+		Description:              "frontier-level and fast - complex software engineering, knowledge work and science",
+	}, {
 		ID: "gemini-4-hydrogen", DisplayName: "Gemini 4 Hydrogen",
 		MaxContext: 1_048_576, ReleaseDate: "2026-11-12",
 		InputMicrosPerMTok: 1_440_000, OutputMicrosPerMTok: 7_200_000,
@@ -468,12 +424,6 @@ var providers = []Provider{{
 		InputMicrosPerMTok: 720_000, OutputMicrosPerMTok: 3_600_000,
 		CachedInputMicrosPerMTok: 72_000,
 		Description:              "mid-size and quick - everyday agent tasks; replaced by Gemini 3.8 Flash",
-	}, {
-		ID: "gemini-3.1-flash-lite", DisplayName: "Gemini 3.1 Flash-Lite",
-		MaxContext: 1_048_576, ReleaseDate: "2026-05-07",
-		InputMicrosPerMTok: 240_000, OutputMicrosPerMTok: 1_440_000,
-		CachedInputMicrosPerMTok: 24_000,
-		Description:              "small and fast - simple, high-volume tasks; replaced by Gemini 3.5 Flash-Lite",
 	}},
 }, {
 	Name:    "deepseek",
@@ -596,7 +546,8 @@ var providers = []Provider{{
 	// version, so a model whose version PeakPrivacy does not name has no
 	// release date. Prices are listed in CHF per thousand tokens. Context
 	// windows are from PeakPrivacy's help centre. GPT Swiss and GPT EU are
-	// both gpt-oss-120b.
+	// both gpt-oss-120b; deepseek-r1 is DeepSeek V4 Pro and deepseek-v4-flash
+	// is DeepSeek V4.1 Flash.
 	Endpoint: "https://api.peakprivacy.ch/v1/ai",
 	Location: "ch",
 	Models: []ProviderModel{{
@@ -615,23 +566,23 @@ var providers = []Provider{{
 		InputMicrosPerMTok: 2_154_000, OutputMicrosPerMTok: 6_772_000,
 		Description: "large - long agent sessions, hard code and terminal work",
 	}, {
-		ID: "deepseek-v4-flash", DisplayName: "DeepSeek V4 Flash",
-		MaxContext: 1_000_000, ReleaseDate: "2026-07-31",
+		ID: "deepseek-v4-flash", DisplayName: "DeepSeek V4.1 Flash",
+		MaxContext: 1_000_000, ReleaseDate: "2026-10-17",
 		InputMicrosPerMTok: 375_000, OutputMicrosPerMTok: 1_500_000,
-		Description: "mid-size and quick - large codebases and long documents",
+		Description: "large and quick, in preview - large codebases and long documents",
 	}, {
 		ID: "gpt-eu", DisplayName: "GPT EU",
 		MaxContext: 124_000, ReleaseDate: "2025-08-05", Location: "eu",
 		InputMicrosPerMTok: 375_000, OutputMicrosPerMTok: 1_500_000,
 		Description: "mid-size reasoning model - general questions and tool use",
 	}, {
-		ID: "deepseek-r1", DisplayName: "DeepSeek R1",
-		MaxContext: 128_000, ReleaseDate: "2025-01-20", Location: "eu",
+		ID: "deepseek-r1", DisplayName: "DeepSeek V4 Pro",
+		MaxContext: 128_000, ReleaseDate: "2026-08-13", Location: "eu",
 		InputMicrosPerMTok: 2_625_000, OutputMicrosPerMTok: 5_250_000,
-		Description: "large reasoning model that thinks at length - hard questions",
+		Description: "very large, with reasoning - hard coding and long agent sessions",
 	}, {
-		ID: "gemma-3", DisplayName: "Gemma 3",
-		MaxContext: 128_000, Location: "eu",
+		ID: "gemma-3", DisplayName: "Gemma 3 27B",
+		MaxContext: 128_000, ReleaseDate: "2025-03-12", Location: "eu",
 		InputMicrosPerMTok: 150_000, OutputMicrosPerMTok: 450_000,
 		Description: "mid-size and quick - documents and answers from search results",
 	}, {
@@ -730,8 +681,9 @@ var providers = []Provider{{
 	Endpoint: "https://llm.stoney-cloud.com/v1",
 	Location: "ch",
 	// Ids are the upstream names, capitals and all. The Nemotron id is spelled
-	// as stepping stone's documentation spells it. An embedding or a rerank
-	// writes nothing, so it has no output price.
+	// as stepping stone's documentation spells it. Contexts are the max_model_len
+	// its wiki lists. An embedding or a rerank writes nothing, so it has no
+	// output price.
 	Models: []ProviderModel{{
 		ID: "MiniMaxAI/MiniMax-M2.5", DisplayName: "MiniMax M2.5",
 		MaxContext: 196_608, ReleaseDate: "2026-02-12",
@@ -739,62 +691,62 @@ var providers = []Provider{{
 		Description: "large - long coding and agent tasks with many steps",
 	}, {
 		ID: "NVIDIA/NVIDIA-Nemotron-3-Super-120B-A12B", DisplayName: "Nemotron 3 Super",
-		MaxContext: 128_000, ReleaseDate: "2026-03-11",
+		MaxContext: 131_072, ReleaseDate: "2026-03-11",
 		InputMicrosPerMTok: 2_000_000, OutputMicrosPerMTok: 5_000_000,
 		Description: "large reasoning model - hard problems",
 	}, {
 		ID: "deepseek-ai/DeepSeek-V4-Flash-0731", DisplayName: "DeepSeek V4 Flash",
-		MaxContext: 512_000, ReleaseDate: "2026-07-31",
+		MaxContext: 524_288, ReleaseDate: "2026-07-31",
 		InputMicrosPerMTok: 450_000, OutputMicrosPerMTok: 1_800_000,
 		Description: "mid-size and quick - large codebases and long documents",
 	}, {
 		ID: "Qwen/Qwen3-Coder-Next", DisplayName: "Qwen3 Coder Next",
-		MaxContext: 256_000, ReleaseDate: "2026-02-03",
+		MaxContext: 262_144, ReleaseDate: "2026-02-03",
 		InputMicrosPerMTok: 340_000, OutputMicrosPerMTok: 1_700_000,
 		Description: "made for code - edits, code questions and agent tool calls",
 	}, {
 		ID: "zai-org/GLM-5.3-Flash", DisplayName: "GLM-5.3 Flash",
-		MaxContext: 256_000, ReleaseDate: "2026-08-26",
+		MaxContext: 262_144, ReleaseDate: "2026-08-26",
 		InputMicrosPerMTok: 300_000, OutputMicrosPerMTok: 1_500_000,
 		Description: "mid-size, quick all-rounder - code, reasoning and tool use",
 	}, {
 		ID: "openai/gpt-oss-120b", DisplayName: "gpt-oss-120b",
-		MaxContext: 128_000, ReleaseDate: "2025-08-05",
+		MaxContext: 131_072, ReleaseDate: "2025-08-05",
 		InputMicrosPerMTok: 400_000, OutputMicrosPerMTok: 1_600_000,
 		Description: "mid-size, reasons before it answers - everyday work and tool use",
 	}, {
 		ID: "Qwen/Qwen3.8-27B", DisplayName: "Qwen3.8 27B",
-		MaxContext: 256_000, ReleaseDate: "2026-08-14",
+		MaxContext: 262_144, ReleaseDate: "2026-08-14",
 		InputMicrosPerMTok: 250_000, OutputMicrosPerMTok: 1_500_000,
 		Description: "small but strong for its size - ordinary code and questions",
 	}, {
 		ID: "google/gemma-4-31B-it", DisplayName: "Gemma 4 31B",
-		MaxContext: 160_000, ReleaseDate: "2026-04-02",
+		MaxContext: 163_840, ReleaseDate: "2026-04-02",
 		InputMicrosPerMTok: 250_000, OutputMicrosPerMTok: 1_000_000,
 		Description: "mid-size and quick - documents, chatbots and ordinary code",
 	}, {
 		ID: "Qwen/Qwen3.5-35B-A3B-FP8", DisplayName: "Qwen3.5 35B A3B FP8",
-		MaxContext: 128_000, ReleaseDate: "2026-02-24",
+		MaxContext: 131_072, ReleaseDate: "2026-02-24",
 		InputMicrosPerMTok: 170_000, OutputMicrosPerMTok: 1_000_000,
 		Description: "small and fast, light on reasoning - high-volume, simple tasks",
 	}, {
 		ID: "apertus-ai/Apertus-v1.5-8B", DisplayName: "Apertus v1.5 8B",
-		MaxContext: 128_000, ReleaseDate: "2026-07-24",
+		MaxContext: 131_072, ReleaseDate: "2026-07-24",
 		InputMicrosPerMTok: 20_000, OutputMicrosPerMTok: 100_000,
 		Description: "small, open training data - simple tasks",
 	}, {
 		ID: "allenai/olmOCR-2-7B", DisplayName: "olmOCR 2",
-		MaxContext: 8_000, ReleaseDate: "2025-10-22",
+		MaxContext: 8_192, ReleaseDate: "2025-10-22",
 		InputMicrosPerMTok: 60_000, OutputMicrosPerMTok: 290_000,
 		Description: "OCR - turns images of pages into text; not for chat or code",
 	}, {
 		ID: "lightonai/LightOnOCR-2-1B", DisplayName: "LightOnOCR 2",
-		MaxContext: 16_000, ReleaseDate: "2026-01-19",
+		MaxContext: 16_384, ReleaseDate: "2026-01-19",
 		InputMicrosPerMTok: 20_000, OutputMicrosPerMTok: 60_000,
 		Description: "small, fast OCR - turns images of pages into text; not for chat or code",
 	}, {
 		ID: "opendatalab/MinerU2.5-2509-1.2B", DisplayName: "MinerU 2.5",
-		MaxContext: 16_000, ReleaseDate: "2025-09-19",
+		MaxContext: 16_384, ReleaseDate: "2025-09-19",
 		InputMicrosPerMTok: 20_000, OutputMicrosPerMTok: 60_000,
 		Description: "document parsing - turns images of pages into text, tables and formulas; not for chat",
 	}, {
@@ -807,6 +759,18 @@ var providers = []Provider{{
 		Kind: policy.KindRerank, MaxContext: 8_192, ReleaseDate: "2024-03-18",
 		InputMicrosPerMTok: 100_000,
 		Description:        "reranker - orders search results by relevance, in many languages",
+	}, {
+		// stepping stone prices audio by the second; this is the price of a
+		// minute.
+		ID: "openai/whisper-large-v3", DisplayName: "Whisper Large v3",
+		Kind: policy.KindTranscription, MaxContext: 224, ReleaseDate: "2023-11-06",
+		AudioMicrosPerMinute: 120_000,
+		Description:          "speech to text in many languages, with timestamps and subtitles",
+	}, {
+		ID: "mistralai/Voxtral-Mini-3B-2507", DisplayName: "Voxtral Mini 3B",
+		Kind: policy.KindTranscription, MaxContext: 32_768, ReleaseDate: "2025-07-15",
+		AudioMicrosPerMinute: 12_000,
+		Description:          "small speech to text in eight languages - meetings, calls and notes",
 	}},
 }, {
 	Name:     "phoeniqs",
@@ -816,7 +780,9 @@ var providers = []Provider{{
 	// Ids are Phoeniqs's own names, kept across minor upgrades. Release dates
 	// are of the models served on 2026-10-21: GLM-5.2 for inference-glm5,
 	// GLM-5.3-Flash for inference-glm5-flash and its -compact, and
-	// MinerU2.5-Pro-2605 for inference-miner-u25.
+	// MinerU2.5-Pro-2605 for inference-miner-u25. Its rerank models are left
+	// out: Phoeniqs does not say which rerank API it speaks. An embedding
+	// writes nothing, so it has no output price.
 	Models: []ProviderModel{{
 		ID: "inference-glm5", DisplayName: "GLM-5",
 		MaxContext: 131_072, ReleaseDate: "2026-06-16",
@@ -895,8 +861,35 @@ var providers = []Provider{{
 	}, {
 		ID: "inference-miner-u25", DisplayName: "MinerU 2.5",
 		MaxContext: 8_192, ReleaseDate: "2026-05-21",
-		InputMicrosPerMTok: 380_000, OutputMicrosPerMTok: 230_000,
+		InputMicrosPerMTok: 538_500, OutputMicrosPerMTok: 76_900,
 		Description: "document parsing - turns images of pages into text, tables and formulas; not for chat",
+	}, {
+		ID: "inference-bge-m3", DisplayName: "BGE M3",
+		Kind: policy.KindEmbedding, MaxContext: 8_192, ReleaseDate: "2024-01-30",
+		InputMicrosPerMTok: 430_900,
+		Description:        "embedding, 1024 dimensions - search and RAG in over 100 languages",
+	}, {
+		ID: "inference-qwen3-embedding-8b", DisplayName: "Qwen3 Embedding 8B",
+		Kind: policy.KindEmbedding, MaxContext: 32_768, ReleaseDate: "2025-06-05",
+		InputMicrosPerMTok: 54_000,
+		Description:        "embedding, 4096 dimensions - search and RAG in over 100 languages",
+	}, {
+		ID: "inference-granite-emb-278m", DisplayName: "Granite Embedding 278M",
+		Kind: policy.KindEmbedding, MaxContext: 512, ReleaseDate: "2024-12-18",
+		InputMicrosPerMTok: 77_000,
+		Description:        "small embedding model, 768 dimensions - short passages in many languages",
+	}, {
+		ID: "inference-whisper-large-v3", DisplayName: "Whisper Large v3",
+		Kind: policy.KindTranscription, MaxContext: 224, ReleaseDate: "2023-11-06",
+		AudioMicrosPerMinute: 6_000,
+		Description:          "speech to text in many languages, with timestamps and subtitles",
+	}, {
+		// Whisper Large v3 trained on Swiss German, which it writes as Standard
+		// German.
+		ID: "inference-flix-swissgerman-full", DisplayName: "Flix Swiss German",
+		Kind: policy.KindTranscription, MaxContext: 224,
+		AudioMicrosPerMinute: 6_000,
+		Description:          "speech to text for Swiss German, written as Standard German",
 	}},
 }, {
 	Name:        "cscs",

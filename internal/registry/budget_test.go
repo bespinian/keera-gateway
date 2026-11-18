@@ -29,8 +29,8 @@ func TestAllowUntilTheTightestScopeIsSpent(t *testing.T) {
 	b.Charge(scopes(), 1_000_000, now)
 
 	err := b.Allow(scopes(), now)
-	var exceeded *policy.ErrBudgetExceeded
-	if !errors.As(err, &exceeded) {
+	exceeded, ok := errors.AsType[*policy.ErrBudgetExceeded](err)
+	if !ok {
 		t.Fatalf("err = %v, want ErrBudgetExceeded", err)
 	}
 	if exceeded.Scope.Type != policy.ScopeProject {

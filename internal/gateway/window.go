@@ -19,11 +19,14 @@ import (
 // fits refuses a request that cannot fit in the context of any model it may
 // go to. A model with no declared context can hold anything.
 func (s *Server) fits(c *call, b *body) bool {
-	// The window holds the query and one document, and a reranker cuts a
-	// long document down itself.
-	// A transcription's prompt is short and its audio is not counted in
-	// tokens before it is heard.
-	if c.surf.kind == policy.KindRerank || c.surf.kind == policy.KindTranscription {
+	switch c.surf.kind {
+	case policy.KindRerank:
+		// The window holds the query and one document, and a reranker cuts
+		// a long document down itself.
+		return true
+	case policy.KindTranscription:
+		// The prompt is short, and the audio has no length in tokens before
+		// it is heard.
 		return true
 	}
 	window, largest := 0, c.alias

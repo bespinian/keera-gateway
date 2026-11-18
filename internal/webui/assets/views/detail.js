@@ -214,7 +214,7 @@ export async function keyDetailView(ctx) {
                 "Issued by Keera Agents for an agent, which holds the only " +
                 "copy. Revoke it to stop the agent.",
             },
-            pill("Keera Agent"),
+            pill("Keera Agents"),
           )
         : null,
       // Only a revoked key can have none: its project was deleted.

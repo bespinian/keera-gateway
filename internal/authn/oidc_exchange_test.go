@@ -1,7 +1,6 @@
 package authn
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -18,7 +17,7 @@ import (
 
 func connect(t *testing.T, idp *oidctest.IDP, mapping RoleMapping) *OIDC {
 	t.Helper()
-	o, err := NewOIDC(context.Background(), OIDCConfig{
+	o, err := NewOIDC(t.Context(), OIDCConfig{
 		Name:         "test",
 		IssuerURL:    idp.URL,
 		ClientID:     "keera",
@@ -47,7 +46,7 @@ func TestASignUpProviderForAnyDomainMustProveTheAddress(t *testing.T) {
 		{[]string{"example.ch"}, true},
 	} {
 		idp := oidctest.New(t)
-		o, err := NewOIDC(context.Background(), OIDCConfig{
+		o, err := NewOIDC(t.Context(), OIDCConfig{
 			Name: "test", IssuerURL: idp.URL, ClientID: "keera", ClientSecret: "secret",
 			RedirectURL: "https://keera.example.ch/auth/callback",
 			Mapping:     RoleMapping{Default: RoleMember}, Domains: tc.domains, SignUp: true,
@@ -60,7 +59,7 @@ func TestASignUpProviderForAnyDomainMustProveTheAddress(t *testing.T) {
 			m["nonce"] = flow.Nonce
 			delete(m, "email_verified")
 		}
-		_, err = o.Exchange(context.Background(), "the-code", flow)
+		_, err = o.Exchange(t.Context(), "the-code", flow)
 		if (err == nil) != tc.ok {
 			t.Errorf("domains %v without email_verified: err = %v, want accepted %v",
 				tc.domains, err, tc.ok)
@@ -70,7 +69,7 @@ func TestASignUpProviderForAnyDomainMustProveTheAddress(t *testing.T) {
 			m["email_verified"] = true
 		}
 		flow = NewFlow()
-		if _, err := o.Exchange(context.Background(), "the-code", flow); err != nil {
+		if _, err := o.Exchange(t.Context(), "the-code", flow); err != nil {
 			t.Errorf("domains %v with a verified address: %v", tc.domains, err)
 		}
 	}
@@ -117,7 +116,7 @@ func TestExchangeReturnsAVerifiedIdentity(t *testing.T) {
 	flow := NewFlow()
 	idp.Claims = func(m map[string]any) { m["nonce"] = flow.Nonce }
 
-	id, err := o.Exchange(context.Background(), "the-code", flow)
+	id, err := o.Exchange(t.Context(), "the-code", flow)
 	if err != nil {
 		t.Fatalf("Exchange: %v", err)
 	}
@@ -147,7 +146,7 @@ func TestExchangeRejectsAMismatchedNonce(t *testing.T) {
 	idp.Claims = func(m map[string]any) { m["nonce"] = "some-other-login" }
 
 	flow := NewFlow()
-	if _, err := o.Exchange(context.Background(), "the-code", flow); err == nil {
+	if _, err := o.Exchange(t.Context(), "the-code", flow); err == nil {
 		t.Fatal("a token with the wrong nonce was accepted")
 	} else if !strings.Contains(err.Error(), "nonce") {
 		t.Errorf("error = %v, want it to name the nonce", err)
@@ -167,7 +166,7 @@ func TestExchangeRejectsAForeignSignature(t *testing.T) {
 
 	flow := NewFlow()
 	idp.Claims = func(m map[string]any) { m["nonce"] = flow.Nonce }
-	if _, err := o.Exchange(context.Background(), "the-code", flow); err == nil {
+	if _, err := o.Exchange(t.Context(), "the-code", flow); err == nil {
 		t.Fatal("a token signed by an unknown key was accepted")
 	}
 }
@@ -181,7 +180,7 @@ func TestExchangeRejectsATokenForAnotherClient(t *testing.T) {
 		m["nonce"] = flow.Nonce
 		m["aud"] = "some-other-application"
 	}
-	if _, err := o.Exchange(context.Background(), "the-code", flow); err == nil {
+	if _, err := o.Exchange(t.Context(), "the-code", flow); err == nil {
 		t.Fatal("a token issued for another client was accepted")
 	}
 }
@@ -195,7 +194,7 @@ func TestExchangeRejectsAnExpiredToken(t *testing.T) {
 		m["nonce"] = flow.Nonce
 		m["exp"] = time.Now().Add(-time.Minute).Unix()
 	}
-	if _, err := o.Exchange(context.Background(), "the-code", flow); err == nil {
+	if _, err := o.Exchange(t.Context(), "the-code", flow); err == nil {
 		t.Fatal("an expired token was accepted")
 	}
 }
@@ -210,7 +209,7 @@ func TestExchangeRefusesAnIdentityWithNoEmail(t *testing.T) {
 		m["nonce"] = flow.Nonce
 		delete(m, "email")
 	}
-	_, err := o.Exchange(context.Background(), "the-code", flow)
+	_, err := o.Exchange(t.Context(), "the-code", flow)
 	if err == nil {
 		t.Fatal("an identity with no email was accepted")
 	}
@@ -231,7 +230,7 @@ func TestExchangeRefusesAnUnverifiedEmail(t *testing.T) {
 			m["nonce"] = flow.Nonce
 			m["email_verified"] = claim
 		}
-		_, err := o.Exchange(context.Background(), "the-code", flow)
+		_, err := o.Exchange(t.Context(), "the-code", flow)
 		if err == nil {
 			t.Fatalf("an identity with email_verified=%v (%T) was accepted", claim, claim)
 		}
@@ -256,7 +255,7 @@ func TestExchangeAcceptsAVerifiedOrUnstatedEmail(t *testing.T) {
 			}
 			m["email_verified"] = claim
 		}
-		id, err := o.Exchange(context.Background(), "the-code", flow)
+		id, err := o.Exchange(t.Context(), "the-code", flow)
 		if err != nil {
 			t.Fatalf("email_verified=%v (%T): %v", claim, claim, err)
 		}
@@ -269,7 +268,7 @@ func TestExchangeAcceptsAVerifiedOrUnstatedEmail(t *testing.T) {
 // Entra sends no email_verified; its xms_edov claim stands in for it.
 func TestExchangeReadsEntrasVerifiedClaim(t *testing.T) {
 	idp := oidctest.New(t)
-	o, err := NewOIDC(context.Background(), OIDCConfig{
+	o, err := NewOIDC(t.Context(), OIDCConfig{
 		Name: "test", IssuerURL: idp.URL, ClientID: "keera", ClientSecret: "secret",
 		RedirectURL: "https://keera.example.ch/auth/callback",
 		Mapping:     RoleMapping{Default: RoleMember}, Domains: []string{AnyDomain}, SignUp: true,
@@ -296,7 +295,7 @@ func TestExchangeReadsEntrasVerifiedClaim(t *testing.T) {
 			delete(m, "email_verified")
 			m["xms_edov"] = tc.claim
 		}
-		_, err := o.Exchange(context.Background(), "the-code", flow)
+		_, err := o.Exchange(t.Context(), "the-code", flow)
 		if (err == nil) != tc.ok {
 			t.Errorf("xms_edov=%v (%T): err = %v, want accepted %v", tc.claim, tc.claim, err, tc.ok)
 		}
@@ -317,7 +316,7 @@ func TestExchangeRefusesAnAddressOutsideTheProvidersDomains(t *testing.T) {
 		{[]string{AnyDomain}, true},
 		{nil, true},
 	} {
-		o, err := NewOIDC(context.Background(), OIDCConfig{
+		o, err := NewOIDC(t.Context(), OIDCConfig{
 			Name:         "entra-a",
 			IssuerURL:    idp.URL,
 			ClientID:     "keera",
@@ -331,7 +330,7 @@ func TestExchangeRefusesAnAddressOutsideTheProvidersDomains(t *testing.T) {
 		}
 		flow := NewFlow()
 		idp.Claims = func(m map[string]any) { m["nonce"] = flow.Nonce }
-		_, err = o.Exchange(context.Background(), "the-code", flow)
+		_, err = o.Exchange(t.Context(), "the-code", flow)
 		if tc.ok && err != nil {
 			t.Errorf("domains %v: %v", tc.domains, err)
 		}
@@ -343,7 +342,7 @@ func TestExchangeRefusesAnAddressOutsideTheProvidersDomains(t *testing.T) {
 
 func TestExchangeReadsAGroupsClaimUnderAnotherName(t *testing.T) {
 	idp := oidctest.New(t)
-	o, err := NewOIDC(context.Background(), OIDCConfig{
+	o, err := NewOIDC(t.Context(), OIDCConfig{
 		Name:      "test",
 		IssuerURL: idp.URL, ClientID: "keera", ClientSecret: "s",
 		RedirectURL: "https://keera.example.ch/auth/callback",
@@ -358,7 +357,7 @@ func TestExchangeReadsAGroupsClaimUnderAnotherName(t *testing.T) {
 		m["nonce"] = flow.Nonce
 		m["roles"] = []string{"platform"}
 	}
-	id, err := o.Exchange(context.Background(), "the-code", flow)
+	id, err := o.Exchange(t.Context(), "the-code", flow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +384,7 @@ func TestLogoutURLUsesTheProvidersEndSession(t *testing.T) {
 
 func TestNewOIDCFailsLoudlyOnABadIssuer(t *testing.T) {
 	// A typo fails the start, not the first sign-in.
-	_, err := NewOIDC(context.Background(), OIDCConfig{
+	_, err := NewOIDC(t.Context(), OIDCConfig{
 		Name:      "test",
 		IssuerURL: "http://127.0.0.1:1", ClientID: "keera", ClientSecret: "s",
 		RedirectURL: "https://keera.example.ch/auth/callback",
@@ -413,7 +412,7 @@ func TestExchangeRefusesAGroupsClaimTheProviderReplacedWithAPointer(t *testing.T
 			"src1": map[string]any{"endpoint": "https://graph.microsoft.com/v1.0/me/getMemberObjects"},
 		}
 	}
-	_, err := o.Exchange(context.Background(), "the-code", flow)
+	_, err := o.Exchange(t.Context(), "the-code", flow)
 	if err == nil {
 		t.Fatal("an overage pointer was accepted, and would have signed an administrator in as a member")
 	}
@@ -436,7 +435,7 @@ func TestExchangeAllowsAnOverageWhenNoRoleDependsOnGroups(t *testing.T) {
 			"src1": map[string]any{"endpoint": "https://graph.microsoft.com/v1.0/me/getMemberObjects"},
 		}
 	}
-	id, err := o.Exchange(context.Background(), "the-code", flow)
+	id, err := o.Exchange(t.Context(), "the-code", flow)
 	if err != nil {
 		t.Fatalf("Exchange: %v", err)
 	}
@@ -453,7 +452,7 @@ func TestExchangeStampsTheProviderOnTheIdentity(t *testing.T) {
 
 	flow := NewFlow()
 	idp.Claims = func(m map[string]any) { m["nonce"] = flow.Nonce }
-	id, err := o.Exchange(context.Background(), "the-code", flow)
+	id, err := o.Exchange(t.Context(), "the-code", flow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,7 +473,7 @@ func TestProvidersResolveByName(t *testing.T) {
 			Mapping:     RoleMapping{Default: RoleMember},
 		}
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 
 	ps, err := NewProviders(ctx, []OIDCConfig{base("google"), base("entra")}, idp.Client())
 	if err != nil {
@@ -527,7 +526,7 @@ func TestAdminFromDirectoryIsTrueIfAnyProviderMapsAdminGroups(t *testing.T) {
 			Mapping:     m,
 		}
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Google issues no groups claim, so roles there are Keera's own.
 	google := RoleMapping{Default: RoleMember, OperatorEmails: []string{"you@example.ch"}}
@@ -574,7 +573,7 @@ func TestExchangeKeepsTheRefreshToken(t *testing.T) {
 	idp.Claims = func(m map[string]any) { m["nonce"] = flow.Nonce }
 	idp.RefreshToken = "rt-1"
 
-	id, err := o.Exchange(context.Background(), "the-code", flow)
+	id, err := o.Exchange(t.Context(), "the-code", flow)
 	if err != nil {
 		t.Fatalf("Exchange: %v", err)
 	}
@@ -614,7 +613,7 @@ func TestRecheckReadsTheDirectoryAgain(t *testing.T) {
 	idp.RefreshToken = "rt-2"
 	idp.Claims = func(m map[string]any) { m["groups"] = []string{"engineering"} }
 
-	id, fresh, err := o.Recheck(context.Background(), "rt-1")
+	id, fresh, err := o.Recheck(t.Context(), "rt-1")
 	if err != nil {
 		t.Fatalf("Recheck: %v", err)
 	}
@@ -637,7 +636,7 @@ func TestRecheckWithoutAnIDTokenOnlyConfirmsTheAccount(t *testing.T) {
 	o := connect(t, idp, RoleMapping{Default: RoleMember})
 	idp.NoIDTokenOnRefresh = true
 
-	id, fresh, err := o.Recheck(context.Background(), "rt-1")
+	id, fresh, err := o.Recheck(t.Context(), "rt-1")
 	if err != nil {
 		t.Fatalf("Recheck: %v", err)
 	}
@@ -655,13 +654,13 @@ func TestRecheckTellsARefusalFromAnOutage(t *testing.T) {
 	o := connect(t, idp, RoleMapping{Default: RoleMember})
 
 	idp.RefuseRefresh = "invalid_grant"
-	if _, _, err := o.Recheck(context.Background(), "rt-1"); !errors.Is(err, ErrDirectoryRefused) {
+	if _, _, err := o.Recheck(t.Context(), "rt-1"); !errors.Is(err, ErrDirectoryRefused) {
 		t.Errorf("revoked token: err = %v, want ErrDirectoryRefused", err)
 	}
 
 	idp.RefuseRefresh = ""
 	idp.FailRefresh = true
-	_, _, err := o.Recheck(context.Background(), "rt-1")
+	_, _, err := o.Recheck(t.Context(), "rt-1")
 	if err == nil || errors.Is(err, ErrDirectoryRefused) {
 		t.Errorf("provider down: err = %v, want an error that is not a refusal", err)
 	}
@@ -672,7 +671,7 @@ func TestRecheckRefusesClaimsASignInWouldRefuse(t *testing.T) {
 	o := connect(t, idp, RoleMapping{Default: RoleMember})
 	idp.Claims = func(m map[string]any) { m["email_verified"] = false }
 
-	if _, _, err := o.Recheck(context.Background(), "rt-1"); !errors.Is(err, ErrDirectoryRefused) {
+	if _, _, err := o.Recheck(t.Context(), "rt-1"); !errors.Is(err, ErrDirectoryRefused) {
 		t.Errorf("err = %v, want ErrDirectoryRefused", err)
 	}
 }
@@ -698,7 +697,7 @@ func TestEntraIsForEveryTenantOnlyWithoutATenantID(t *testing.T) {
 func TestEntraForEveryTenantChecksEachTokensTenant(t *testing.T) {
 	const tenant = "11111111-2222-3333-4444-555555555555"
 	idp := oidctest.New(t)
-	o, err := NewOIDC(context.Background(), OIDCConfig{
+	o, err := NewOIDC(t.Context(), OIDCConfig{
 		Name: "entra", IssuerURL: idp.URL + "/common/v2.0", ClientID: "keera", ClientSecret: "secret",
 		RedirectURL: "https://keera.example.ch/auth/callback",
 		Mapping:     RoleMapping{Default: RoleMember}, Domains: []string{AnyDomain},
@@ -741,7 +740,7 @@ func TestEntraForEveryTenantChecksEachTokensTenant(t *testing.T) {
 				m["nonce"] = flow.Nonce
 				tc.claims(m)
 			}
-			_, err := o.Exchange(context.Background(), "the-code", flow)
+			_, err := o.Exchange(t.Context(), "the-code", flow)
 			if (err == nil) != tc.ok {
 				t.Errorf("err = %v, want accepted %v", err, tc.ok)
 			}
@@ -755,7 +754,7 @@ func TestEntraForEveryTenantTrustsPersonalAccounts(t *testing.T) {
 	const personal = "9188040d-6c67-4c5b-b112-36a304b66dad"
 	const work = "11111111-2222-3333-4444-555555555555"
 	idp := oidctest.New(t)
-	o, err := NewOIDC(context.Background(), OIDCConfig{
+	o, err := NewOIDC(t.Context(), OIDCConfig{
 		Name: "entra", IssuerURL: idp.URL + "/common/v2.0", ClientID: "keera", ClientSecret: "secret",
 		RedirectURL: "https://keera.example.ch/auth/callback",
 		Mapping:     RoleMapping{Default: RoleMember}, Domains: []string{AnyDomain},
@@ -788,7 +787,7 @@ func TestEntraForEveryTenantTrustsPersonalAccounts(t *testing.T) {
 				m["nonce"] = flow.Nonce
 				tc.claims(m)
 			}
-			_, err := o.Exchange(context.Background(), "the-code", flow)
+			_, err := o.Exchange(t.Context(), "the-code", flow)
 			if (err == nil) != tc.ok {
 				t.Errorf("err = %v, want accepted %v", err, tc.ok)
 			}

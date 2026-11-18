@@ -315,7 +315,10 @@ export async function signIn(root, onSignedIn) {
     // Each directory is named: someone with Google and Microsoft accounts
     // cannot answer "single sign-on".
     const providers = config.providers || [];
-    const signUpWith = providers.find((p) => p.signup);
+    // Sign-up is set per provider, so name each one that allows it.
+    const signUpWith = new Intl.ListFormat("en-GB", {
+      type: "disjunction",
+    }).format(providers.filter((p) => p.signup).map((p) => p.label || p.name));
 
     // A password directory opens its form in place of the buttons. If it is
     // the only choice, it is open from the start.
@@ -370,7 +373,7 @@ export async function signIn(root, onSignedIn) {
           : "Sign in with your identity provider. ") +
           (signUpWith
             ? "New here? Sign in with " +
-              (signUpWith.label || signUpWith.name) +
+              signUpWith +
               " to create an organisation."
             : "If you cannot, ask your administrator."),
       ),

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
@@ -296,26 +297,28 @@ func TestMessagesStreamReportsUsageForBilling(t *testing.T) {
 func TestATranslatedStreamCountsReasoningAsTheFirstToken(t *testing.T) {
 	// Reasoning is dropped, but the first token is still when the model
 	// started.
-	start := time.Now()
-	stats, err := anthropicShape{}.pipe(io.Discard, func() {}, paused(pause,
-		"data: "+`{"choices":[{"delta":{"role":"assistant"}}]}`+"\n\n",
-		"data: "+`{"choices":[{"delta":{"reasoning_content":"hm"}}]}`+"\n\n",
-		sseStream(`{"choices":[{"delta":{"content":"a"}}]}`, stopChunk),
-	), "keera-code", true, DefaultMaxResponseBytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := stats.firstAt.Sub(start)
-	if got < pause {
-		t.Errorf("first token after %v, want at least %v: the role chunk was counted", got, pause)
-	}
-	if got >= 2*pause {
-		t.Errorf("first token after %v, want under %v: the reasoning was not counted", got, 2*pause)
-	}
-	// A hang-up is charged on the deltas, so reasoning counts.
-	if stats.deltas != 2 {
-		t.Errorf("deltas = %d, want 2: the reasoning and the text", stats.deltas)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		stats, err := anthropicShape{}.pipe(io.Discard, func() {}, paused(pause,
+			"data: "+`{"choices":[{"delta":{"role":"assistant"}}]}`+"\n\n",
+			"data: "+`{"choices":[{"delta":{"reasoning_content":"hm"}}]}`+"\n\n",
+			sseStream(`{"choices":[{"delta":{"content":"a"}}]}`, stopChunk),
+		), "keera-code", true, DefaultMaxResponseBytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := stats.firstAt.Sub(start)
+		if got < pause {
+			t.Errorf("first token after %v, want at least %v: the role chunk was counted", got, pause)
+		}
+		if got >= 2*pause {
+			t.Errorf("first token after %v, want under %v: the reasoning was not counted", got, 2*pause)
+		}
+		// A hang-up is charged on the deltas, so reasoning counts.
+		if stats.deltas != 2 {
+			t.Errorf("deltas = %d, want 2: the reasoning and the text", stats.deltas)
+		}
+	})
 }
 
 func TestMessagesSurfaceEnforcesTheSamePolicyAsChat(t *testing.T) {
@@ -554,40 +557,42 @@ func TestConnectionWarmingProbeIsAnswered(t *testing.T) {
 
 func TestMessagesStreamPingsWhileTheUpstreamIsSilent(t *testing.T) {
 	// Pings keep a quiet stream alive before the first token.
-	restore := anthropicPingInterval
-	anthropicPingInterval = 5 * time.Millisecond
-	t.Cleanup(func() { anthropicPingInterval = restore })
+	synctest.Test(t, func(t *testing.T) {
+		restore := anthropicPingInterval
+		anthropicPingInterval = 5 * time.Millisecond
+		t.Cleanup(func() { anthropicPingInterval = restore })
 
-	// A source that stalls, then answers.
-	src := io.MultiReader(
-		&slowReader{delay: 60 * time.Millisecond},
-		strings.NewReader(sseStream(`{"choices":[{"delta":{"content":"x"}}]}`, stopChunk)),
-	)
+		// A source that stalls, then answers.
+		src := io.MultiReader(
+			&slowReader{delay: 60 * time.Millisecond},
+			strings.NewReader(sseStream(`{"choices":[{"delta":{"content":"x"}}]}`, stopChunk)),
+		)
 
-	var buf syncBuffer
-	if _, err := (anthropicShape{}).pipe(&buf, func() {}, src, "keera-code", true, DefaultMaxResponseBytes); err != nil {
-		t.Fatalf("pipe: %v", err)
-	}
-
-	events := readEvents(t, buf.String())
-	if len(events) == 0 || events[0].name != "ping" {
-		t.Fatalf("the silence carried no ping; the client would see a dead connection:\n%v",
-			names(events))
-	}
-	// The turn still opens, delivers and closes.
-	var turn []string
-	for _, e := range events {
-		if e.name != "ping" {
-			turn = append(turn, e.name)
+		var buf syncBuffer
+		if _, err := (anthropicShape{}).pipe(&buf, func() {}, src, "keera-code", true, DefaultMaxResponseBytes); err != nil {
+			t.Fatalf("pipe: %v", err)
 		}
-	}
-	want := []string{
-		"message_start", "content_block_start", "content_block_delta",
-		"content_block_stop", "message_delta", "message_stop",
-	}
-	if !slices.Equal(turn, want) {
-		t.Errorf("events without the pings = %v,\nwant %v", turn, want)
-	}
+
+		events := readEvents(t, buf.String())
+		if len(events) == 0 || events[0].name != "ping" {
+			t.Fatalf("the silence carried no ping; the client would see a dead connection:\n%v",
+				names(events))
+		}
+		// The turn still opens, delivers and closes.
+		var turn []string
+		for _, e := range events {
+			if e.name != "ping" {
+				turn = append(turn, e.name)
+			}
+		}
+		want := []string{
+			"message_start", "content_block_start", "content_block_delta",
+			"content_block_stop", "message_delta", "message_stop",
+		}
+		if !slices.Equal(turn, want) {
+			t.Errorf("events without the pings = %v,\nwant %v", turn, want)
+		}
+	})
 }
 
 // slowReader blocks once, like a backend reading a long prompt, then reports
@@ -655,21 +660,23 @@ func TestMessagesStreamReadsAToolCallLargerThanTheReadBuffer(t *testing.T) {
 
 func TestMessagesStreamWritesNothingOnceTheClientIsGone(t *testing.T) {
 	// Pings come from a timer, so none may come after the pipe returned.
-	restore := anthropicPingInterval
-	anthropicPingInterval = time.Millisecond
-	t.Cleanup(func() { anthropicPingInterval = restore })
+	synctest.Test(t, func(t *testing.T) {
+		restore := anthropicPingInterval
+		anthropicPingInterval = time.Millisecond
+		t.Cleanup(func() { anthropicPingInterval = restore })
 
-	dst := &failingWriter{after: 2}
-	_, err := (anthropicShape{}).pipe(dst, func() {},
-		strings.NewReader(sseStream(deltaChunk, deltaChunk, deltaChunk)), "keera-code", true, DefaultMaxResponseBytes)
-	if err == nil {
-		t.Fatal("pipe reported success to a client that was gone")
-	}
-	written := dst.count()
-	time.Sleep(20 * anthropicPingInterval)
-	if dst.count() != written {
-		t.Errorf("%d writes after the pipe returned, want none", dst.count()-written)
-	}
+		dst := &failingWriter{after: 2}
+		_, err := (anthropicShape{}).pipe(dst, func() {},
+			strings.NewReader(sseStream(deltaChunk, deltaChunk, deltaChunk)), "keera-code", true, DefaultMaxResponseBytes)
+		if err == nil {
+			t.Fatal("pipe reported success to a client that was gone")
+		}
+		written := dst.count()
+		time.Sleep(20 * anthropicPingInterval)
+		if dst.count() != written {
+			t.Errorf("%d writes after the pipe returned, want none", dst.count()-written)
+		}
+	})
 }
 
 // failingWriter fails every write after the first few, like a closed

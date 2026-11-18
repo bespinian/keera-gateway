@@ -21,7 +21,7 @@ import {
   formModal,
 } from "../ui.js";
 import { orgNameOf } from "./orgs.js";
-import { userPasskeys, showPasskeyLink } from "./passkeys.js";
+import { managePasskeys, userPasskeys, showPasskeyLink } from "./passkeys.js";
 
 const ROLES = [
   {
@@ -435,7 +435,9 @@ function passkeyButton(ctx, u) {
       {
         class: "btn btn-sm",
         title: "This user's passkeys, and a new set-up link",
-        onClick: () => userPasskeys(u),
+        // A set-up link is for someone else; one's own passkeys are added here.
+        onClick: () =>
+          u.id === ctx.state.me.user_id ? managePasskeys() : userPasskeys(u),
       },
       "Passkeys",
     );

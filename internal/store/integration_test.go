@@ -50,7 +50,7 @@ func db(t *testing.T) (*Store, context.Context) {
 	if testStore == nil {
 		t.Skip("set KEERA_TEST_DATABASE_URL to run the store's integration tests")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	t.Cleanup(cancel)
 	if _, err := testStore.pool.Exec(ctx, `TRUNCATE orgs, projects, users, api_keys, guardrails,
 		models, filters, filter_runs, routers, usage_events, usage_daily, spend, audit_log, sessions,
@@ -158,7 +158,7 @@ func TestNotifyReachesAListener(t *testing.T) {
 	}
 	// Closed rather than released, so the LISTEN does not leak into later tests.
 	conn := pooled.Hijack()
-	defer conn.Close(context.Background())
+	defer conn.Close(t.Context())
 	if _, err := conn.Exec(ctx, "LISTEN "+NotifyChannel); err != nil {
 		t.Fatalf("LISTEN: %v", err)
 	}

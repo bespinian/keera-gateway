@@ -203,6 +203,15 @@ func (s *Store) writeBatch(ctx context.Context, events []Event) error {
 	return s.pool.SendBatch(ctx, batch).Close()
 }
 
+// Tokens is what the event used, as a model prices it.
+func (e Event) Tokens() policy.Tokens {
+	return policy.Tokens{
+		Input: e.InputTokens, CachedInput: e.CachedInputTokens,
+		CacheWrite: e.CacheWriteTokens, CacheWriteHour: e.CacheWriteHourTokens,
+		Output: e.OutputTokens, AudioMillis: e.AudioMillis,
+	}
+}
+
 // clean makes every text in an event fit for Postgres, which refuses NUL bytes
 // and invalid UTF-8. Much of it comes from clients or upstreams.
 func (e *Event) clean() {

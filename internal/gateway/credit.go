@@ -97,24 +97,37 @@ func mostTokens(bodyBytes, outputCeiling int) policy.Tokens {
 
 // most is all a call may use: mostTokens, or for a transcription its text
 // fields and the longest audio its file can hold, in minutes and in tokens.
-func (c *call) most(b *body) policy.Tokens {
-	t := mostTokens(c.received, c.outputTokens(b))
-	if c.audio != nil {
-		t.AudioMillis = mostAudioMillis(len(c.audio.data))
-		t.Input = len(b.encode())/bytesPerToken + audioTokensAtMost(t.AudioMillis)
+// prompt is the part of the input a filter reads: all of it, or a
+// transcription's text fields.
+func (c *call) most(b *body) (t policy.Tokens, prompt int) {
+	t = mostTokens(c.received, c.outputTokens(b))
+	if c.audio == nil {
+		return t, t.Input
 	}
-	return t
+	prompt = len(b.encode()) / bytesPerToken
+	t.AudioMillis = mostAudioMillis(len(c.audio.data))
+	t.Input = prompt + audioTokensAtMost(t.AudioMillis)
+	return t, prompt
 }
 
 // billUnreported bills a request on the deployment's key that came back
-// without a usage record. See mostTokens.
+// without a usage record. See mostTokens. A model priced by the minute that
+// reports tokens but no length is billed its longest audio, or it would be
+// free.
 func (s *Server) billUnreported(c *call, b *body) {
-	if !c.model.PlatformKey || c.ev.InputTokens+c.ev.OutputTokens > 0 || c.ev.AudioMillis > 0 {
+	if !c.model.PlatformKey {
 		return
 	}
-	t := c.most(c.sent(b))
-	c.ev.InputTokens, c.ev.OutputTokens, c.ev.Estimated = t.Input, t.Output, true
-	c.ev.AudioMillis = t.AudioMillis
+	noTokens := !c.ev.Tokens().Any()
+	noAudio := c.model.AudioMicrosPerMinute > 0 && c.ev.AudioMillis == 0
+	if !noTokens && !noAudio {
+		return
+	}
+	t, _ := c.most(c.sent(b))
+	if noTokens {
+		c.ev.InputTokens, c.ev.OutputTokens = t.Input, t.Output
+	}
+	c.ev.AudioMillis, c.ev.Estimated = t.AudioMillis, true
 	s.log.Warn("a request on the deployment's key came back without a usage record; "+
 		"it is billed the most it may have used", "model", c.alias,
 		httpx.LogIDs(c.r.Context()))
@@ -154,12 +167,7 @@ const mostOutputTokens = 10_000_000
 // full rewrite by each billed filter. It errs high and is released once the
 // request is charged.
 func (s *Server) creditHold(c *call, b *body) int64 {
-	t := c.most(b)
-	in := t.Input
-	// Filters read a transcription's prompt, not its audio.
-	if c.audio != nil {
-		in = len(b.encode()) / bytesPerToken
-	}
+	t, in := c.most(b)
 	var most int64
 	for _, m := range s.billedAnswerers(c) {
 		if line, ok := m.Bill(t, t); ok {

@@ -578,7 +578,7 @@ func answerCost(m policy.Model, used, counted policy.Tokens) (int64, []policy.Bi
 		used = counted
 	}
 	micros := m.Cost(used)
-	if line, ok := m.Bill(used, counted); ok && (line.InputTokens+line.OutputTokens > 0 || line.AudioMillis > 0) {
+	if line, ok := m.Bill(used, counted); ok && line.Any() {
 		return micros, []policy.BillLine{line}
 	}
 	return micros, nil

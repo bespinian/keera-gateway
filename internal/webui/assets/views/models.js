@@ -214,20 +214,7 @@ export async function modelsView(ctx) {
         // By input price.
         sortKey: (m) => m.input_micros_per_mtok || null,
         sortDir: "desc",
-        cell: (m) =>
-          m.audio_micros_per_minute
-            ? h(
-                "span",
-                { class: "nowrap muted" },
-                `${listPrice(m.audio_micros_per_minute)} / min of audio`,
-              )
-            : m.input_micros_per_mtok || m.output_micros_per_mtok
-              ? h(
-                  "span",
-                  { class: "nowrap muted" },
-                  `${listPrice(m.input_micros_per_mtok)} in · ${listPrice(m.output_micros_per_mtok)} out`,
-                )
-              : h("span", { class: "faint" }, "not billed"),
+        cell: priceCell,
       },
       {
         // Enabled is the admin's switch; Check tests the backend.
@@ -876,6 +863,27 @@ function report(probe, kind) {
   });
 }
 
+// priceCell is a model's list price: per minute of audio, or per million
+// tokens.
+function priceCell(m) {
+  if (m.audio_micros_per_minute)
+    return h(
+      "span",
+      { class: "nowrap muted" },
+      `${listPrice(m.audio_micros_per_minute)} / min of audio`,
+    );
+  if (!m.input_micros_per_mtok && !m.output_micros_per_mtok)
+    return h("span", { class: "faint" }, "not billed");
+  return h(
+    "span",
+    { class: "nowrap muted" },
+    `${listPrice(m.input_micros_per_mtok)} in · ${listPrice(m.output_micros_per_mtok)} out`,
+  );
+}
+
+// TOKEN_PRICES are the form's prices per million tokens.
+const TOKEN_PRICES = ["priceIn", "priceOut", "priceCached", "priceWrite"];
+
 const KINDS = [
   "chat",
   "completion",
@@ -1217,23 +1225,26 @@ function editModel(ctx, existing, providers, pick) {
         : "Set by Keera: self-hosted models are free here.",
     ),
   );
+  // Only a hosted transcription model is priced per minute; the fee is per
+  // token.
+  let selfHosted = true;
+  const syncAudio = () => {
+    audioRow.hidden = selfHosted || kind.value !== "transcription";
+  };
   const lockFee = (self) => {
+    selfHosted = self;
     feeNote.hidden = !self;
     cacheRow.hidden = self;
-    // Only a hosted transcription model is priced per minute; the fee is
-    // per token.
-    audioRow.hidden = self || kind.value !== "transcription";
+    syncAudio();
     if (!self) return;
-    for (const el of [priceIn, priceOut, priceCached, priceWrite]) {
-      el.value = String(fee / 1e6);
-      el.disabled = true;
+    for (const key of TOKEN_PRICES) {
+      fields[key].value = String(fee / 1e6);
+      fields[key].disabled = true;
     }
     priceAudio.value = "";
     priceAudio.disabled = true;
   };
-  kind.addEventListener("change", () => {
-    audioRow.hidden = !state.hosted || kind.value !== "transcription";
-  });
+  kind.addEventListener("change", syncAudio);
 
   // basics stays visible for a self-hosted model; extras is folded under
   // Advanced options. A hosted model folds both. See layout.
@@ -1738,14 +1749,7 @@ function hostedFields(ctx, providers, form) {
     // On the operator's key the control plane sets endpoint and prices.
     if (p.platform_key) {
       fixed.backends = true;
-      for (const key of [
-        "priceIn",
-        "priceOut",
-        "priceCached",
-        "priceWrite",
-        "priceAudio",
-      ])
-        fixed[key] = !!m;
+      for (const key of [...TOKEN_PRICES, "priceAudio"]) fixed[key] = !!m;
     }
     return fixed;
   };

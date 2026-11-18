@@ -71,7 +71,9 @@ type call struct {
 	// get the translation. Until then the OpenAI-shaped body is nil.
 	native     *body
 	translated bool
-	// audio is a transcription's audio, sent on as it came.
+	// audio is a transcription's audio, sent on as it came. It is set for
+	// every transcription and only for one, so after decode a nil check is
+	// how a step tells a transcription.
 	audio *audioPart
 
 	stream        bool
@@ -82,7 +84,7 @@ type call struct {
 	// creditHold.
 	held int64
 	// counted is the gateway's own count of the answer's tokens, for a model
-	// billed on it. See policy.Model.CountsTokens.
+	// billed on it and for a transcription. See countsTokens.
 	counted policy.Tokens
 }
 
@@ -105,6 +107,23 @@ func (c *call) hookMicros() int64 {
 // deployment's key.
 func (c *call) hookBills() []policy.BillLine {
 	return slices.Concat(c.filters.bills, c.decision.bills, c.earlier.bills)
+}
+
+// countsTokens says the gateway counts the call's tokens itself. A
+// transcription is always counted: its answer may report only the audio's
+// length, and the gateway fee and token limits still need its tokens.
+func (c *call) countsTokens() bool {
+	return c.model.CountsTokens() || c.audio != nil
+}
+
+// limitedTokens is what the call counts against token limits: what the
+// backend reported, or for a transcription that reported none, the gateway's
+// count, so a key limited on tokens cannot transcribe without limit.
+func (c *call) limitedTokens() int {
+	if n := c.ev.InputTokens + c.ev.OutputTokens; n > 0 || c.audio == nil {
+		return n
+	}
+	return c.counted.Input + c.counted.Output
 }
 
 func (c *call) viaRouter() bool { return c.router.Alias != "" }
@@ -302,12 +321,6 @@ func (s *Server) decode(c *call, raw []byte) (*body, bool) {
 	}
 	if err != nil {
 		s.refuse(c, invalidBody(err.Error()))
-		return nil, false
-	}
-	// A streamed transcription's events carry no usage record the gateway
-	// reads, so it could not be billed.
-	if on, _ := b.boolean("stream"); on && c.surf.kind == policy.KindTranscription {
-		s.refuse(c, invalidBody("the gateway does not stream transcriptions; leave out 'stream'"))
 		return nil, false
 	}
 	// A backend that reads "true" or 1 as true would stream an answer the
@@ -798,13 +811,13 @@ func (s *Server) prepare(c *call, b *body) bool {
 			}
 		}
 	}
-	if c.chainOnKey() && c.surf.kind == policy.KindTranscription {
-		if why := unreportedFormat(b); why != "" {
-			s.refuse(c, invalidBody(why))
-			return false
-		}
-	}
 	if c.chainOnKey() {
+		if c.audio != nil {
+			if why := unreportedFormat(b); why != "" {
+				s.refuse(c, invalidBody(why))
+				return false
+			}
+		}
 		// Hosted tools are removed on the deployment's key: the provider
 		// charges for them apart from tokens, which is not billed. The header
 		// tells the developer why.
@@ -892,12 +905,14 @@ func (s *Server) answer(c *call, b *body) {
 	resp := fw.resp
 
 	c.ev.Status = resp.StatusCode
-	streaming := c.stream && httpx.MediaType(resp.Header.Get("Content-Type")) == "text/event-stream"
+	// Only a success is relayed as a stream. A failure is read whole as an
+	// error, so a backend cannot pass a whole answer on under an error status.
+	streaming := c.stream && resp.StatusCode < 300 &&
+		httpx.MediaType(resp.Header.Get("Content-Type")) == "text/event-stream"
 	copyResponseHeaders(c.w, resp, c.alias, streaming)
-	if c.audio != nil && resp.StatusCode < 300 {
-		if ct := transcriptContentType(resp.Header.Get("Content-Type")); ct != "" {
-			c.w.Header().Set("Content-Type", ct)
-		}
+	if ct := resp.Header.Get("Content-Type"); c.audio != nil && resp.StatusCode < 300 &&
+		slices.Contains(transcriptMediaTypes, httpx.MediaType(ct)) {
+		c.w.Header().Set("Content-Type", ct)
 	}
 	s.limitHeaders(c.w, c.res, c.now)
 	if c.model.Subscription {
@@ -925,13 +940,16 @@ func (s *Server) answer(c *call, b *body) {
 	if resp.StatusCode < 400 {
 		s.billUnreported(c, b)
 	}
-	switch {
-	case c.model.CountsTokens() && c.ev.Status < 300 && c.audio != nil:
-		// The payload is mostly audio; only the text fields are tokens.
-		c.counted.Input = estimateInputTokens(c.sent(b).encode())
-	case c.model.CountsTokens() && c.ev.Status < 300:
-		c.counted.Input = estimateInputTokens(fw.payload)
-	default:
+	// A backend the gateway counts for is not trusted to say it failed: the
+	// prompt was passed on either way.
+	if c.countsTokens() && (c.ev.Status < 300 || c.model.CountsTokens()) {
+		prompt := fw.payload
+		if c.audio != nil {
+			// The payload is mostly audio; only the text fields are tokens.
+			prompt = c.sent(b).encode()
+		}
+		c.counted.Input = estimateInputTokens(prompt)
+	} else {
 		c.counted = policy.Tokens{}
 	}
 	c.ev.Canceled = c.r.Context().Err() != nil
@@ -1155,12 +1173,16 @@ func (s *Server) relayBuffered(c *call, resp *http.Response, answered time.Time,
 	if usage != nil {
 		setUsage(&c.ev, usage)
 	}
-	if c.model.CountsTokens() && resp.StatusCode < 300 {
-		written := writtenBytes(body)
+	switch {
+	case c.countsTokens() && resp.StatusCode < 300:
 		if c.audio != nil {
-			written = transcriptBytes(body)
+			c.counted.Output = transcriptBytes(body) / bytesPerTokenTypical
+		} else {
+			c.counted.Output = writtenBytes(body) / bytesPerTokenTypical
 		}
-		c.counted.Output = written / bytesPerTokenTypical
+	case c.model.CountsTokens():
+		// An error carries no answer to read, so what was passed on counts.
+		c.counted.Output = len(out) / bytesPerTokenTypical
 	}
 }
 
@@ -1235,12 +1257,7 @@ func setUsage(ev *store.Event, u *tokenUsage) {
 func (s *Server) finish(c *call) {
 	ev := c.ev
 	ev.Spans = c.tr.steps("")
-	used := policy.Tokens{
-		Input: ev.InputTokens, CachedInput: ev.CachedInputTokens,
-		CacheWrite: ev.CacheWriteTokens, CacheWriteHour: ev.CacheWriteHourTokens,
-		Output: ev.OutputTokens, AudioMillis: ev.AudioMillis,
-	}
-	cost, bills := answerCost(c.model, used, c.counted)
+	cost, bills := answerCost(c.model, ev.Tokens(), c.counted)
 	ev.CostMicros, ev.Bills = cost, append(c.hookBills(), bills...)
 	// A subscription paid for this. The API price is kept for comparison and
 	// charged to no budget.
@@ -1251,7 +1268,7 @@ func (s *Server) finish(c *call) {
 	ev.CostMicros += c.hookMicros()
 	ev.Scopes = c.scopes
 
-	if tokens := float64(ev.InputTokens + ev.OutputTokens); tokens > 0 {
+	if tokens := float64(c.limitedTokens()); tokens > 0 {
 		reqs := make([]ratelimit.Requirement, 0, len(c.scopes))
 		for _, sc := range c.scopes {
 			reqs = append(reqs, tpmBucket(sc))

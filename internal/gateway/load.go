@@ -1,8 +1,9 @@
 package gateway
 
 import (
+	"cmp"
 	"math"
-	"sort"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -145,19 +146,28 @@ func (l *loads) order(mode policy.RouteMode, aliases []string, key func(alias st
 	for _, a := range aliases {
 		r[a] = l.read(key(a), now)
 	}
-	sort.SliceStable(aliases, func(i, j int) bool {
-		a, b := r[aliases[i]], r[aliases[j]]
+	slices.SortStableFunc(aliases, func(x, y string) int {
+		a, b := r[x], r[y]
 		if a.failing != b.failing {
-			return !a.failing
+			return lastIf(a.failing)
 		}
 		if mode == policy.RouteModeLeastBusy {
-			return a.inflight < b.inflight
+			return cmp.Compare(a.inflight, b.inflight)
 		}
 		if a.known != b.known {
-			return !a.known
+			return lastIf(a.known)
 		}
-		return a.latency < b.latency
+		return cmp.Compare(a.latency, b.latency)
 	})
+}
+
+// lastIf orders two destinations that differ in one flag: the one with it set
+// goes after the other.
+func lastIf(set bool) int {
+	if set {
+		return 1
+	}
+	return -1
 }
 
 // orderByLoad sorts a route step's destinations. See loads.order.

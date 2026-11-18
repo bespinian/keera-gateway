@@ -1,7 +1,6 @@
 package payment
 
 import (
-	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -72,7 +71,7 @@ func TestARequestIsSignedForItsMethodAndPath(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 		_, _ = io.WriteString(w, `{"id":42,"state":"PENDING","currency":"CHF"}`)
 	})
-	tx, err := c.Create(context.Background(), NewTransaction{
+	tx, err := c.Create(t.Context(), NewTransaction{
 		Currency: "CHF", CustomerID: "org_1", MerchantReference: "pay_1",
 		CompletionBehavior: "COMPLETE_IMMEDIATELY",
 		LineItems: []LineItem{{
@@ -101,7 +100,7 @@ func TestThePaymentPageIsReadAsText(t *testing.T) {
 		}
 		_, _ = io.WriteString(w, "https://checkout.postfinance.ch/s/4711/payment/transaction/pay/42")
 	})
-	u, err := c.PaymentPageURL(context.Background(), 42)
+	u, err := c.PaymentPageURL(t.Context(), 42)
 	if err != nil || u != "https://checkout.postfinance.ch/s/4711/payment/transaction/pay/42" {
 		t.Errorf("url = %q, %v", u, err)
 	}
@@ -111,7 +110,7 @@ func TestAPaymentPageThatIsNotHTTPSIsRefused(t *testing.T) {
 	c := testClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, "javascript:alert(1)")
 	})
-	if _, err := c.PaymentPageURL(context.Background(), 42); err == nil {
+	if _, err := c.PaymentPageURL(t.Context(), 42); err == nil {
 		t.Error("an address that is not https was handed out")
 	}
 }
@@ -136,7 +135,7 @@ func TestASavedCardIsShownByBrandAndLabel(t *testing.T) {
 		_, _ = io.WriteString(w, `{"name":"•••• 4821","expiresOn":"2028-09-30T00:00:00Z",
 			"paymentMethodBrand":{"name":{"de-CH":"Visa","en-US":"Visa"}}}`)
 	})
-	card, err := c.Card(context.Background(), 7)
+	card, err := c.Card(t.Context(), 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +155,7 @@ func TestAnInvoiceArrivesAsAPDF(t *testing.T) {
 			"mimeType": "application/pdf", "data": pdf,
 		})
 	})
-	doc, err := c.InvoiceDocument(context.Background(), 42)
+	doc, err := c.InvoiceDocument(t.Context(), 42)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +173,7 @@ func TestAnInvoiceThatIsNotAPDFIsRefused(t *testing.T) {
 			"data":     []byte("<script>alert(1)</script>"),
 		})
 	})
-	if _, err := c.InvoiceDocument(context.Background(), 42); err == nil {
+	if _, err := c.InvoiceDocument(t.Context(), 42); err == nil {
 		t.Error("a document that is not a PDF was handed out")
 	}
 }
@@ -184,9 +183,9 @@ func TestARefusalCarriesPostFinancesReason(t *testing.T) {
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		_, _ = io.WriteString(w, `{"code":"invalid_currency","message":"EUR is not enabled"}`)
 	})
-	_, err := c.Get(context.Background(), 1)
-	var e *Error
-	if !errors.As(err, &e) || e.Status != 422 || e.Code != "invalid_currency" ||
+	_, err := c.Get(t.Context(), 1)
+	e, ok := errors.AsType[*Error](err)
+	if !ok || e.Status != 422 || e.Code != "invalid_currency" ||
 		!strings.Contains(err.Error(), "EUR is not enabled") {
 		t.Errorf("err = %v", err)
 	}

@@ -91,7 +91,8 @@ var commands = []command{
 			"names you. --url also makes that gateway the default for every later command.\n\n" +
 			"A command talks to the gateway --url names, else KEERA_CONTROL_URL, else the " +
 			"one you last signed in to, else the hosted one. KEERA_OPERATOR_KEY, the " +
-			"deployment's own credential, wins over a sign-in. 'keera whoami' says which " +
+			"deployment's own credential, wins over a sign-in, but only goes to a " +
+			"gateway --url or KEERA_CONTROL_URL names. 'keera whoami' says which " +
 			"gateway and credential are in use. See https://docs.keera.ch/reference/cli/.",
 		examples: []string{
 			"keera login                # the gateway the other commands talk to",
@@ -868,6 +869,20 @@ var commands = []command{
 		},
 	},
 	{
+		name:    "audit",
+		summary: "who changed what, newest first",
+		args:    "[flags]",
+		flags:   []string{"action", "actor", "since", "limit", "json"},
+		prose: "Every change made in the panel, with this command or through the API, and " +
+			"every sign-in. Administrators read their organisation's; operators every one, " +
+			"or one with --org. --json has each entry's detail whole.",
+		examples: []string{
+			"keera audit",
+			"keera audit --action key.revoke --since 90d",
+			"keera audit --actor ada@example.ch --limit 500",
+		},
+	},
+	{
 		name:    "connect",
 		summary: "set an editor up for this gateway",
 		args:    "[<client>] [flags]",
@@ -885,6 +900,157 @@ var commands = []command{
 			"keera connect",
 			"keera connect opencode --key laptop",
 			"keera connect claude-code --subscription",
+		},
+	},
+	{
+		name:    "agent",
+		aliases: []string{"agents"},
+		summary: "agents in Keera Agents, which carry out tasks on machines of their own",
+		prose: "An agent is a model with tools, on a machine of its own in Keera Agents. People " +
+			"give it tasks from a chat, a board, a folder, a schedule or 'keera agent ask', and it " +
+			"spends on the models through a key of its own. An agent is named by its name or its " +
+			"id. Its owner and administrators change it; --access says who may give it work. " +
+			"Connecting it to chats, folders and services is done in the Keera Agents panel. " +
+			"See https://docs.keera.ch/use/agents/.",
+		subs: []subcommand{
+			{name: "list", summary: "the organisation's agents", flags: []string{"json"}},
+			{name: "show", args: "<agent>", summary: "one agent, what it is connected to, and its schedules", flags: []string{"json"}},
+			{
+				name: "create", args: "<name>", summary: "make an agent",
+				flags: []string{
+					"model", "description", "instructions", "tools", "max-steps", "access", "people",
+					"budget", "cpu", "memory", "json",
+				},
+				prose: "Without --tools it has files and memory. shell runs commands on its machine, " +
+					"and web reads pages. Without --access everyone in the organisation may give it work.",
+				examples: []string{
+					`keera agent create support --model keera-speed --instructions @support.md`,
+					`keera agent create reports --model keera-speed --tools files,memory,shell --access owner`,
+				},
+			},
+			{
+				name: "set", aliases: []string{"rename"}, args: "<agent>", summary: "change an agent",
+				flags: []string{
+					"name", "model", "description", "instructions", "tools", "max-steps", "access", "people",
+					"budget", "cpu", "memory", "json",
+				},
+				prose: "Only what is given changes. Instructions and the model apply from its next task; " +
+					"a new size restarts its machine, and its files stay.",
+			},
+			{
+				name: "ask", aliases: []string{"give"}, args: "<agent> <prompt>", summary: "give an agent a task",
+				flags: []string{"wait", "json"},
+				prose: "The prompt may be @file, or @- for standard input. Without --wait it prints the " +
+					"task's id and returns; 'keera task show <id> --follow' follows it.",
+				examples: []string{
+					`keera agent ask support "Summarise yesterday's open tickets" --wait`,
+					"keera agent ask reports @brief.md",
+				},
+			},
+			{name: "start", args: "<agent>", summary: "start an agent someone stopped", flags: []string{"json"}},
+			{
+				name: "stop", args: "<agent>", summary: "stop it taking tasks, keeping its files",
+				flags: []string{"json"},
+			},
+			{
+				name: "restart", args: "<agent>", summary: "give it a new machine, keeping its files",
+				flags: []string{"json"},
+			},
+			{
+				name: "logs", args: "<agent>", summary: "what its machine printed, such as why it does not start",
+				flags: []string{"follow"},
+			},
+			{
+				name: "cost", args: "<agent>", summary: "what its machine cost this month, and an hour of it running",
+				flags: []string{"json"},
+				prose: "Only on a deployment that bills machine time. The models it calls are billed " +
+					"apart, in 'keera usage' and 'keera billing'.",
+			},
+			{
+				name: "take-over", args: "<agent>", summary: "become its owner, as when its owner left (administrators)",
+				flags: []string{"json"},
+				prose: "It then spends and acts in your name, with a new key.",
+			},
+			{
+				name: "delete", args: "<agent>", summary: "delete an agent, its machine and its schedules",
+				flags: []string{"yes", "json"},
+			},
+		},
+		examples: []string{
+			"keera agent create support --model keera-speed --instructions @support.md",
+			`keera agent ask support "What came in overnight?" --wait`,
+			"keera agent logs support --follow",
+		},
+	},
+	{
+		name:    "task",
+		aliases: []string{"tasks"},
+		summary: "the work agents were given, and what came of it",
+		prose: "A task is one piece of work for an agent: a chat message, a schedule's run, a card, " +
+			"a file or 'keera agent ask'. You see the tasks you asked for and those of the agents " +
+			"you may change; administrators see every one.",
+		subs: []subcommand{
+			{
+				name: "list", summary: "the tasks, newest first",
+				flags: []string{"agent", "state", "source", "limit", "json"},
+			},
+			{
+				name: "show", args: "<task>", summary: "one task: its prompt, its steps and its answer",
+				flags: []string{"follow", "json"},
+				prose: "Tool calls and their results show by their first line; --json has them whole. " +
+					"--follow prints each step as it comes, until the task ends. Ctrl-C stops " +
+					"following, and the task goes on.",
+			},
+			{
+				name: "cancel", args: "<task>", summary: "stop a task that has not ended",
+				flags: []string{"json"},
+				prose: "Whoever asked for it can, and whoever may change the agent.",
+			},
+		},
+		examples: []string{
+			"keera task list --agent support --state failed",
+			"keera task show task_06c1k2rt8g3m4n5p6q7r8s9t0v --follow",
+		},
+	},
+	{
+		name:    "schedule",
+		aliases: []string{"schedules"},
+		summary: "give an agent the same task on a timetable",
+		prose: "A schedule gives its agent a task with the same prompt each time its cron " +
+			"expression comes round, read in its time zone (Europe/Zurich unless one is given). " +
+			"It runs as whoever changed it last. Sending each result to a chat is set in the " +
+			"Keera Agents panel. A schedule is named by its name or its id.",
+		subs: []subcommand{
+			{name: "list", summary: "the schedules and when each runs next", flags: []string{"agent", "json"}},
+			{
+				name: "create", args: "<name>", summary: "make a schedule",
+				flags: []string{"agent", "cron", "timezone", "prompt", "json"},
+				prose: "The expression has five fields: minute, hour, day of the month, month and " +
+					"day of the week. 'keera schedule preview' checks one first.",
+				examples: []string{
+					`keera schedule create standup --agent reports --cron "0 9 * * 1-5" --prompt @standup.md`,
+				},
+			},
+			{
+				name: "set", aliases: []string{"rename"}, args: "<schedule>", summary: "change a schedule",
+				flags: []string{"name", "cron", "timezone", "prompt", "json"},
+			},
+			{name: "enable", args: "<schedule>", summary: "run it again on its timetable", flags: []string{"json"}},
+			{name: "disable", args: "<schedule>", summary: "stop running it, keeping it", flags: []string{"json"}},
+			{
+				name: "run", args: "<schedule>", summary: "give its agent the task now",
+				flags: []string{"wait", "json"},
+				prose: "It runs as you, and does not move the next run.",
+			},
+			{
+				name: "preview", args: "<cron>", summary: "say when an expression runs, in words and the next five times",
+				flags:    []string{"timezone", "json"},
+				examples: []string{`keera schedule preview "0 9 * * 1-5"`},
+			},
+			{
+				name: "delete", args: "<schedule>", summary: "delete a schedule",
+				flags: []string{"yes", "json"},
+			},
 		},
 	},
 	{
@@ -906,6 +1072,13 @@ var commands = []command{
 					"the coding agent starts with.",
 			},
 			{name: "show", args: "<name>", summary: "one workspace and its state", flags: []string{"json"}},
+			{
+				name: "set", aliases: []string{"rename"}, args: "<name>", summary: "rename it, or change its model, experience or size",
+				flags: []string{"name", "description", "model", "terminal", "vscode", "cpu", "memory", "json"},
+				prose: "A new experience or size restarts it; its files stay. The disk keeps the size " +
+					"it was made with.",
+				examples: []string{"keera workspace set api --vscode", "keera workspace set api --cpu 4 --memory 8Gi"},
+			},
 			{name: "start", args: "<name>", summary: "start a workspace someone stopped", flags: []string{"json"}},
 			{
 				name: "stop", args: "<name>", summary: "stop a workspace, keeping its files",
@@ -927,13 +1100,30 @@ var commands = []command{
 				flags:   []string{"port"},
 			},
 			{
+				name: "logs", args: "<name>", summary: "what its machine printed, such as why it does not start",
+				flags: []string{"follow"},
+			},
+			{
+				name: "cost", args: "<name>", summary: "what its machine cost this month, and an hour of it running",
+				flags: []string{"json"},
+				prose: "Only on a deployment that bills machine time. The models it calls are " +
+					"billed apart, in 'keera usage' and 'keera billing'.",
+			},
+			{
 				name: "ssh", args: "<name>", summary: "sign in to it over SSH",
 				prose: "Makes ~/.ssh/keera_ed25519 if this machine has none, and adds it to your keys.",
 			},
 			{
-				name: "ssh-config", summary: "let ssh, scp and editors reach workspaces as <name>.keera",
+				name: "configure-ssh", summary: "let ssh, scp and editors reach workspaces as <name>.keera",
 				prose: "Adds an entry for *.keera at the top of ~/.ssh/config, and adds this machine's " +
 					"key to yours. VS Code's Remote-SSH and JetBrains Gateway then work too.",
+			},
+			{name: "ssh-keys", summary: "the SSH keys that let you into your workspaces", flags: []string{"json"}},
+			{
+				name: "remove-ssh-key", args: "<key>", summary: "stop a key letting you in",
+				flags: []string{"json"},
+				prose: "Takes the key's id, fingerprint or name from 'keera workspace ssh-keys'. " +
+					"'keera workspace configure-ssh' on that machine adds it again.",
 			},
 			{
 				name: "ssh-proxy", args: "<host>", summary: "what ssh's ProxyCommand runs",
@@ -944,7 +1134,7 @@ var commands = []command{
 			"keera workspace create api --vscode",
 			"keera workspace open api",
 			"keera workspace forward api 3000",
-			"keera workspace ssh-config && ssh api.keera",
+			"keera workspace configure-ssh && ssh api.keera",
 		},
 	},
 	{name: "version", summary: "the build version this command line reports"},

@@ -244,7 +244,7 @@ func TestMachineKeyTakesOverAMembersIssuedKey(t *testing.T) {
 		},
 	})
 
-	key, replaced, err := machineKey(context.Background(), newClient(), "org_1", member, "", policy.KeySubscription)
+	key, replaced, err := machineKey(t.Context(), newClient(), "org_1", member, "", policy.KeySubscription)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestMachineKeySendsAMemberWithoutAKeyToAnAdministrator(t *testing.T) {
 		"GET /v1/keys": map[string]any{"data": memberKeys["data"].([]map[string]any)[:1]},
 	})
 
-	_, _, err := machineKey(context.Background(), newClient(), "org_1", member, "", policy.KeySubscription)
+	_, _, err := machineKey(t.Context(), newClient(), "org_1", member, "", policy.KeySubscription)
 	if err == nil || !strings.Contains(err.Error(), "administrator") ||
 		!strings.Contains(err.Error(), "--user ada@example.ch") {
 		t.Errorf("err = %v, want it to say what to ask an administrator for", err)
@@ -285,7 +285,7 @@ func TestMachineKeyIssuedByAnAdministratorExpires(t *testing.T) {
 	})
 	admin := identity{UserID: "user_1", Email: "ada@example.ch", Role: "admin", OrgID: "org_1"}
 
-	if _, _, err := machineKey(context.Background(), newClient(), "org_1", admin, "", policy.KeySubscription); err != nil {
+	if _, _, err := machineKey(t.Context(), newClient(), "org_1", admin, "", policy.KeySubscription); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.request("POST", "/v1/keys").body["expires_in_seconds"]; got != defaultKeyLife.Seconds() {
@@ -313,7 +313,7 @@ func TestSubscriptionSetupStopsWhenTheDeploymentTakesNone(t *testing.T) {
 		"GET /v1/me": map[string]any{"role": "member", "org_id": "org_1", "user_id": "user_1"},
 	})
 
-	err := connectClaude(context.Background(), newClient(), claudeSetup{subscription: true})
+	err := connectClaude(t.Context(), newClient(), claudeSetup{subscription: true})
 	if !errors.Is(err, errSubscriptionsOff) {
 		t.Errorf("err = %v, want errSubscriptionsOff", err)
 	}

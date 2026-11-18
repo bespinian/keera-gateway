@@ -546,6 +546,13 @@ func (s *Server) issuePasskeyLinkRoute(w http.ResponseWriter, r *http.Request, p
 	if !ok {
 		return
 	}
+	// A link for oneself would get around the recent sign-in that adding
+	// one's own passkey needs, so a taken session could plant one.
+	if target.ID == p.UserID {
+		forbid(w, "add your own passkey under Passkeys in the panel; "+
+			"a set-up link is for someone else")
+		return
+	}
 	if target.Role == string(authn.RoleOperator) {
 		forbid(w, target.Email+" is an operator, which comes from the configuration; "+
 			"a passkey account cannot hold that role")

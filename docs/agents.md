@@ -6,18 +6,14 @@ in their name. Every request it makes goes through the gateway with a key of
 that person's, so their guardrails, budgets and audit log apply as to anything
 else they do.
 
-Keera Agents is a separate app on its own address. This page explains what the
-gateway does for it, and why. Two settings connect them:
+Keera Agents is a separate app on its own address. Two settings on the gateway
+connect them, `KEERA_AGENTS_URL` and `KEERA_AGENTS_SERVICE_KEY`; see
+[Run Keera Agents](https://docs.keera.ch/operate/agents/). This page explains
+what the gateway does for it, and why.
 
-| Variable                   | What it is                                                                                       |
-| -------------------------- | ------------------------------------------------------------------------------------------------ |
-| `KEERA_AGENTS_URL`         | Keera Agents' address, without a path. People can then sign in to it, and the panel links to it. |
-| `KEERA_AGENTS_SERVICE_KEY` | A secret Keera Agents' server sends to the gateway. Unset, the service routes are off.           |
-
-Generate the service key with `openssl rand -hex 32` and give Keera Agents the
-same value. The gateway does not start with a service key shorter than 32
-characters, or one equal to the operator key, the metrics token or the secret
-key. Each credential then does one thing, and a leaked one is replaced alone.
+The gateway does not start with a service key equal to the operator key, the
+metrics token or the secret key. Each credential then does one thing, and a
+leaked one is replaced alone.
 
 ## Signing in
 
@@ -110,20 +106,16 @@ Removing a person from the directory only ends their sign-ins, as for every
 other key: the directory never sees API keys. Their agents keep working until
 they are disabled in Keera.
 
-## Workspaces from the command line
+## Keera Agents from the command line
 
-Keera Agents also runs workspaces: machines people work in, with a coding
-agent. `keera workspace` reaches them with the person's `keera login`. It
-finds Keera Agents through `agents_url` in `GET /control/v1/me`, and Keera
-Agents takes the same sign-in.
+`keera agent`, `keera task`, `keera schedule` and `keera workspace` work with
+Keera Agents, which also runs
+[workspaces](https://docs.keera.ch/use/workspaces/). They use the person's
+`keera login`. They find Keera Agents through `agents_url` in
+`GET /control/v1/me`, and Keera Agents takes the same sign-in. They call its
+panel API, `/api/v1/...`, as the panel does.
 
-```sh
-keera workspace create api      # asks: terminal (pi) or VS Code (Cline)
-keera workspace open api        # in the browser, through this machine's loopback
-keera workspace forward api 3000
-keera workspace ssh-config      # then: ssh api.keera
-```
-
-The operator key cannot use workspaces: it belongs to nobody, and a
-workspace is a person's. How a workspace runs, and why, is in Keera Agents'
-`docs/workspaces.md`.
+The operator key cannot use them: it belongs to nobody, and agents and
+workspaces are a person's. Connecting an agent to chats, folders and services
+is left to the Keera Agents panel, as most connections need a browser to sign
+in. How a workspace runs, and why, is in Keera Agents' `docs/workspaces.md`.

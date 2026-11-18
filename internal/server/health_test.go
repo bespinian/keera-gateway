@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,11 +37,11 @@ func TestHealth(t *testing.T) {
 	defer srv.Close()
 	addr := strings.TrimPrefix(srv.URL, "http://")
 
-	if err := health(context.Background(), addr); err != nil {
+	if err := health(t.Context(), addr); err != nil {
 		t.Fatalf("ready server: %v", err)
 	}
 	status = http.StatusServiceUnavailable
-	if err := health(context.Background(), addr); err == nil {
+	if err := health(t.Context(), addr); err == nil {
 		t.Fatal("a server answering 503 passed")
 	}
 }

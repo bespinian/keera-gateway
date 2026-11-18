@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"bytes"
-	"context"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -172,6 +171,11 @@ func TestATranscriptionTheGatewayCannotReadIsRefused(t *testing.T) {
 		}, "only 'file'"},
 		{"two files", []formField{model, audio, audio}, "one audio file"},
 		{"a stream", []formField{model, audio, {name: "stream", value: "true"}}, "stream"},
+		// A Python backend reads 1 as true.
+		{"a stream as 1", []formField{model, audio, {name: "stream", value: "1"}}, "leave out 'stream'"},
+		{"stream twice", []formField{
+			model, audio, {name: "stream", value: "false"}, {name: "stream", value: "false"},
+		}, "leave out 'stream'"},
 		{
 			"a misspelled model",
 			[]formField{{name: "Model", value: "keera-whisper"}, audio},
@@ -274,6 +278,32 @@ func TestATranscriptionOnTheDeploymentsKeyMustReportItsUse(t *testing.T) {
 	}
 }
 
+// Tokens price nothing on a model priced by the minute, so an answer with
+// tokens but no length is billed the longest audio the file can hold.
+func TestATranscriptionOnTheDeploymentsKeyReportingOnlyTokensIsBilledItsLongestAudio(t *testing.T) {
+	h := newHarness(t,
+		jsonBackend(`{"text":"hi","usage":{"type":"tokens","input_tokens":40,"output_tokens":7}}`),
+		filterModels(), nil)
+	onPlatformKey(h, "keera-whisper")
+	audio := strings.Repeat("a", 7_500)
+	body, ct := form(t,
+		formField{name: "model", value: "keera-whisper"},
+		formField{name: "file", filename: "a.wav", value: audio},
+	)
+	if resp := h.postForm(t, body, ct); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	ev := h.sink.last(t)
+	want := mostAudioMillis(len(audio))
+	if !ev.Estimated || ev.InputTokens != 40 || ev.OutputTokens != 7 || ev.AudioMillis != want {
+		t.Errorf("event = %d in, %d out, %d ms, estimated %v; want the reported tokens and %d ms estimated",
+			ev.InputTokens, ev.OutputTokens, ev.AudioMillis, ev.Estimated, want)
+	}
+	if len(ev.Bills) != 1 || ev.Bills[0].Micros == 0 {
+		t.Errorf("bills = %+v, want the longest audio billed", ev.Bills)
+	}
+}
+
 func TestTranscriptionUsageReadsEachBackendsRecord(t *testing.T) {
 	for _, tc := range []struct {
 		name, answer string
@@ -325,7 +355,7 @@ func TestCheckModelTranscribesASecondOfSilence(t *testing.T) {
 	m := chatAlias(upstream.URL)
 	m.Kind = policy.KindTranscription
 	m.BackendModel = "whisper"
-	p := probeServer(t).CheckModel(context.Background(), m)
+	p := probeServer(t).CheckModel(t.Context(), m)
 	if !p.OK {
 		t.Fatalf("probe = %+v, want ok", p)
 	}
@@ -334,5 +364,28 @@ func TestCheckModelTranscribesASecondOfSilence(t *testing.T) {
 	}
 	if f := files["file"]; !strings.HasPrefix(f[1], "RIFF") || len(f[1]) != 44+32_000 {
 		t.Errorf("audio = %d bytes, want a second of 16 kHz WAV", len(f[1]))
+	}
+}
+
+// A transcriber that reports only the audio's length reports no tokens, so
+// the gateway's count is charged against a token limit, or a key limited on
+// tokens could transcribe without limit.
+func TestATranscriptionReportedByLengthCountsAgainstATokenLimit(t *testing.T) {
+	limited := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"},
+		&policy.Limits{RateLimits: []policy.RateLimit{{Tokens: 50}}}, nil, nil)
+	transcript := strings.Repeat("x", 400)
+	h := newHarness(t, jsonBackend(`{"text":"`+transcript+`","usage":{"type":"duration","seconds":60}}`),
+		filterModels(), limited)
+
+	body, ct := form(t,
+		formField{name: "model", value: "keera-whisper"},
+		formField{name: "file", filename: "a.wav", value: "audio"},
+	)
+	if resp := h.postForm(t, body, ct); resp.StatusCode != http.StatusOK {
+		t.Fatalf("the first transcription: status = %d, want 200", resp.StatusCode)
+	}
+	if resp := h.postForm(t, body, ct); resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("status = %d, want 429 once 100 transcript tokens used up a limit of 50",
+			resp.StatusCode)
 	}
 }

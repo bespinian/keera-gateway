@@ -77,6 +77,50 @@ func TestASelfHostedStreamIsBilledOnItsText(t *testing.T) {
 	}
 }
 
+// A self-hosted backend could send its whole answer under an error status to
+// be billed nothing. A failure is not streamed, and it pays the fee on what
+// was passed on both ways.
+func TestASelfHostedFailureStillPaysTheFee(t *testing.T) {
+	answer := `{"id":"1","choices":[{"index":0,"delta":{"content":"` + strings.Repeat("x", 400) + `"}}]}`
+	for name, backend := range map[string]http.HandlerFunc{
+		"a stream": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, sseStream(answer, stopChunk))
+		},
+		"an error": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":{"message":"`+strings.Repeat("x", 400)+`"}}`)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, backend, nil, nil)
+			withGatewayFee(h, "keera-code")
+
+			resp := h.post(t, "/v1/chat/completions", `{"model":"keera-code","stream":true,`+
+				`"messages":[{"role":"user","content":"hello"}]}`)
+			_, _ = io.Copy(io.Discard, resp.Body)
+			if resp.StatusCode != http.StatusBadRequest ||
+				strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") &&
+					resp.Header.Get("Cache-Control") == "no-cache" {
+				t.Errorf("status = %d, headers = %v; want the 400, not relayed as a stream",
+					resp.StatusCode, resp.Header)
+			}
+
+			sent := <-h.upstreamBodies
+			ev := h.sink.last(t)
+			if len(ev.Bills) != 1 {
+				t.Fatalf("bills = %+v, want one", ev.Bills)
+			}
+			if b := ev.Bills[0]; b.InputTokens != len(sent)/bytesPerTokenTypical ||
+				b.OutputTokens < 100 {
+				t.Errorf("bill = %+v, want the request in and at least 100 out", b)
+			}
+		})
+	}
+}
+
 // A model at a hosted provider is billed on the provider's own count.
 func TestAModelOnTheOrganisationsOwnKeyIsBilledWhatItReported(t *testing.T) {
 	h := newHarness(t, jsonBackend(hiAnswer), nil, nil)
@@ -265,5 +309,32 @@ func TestTextCounterReadsLinesCutAnywhere(t *testing.T) {
 	// The last line has no newline and still counts.
 	if got := c.tokens(); got != 12/bytesPerTokenTypical {
 		t.Errorf("tokens = %d, want 3", got)
+	}
+}
+
+// A transcriber at its provider may report only the audio's length. The fee
+// is per token, so the gateway counts the transcript, or it would charge none.
+func TestATranscriptionReportedByLengthPaysTheFeeOnItsTranscript(t *testing.T) {
+	transcript := strings.Repeat("x", 400)
+	h := newHarness(t, jsonBackend(`{"text":"`+transcript+`","usage":{"type":"duration","seconds":60}}`),
+		filterModels(), nil)
+	withGatewayFee(h, "keera-whisper")
+	m := h.src.models["keera-whisper"]
+	m.Billing.AtProvider = true
+	h.src.models["keera-whisper"] = m
+
+	body, ct := form(t,
+		formField{name: "model", value: "keera-whisper"},
+		formField{name: "file", filename: "a.wav", value: "audio"},
+	)
+	if resp := h.postForm(t, body, ct); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	ev := h.sink.last(t)
+	if len(ev.Bills) != 1 {
+		t.Fatalf("bills = %+v, want the fee", ev.Bills)
+	}
+	if b := ev.Bills[0]; !b.GatewayFee || b.OutputTokens != 100 || b.AudioMillis != 0 {
+		t.Errorf("bill = %+v, want the fee on 100 transcript tokens and no audio", b)
 	}
 }

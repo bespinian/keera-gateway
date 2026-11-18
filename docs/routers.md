@@ -378,18 +378,9 @@ shows this - see [checking one](#checking-one).
 suits which.
 
 Say which way to err. The small model will sometimes be wrong. The instruction
-should say whether a wrong choice should cost money or risk data leaving.
-
-The panel's form offers this:
-
-```
-Send small, simple requests to the cheapest model, such as a rename or a commit
-message.
-
-Send requests that need planning or reasoning to a more capable model.
-
-If you are unsure, choose the more capable model.
-```
+should say whether a wrong choice should cost money or risk data leaving. The
+panel's form offers the example in
+[How a route step chooses](https://docs.keera.ch/manage/routers/#how-a-route-step-chooses).
 
 Limits:
 
@@ -399,7 +390,7 @@ Limits:
 - At most 16 destinations. With longer lists, a small model tends to pick
   whichever end it read last.
 
-Spell out which kind of request goes where, as above or with one line per
+Spell out which kind of request goes where, as there or with one line per
 destination. In our tests, a single sentence such as "Choose the cheapest model
 that can handle the request" or a question made chat models choose worse and
 more often fail to answer at all.

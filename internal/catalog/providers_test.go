@@ -318,6 +318,7 @@ func checkProviderModel(t *testing.T, p Provider, m ProviderModel, seenDescripti
 		// Priced by the minute, it reports no tokens to charge.
 		t.Errorf("%s is priced both per minute and per token", m.ID)
 	case m.AudioMicrosPerMinute > 0:
+		// Priced by the minute alone, so the token checks below do not apply.
 	case inputOnly && m.OutputMicrosPerMTok != 0:
 		t.Errorf("%s is a %s model with an output price; it writes nothing", m.ID, m.kindOrChat())
 	case inputOnly && m.InputMicrosPerMTok <= 0:
@@ -788,7 +789,7 @@ func TestATranscriptionModelIsPricedByTheMinute(t *testing.T) {
 models:
   - alias: whisper
     provider: openai
-    backend_model: whisper-1
+    backend_model: gpt-transcribe
   - alias: whisper-next
     provider: openai
     kind: transcription
@@ -799,8 +800,8 @@ models:
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if m := models[0]; m.Kind != policy.KindTranscription || m.AudioMicrosPerMinute != 5_760 {
-		t.Errorf("whisper-1 = %s at %d a minute, want transcription at the table's 5760",
+	if m := models[0]; m.Kind != policy.KindTranscription || m.AudioMicrosPerMinute != 4_320 {
+		t.Errorf("gpt-transcribe = %s at %d a minute, want transcription at the table's 4320",
 			m.Kind, m.AudioMicrosPerMinute)
 	}
 	if m := models[1]; m.AudioMicrosPerMinute != 4_000 {

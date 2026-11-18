@@ -194,8 +194,8 @@ func ParseModel(m Model) (policy.Model, error) {
 
 // CheckModel fills in what a model may leave out and says what is wrong with
 // it. Files, the command line and the control API all run it, so they agree.
-// priced says both token prices, or the audio price, were stated. Other provider defaults are not
-// applied: the control API is sent every value.
+// priced says both token prices, or the audio price, were stated. Other
+// provider defaults are not applied: the control API is sent every value.
 func CheckModel(m *policy.Model, priced bool) error {
 	if err := m.CheckBackend(); err != nil {
 		return err

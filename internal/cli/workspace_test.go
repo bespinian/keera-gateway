@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bufio"
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -70,7 +69,7 @@ func TestStreamThroughKeeraAgents(t *testing.T) {
 	defer srv.Close()
 	a := &agents{base: srv.URL, token: "tok", http: srv.Client()}
 
-	conn, err := a.stream(context.Background(), "dev", "ssh")
+	conn, err := a.stream(t.Context(), "dev", "ssh")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +79,7 @@ func TestStreamThroughKeeraAgents(t *testing.T) {
 		t.Errorf("read %q", got)
 	}
 
-	if _, err := a.stream(context.Background(), "nope", "ssh"); err == nil ||
+	if _, err := a.stream(t.Context(), "nope", "ssh"); err == nil ||
 		!strings.Contains(err.Error(), "no such workspace") {
 		t.Errorf("a refused stream: %v", err)
 	}

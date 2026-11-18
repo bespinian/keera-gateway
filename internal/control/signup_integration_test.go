@@ -1,7 +1,6 @@
 package control
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -143,7 +142,7 @@ func cookieNamed(cookies []*http.Cookie, name string) *http.Cookie {
 
 func TestASignInMatchingNoOrganisationCreatesOne(t *testing.T) {
 	s := signupServer(t, true)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	to, cookies := s.signIn(t, "sub-ada", "ada@new.example")
 	if to != "/?sign_up=1" {
@@ -207,7 +206,7 @@ func TestASignInMatchingNoOrganisationCreatesOne(t *testing.T) {
 
 func TestAnInvitationIsJoinedOnlyWhenAccepted(t *testing.T) {
 	s := signupServer(t, true)
-	ctx := context.Background()
+	ctx := t.Context()
 	if _, err := s.st.AddUser(ctx, "user_grace", "org_1", "grace@new.example", "", "member"); err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +246,7 @@ func TestWithoutSignUpTheOnlyOrganisationTakesEveryone(t *testing.T) {
 	if to, _ := s.signIn(t, "sub-ada", "ada@new.example"); to != "/" {
 		t.Fatalf("sent to %q, want the panel", to)
 	}
-	user, err := s.st.UserByExternalID(context.Background(), "test:sub-ada")
+	user, err := s.st.UserByExternalID(t.Context(), "test:sub-ada")
 	if err != nil || user.OrgID != "org_1" {
 		t.Errorf("person = %+v, %v; want them in the only organisation", user, err)
 	}

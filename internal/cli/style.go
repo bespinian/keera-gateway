@@ -111,13 +111,13 @@ func badColor(given string) error {
 // statusWord leaves unknown words plain.
 func statusWord(word string) string {
 	switch word {
-	case "ready", "active", "running", "enabled", "true", "yes", "ok":
+	case "ready", "active", "running", "enabled", "true", "yes", "ok", "succeeded":
 		return style.ok(word)
-	case "pending", "starting", "suspended", "warm":
+	case "pending", "starting", "suspended", "warm", "queued":
 		return style.warn(word)
 	case "failed", "expired", "terminated", "revoked":
 		return style.bad(word)
-	case "disabled", "false", "no", "never", "unknown":
+	case "disabled", "false", "no", "never", "unknown", "stopped", "cancelled":
 		return style.muted(word)
 	}
 	return word

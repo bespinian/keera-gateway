@@ -461,7 +461,7 @@ func TestATranscriptionBillsItsAudioMinutes(t *testing.T) {
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("billing = %+v, %v; want one row", rows, err)
 	}
-	if r := rows[0]; r.Unit != UnitAudioMinutes || r.QuantityMicros != 1_500_000 ||
+	if r := rows[0]; r.Unit != policy.UnitAudioMinutes || r.QuantityMicros != 1_500_000 ||
 		r.Calls != 1 || r.BilledMicros != 8_640 {
 		t.Errorf("billing = %+v, want 1.5 audio minutes in one call", r)
 	}

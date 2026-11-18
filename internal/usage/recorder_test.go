@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
@@ -63,7 +64,7 @@ func (r *recorded) batches() int {
 func run(t *testing.T, w Writer, opts Options) (*Recorder, func()) {
 	t.Helper()
 	r := NewRecorder(w, opts, slog.New(slog.DiscardHandler))
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	go r.Run(ctx)
 	stop := sync.OnceFunc(func() {
 		cancel()
@@ -148,31 +149,32 @@ func (c *contextWriter) atWrite() (wrote, deadline bool, err error) {
 func TestAFullBufferDropsAndCountsRatherThanBlockingInference(t *testing.T) {
 	// A small buffer and a wedged writer. Record runs at the end of a
 	// completion, so it must not block longer than BlockFor.
-	w := &recorded{block: make(chan struct{})}
-	defer close(w.block)
+	synctest.Test(t, func(t *testing.T) {
+		w := &recorded{block: make(chan struct{})}
+		defer close(w.block)
 
-	r, _ := run(t, w, Options{
-		Buffer: 2, BatchSize: 1, FlushInterval: time.Millisecond,
-		BlockFor: 20 * time.Millisecond,
+		const blockFor = 20 * time.Millisecond
+		r, _ := run(t, w, Options{
+			Buffer: 2, BatchSize: 1, FlushInterval: time.Millisecond, BlockFor: blockFor,
+		})
+
+		// Let the loop pick one up and wedge on it, so the buffer is what fills.
+		r.Record(event("a"))
+		synctest.Wait()
+
+		start := time.Now()
+		for range 20 {
+			r.Record(event("b"))
+		}
+		elapsed := time.Since(start)
+
+		if r.Dropped() == 0 {
+			t.Error("a wedged database and a full buffer dropped nothing; Record blocked instead")
+		}
+		if limit := 20 * blockFor; elapsed > limit {
+			t.Errorf("twenty records took %v, want at most %v", elapsed, limit)
+		}
 	})
-
-	// Let the loop pick one up and wedge on it, so the buffer is what fills.
-	r.Record(event("a"))
-	time.Sleep(50 * time.Millisecond)
-
-	start := time.Now()
-	for range 20 {
-		r.Record(event("b"))
-	}
-	elapsed := time.Since(start)
-
-	if r.Dropped() == 0 {
-		t.Error("a wedged database and a full buffer dropped nothing; Record blocked instead")
-	}
-	// Generous: calls that waited forever would not come back at all.
-	if limit := 20 * 20 * time.Millisecond * 3; elapsed > limit {
-		t.Errorf("twenty records took %v, want well under %v", elapsed, limit)
-	}
 }
 
 // hangWriter is a connection that stopped answering: a write ends only with its
@@ -186,53 +188,51 @@ func (hangWriter) WriteEvents(ctx context.Context, _ []store.Event) error {
 
 func TestAHungWriteIsGivenUpAfterWriteTimeout(t *testing.T) {
 	// Without a bound, one hung connection stops the only writer.
-	r, _ := run(t, hangWriter{}, Options{
-		BatchSize: 1, FlushInterval: time.Millisecond, WriteTimeout: 20 * time.Millisecond,
-	})
-	r.Record(event("a"))
+	synctest.Test(t, func(t *testing.T) {
+		const timeout = 20 * time.Millisecond
+		r, _ := run(t, hangWriter{}, Options{
+			BatchSize: 1, FlushInterval: time.Millisecond, WriteTimeout: timeout,
+		})
+		r.Record(event("a"))
 
-	deadline := time.Now().Add(2 * time.Second)
-	for r.Dropped() == 0 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
-	if got := r.Dropped(); got != 1 {
-		t.Errorf("Dropped = %d, want the 1 event whose write hung", got)
-	}
+		time.Sleep(timeout)
+		synctest.Wait()
+		if got := r.Dropped(); got != 1 {
+			t.Errorf("Dropped = %d, want the 1 event whose write hung", got)
+		}
+	})
 }
 
 func TestAFullBufferDropsAtOnceWhileWritesAreFailing(t *testing.T) {
 	// While writes fail, waiting BlockFor for space would only add latency.
-	w := &recorded{fail: errors.New("connection refused")}
-	r, _ := run(t, w, Options{
-		Buffer: 1, BatchSize: 1, FlushInterval: time.Millisecond, BlockFor: time.Minute,
+	synctest.Test(t, func(t *testing.T) {
+		w := &recorded{fail: errors.New("connection refused")}
+		r, _ := run(t, w, Options{
+			Buffer: 1, BatchSize: 1, FlushInterval: time.Millisecond, BlockFor: time.Minute,
+		})
+
+		r.Record(event("a"))
+		synctest.Wait()
+
+		// Wedge the writer on the next event, so the one after fills the buffer.
+		block := make(chan struct{})
+		defer close(block)
+		w.mu.Lock()
+		w.block = block
+		w.mu.Unlock()
+		r.Record(event("b"))
+		synctest.Wait()
+		r.Record(event("c"))
+
+		start := time.Now()
+		r.Record(event("d"))
+		if elapsed := time.Since(start); elapsed > 0 {
+			t.Errorf("Record waited %v for space while writes were failing, want no wait", elapsed)
+		}
+		if got := r.Dropped(); got != 2 {
+			t.Errorf("Dropped = %d, want the failed batch and the event that found no room", got)
+		}
 	})
-
-	r.Record(event("a"))
-	deadline := time.Now().Add(2 * time.Second)
-	for r.Dropped() == 0 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
-
-	// Wedge the writer on the next event, so the one after fills the buffer.
-	block := make(chan struct{})
-	defer close(block)
-	w.mu.Lock()
-	w.block = block
-	w.mu.Unlock()
-	r.Record(event("b"))
-	for w.batches() < 2 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
-	r.Record(event("c"))
-
-	start := time.Now()
-	r.Record(event("d"))
-	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Errorf("Record waited %v for space while writes were failing, want no wait", elapsed)
-	}
-	if got := r.Dropped(); got != 2 {
-		t.Errorf("Dropped = %d, want the failed batch and the event that found no room", got)
-	}
 }
 
 func TestAnEventIsNeverDroppedWhileThereIsRoomForIt(t *testing.T) {
@@ -273,53 +273,57 @@ func TestAFailedWriteIsCountedAsLostAndNotAsWritten(t *testing.T) {
 
 func TestAFullBatchIsWrittenWithoutWaitingForTheTimer(t *testing.T) {
 	// Otherwise a busy gateway would lag a flush interval per batch.
-	w := &recorded{}
-	r, stop := run(t, w, Options{BatchSize: 10, FlushInterval: time.Hour})
+	synctest.Test(t, func(t *testing.T) {
+		w := &recorded{}
+		r, _ := run(t, w, Options{BatchSize: 10, FlushInterval: time.Hour})
 
-	for range 50 {
-		r.Record(event("a"))
-	}
+		for range 50 {
+			r.Record(event("a"))
+		}
 
-	deadline := time.Now().Add(2 * time.Second)
-	for len(w.seen()) < 50 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if got := len(w.seen()); got != 50 {
-		t.Fatalf("wrote %d events without the timer firing, want 50", got)
-	}
-	// Five batches of ten, not fifty writes of one.
-	if got := w.batches(); got != 5 {
-		t.Errorf("made %d round trips for 50 events at a batch size of 10, want 5", got)
-	}
-	stop()
+		synctest.Wait()
+		if got := len(w.seen()); got != 50 {
+			t.Fatalf("wrote %d events without the timer firing, want 50", got)
+		}
+		// Five batches of ten, not fifty writes of one.
+		if got := w.batches(); got != 5 {
+			t.Errorf("made %d round trips for 50 events at a batch size of 10, want 5", got)
+		}
+	})
 }
 
 func TestAPartialBatchIsWrittenWhenTheTimerFires(t *testing.T) {
 	// A quiet deployment's events must not wait in a half-full batch.
-	w := &recorded{}
-	r, stop := run(t, w, Options{BatchSize: 1000, FlushInterval: 5 * time.Millisecond})
-	r.Record(event("a"))
+	synctest.Test(t, func(t *testing.T) {
+		const interval = 5 * time.Millisecond
+		w := &recorded{}
+		r, _ := run(t, w, Options{BatchSize: 1000, FlushInterval: interval})
+		r.Record(event("a"))
 
-	deadline := time.Now().Add(2 * time.Second)
-	for len(w.seen()) == 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if got := len(w.seen()); got != 1 {
-		t.Errorf("wrote %d events, want the one that was waiting", got)
-	}
-	stop()
+		synctest.Wait()
+		if got := len(w.seen()); got != 0 {
+			t.Fatalf("wrote %d events before the timer fired, want none", got)
+		}
+		time.Sleep(interval)
+		synctest.Wait()
+		if got := len(w.seen()); got != 1 {
+			t.Errorf("wrote %d events, want the one that was waiting", got)
+		}
+	})
 }
 
 func TestAnIdleRecorderMakesNoRoundTrips(t *testing.T) {
 	// The ticker fires on an idle deployment too: write no empty batches.
-	w := &recorded{}
-	_, stop := run(t, w, Options{FlushInterval: time.Millisecond})
-	time.Sleep(50 * time.Millisecond)
-	stop()
+	synctest.Test(t, func(t *testing.T) {
+		w := &recorded{}
+		_, stop := run(t, w, Options{FlushInterval: time.Millisecond})
+		time.Sleep(50 * time.Millisecond)
+		stop()
 
-	if got := w.batches(); got != 0 {
-		t.Errorf("made %d round trips with nothing to write, want none", got)
-	}
+		if got := w.batches(); got != 0 {
+			t.Errorf("made %d round trips with nothing to write, want none", got)
+		}
+	})
 }
 
 func TestTheDefaultsAreTheOnesTheCommentsPromise(t *testing.T) {

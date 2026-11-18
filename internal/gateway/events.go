@@ -56,6 +56,22 @@ func (c *chatChunks) counts() (*tokenUsage, int, time.Time) {
 	return c.usage, c.deltas, c.firstAt
 }
 
+// heldText counts what a translated stream keeps for its closing events. The
+// limit on one event does not bound it, so without this a backend that never
+// stops could fill the gateway's memory.
+type heldText struct{ n, limit int64 }
+
+func (h *heldText) add(n int) error {
+	h.n += int64(n)
+	if h.limit > 0 && h.n > h.limit {
+		return errAnswerTooLarge
+	}
+	return nil
+}
+
+var errAnswerTooLarge = streamFailure{"the model's answer is larger than the gateway holds " +
+	"(KEERA_MAX_RESPONSE_BYTES)"}
+
 // streamFailure is an upstream stream that ended without a whole answer. Its
 // message is safe to show the client.
 type streamFailure struct{ msg string }

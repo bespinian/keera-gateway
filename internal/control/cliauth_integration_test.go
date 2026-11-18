@@ -2,7 +2,6 @@ package control
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -53,7 +52,7 @@ func redeem(t *testing.T, ts *httptest.Server, in, out any) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
 		ts.URL+httpx.ControlPrefix+path, bytes.NewReader(raw))
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +75,7 @@ func redeem(t *testing.T, ts *httptest.Server, in, out any) int {
 // nothing else.
 func asToken(t *testing.T, ts *httptest.Server, token string, out any) int {
 	t.Helper()
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		ts.URL+httpx.ControlPrefix+"/v1/me", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -131,7 +130,7 @@ func TestARedeemedCodeSignsTheTerminalInAsThePerson(t *testing.T) {
 	}
 
 	// And signing out ends it, on this machine, at once.
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
 		ts.URL+httpx.ControlPrefix+"/auth/logout", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -205,7 +204,7 @@ func TestARoleChangeEndsASignedInTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPatch,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPatch,
 		ts.URL+httpx.ControlPrefix+"/v1/users/"+user.ID, bytes.NewReader(raw))
 	if err != nil {
 		t.Fatal(err)

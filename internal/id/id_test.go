@@ -3,6 +3,7 @@ package id
 import (
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -25,12 +26,14 @@ func TestNewIsUniqueAndPrefixed(t *testing.T) {
 
 func TestNewSortsByCreationTime(t *testing.T) {
 	// Sortable ids are what make "ORDER BY id" a chronological listing.
-	first := New("key")
-	time.Sleep(2 * time.Millisecond)
-	second := New("key")
-	if first >= second {
-		t.Errorf("%q was minted before %q but does not sort before it", first, second)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		first := New("key")
+		time.Sleep(2 * time.Millisecond)
+		second := New("key")
+		if first >= second {
+			t.Errorf("%q was minted before %q but does not sort before it", first, second)
+		}
+	})
 }
 
 func TestHasPrefixRejectsOtherShapes(t *testing.T) {

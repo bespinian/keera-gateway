@@ -1,28 +1,21 @@
 # Claude subscriptions
 
 People on a Claude Team or Enterprise plan can use Claude Code through Keera
-Gateway, and their plan pays. Keera still applies the guardrails, records every
-request, and shows how much of the plan each person uses.
+Gateway, and their plan pays. What it is and how to set it up:
+[Claude plans](https://docs.keera.ch/operate/claude-plans/). This page explains
+how it works and why.
 
-This works for Claude Code only. Anthropic allows a Claude sign-in in Claude
-Code and Claude.ai, and nowhere else. Claude.ai in the browser and the desktop
-app do not go through Keera.
-
-To set it up, see [Claude plans](https://docs.keera.ch/operate/claude-plans/).
-This page explains how it works and why.
+It works for Claude Code only, because Anthropic allows a Claude sign-in in
+Claude Code and Claude.ai, and nowhere else.
 
 ## How it works
 
-Claude Code is signed in to the person's Claude plan, and its address is set to
-the gateway. Each request then carries two credentials:
-
-| Header          | Holds                           | What Keera does with it                                                 |
-| --------------- | ------------------------------- | ----------------------------------------------------------------------- |
-| `X-Keera-Key`   | The person's subscription key   | Finds who is asking, applies their guardrails, and does not send it on. |
-| `Authorization` | The person's own Claude sign-in | Sends it to Anthropic unchanged. It is never stored and never logged.   |
-
-Claude Code sends `X-Keera-Key` from `ANTHROPIC_CUSTOM_HEADERS`. The sign-in
-token says nothing about who it belongs to, so the key is what tells Keera.
+Each request carries two credentials
+([How it works](https://docs.keera.ch/operate/claude-plans/#how-it-works)): the
+subscription key in `X-Keera-Key`, which is not sent on, and the Claude sign-in
+in `Authorization`. Claude Code sends `X-Keera-Key` from
+`ANTHROPIC_CUSTOM_HEADERS`. The sign-in token says nothing about who it belongs
+to, so the key is what tells Keera.
 
 ## 1. Turn it on
 

@@ -43,7 +43,7 @@ func TestSessionsTakesAPersonByEmail(t *testing.T) {
 		}},
 		"GET /v1/sessions": map[string]any{"data": []any{}},
 	})
-	if err := sessionCmd(context.Background(), []string{"list", "--user", "Ada@example.ch"}); err != nil {
+	if err := sessionCmd(t.Context(), []string{"list", "--user", "Ada@example.ch"}); err != nil {
 		t.Fatal(err)
 	}
 	q, _ := url.ParseQuery(f.request("GET", "/v1/sessions").query)
@@ -79,7 +79,7 @@ func TestSessionTakesAnIdWithoutShow(t *testing.T) {
 	f := newFakeControl(t, map[string]any{
 		"GET /v1/sessions/4711": map[string]any{"session": map[string]any{"id": 4711}},
 	})
-	if err := sessionCmd(context.Background(), []string{"4711", "--json"}); err != nil {
+	if err := sessionCmd(t.Context(), []string{"4711", "--json"}); err != nil {
 		t.Fatal(err)
 	}
 	f.request("GET", "/v1/sessions/4711")
@@ -107,7 +107,7 @@ func TestReportsTakeAnOrganisationByName(t *testing.T) {
 			"GET /v1/sessions/4711":    map[string]any{},
 		})
 		t.Setenv("KEERA_ORG", "example bank")
-		if err := c.run(context.Background(), c.args); err != nil {
+		if err := c.run(t.Context(), c.args); err != nil {
 			t.Fatal(err)
 		}
 		q, _ := url.ParseQuery(f.request("GET", c.path).query)

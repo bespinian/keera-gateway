@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -226,7 +225,7 @@ func TestCheckingADecisionModelAsksItAnObviousQuestion(t *testing.T) {
 	}, jsonBackend(hiAnswer))
 	h := newHarness(t, backend, decisionModels(), nil)
 
-	p := h.srv.CheckModel(context.Background(), h.src.models["keera-decider"])
+	p := h.srv.CheckModel(t.Context(), h.src.models["keera-decider"])
 	if !p.OK {
 		t.Fatalf("check failed: %s", p.Error)
 	}

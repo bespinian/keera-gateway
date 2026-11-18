@@ -488,3 +488,28 @@ func TestAddingAPasskeyNeedsARecentBrowserSignIn(t *testing.T) {
 		t.Errorf("a command-line token gave %d, want 403", res.StatusCode)
 	}
 }
+
+// A set-up link for oneself would get around the recent sign-in above, so an
+// administrator gets links only for others.
+func TestAnAdministratorGetsNoSetUpLinkForThemselves(t *testing.T) {
+	e := newPasskeyEnv(t, "")
+	userID, token := e.createPasskeyAccount()
+	if err := e.st.SetUserRole(e.ctx, store.AnyOrg, userID, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	b, status, out := e.setUp(token, passkeytest.New(passkeyOrigin, "localhost"))
+	if status != http.StatusOK {
+		t.Fatalf("set-up: %d %v", status, out)
+	}
+	b.me()
+	if status, out := b.do("POST", "/v1/users/"+userID+"/passkey-link", nil, ""); status != http.StatusForbidden {
+		t.Errorf("a link for oneself gave %d %v, want 403", status, out)
+	}
+	other, err := e.st.AddUser(e.ctx, "user_2", "org_1", "bob@example.ch", "", "member")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, out := b.do("POST", "/v1/users/"+other.ID+"/passkey-link", nil, ""); status != http.StatusCreated {
+		t.Errorf("a link for someone else gave %d %v, want 201", status, out)
+	}
+}

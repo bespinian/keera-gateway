@@ -227,8 +227,8 @@ func TestDeleteProjectIsRefusedWhileAKeyStillWorks(t *testing.T) {
 	}
 
 	_, err := st.DeleteProject(ctx, AnyOrg, f.projectID)
-	var inUse *ProjectInUseError
-	if !errors.As(err, &inUse) {
+	inUse, ok := errors.AsType[*ProjectInUseError](err)
+	if !ok {
 		t.Fatalf("DeleteProject with a live key = %v, want ProjectInUseError", err)
 	}
 	// The key names are carried, so somebody can act on them.

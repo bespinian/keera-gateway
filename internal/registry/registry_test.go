@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/auth"
@@ -187,24 +188,6 @@ func (s *source) announce(c Change) {
 	}
 }
 
-// waitForListener waits until Run listens, so an announcement reaches it.
-func waitForListener(t *testing.T, s *source) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		s.mu.Lock()
-		ready := s.notify != nil
-		s.mu.Unlock()
-		if ready {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the registry never started listening")
-		}
-		time.Sleep(time.Millisecond)
-	}
-}
-
 func (s *source) calls() int { return int(s.lookups.Load()) }
 
 func (s *source) set(key string, r *policy.Resolved) {
@@ -300,29 +283,31 @@ func TestARevokedKeyStopsWorkingWhenTheControlPlaneSaysSo(t *testing.T) {
 
 func TestANotifyFromTheControlPlaneDropsEveryCachedKey(t *testing.T) {
 	// The same from another replica, over LISTEN/NOTIFY.
-	s := newSource()
-	s.set(testKey("sk-live"), resolved("org_1"))
-	r := newRegistry(t, s, Options{TTL: time.Hour})
+	synctest.Test(t, func(t *testing.T) {
+		s := newSource()
+		s.set(testKey("sk-live"), resolved("org_1"))
+		r := newRegistry(t, s, Options{TTL: time.Hour})
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	go r.Run(ctx)
-	waitForListener(t, s)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		go r.Run(ctx)
+		synctest.Wait()
 
-	if _, err := r.Resolve(ctx, testKey("sk-live")); err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	before := s.calls()
+		if _, err := r.Resolve(ctx, testKey("sk-live")); err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		before := s.calls()
 
-	s.reject(testKey("sk-live"), policy.ErrKeyRevoked)
-	s.announce(anyChange)
+		s.reject(testKey("sk-live"), policy.ErrKeyRevoked)
+		s.announce(anyChange)
 
-	if _, err := r.Resolve(ctx, testKey("sk-live")); !errors.Is(err, policy.ErrKeyRevoked) {
-		t.Errorf("error = %v, want the key refused after the announcement", err)
-	}
-	if s.calls() <= before {
-		t.Error("the key was answered from the cache after a notify dropped it")
-	}
+		if _, err := r.Resolve(ctx, testKey("sk-live")); !errors.Is(err, policy.ErrKeyRevoked) {
+			t.Errorf("error = %v, want the key refused after the announcement", err)
+		}
+		if s.calls() <= before {
+			t.Error("the key was answered from the cache after a notify dropped it")
+		}
+	})
 }
 
 func TestAKeyChangeDropsThatKeyAlone(t *testing.T) {
@@ -384,54 +369,50 @@ func TestAnOrgChangeDropsThatOrganisationsKeysAlone(t *testing.T) {
 }
 
 func TestAnOrgChangeReloadsThatOrganisationAlone(t *testing.T) {
-	s := newSource()
-	s.models = []policy.Model{
-		{OrgID: "org_1", Alias: "fast", BackendModel: "old"},
-		{OrgID: "org_2", Alias: "fast", BackendModel: "old"},
-	}
-	s.filters = []policy.Filter{{OrgID: "org_2", Alias: "pii"}}
-	r := newRegistry(t, s, Options{})
-
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	go r.Run(ctx)
-	waitForListener(t, s)
-
-	s.mu.Lock()
-	s.models = []policy.Model{
-		{OrgID: "org_1", Alias: "fast", BackendModel: "new"},
-		{OrgID: "org_1", Alias: "engine", Backends: []string{"http://keera-engine:8000/v1"}},
-		{OrgID: "org_2", Alias: "fast", BackendModel: "new"},
-	}
-	s.limited = map[string]string{"org_1": "Example Bank"}
-	full := s.fullLoads
-	s.mu.Unlock()
-	s.announce(OrgChange("org_1"))
-
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if m, _ := r.Model("org_1", "fast"); m.BackendModel == "new" {
-			break
+	synctest.Test(t, func(t *testing.T) {
+		s := newSource()
+		s.models = []policy.Model{
+			{OrgID: "org_1", Alias: "fast", BackendModel: "old"},
+			{OrgID: "org_2", Alias: "fast", BackendModel: "old"},
 		}
-		if time.Now().After(deadline) {
+		s.filters = []policy.Filter{{OrgID: "org_2", Alias: "pii"}}
+		r := newRegistry(t, s, Options{})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		go r.Run(ctx)
+		synctest.Wait()
+
+		s.mu.Lock()
+		s.models = []policy.Model{
+			{OrgID: "org_1", Alias: "fast", BackendModel: "new"},
+			{OrgID: "org_1", Alias: "engine", Backends: []string{"http://keera-engine:8000/v1"}},
+			{OrgID: "org_2", Alias: "fast", BackendModel: "new"},
+		}
+		s.limited = map[string]string{"org_1": "Example Bank"}
+		full := s.fullLoads
+		s.mu.Unlock()
+		s.announce(OrgChange("org_1"))
+
+		synctest.Wait()
+		if m, _ := r.Model("org_1", "fast"); m.BackendModel != "new" {
 			t.Fatal("the organisation that changed was not reloaded")
 		}
-		time.Sleep(time.Millisecond)
-	}
-	if m, _ := r.Model("org_1", "engine"); !m.Limited || !m.Locked {
-		t.Errorf("engine: limited %v, locked %v; want the organisation's limit applied", m.Limited, m.Locked)
-	}
-	if m, _ := r.Model("org_2", "fast"); m.BackendModel != "old" {
-		t.Error("another organisation was reloaded too")
-	}
-	if _, ok := r.Filter("org_2", "pii"); !ok {
-		t.Error("another organisation lost its filter")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.fullLoads != full {
-		t.Errorf("%d full reloads after one organisation changed, want none", s.fullLoads-full)
-	}
+		if m, _ := r.Model("org_1", "engine"); !m.Limited || !m.Locked {
+			t.Errorf("engine: limited %v, locked %v; want the organisation's limit applied", m.Limited, m.Locked)
+		}
+		if m, _ := r.Model("org_2", "fast"); m.BackendModel != "old" {
+			t.Error("another organisation was reloaded too")
+		}
+		if _, ok := r.Filter("org_2", "pii"); !ok {
+			t.Error("another organisation lost its filter")
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.fullLoads != full {
+			t.Errorf("%d full reloads after one organisation changed, want none", s.fullLoads-full)
+		}
+	})
 }
 
 func TestADeletedOrganisationIsDropped(t *testing.T) {
@@ -616,92 +597,96 @@ func TestOneMissIsOneQueryHoweverManyAskAtOnce(t *testing.T) {
 
 func TestACallerThatGivesUpDoesNotTakeTheOthersWithIt(t *testing.T) {
 	// A client that hangs up must not fail everyone who joined its query.
-	s := newSource()
-	s.set(testKey("sk-live"), resolved("org_1"))
-	release := make(chan struct{})
-	var once sync.Once
-	var arrived sync.WaitGroup
-	arrived.Add(1)
-	s.beforeLookup = func() {
-		once.Do(func() {
-			arrived.Done()
-			<-release
-		})
-	}
-	r := newRegistry(t, s, Options{TTL: time.Minute})
+	synctest.Test(t, func(t *testing.T) {
+		s := newSource()
+		s.set(testKey("sk-live"), resolved("org_1"))
+		release := make(chan struct{})
+		var once sync.Once
+		var arrived sync.WaitGroup
+		arrived.Add(1)
+		s.beforeLookup = func() {
+			once.Do(func() {
+				arrived.Done()
+				<-release
+			})
+		}
+		r := newRegistry(t, s, Options{TTL: time.Minute})
 
-	// The one that will do the work.
-	first := make(chan error, 1)
-	go func() {
-		_, err := r.Resolve(context.Background(), testKey("sk-live"))
-		first <- err
-	}()
-	arrived.Wait()
+		// The one that will do the work.
+		first := make(chan error, 1)
+		go func() {
+			_, err := r.Resolve(t.Context(), testKey("sk-live"))
+			first <- err
+		}()
+		arrived.Wait()
 
-	// The one that joins it and then gives up.
-	ctx, cancel := context.WithCancel(context.Background())
-	joined := make(chan error, 1)
-	go func() {
-		_, err := r.Resolve(ctx, testKey("sk-live"))
-		joined <- err
-	}()
-	time.Sleep(20 * time.Millisecond)
-	cancel()
+		// The one that joins it and then gives up.
+		ctx, cancel := context.WithCancel(t.Context())
+		joined := make(chan error, 1)
+		go func() {
+			_, err := r.Resolve(ctx, testKey("sk-live"))
+			joined <- err
+		}()
+		synctest.Wait()
+		cancel()
 
-	if err := <-joined; !errors.Is(err, context.Canceled) {
-		t.Errorf("the caller that gave up got %v, want a cancellation", err)
-	}
-	close(release)
-	if err := <-first; err != nil {
-		t.Errorf("the caller doing the work was failed by one that left: %v", err)
-	}
+		if err := <-joined; !errors.Is(err, context.Canceled) {
+			t.Errorf("the caller that gave up got %v, want a cancellation", err)
+		}
+		close(release)
+		if err := <-first; err != nil {
+			t.Errorf("the caller doing the work was failed by one that left: %v", err)
+		}
+	})
 }
 
 func TestTheCallerDoingTheWorkCanLeaveWithoutFailingTheOthers(t *testing.T) {
 	// Others wait on the first caller's query, so hanging up must not cancel
 	// it.
-	s := newSource()
-	s.set(testKey("sk-live"), resolved("org_1"))
-	release := make(chan struct{})
-	var once sync.Once
-	var arrived sync.WaitGroup
-	arrived.Add(1)
-	s.beforeLookup = func() {
-		once.Do(func() {
-			arrived.Done()
-			<-release
-		})
-	}
-	r := newRegistry(t, s, Options{TTL: time.Minute})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	first := make(chan error, 1)
-	go func() {
-		_, err := r.Resolve(ctx, testKey("sk-live"))
-		first <- err
-	}()
-	arrived.Wait()
-
-	joined := make(chan error, 1)
-	go func() {
-		_, err := r.Resolve(context.Background(), testKey("sk-live"))
-		joined <- err
-	}()
-	time.Sleep(20 * time.Millisecond)
-	cancel()
-
-	select {
-	case err := <-first:
-		if !errors.Is(err, context.Canceled) {
-			t.Errorf("the caller that gave up got %v, want a cancellation", err)
+	synctest.Test(t, func(t *testing.T) {
+		s := newSource()
+		s.set(testKey("sk-live"), resolved("org_1"))
+		release := make(chan struct{})
+		var once sync.Once
+		var arrived sync.WaitGroup
+		arrived.Add(1)
+		s.beforeLookup = func() {
+			once.Do(func() {
+				arrived.Done()
+				<-release
+			})
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("the caller that gave up is still waiting on the query")
-	}
-	close(release)
-	if err := <-joined; err != nil {
-		t.Errorf("the caller that joined was failed by the one that left: %v", err)
-	}
+		r := newRegistry(t, s, Options{TTL: time.Minute})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		first := make(chan error, 1)
+		go func() {
+			_, err := r.Resolve(ctx, testKey("sk-live"))
+			first <- err
+		}()
+		arrived.Wait()
+
+		joined := make(chan error, 1)
+		go func() {
+			_, err := r.Resolve(t.Context(), testKey("sk-live"))
+			joined <- err
+		}()
+		synctest.Wait()
+		cancel()
+
+		select {
+		case err := <-first:
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("the caller that gave up got %v, want a cancellation", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("the caller that gave up is still waiting on the query")
+		}
+		close(release)
+		if err := <-joined; err != nil {
+			t.Errorf("the caller that joined was failed by the one that left: %v", err)
+		}
+	})
 }
 
 func TestSweepForgetsWhatIsExpiredAndWhatIsStale(t *testing.T) {
@@ -927,67 +912,67 @@ func TestATokenThatCannotBeAKeyCostsNoQuery(t *testing.T) {
 
 func TestKeyQueriesNeverTakeMoreThanTheirShareOfThePool(t *testing.T) {
 	// A flood of made-up keys must leave the rest of the pool free.
-	s := newSource()
-	release := make(chan struct{})
-	var running, peak atomic.Int32
-	s.beforeLookup = func() {
-		n := running.Add(1)
-		for {
-			p := peak.Load()
-			if n <= p || peak.CompareAndSwap(p, n) {
-				break
+	synctest.Test(t, func(t *testing.T) {
+		s := newSource()
+		release := make(chan struct{})
+		var running, peak atomic.Int32
+		s.beforeLookup = func() {
+			n := running.Add(1)
+			for {
+				p := peak.Load()
+				if n <= p || peak.CompareAndSwap(p, n) {
+					break
+				}
 			}
+			<-release
+			running.Add(-1)
 		}
-		<-release
-		running.Add(-1)
-	}
-	r := newRegistry(t, s, Options{TTL: time.Minute})
+		r := newRegistry(t, s, Options{TTL: time.Minute})
 
-	const callers = 3 * maxLookups
-	var wg sync.WaitGroup
-	for i := range callers {
-		wg.Go(func() { _, _ = r.Resolve(t.Context(), testKey(fmt.Sprint("flood-", i))) })
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for s.lookups.Load() < maxLookups && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	// Give any query that should not have started the chance to.
-	time.Sleep(20 * time.Millisecond)
-	close(release)
-	wg.Wait()
+		const callers = 3 * maxLookups
+		var wg sync.WaitGroup
+		for i := range callers {
+			wg.Go(func() { _, _ = r.Resolve(t.Context(), testKey(fmt.Sprint("flood-", i))) })
+		}
+		// Every caller is either in a query or waiting for a slot.
+		synctest.Wait()
+		if n := s.lookups.Load(); n != maxLookups {
+			t.Errorf("%d key queries started, want the %d slots full", n, maxLookups)
+		}
+		close(release)
+		wg.Wait()
 
-	if p := peak.Load(); p > maxLookups {
-		t.Errorf("%d key queries ran at once, want at most %d", p, maxLookups)
-	}
-	if n := s.lookups.Load(); n != callers {
-		t.Errorf("%d queries ran, want %d: a caller waiting for a slot was dropped", n, callers)
-	}
+		if p := peak.Load(); p > maxLookups {
+			t.Errorf("%d key queries ran at once, want at most %d", p, maxLookups)
+		}
+		if n := s.lookups.Load(); n != callers {
+			t.Errorf("%d queries ran, want %d: a caller waiting for a slot was dropped", n, callers)
+		}
+	})
 }
 
 func TestACallerWhoHangsUpWaitingForASlotGivesItUp(t *testing.T) {
-	s := newSource()
-	release := make(chan struct{})
-	s.beforeLookup = func() { <-release }
-	r := newRegistry(t, s, Options{TTL: time.Minute})
-	defer close(release)
+	synctest.Test(t, func(t *testing.T) {
+		s := newSource()
+		release := make(chan struct{})
+		s.beforeLookup = func() { <-release }
+		r := newRegistry(t, s, Options{TTL: time.Minute})
+		defer close(release)
 
-	for i := range maxLookups {
-		go func() { _, _ = r.Resolve(context.Background(), testKey(fmt.Sprint("busy-", i))) }()
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for s.lookups.Load() < maxLookups && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
+		for i := range maxLookups {
+			go func() { _, _ = r.Resolve(t.Context(), testKey(fmt.Sprint("busy-", i))) }()
+		}
+		synctest.Wait()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
-	defer cancel()
-	if _, err := r.Resolve(ctx, testKey("late")); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("Resolve = %v, want the caller's own deadline", err)
-	}
-	if _, loaded := r.inflight.Load(hashOf(testKey("late"))); loaded {
-		t.Error("the abandoned query is still marked in flight, so nobody can retry it")
-	}
+		ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+		defer cancel()
+		if _, err := r.Resolve(ctx, testKey("late")); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Resolve = %v, want the caller's own deadline", err)
+		}
+		if _, loaded := r.inflight.Load(hashOf(testKey("late"))); loaded {
+			t.Error("the abandoned query is still marked in flight, so nobody can retry it")
+		}
+	})
 }
 
 // The gateway fee bills every model the deployment does not bill otherwise.

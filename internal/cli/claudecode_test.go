@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"maps"
 	"os"
 	"path/filepath"
@@ -55,7 +54,7 @@ func TestConnectClaudeCodeActivatesAPendingKeyAndWritesTheSettings(t *testing.T)
 	}
 	f := newFakeControl(t, claudeCodeRoutes(nil))
 
-	if err := connectCmd(context.Background(), []string{"claude-code"}); err != nil {
+	if err := connectCmd(t.Context(), []string{"claude-code"}); err != nil {
 		t.Fatal(err)
 	}
 	name, _ := f.request("POST", "/v1/keys/key_pending/activate").body["name"].(string)
@@ -99,7 +98,7 @@ func TestConnectClaudeCodeSendsAMemberWithoutAKeyToAnAdministrator(t *testing.T)
 		"GET /v1/keys": map[string]any{"data": []any{}},
 	}))
 
-	err := connectCmd(context.Background(), []string{"claude-code"})
+	err := connectCmd(t.Context(), []string{"claude-code"})
 	if err == nil || !strings.Contains(err.Error(), "--pending --user ada@example.ch") {
 		t.Errorf("err = %v, want it to say what to ask an administrator for", err)
 	}
@@ -125,7 +124,7 @@ func TestConnectClaudeCodeRefusesTheOperatorKey(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, connectRoutes("https://keera.example.ch/api", nil))
 
-	err := connectCmd(context.Background(), []string{"claude-code"})
+	err := connectCmd(t.Context(), []string{"claude-code"})
 	if err == nil || !strings.Contains(err.Error(), "--print") {
 		t.Errorf("err = %v, want it to point at --print", err)
 	}
@@ -164,7 +163,7 @@ func TestConnectClaudeCodeKeepsTheKeyWhenItMayNotUseTheModel(t *testing.T) {
 		}},
 	}))
 
-	err := connectCmd(context.Background(), []string{"claude-code", "--model", "auto"})
+	err := connectCmd(t.Context(), []string{"claude-code", "--model", "auto"})
 	if err == nil || !strings.Contains(err.Error(), "may not use auto") {
 		t.Errorf("err = %v, want it to say the key may not use the model", err)
 	}
@@ -191,7 +190,7 @@ func TestConnectClaudeCodeReplacesAnExpiredKey(t *testing.T) {
 		},
 	}))
 
-	if err := connectCmd(context.Background(), []string{"claude-code"}); err != nil {
+	if err := connectCmd(t.Context(), []string{"claude-code"}); err != nil {
 		t.Fatal(err)
 	}
 	if !f.called("POST", "/v1/keys/key_mine/rotate") {
@@ -228,7 +227,7 @@ func TestConnectClaudeCodeSubscriptionRemovesTheKeeraKey(t *testing.T) {
 		},
 	}))
 
-	if err := connectCmd(context.Background(), []string{"claude-code", "--subscription"}); err != nil {
+	if err := connectCmd(t.Context(), []string{"claude-code", "--subscription"}); err != nil {
 		t.Fatal(err)
 	}
 	settings, err := readSettings(path)
@@ -272,7 +271,7 @@ func TestConnectClaudeCodeRevokesANewKeyThatMayNotUseTheModel(t *testing.T) {
 		"DELETE /v1/keys/key_new": map[string]any{},
 	}))
 
-	err := connectCmd(context.Background(), []string{"claude-code", "--model", "auto"})
+	err := connectCmd(t.Context(), []string{"claude-code", "--model", "auto"})
 	if err == nil || !strings.Contains(err.Error(), "revoked again") {
 		t.Errorf("err = %v, want it to say the key was revoked again", err)
 	}

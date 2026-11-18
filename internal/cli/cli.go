@@ -65,10 +65,18 @@ func Run(ctx context.Context, args []string) error {
 		return billingCmd(ctx, rest)
 	case "failures":
 		return failuresCmd(ctx, rest)
+	case "audit":
+		return auditCmd(ctx, rest)
 	case "session":
 		return sessionCmd(ctx, rest)
 	case "connect":
 		return connectCmd(ctx, rest)
+	case "agent":
+		return agentCmd(ctx, rest)
+	case "task":
+		return taskCmd(ctx, rest)
+	case "schedule":
+		return scheduleCmd(ctx, rest)
 	case "workspace":
 		return workspaceCmd(ctx, rest)
 	case "doctor":

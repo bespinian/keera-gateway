@@ -920,7 +920,7 @@ func TestTheLatencyReadingLeavesOutTimeLostOnFailedDestinations(t *testing.T) {
 }
 
 func TestARouterRowSaysHowItEndedWhenTheClientHangsUpFirst(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	h := chainHarnessWith(t, chainRoute(), func(_ http.ResponseWriter, r *http.Request) {
 		cancel()
 		<-r.Context().Done()
@@ -949,7 +949,7 @@ func TestARouterRowSaysHowItEndedWhenTheClientHangsUpFirst(t *testing.T) {
 
 // A client that hangs up while the model decides gets an error row, not chose.
 func TestARouterRowSaysErrorWhenTheClientHangsUpWhileItDecides(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	h := routeHarness(t, func([]string) string {
 		cancel()
 		// Long enough for the gateway to notice and give up on the decision.
