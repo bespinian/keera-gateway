@@ -144,9 +144,6 @@ export async function auditView(ctx) {
   const filters = h(
     "div",
     { class: "row", style: { margin: "12px 0", flexWrap: "wrap" } },
-    choose("Action", "All actions", facets.actions, filter.action, label, (v) =>
-      set("action", v),
-    ),
     choose(
       "User",
       "All users",
@@ -154,6 +151,9 @@ export async function auditView(ctx) {
       filter.actor,
       (a) => a,
       (v) => set("actor", v),
+    ),
+    choose("Action", "All actions", facets.actions, filter.action, label, (v) =>
+      set("action", v),
     ),
     active
       ? h(

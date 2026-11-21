@@ -82,7 +82,7 @@ type ProviderModel struct {
 // transcription model sold by the minute, at list price unless a provider
 // says otherwise; an entry can override them. Prices listed in USD are
 // converted at 0.96 CHF per USD. Last checked against each pricing page on
-// 2026-11-18.
+// 2026-11-21.
 //
 // Release dates come from each maker's announcement. An FP8 build takes the
 // date of its base model. Retired models are dropped before they retire.
@@ -365,8 +365,9 @@ var providers = []Provider{{
 	Name:    "google",
 	Summary: "Google's own Gemini models, on the Gemini API.",
 	// The Gemini API's OpenAI-compatible surface. Gemini caches prompts
-	// without charging for the write. Gemini 4 Carbon and Argon's prices
-	// double on 2026-12-01, and Gemini 3.8 and 3.6 Flash's on 2027-01-01.
+	// without charging for the write. Gemini 4 Carbon and Argon hold the
+	// prices from 2026-12-01, twice those before, so a budget never runs over.
+	// Gemini 3.8 and 3.6 Flash's prices double on 2027-01-01.
 	Endpoint:    "https://generativelanguage.googleapis.com/v1beta/openai",
 	CachedInput: true,
 	Location:    "usa",
@@ -385,14 +386,14 @@ var providers = []Provider{{
 	}, {
 		ID: "gemini-4-carbon", DisplayName: "Gemini 4 Carbon",
 		MaxContext: 1_048_576, ReleaseDate: "2026-11-10",
-		InputMicrosPerMTok: 1_920_000, OutputMicrosPerMTok: 9_600_000,
-		CachedInputMicrosPerMTok: 96_000,
+		InputMicrosPerMTok: 3_840_000, OutputMicrosPerMTok: 19_200_000,
+		CachedInputMicrosPerMTok: 192_000,
 		Description:              "flagship, thinks longest - the hardest coding, agent and science work",
 	}, {
 		ID: "gemini-4-argon", DisplayName: "Gemini 4 Argon",
 		MaxContext: 1_048_576, ReleaseDate: "2026-10-13",
-		InputMicrosPerMTok: 1_920_000, OutputMicrosPerMTok: 9_600_000,
-		CachedInputMicrosPerMTok: 96_000,
+		InputMicrosPerMTok: 3_840_000, OutputMicrosPerMTok: 19_200_000,
+		CachedInputMicrosPerMTok: 192_000,
 		Description:              "large and efficient - most coding, agent and knowledge work",
 	}, {
 		ID: "gemini-3.8-flash", DisplayName: "Gemini 3.8 Flash",
@@ -858,6 +859,13 @@ var providers = []Provider{{
 		MaxContext: 8_192, ReleaseDate: "2025-02-26",
 		InputMicrosPerMTok: 77_000, OutputMicrosPerMTok: 77_000,
 		Description: "tiny vision model - describes images and reads charts; not for chat",
+	}, {
+		// Phoeniqs names no upstream model. Its description is the title of the
+		// DeepSeek-OCR paper, so it is DeepSeek-OCR, not DeepSeek-OCR 2.
+		ID: "inference-deepseek-ocr", DisplayName: "DeepSeek-OCR",
+		MaxContext: 8_192, ReleaseDate: "2025-10-20",
+		InputMicrosPerMTok: 384_800, OutputMicrosPerMTok: 1_539_100,
+		Description: "OCR - turns images of pages and receipts into text; not for chat or code",
 	}, {
 		ID: "inference-miner-u25", DisplayName: "MinerU 2.5",
 		MaxContext: 8_192, ReleaseDate: "2026-05-21",
