@@ -5,7 +5,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -72,6 +74,9 @@ func (responsesDialect) read(b *body) (*treeDoc, error) {
 	if s, ok := input.(string); ok {
 		d.add(s, func(v string) { d.roots["input"] = v })
 	}
+	if err := addPromptVariables(d, b); err != nil {
+		return nil, err
+	}
 	for _, item := range d.objects(input) {
 		typ, _ := item["type"].(string)
 		field := "content"
@@ -106,6 +111,44 @@ func (responsesDialect) read(b *body) (*treeDoc, error) {
 		return nil, d.err
 	}
 	return d, nil
+}
+
+// addPromptVariables collects the variables a stored prompt is filled with.
+// OpenAI puts them in what the model reads, so they are filtered like input.
+func addPromptVariables(d *treeDoc, b *body) error {
+	prompt, err := d.root(b, "prompt")
+	if err != nil {
+		return err
+	}
+	if prompt == nil {
+		return nil
+	}
+	p, ok := prompt.(map[string]any)
+	if !ok {
+		return errors.New("the 'prompt' field must be an object")
+	}
+	if err := checkKeys(p); err != nil && d.err == nil {
+		d.err = err
+	}
+	vars, _ := p["variables"].(map[string]any)
+	// Sorted, so a filter sees the same text in the same order each time.
+	for _, name := range slices.Sorted(maps.Keys(vars)) {
+		switch v := vars[name].(type) {
+		case string:
+			d.add(v, func(s string) { vars[name] = s })
+		case map[string]any:
+			if err := checkKeys(v); err != nil && d.err == nil {
+				d.err = err
+			}
+			addResponsesPart(d, v)
+		case nil, bool, json.Number:
+		default:
+			if d.unread == "" {
+				d.unread = "the prompt variable '" + name + "'"
+			}
+		}
+	}
+	return nil
 }
 
 // outputItems hold what a tool the client runs gave back, in "output".

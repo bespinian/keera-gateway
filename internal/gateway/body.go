@@ -110,7 +110,7 @@ var readNames = foldedNames(
 	"media_type", "messages", "model", "name", "namespace", "output", "parallel_tool_calls",
 	"parameters", "prompt", "query", "refusal", "role", "schema", "source", "stop_sequences",
 	"stream", "stream_options", "strict", "syntax", "system", "temperature", "text", "title",
-	"tool_choice", "tool_use_id", "tools", "top_k", "top_p", "type", "url",
+	"tool_choice", "tool_use_id", "tools", "top_k", "top_p", "type", "url", "variables",
 )
 
 func foldedNames(names ...string) map[string]string {

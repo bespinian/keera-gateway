@@ -383,6 +383,48 @@ func TestEveryTextTheTranslationKeepsIsFiltered(t *testing.T) {
 	}
 }
 
+func TestPromptVariablesAreFiltered(t *testing.T) {
+	// OpenAI fills a stored prompt with these, so the model reads them.
+	b, err := parseBody([]byte(`{"model":"m","input":"what is it?",` +
+		`"prompt":{"id":"pmpt_1","version":"2","variables":{"plain":"hunter2",` +
+		`"part":{"type":"input_text","text":"hunter2"},` +
+		`"file":{"type":"input_file","filename":"a.txt","file_data":"data:text/plain,hunter2"},` +
+		`"count":3}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := responsesDialect{}.text(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := append([]string(nil), doc.texts()...)
+	for i, s := range out {
+		out[i] = strings.ReplaceAll(s, "hunter2", "[CREDENTIAL]")
+	}
+	if err := doc.apply(b, out); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := b.value("prompt")
+	if strings.Contains(string(got), "hunter2") || strings.Count(string(got), "[CREDENTIAL]") != 3 {
+		t.Errorf("prompt after the rewrite: %s", got)
+	}
+
+	for _, body := range []string{
+		`{"model":"m","prompt":{"id":"p","variables":{"x":["hunter2"]}}}`,
+		`{"model":"m","prompt":{"id":"p","variables":{"x":{"type":"new_part","text":"hunter2"}}}}`,
+		`{"model":"m","prompt":{"id":"p","Variables":{"x":"hunter2"}}}`,
+		`{"model":"m","prompt":"hunter2"}`,
+	} {
+		b, err := parseBody([]byte(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := (responsesDialect{}).text(b); err == nil {
+			t.Errorf("a filter could read %s", body)
+		}
+	}
+}
+
 func TestARewriteOfAnInlineFileKeepsItsEncoding(t *testing.T) {
 	b, err := parseBody([]byte(`{"model":"m","input":[{"type":"message","role":"user","content":[` +
 		`{"type":"input_file","filename":"a.txt","file_data":"data:text/plain;base64,aHVudGVyMg=="},` +
