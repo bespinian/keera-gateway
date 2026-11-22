@@ -544,6 +544,50 @@ func addStrings(d *treeDoc, v any) {
 	}
 }
 
+// opaqueKeys hold what no model reads as text in a built-in tool's result:
+// encrypted content, names a rewrite would break, and fixed values.
+var opaqueKeys = map[string]bool{
+	"type": true, "encrypted_content": true, "encrypted_index": true,
+	"file_id": true, "tool_use_id": true, "call_id": true, "id": true,
+	"media_type": true, "error_code": true, "retrieved_at": true, "page_age": true,
+}
+
+// addResultStrings collects the text in a built-in tool's result. Results
+// come in many shapes, all read by the model, so it reads every string but
+// the opaque ones. A document is read as one in a message is, and an image
+// or inline file is no text.
+func addResultStrings(d *treeDoc, v any) {
+	switch v := v.(type) {
+	case map[string]any:
+		switch v["type"] {
+		case "document":
+			addTextBlock(d, v)
+			return
+		case "image", "base64":
+			return
+		}
+		for _, k := range slices.Sorted(maps.Keys(v)) {
+			if opaqueKeys[k] {
+				continue
+			}
+			e := v[k]
+			if s, ok := e.(string); ok {
+				d.add(s, func(n string) { v[k] = n })
+				continue
+			}
+			addResultStrings(d, e)
+		}
+	case []any:
+		for i, e := range v {
+			if s, ok := e.(string); ok {
+				d.add(s, func(n string) { v[i] = n })
+				continue
+			}
+			addResultStrings(d, e)
+		}
+	}
+}
+
 // admit holds a tool call to the key's rate limits. A call costs nothing
 // unless filters read it, so only then does a budget apply. It returns why a
 // call is refused, or "".

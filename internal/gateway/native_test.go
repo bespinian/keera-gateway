@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -742,5 +743,100 @@ func TestTheClientsRequestIDGoesOnlyToOpenAI(t *testing.T) {
 			t.Errorf("%s: row has ids %q and %q, want %q and job-12", alias,
 				ev.RequestID, ev.ClientRequestID, resp.Header.Get("X-Request-Id"))
 		}
+	}
+}
+
+// A block the gateway cannot read is refused rather than forwarded, as the
+// model may read text no filter saw.
+func TestANativeRequestWithABlockItCannotReadIsRefused(t *testing.T) {
+	for _, tc := range []struct {
+		d    dialect
+		body string
+	}{
+		{anthropicDialect{}, `{"model":"m","messages":[{"role":"user","content":[` +
+			`{"type":"future_block","text":"hunter2"}]}]}`},
+		{anthropicDialect{}, `{"model":"m","messages":[{"role":"user","content":[` +
+			`{"type":"tool_result","tool_use_id":"t1","content":[{"type":"future_block","text":"hunter2"}]}]}]}`},
+		{anthropicDialect{}, `{"model":"m","messages":[{"role":"user","content":[{"text":"hunter2"}]}]}`},
+		{responsesDialect{}, `{"model":"m","input":[{"type":"future_item","text":"hunter2"}]}`},
+		{responsesDialect{}, `{"model":"m","input":[{"role":"user","content":[` +
+			`{"type":"future_part","text":"hunter2"}]}]}`},
+		{responsesDialect{}, `{"model":"m","input":[{"type":"function_call_output","call_id":"c1",` +
+			`"output":[{"type":"future_part","text":"hunter2"}]}]}`},
+	} {
+		b, err := parseBody([]byte(tc.body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tc.d.text(b); err == nil || !strings.Contains(err.Error(), "cannot be read") {
+			t.Errorf("%s: err = %v, want it refused", tc.body, err)
+		}
+	}
+}
+
+// Results of the providers' own tools come back from the client, so a forged
+// one must not carry text past a filter. Their encrypted parts are left alone.
+func TestFiltersReadWhatBuiltInToolsFound(t *testing.T) {
+	for _, tc := range []struct {
+		d    dialect
+		body string
+		want int
+	}{
+		{anthropicDialect{}, `{"model":"m","messages":[{"role":"assistant","content":[` +
+			`{"type":"server_tool_use","id":"s1","name":"web_search","input":{"query":"q"}},` +
+			`{"type":"web_search_tool_result","tool_use_id":"s1","content":[{"type":"web_search_result",` +
+			`"title":"hunter2","url":"https://a.ch","encrypted_content":"hunter2"}]},` +
+			`{"type":"code_execution_tool_result","tool_use_id":"s2","content":` +
+			`{"type":"code_execution_result","stdout":"hunter2","stderr":"","return_code":0}},` +
+			`{"type":"web_fetch_tool_result","tool_use_id":"s3","content":{"type":"web_fetch_result",` +
+			`"url":"https://a.ch","content":{"type":"document","source":{"type":"text","data":"hunter2"}}}},` +
+			`{"type":"mcp_tool_result","tool_use_id":"s4","content":[{"type":"text","text":"hunter2"}]},` +
+			`{"type":"mcp_tool_result","tool_use_id":"s5","content":"hunter2"},` +
+			`{"type":"compaction","content":"hunter2"}]}]}`, 6},
+		// A fetched PDF is no text: its data and media type are left alone.
+		{anthropicDialect{}, `{"model":"m","messages":[{"role":"assistant","content":[` +
+			`{"type":"web_fetch_tool_result","tool_use_id":"s1","content":{"type":"web_fetch_result",` +
+			`"url":"https://a.ch/hunter2.pdf","content":{"type":"document","title":"hunter2",` +
+			`"source":{"type":"base64","media_type":"application/pdf","data":"hunter2"}}}},` +
+			`{"type":"web_search_tool_result","tool_use_id":"s2",` +
+			`"content":{"type":"web_search_tool_result_error","error_code":"hunter2"}}]}]}`, 2},
+		{responsesDialect{}, `{"model":"m","input":[` +
+			`{"type":"mcp_call","id":"m1","name":"f","arguments":"{}","output":"hunter2"},` +
+			`{"type":"file_search_call","id":"f1","results":[{"file_id":"hunter2","text":"hunter2"}]},` +
+			`{"type":"code_interpreter_call","id":"c1","outputs":[{"type":"logs","logs":"hunter2"}]},` +
+			`{"type":"reasoning","id":"r1","encrypted_content":"hunter2","summary":[]}]}`, 3},
+	} {
+		b, err := parseBody([]byte(tc.body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		doc, err := tc.d.text(b)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.body, err)
+		}
+		out := append([]string(nil), doc.texts()...)
+		for i, s := range out {
+			out[i] = strings.ReplaceAll(s, "hunter2", "[CREDENTIAL]")
+		}
+		if err := doc.apply(b, out); err != nil {
+			t.Fatal(err)
+		}
+		got := string(b.encode())
+		if n := strings.Count(got, "[CREDENTIAL]"); n != tc.want {
+			t.Errorf("%d texts rewritten, want %d: %s", n, tc.want, got)
+		}
+	}
+}
+
+// A token count is an estimate, so a block it cannot read is skipped.
+func TestCountTokensSkipsABlockItCannotRead(t *testing.T) {
+	b, err := parseBody([]byte(`{"model":"m","messages":[{"role":"user","content":[` +
+		`{"type":"future_block"},{"type":"text","text":"hi"}]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := anthropicDialect{}.read(b)
+	if err != nil || !slices.Equal(doc.texts(), []string{"hi"}) {
+		t.Errorf("texts = %v, %v; want the text alone", doc, err)
 	}
 }

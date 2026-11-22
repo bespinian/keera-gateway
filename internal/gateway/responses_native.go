@@ -53,7 +53,10 @@ func (responsesDialect) opening(b *body) (json.RawMessage, bool) {
 
 // text is the instructions and the text of every message and tool output.
 // Call arguments and custom tool input are not text, as on the chat surface.
-func (responsesDialect) text(b *body) (textDoc, error) {
+// An item or part it cannot read is refused.
+func (d responsesDialect) text(b *body) (textDoc, error) { return strict(d.read(b)) }
+
+func (responsesDialect) read(b *body) (*treeDoc, error) {
 	d := newTreeDoc()
 	instructions, err := d.root(b, "instructions")
 	if err != nil {
@@ -70,33 +73,83 @@ func (responsesDialect) text(b *body) (textDoc, error) {
 		d.add(s, func(v string) { d.roots["input"] = v })
 	}
 	for _, item := range d.objects(input) {
+		typ, _ := item["type"].(string)
 		field := "content"
-		switch item["type"] {
-		case "function_call_output", "custom_tool_call_output", "local_shell_call_output",
-			"shell_call_output", "apply_patch_call_output":
+		switch {
+		case typ == "" || typ == "message":
+		case outputItems[typ]:
 			field = "output"
+		case len(builtInResults[typ]) > 0:
+			for _, f := range builtInResults[typ] {
+				addResultStrings(d, item[f])
+				d.addField(item, f)
+			}
+			continue
+		case itemsWithoutText[typ]:
+			continue
+		default:
+			d.cannotRead("an input item", typ)
+			continue
 		}
 		d.addField(item, field)
 		for _, part := range d.objects(item[field]) {
-			switch part["type"] {
-			case "input_text", "output_text", "text":
-				d.addField(part, "text")
-			case "refusal":
-				d.addField(part, "refusal")
-			case "input_file":
-				addFileText(d, part)
-			}
 			// A shell call's output is one entry per command, with no type.
-			if item["type"] == "shell_call_output" {
+			if typ == "shell_call_output" {
 				d.addField(part, "stdout")
 				d.addField(part, "stderr")
+				continue
 			}
+			addResponsesPart(d, part)
 		}
 	}
 	if d.err != nil {
 		return nil, d.err
 	}
 	return d, nil
+}
+
+// outputItems hold what a tool the client runs gave back, in "output".
+var outputItems = map[string]bool{
+	"function_call_output": true, "custom_tool_call_output": true,
+	"local_shell_call_output": true, "shell_call_output": true,
+	"apply_patch_call_output": true,
+}
+
+// builtInResults are the fields where OpenAI's own tools put what they found.
+// The client sends them back on the next turn, and the model reads them.
+var builtInResults = map[string][]string{
+	"mcp_call":              {"output", "error"},
+	"file_search_call":      {"results"},
+	"code_interpreter_call": {"outputs"},
+}
+
+// itemsWithoutText carry no text a filter reads: calls the model wrote (as on
+// the chat surface), screenshots, encrypted reasoning, and tool lists, whose
+// descriptions are not read in the request's tools either.
+var itemsWithoutText = map[string]bool{
+	"function_call": true, "custom_tool_call": true, "local_shell_call": true,
+	"shell_call": true, "apply_patch_call": true, "computer_call": true,
+	"computer_call_output": true, "web_search_call": true, "image_generation_call": true,
+	"tool_search_call": true, "tool_search_output": true, "mcp_list_tools": true,
+	"mcp_approval_request": true, "mcp_approval_response": true, "reasoning": true,
+	"item_reference": true, "compaction": true,
+}
+
+// addResponsesPart collects the text of one part of a message or a tool's
+// output.
+func addResponsesPart(d *treeDoc, part map[string]any) {
+	typ, _ := part["type"].(string)
+	switch typ {
+	case "input_text", "output_text", "text":
+		d.addField(part, "text")
+	case "refusal":
+		d.addField(part, "refusal")
+	case "input_file":
+		addFileText(d, part)
+	case "input_image", "input_audio":
+	default:
+		d.cannotRead("a content part", typ)
+	}
 }
 
 // addSystem puts the system prompt ahead of the client's instructions.

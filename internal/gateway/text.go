@@ -64,8 +64,8 @@ func extractChat(b *body) (*treeDoc, error) {
 			return nil, err
 		}
 	}
-	if d.err != nil {
-		return nil, d.err
+	if err := d.readable(); err != nil {
+		return nil, err
 	}
 	return d, nil
 }

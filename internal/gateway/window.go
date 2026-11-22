@@ -41,7 +41,13 @@ func (s *Server) fits(c *call, b *body) bool {
 	// Without a translation, every destination gets the client's own body.
 	sent, extract := b, func(b *body) (textDoc, error) { return extractText(b, c.surf.kind) }
 	if b == nil {
-		sent, extract = c.native, c.surf.dialect.text
+		sent, extract = c.native, func(b *body) (textDoc, error) {
+			d, err := c.surf.dialect.read(b)
+			if err != nil {
+				return nil, err
+			}
+			return d, nil
+		}
 	}
 	// The whole body is more than its text, so if it fits, the text does.
 	// That covers nearly every request at no cost.

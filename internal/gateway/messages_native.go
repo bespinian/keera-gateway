@@ -37,8 +37,11 @@ func (anthropicDialect) opening(b *body) (json.RawMessage, bool) {
 }
 
 // text is the system prompt, and the text and tool results of every turn.
-// Thinking blocks are left alone, since they are signed.
-func (anthropicDialect) text(b *body) (textDoc, error) {
+// Thinking blocks are left alone, since they are signed. A block it cannot
+// read is refused.
+func (d anthropicDialect) text(b *body) (textDoc, error) { return strict(d.read(b)) }
+
+func (anthropicDialect) read(b *body) (*treeDoc, error) {
 	d := newTreeDoc()
 	system, err := d.root(b, "system")
 	if err != nil {
@@ -61,13 +64,6 @@ func (anthropicDialect) text(b *body) (textDoc, error) {
 		d.addField(msg, "content")
 		for _, block := range d.objects(msg["content"]) {
 			addTextBlock(d, block)
-			if block["type"] != "tool_result" {
-				continue
-			}
-			d.addField(block, "content")
-			for _, inner := range d.objects(block["content"]) {
-				addTextBlock(d, inner)
-			}
 		}
 	}
 	if d.err != nil {
@@ -76,12 +72,31 @@ func (anthropicDialect) text(b *body) (textDoc, error) {
 	return d, nil
 }
 
-// addTextBlock collects the text of a text block, a search result or a
-// document. See blockText.
+// blocksWithoutText carry no text a filter reads: media, calls the model
+// wrote (as on the chat surface), signed thinking, and references to files
+// and tools.
+var blocksWithoutText = map[string]bool{
+	"image": true, "tool_use": true, "server_tool_use": true, "mcp_tool_use": true,
+	"thinking": true, "redacted_thinking": true, "container_upload": true,
+	"tool_reference": true,
+}
+
+// addTextBlock collects the text of a block: a text block, a search result, a
+// document, a tool result, or a result of one of Anthropic's own tools. See
+// blockText.
 func addTextBlock(d *treeDoc, block map[string]any) {
-	switch block["type"] {
+	typ, _ := block["type"].(string)
+	switch typ {
+	case "tool_result":
+		d.addField(block, "content")
+		for _, inner := range d.objects(block["content"]) {
+			addTextBlock(d, inner)
+		}
 	case "text":
 		d.addField(block, "text")
+	// A compaction summary stands for the earlier conversation.
+	case "compaction":
+		d.addField(block, "content")
 	case "search_result":
 		d.addField(block, "title")
 		// The URL reaches a translated request as text.
@@ -102,6 +117,17 @@ func addTextBlock(d *treeDoc, block map[string]any) {
 					addTextBlock(d, inner)
 				}
 			}
+		}
+	default:
+		switch {
+		case blocksWithoutText[typ]:
+		// Web search, web fetch, code execution and MCP results come back
+		// from the client on the next turn, and the model reads them.
+		case strings.HasSuffix(typ, "_tool_result"):
+			d.addField(block, "content")
+			addResultStrings(d, block["content"])
+		default:
+			d.cannotRead("a content block", typ)
 		}
 	}
 }
@@ -316,7 +342,7 @@ func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 		sh.writeError(w, ref.status, ref.typ, ref.code, s.told(*ref))
 		return
 	}
-	doc, err := anthropicDialect{}.text(b)
+	doc, err := anthropicDialect{}.read(b)
 	if err != nil {
 		sh.writeError(w, http.StatusBadRequest, "", "", err.Error())
 		return

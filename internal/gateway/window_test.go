@@ -101,3 +101,21 @@ func TestAModelWithNoDeclaredContextTakesAnything(t *testing.T) {
 		t.Errorf("status = %d, want 200", resp.StatusCode)
 	}
 }
+
+// The window check is an estimate, so a block no filter can read does not
+// skip it on a request sent to its provider untranslated.
+func TestANativeRequestTooLongIsRefusedWithABlockItCannotRead(t *testing.T) {
+	h, seen := providerHarness(t, "anthropic", "claude-opus-5", jsonBackend(anthropicAnswer), nil)
+	long := strings.Repeat("a", 1_100_000) // at least 220,000 tokens
+
+	resp := h.post(t, "/v1/messages", `{"model":"keera-frontier","max_tokens":10,`+
+		`"messages":[{"role":"user","content":[{"type":"future_block"},`+
+		`{"type":"text","text":"`+long+`"}]}]}`)
+	body := decodedBody(t, resp)
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(body, "prompt is too long") {
+		t.Errorf("status = %d: %s; want it refused as too long", resp.StatusCode, body)
+	}
+	if len(seen) != 0 {
+		t.Error("the request reached the provider")
+	}
+}

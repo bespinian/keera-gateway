@@ -26,8 +26,11 @@ type dialect interface {
 	provider() string
 	// path is where that API is, under the provider's base URL.
 	path() string
-	// text is what filters read in a body, and how to put it back.
+	// text is what filters read in a body, and how to put it back. A part it
+	// cannot read is refused.
 	text(b *body) (textDoc, error)
+	// read is the same text, skipping what it cannot read, for an estimate.
+	read(b *body) (*treeDoc, error)
 	// addSystem puts the system prompt ahead of the client's own.
 	addSystem(b *body, prompt string) error
 	// needsNative says why a body can only go to the provider itself, or ""
@@ -237,6 +240,43 @@ type treeDoc struct {
 	set    []func(string)
 	// err is the first misspelled key the walk met. See checkKeys.
 	err error
+	// unread names the first block, item or part the walk could not read.
+	// A filter refuses such a request, as the model may read text no filter
+	// saw. A token count only skips it.
+	unread string
+}
+
+func (d *treeDoc) cannotRead(what, typ string) {
+	if d.unread != "" {
+		return
+	}
+	if typ == "" {
+		d.unread = what + " with no 'type'"
+		return
+	}
+	d.unread = what + " of type '" + typ + "'"
+}
+
+// strict is a walk a filter may read, or why it cannot be.
+func strict(d *treeDoc, err error) (textDoc, error) {
+	if err != nil {
+		return nil, err
+	}
+	if err := d.readable(); err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+// readable says why the walk cannot be filtered, or nil.
+func (d *treeDoc) readable() error {
+	if d.err != nil {
+		return d.err
+	}
+	if d.unread != "" {
+		return errors.New(d.unread + " cannot be read")
+	}
+	return nil
 }
 
 func newTreeDoc() *treeDoc {
