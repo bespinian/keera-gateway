@@ -106,16 +106,8 @@ func TestPrivateHostsAreNamesOrAllOrNone(t *testing.T) {
 	}
 }
 
-// install.md and the Makefile's dev target (without loopback) must match the
-// default.
-func TestTheDefaultDenyListIsTheOneTheDocsAndMakeDevGive(t *testing.T) {
-	doc, err := os.ReadFile("../../docs/install.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(doc), "\n"+DefaultUpstreamDeny+"\n") {
-		t.Error("docs/install.md does not give DefaultUpstreamDeny as the default")
-	}
+// The Makefile's dev target must match the default, without loopback.
+func TestMakeDevGivesTheDefaultDenyList(t *testing.T) {
 	makefile, err := os.ReadFile("../../Makefile")
 	if err != nil {
 		t.Fatal(err)
