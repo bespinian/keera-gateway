@@ -1,6 +1,6 @@
 // The bill for the deployment's own provider keys, the gateway fee and Keera
 // Agents' machines, and the credit an organisation pays for them in advance.
-// See docs/billing.md.
+// See https://docs.keera.ch/manage/billing/.
 
 import { api } from "../api.js";
 import {

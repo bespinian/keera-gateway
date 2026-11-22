@@ -18,7 +18,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// Passkeys sign in the accounts no directory vouches for. See docs/sso.md.
+// Passkeys sign in the accounts no directory vouches for. See https://docs.keera.ch/operate/sign-on/#passkeys.
 //
 // Three rules keep them from weakening single sign-on:
 //

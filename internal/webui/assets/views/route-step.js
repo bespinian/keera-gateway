@@ -797,5 +797,5 @@ Send requests that need planning or reasoning to a more capable model.
 If you are unsure, choose the more capable model.`;
 
 // A decision model sees each destination's description only. See
-// docs/gateway.md#decision-models.
+// https://docs.keera.ch/manage/routers/#how-a-route-step-chooses.
 const DECISION_EXAMPLE = "Which model should answer this request?";

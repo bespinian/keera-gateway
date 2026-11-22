@@ -14,7 +14,7 @@ import (
 )
 
 // Payments is how organisations pay for the deployment's provider keys and
-// the gateway fee in advance. See docs/billing.md.
+// the gateway fee in advance. See https://docs.keera.ch/operate/settings/#hosted-providers-and-billing.
 type Payments struct {
 	PostFinance payment.Settings
 	// VATBP is the VAT added to every payment, in basis points: 810 is 8.1%.

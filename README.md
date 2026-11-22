@@ -11,7 +11,7 @@ The gateway is one half of Keera, the AI stack run in Switzerland. The other
 half is **Keera Engine**: open-weight coding models served on vLLM, on your own
 GPUs or on Swiss ones.
 
-![The control panel's live map: what the gateway is connected to, and the requests as they are written.](docs/assets/live-map.webp)
+![The control panel's live map: what the gateway is connected to, and the requests as they are written.](https://docs.keera.ch/assets/images/live-map.webp)
 
 ## What is in this repository
 
@@ -49,7 +49,7 @@ request, logs it and passes it on.
 
 Everything runs on one port, `:8080`, split by path: inference under `/api`,
 administration under `/control`, and the control panel at `/`. See
-[docs/gateway.md](docs/gateway.md#one-listener-three-surfaces).
+[Publish it](https://docs.keera.ch/operate/install/#publish-it).
 
 The gateway speaks three APIs, all with the same guardrails, accounting and
 audit:
@@ -61,7 +61,7 @@ audit:
 - the Anthropic Messages API, used by Claude Code: `/api/v1/messages`
 - the OpenAI Responses API, used by Codex: `/api/v1/responses`. The gateway
   stores no conversations; see
-  [docs/gateway.md](docs/gateway.md#three-request-shapes).
+  [The API](https://docs.keera.ch/use/api/).
 
 A Messages request to Anthropic, or a Responses request to OpenAI, is forwarded
 in its own API, so prompt caching and reasoning keep working. To switch
@@ -77,19 +77,19 @@ podman compose up -d --build
 
 That runs the gateway, Postgres, a CPU model and a decision model on one host.
 [compose/README.md](compose/README.md) covers the GPU tier and what the CPU tier
-cannot do. [First run](docs/install.md#first-run) issues a first key and sends
-a request, and [docs/install.md](docs/install.md) covers every setting.
-[docs/run-locally.md](docs/run-locally.md) is the development loop.
+cannot do. [First run](https://docs.keera.ch/operate/install/#first-run) issues a first key
+and sends a request, and [Settings](https://docs.keera.ch/operate/settings/) covers every
+setting. `make dev` is the development loop.
 
-How to use and manage Keera is in the [documentation](https://docs.keera.ch).
-`docs/` explains how each piece works and why, for operators and contributors.
+How to install, use and manage Keera is in the
+[documentation](https://docs.keera.ch).
 
 `keera doctor` checks the deployment and says what to fix; see
-[When it does not work](docs/install.md#when-it-does-not-work).
+[Troubleshooting](https://docs.keera.ch/operate/troubleshooting/).
 
 A developer signs in with one command, which also makes that deployment the
 default for later commands
-([which gateway a command uses](docs/install.md#the-keera-command)):
+([which gateway a command uses](https://docs.keera.ch/reference/cli/#which-gateway-and-organisation)):
 
 ```sh
 keera login --url https://keera.example.ch
@@ -98,7 +98,7 @@ keera login --url https://keera.example.ch
 `keera connect claude-code` sets Claude Code up in one step. It gives this
 machine a key of its own and writes it into `~/.claude/settings.json`, with
 every model the key may use
-([docs/gateway.md](docs/gateway.md#connecting-claude-code)). For other editors,
+([Claude Code](https://docs.keera.ch/use/connect/#claude-code)). For other editors,
 `keera connect` prints the configuration to stdout and the instructions to
 stderr:
 
@@ -112,9 +112,9 @@ keera connect opencode --key laptop
 
 **Guardrails, budgets and rate limits** attach to an organisation, a project or
 a key, and a level can narrow what it inherits but never widen it
-([the tenancy model](docs/gateway.md#the-tenancy-model)). Clients name an alias
+([organisations, projects and keys](https://docs.keera.ch/get-started/concepts/#organisations-projects-and-keys)). Clients name an alias
 like `keera-speed`, so you can swap the model behind it without developers
-changing anything ([the alias](docs/gateway.md#the-alias-is-the-api-contract)).
+changing anything ([the alias](https://docs.keera.ch/manage/models/#the-alias)).
 
 ```sh
 keera guardrail set project <project-id> --models keera-speed --requests 120 --budget 500 --period month
@@ -126,7 +126,7 @@ keera usage --by project
 removes credentials or client names, or refuses the request, and a list of
 regular expressions catches anything with a fixed shape, such as an API key or
 an IBAN. A filter can start in shadow, so you can measure it on a week of real
-traffic before it enforces. [docs/filters.md](docs/filters.md)
+traffic before it enforces. [Filters](https://docs.keera.ch/manage/filters/)
 
 **Routers** are what a client calls besides a model, by naming one where it
 would name a model. They chain filters, route steps, rate limits, budgets and
@@ -134,16 +134,17 @@ system prompts in the order you draw them, each branch ending at a model. A
 route step changes where a request goes: small tasks to the local model and
 heavy reasoning to a large one, or to the next model when one is down. Around it, a router can
 redact only what goes to a hosted model, or fall back to the local one once the
-hosted budget is spent. [docs/routers.md](docs/routers.md)
+hosted budget is spent. [Routers](https://docs.keera.ch/manage/routers/)
 
 **Keera Agents** runs agents that people start from a chat, such as Slack. It
 is a separate app: each agent works with a key in its owner's name, so their
-guardrails, budgets and audit log apply. [docs/agents.md](docs/agents.md)
+guardrails, budgets and audit log apply.
+[Run Keera Agents](https://docs.keera.ch/operate/agents/)
 
 **MCP servers** get the same controls as models: an agent calls a server's
 tools through `/api/mcp/<alias>` with its Keera key, sees only the tools its
 guardrail allows, and every call is filtered and logged.
-[docs/mcp.md](docs/mcp.md)
+[MCP servers](https://docs.keera.ch/manage/mcp/)
 
 ```sh
 keera mcp add github --endpoint https://api.githubcopilot.com/mcp/ --api-key @-
@@ -153,17 +154,17 @@ keera mcp calls --summary
 
 **Hosted models** get the same allow-lists, budgets, rate limits and audit as
 any other model. Prompts sent to them leave your infrastructure, so put a
-guardrail on them. [docs/providers.md](docs/providers.md)
+guardrail on them. [Add a hosted model](https://docs.keera.ch/manage/models/#add-a-hosted-model)
 
 **Claude subscriptions** let a Claude Team or Enterprise plan pay for Claude
 Code, while Keera applies the guardrails and shows each person's usage. They
 are off unless `KEERA_CLAUDE_SUBSCRIPTIONS` is turned on.
-[docs/subscriptions.md](docs/subscriptions.md)
+[Claude plans](https://docs.keera.ch/operate/claude-plans/)
 
 **Billing** lets a deployment hold its own key for a hosted provider. Every
 organisation then uses that key, and is billed at the provider's list price:
 each month, or in advance by card through PostFinance Checkout.
-[docs/billing.md](docs/billing.md)
+[Billing](https://docs.keera.ch/manage/billing/)
 
 **The panel** has these screens, among others:
 

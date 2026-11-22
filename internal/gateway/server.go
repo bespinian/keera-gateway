@@ -37,7 +37,7 @@ type Budgeter interface {
 	// the budget headers, so a client sees a limit coming.
 	Spent(t policy.ScopeType, id string, p policy.Period, now time.Time) int64
 	// HoldCredit reports whether an organisation may use the deployment's
-	// provider keys (prepaid, see docs/billing.md), and holds the most a
+	// provider keys (prepaid, see https://docs.keera.ch/manage/billing/), and holds the most a
 	// request may cost until ReleaseCredit. It returns what it held.
 	HoldCredit(orgID string, micros int64) (int64, error)
 	ReleaseCredit(orgID string, micros int64)

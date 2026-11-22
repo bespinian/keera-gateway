@@ -14,7 +14,7 @@ import (
 
 // An LDAP directory signs people in with a password. There is no redirect: the
 // panel shows a form and sends it here, and the gateway binds as the person.
-// After that it is the same sign-in as through any directory. See docs/sso.md.
+// After that it is the same sign-in as through any directory. See https://docs.keera.ch/operate/sign-on/.
 
 // passwordPerAccountRPM bounds the attempts on one account, from any address,
 // so nobody can guess a password or lock an account out faster than this. It is

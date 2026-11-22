@@ -11,8 +11,6 @@
 // panel moves. For an organisation that exists already, it only does that.
 //
 //	go run ./scripts/demo -org "Example Bank" -live keera-speed
-//
-// See docs/run-locally.md#demo-data.
 package main
 
 import (

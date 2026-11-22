@@ -23,7 +23,7 @@ import (
 )
 
 // Payments is how organisations pay for the deployment's provider keys in
-// advance, by card through PostFinance Checkout. See docs/billing.md.
+// advance, by card through PostFinance Checkout. See https://docs.keera.ch/manage/billing/.
 type Payments struct {
 	Client *payment.Client
 	// VATBP is the VAT added to every payment, in basis points.

@@ -12,7 +12,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// guardedRouter is the example in docs/routers.md: a pattern filter, a
+// guardedRouter is the example in https://docs.keera.ch/manage/routers/: a pattern filter, a
 // budget whose exceeded branch goes to the local model, and a route step
 // whose hosted branch is redacted first.
 func guardedRouter() policy.Router {

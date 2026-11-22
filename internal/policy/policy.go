@@ -132,11 +132,11 @@ type Model struct {
 	HasAPIKey bool `json:"has_api_key,omitempty"`
 	// Subscription says each caller's own Claude subscription pays. The
 	// gateway forwards the caller's sign-in, and the prices only say what the
-	// API would cost. See docs/subscriptions.md.
+	// API would cost. See https://docs.keera.ch/operate/claude-plans/.
 	Subscription bool `json:"subscription,omitempty"`
 	// PlatformKey says the deployment holds the provider key, so the
 	// organisation sets none. Requests go to the provider at list prices and
-	// are billed. See docs/billing.md.
+	// are billed. See https://docs.keera.ch/manage/billing/.
 	PlatformKey bool `json:"platform_key,omitempty"`
 	// Billing is set by the registry for a model on the deployment's key. It
 	// never leaves the gateway.
@@ -145,7 +145,7 @@ type Model struct {
 	// gateway connects only to public addresses for it. Locked says it may not
 	// use this model yet: the model runs inside the deployment's network, or
 	// would be billed after the fact. OrgName lets a refusal name the
-	// organisation. The registry sets all three. See docs/sso.md.
+	// organisation. The registry sets all three. See https://docs.keera.ch/operate/sign-on/.
 	Limited bool   `json:"-"`
 	Locked  bool   `json:"-"`
 	OrgName string `json:"-"`
@@ -279,7 +279,7 @@ type Filter struct {
 //   - pattern runs no model: regular expressions replace or refuse. It suits
 //     keys and card numbers but cannot recognise a name.
 //
-// The zero value is rewrite. See docs/filters.md.
+// The zero value is rewrite. See https://docs.keera.ch/manage/filters/.
 type FilterMode string
 
 const (
@@ -391,7 +391,7 @@ type Route struct {
 	Destinations []string
 	// Ceilings is a size step's largest request per destination, in tokens
 	// estimated from bytes. Exactly one destination has no ceiling and takes
-	// what is too big for the rest. See docs/routers.md.
+	// what is too big for the rest. See https://docs.keera.ch/manage/routers/.
 	Ceilings map[string]int
 	// Header is the request header a header step reads, and Values maps its
 	// values to destinations.

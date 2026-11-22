@@ -55,7 +55,7 @@ export KEERA_OPERATOR_KEY=…                    # the value from .env
 export KEERA_CONTROL_URL=http://127.0.0.1:8080
 ```
 
-[First run](../docs/install.md#first-run) creates an organisation, a project and
+[First run](https://docs.keera.ch/operate/install/#first-run) creates an organisation, a project and
 a key, and sends a first request. Or open <http://127.0.0.1:8080> and sign in
 with the operator key.
 
@@ -76,19 +76,19 @@ on the same card; the unquantised 14B needs a 48 GB card (g6e.xlarge).
 
 - **`models.yaml` is what each new organisation starts with.** After that, the
   models are the organisation's own
-  ([Template files](../docs/gateway.md#template-files)).
+  ([Models every organisation starts with](https://docs.keera.ch/operate/install/#models-every-organisation-starts-with)).
 - **The backends use the model's own chat template.** Qwen's adds "You are
   Qwen, created by Alibaba Cloud..." when a request has no system message. For
   a standing system prompt, set one on a guardrail:
   `keera guardrail set org <org-id> --system-prompt ...`.
 - **Port 8080 carries the panel, the control API and the inference API**
-  ([gateway.md](../docs/gateway.md#one-listener-three-surfaces)). Put a TLS
+  ([Publish it](https://docs.keera.ch/operate/install/#publish-it)). Put a TLS
   terminator in front before you change `KEERA_BIND`.
 - **Port 8000 is not published on purpose**: the inference backend has no
-  authentication ([gateway.md](../docs/gateway.md#failure-modes-worth-knowing)).
+  authentication ([Publish it](https://docs.keera.ch/operate/install/#publish-it)).
   For the same reason the llama.cpp tier runs with `--no-webui`.
 - **Every setting in `.env` reaches the gateway**
-  ([docs/install.md](../docs/install.md) lists them). `compose.yaml` fixes the
+  ([Settings](https://docs.keera.ch/operate/settings/) lists them). `compose.yaml` fixes the
   database, the listen address and the template file. A variable exported in
   your shell but not written in `.env` does not reach it.
 - The gateway image is `FROM scratch`: one static binary, no shell. So its
@@ -114,7 +114,7 @@ on the same card; the unquantised 14B needs a 48 GB card (g6e.xlarge).
 image, so `decider/Containerfile` installs it. The first start downloads about
 0.8 GB into the `decider-cache` volume.
 
-It is a [decision model](../docs/gateway.md#decision-models): route steps and
+It is a [decision model](https://docs.keera.ch/manage/routers/#how-a-route-step-chooses): route steps and
 gate filters can decide with it, and it writes no text. For example, a router
 clients call as `auto`, once `keera-frontier` is uncommented in `models.yaml`:
 

@@ -21,7 +21,7 @@ import (
 
 // routerRun reads a router's steps from a JSON file, since flags cannot spell
 // a tree. A route step also has flags, so the simplest router needs no file.
-// See docs/routers.md.
+// See https://docs.keera.ch/manage/routers/.
 type routerRun struct {
 	*aliasRun
 

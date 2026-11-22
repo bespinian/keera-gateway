@@ -14,7 +14,7 @@ const Currency = "CHF"
 type Billing struct {
 	Provider string
 	// Credit says organisations prepay, so each call takes from their credit.
-	// It is false without payments. See docs/billing.md.
+	// It is false without payments. See https://docs.keera.ch/manage/billing/.
 	Credit bool
 	// FeeMicrosPerMTok is the gateway's price per million tokens on a model
 	// the deployment does not bill otherwise. Zero means list price.

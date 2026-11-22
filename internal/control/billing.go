@@ -20,7 +20,7 @@ type billingTotal struct {
 // billing is one month of billed use, per organisation and model: the
 // deployment's own provider keys at list price, and the gateway fee on every
 // other model. Keera Agents' machines come after, per item. See
-// docs/billing.md.
+// https://docs.keera.ch/manage/billing/.
 //
 // Administrators read their own organisation's. Operators read any, or all at
 // once.

@@ -16,7 +16,7 @@ import (
 // receipts for both. Keera Agents meters and prices the machines itself, and
 // bills nothing without prices; the gateway records its lines and says whether
 // an organisation may run machines. So the service key is the only switch
-// here. See docs/billing.md.
+// here. See https://docs.keera.ch/manage/billing/.
 
 // machineRefusal is why an organisation may not run machines, or nil.
 type machineRefusal struct {

@@ -15,16 +15,16 @@ models:
     backend_model: keera-speed
     max_context_tokens: 16384
     # The requests this model should get. Clients see it on /v1/models, and
-    # routers choose by it. See docs/routers.md.
+    # routers choose by it. See https://docs.keera.ch/manage/routers/.
     description: >-
       Short, simple requests: renames, syntax questions, commit messages and
       one-line edits. Also anything naming a client.
     # No prices: a self-hosted model costs KEERA_BILLING_GATEWAY_FEE, or
-    # nothing without one. See docs/billing.md#the-gateway-fee.
+    # nothing without one. See https://docs.keera.ch/manage/billing/#the-gateway-fee.
 
   # Keera Decider: Laya, a classifier served by laya-serve. A decision model
   # writes no text, so only routers and gate filters use it, not clients. See
-  # docs/gateway.md#decision-models.
+  # https://docs.keera.ch/manage/routers/#how-a-route-step-chooses.
   - alias: keera-decider
     kind: decision
     display_name: Keera Decider
@@ -46,7 +46,7 @@ models:
 #
 #   keera model set keera-frontier --api-key @-
 #
-# Prompts sent to this model leave your infrastructure. Read docs/providers.md
+# Prompts sent to this model leave your infrastructure. Read https://docs.keera.ch/manage/models/#add-a-hosted-model
 # first, and put a budget on the projects that may use it.
 #  - alias: keera-frontier
 #    provider: anthropic
@@ -69,7 +69,7 @@ models:
 #      the country.
 
 # With two models, let a router pick per request by each `description` (see
-# docs/routers.md):
+# https://docs.keera.ch/manage/routers/):
 #
 #   keera router add auto --model keera-speed \
 #     --destinations keera-speed,keera-frontier \

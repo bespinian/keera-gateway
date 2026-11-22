@@ -61,7 +61,7 @@ type Config struct {
 	MaxResponseBytes      int64
 	UpstreamHeaderTimeout time.Duration
 	// UpstreamDeny is the addresses the gateway never sends a request to:
-	// loopback and the cloud metadata service by default. See docs/install.md.
+	// loopback and the cloud metadata service by default. See https://docs.keera.ch/operate/settings/#recommended.
 	UpstreamDeny []netip.Prefix
 	// LimitPrivate keeps organisations from addresses inside the network,
 	// except through the host names in PrivateHosts. KEERA_UPSTREAM_PRIVATE
@@ -73,17 +73,17 @@ type Config struct {
 
 	// UsageRetention and AuditRetention are how long usage events and audit
 	// entries are kept. Ended keys go with usage. Zero, the
-	// default, keeps them for ever. See docs/install.md.
+	// default, keeps them for ever. See https://docs.keera.ch/operate/settings/#retention.
 	UsageRetention time.Duration
 	AuditRetention time.Duration
 
 	// SessionGap is how long an agent conversation may go quiet before the
 	// next request starts a new task. Changing it re-cuts past sessions too.
-	// See docs/sessions.md.
+	// See https://docs.keera.ch/monitor/requests-and-sessions/#sessions.
 	SessionGap time.Duration
 
 	// Platform is the deployment's own provider keys, which organisations
-	// use and are billed for. See docs/billing.md.
+	// use and are billed for. See https://docs.keera.ch/operate/settings/#hosted-providers-and-billing.
 	Platform catalog.Platform
 	// GatewayFee is what organisations pay per million tokens, in micros, on
 	// every model the deployment does not bill otherwise: self-hosted ones and
@@ -93,18 +93,18 @@ type Config struct {
 	// advance. Nil without a PostFinance Checkout account.
 	Payments *Payments
 	// ClaudeSubscriptions lets Claude Code signed in to a Claude plan through,
-	// paid by that plan. Off by default. See docs/subscriptions.md.
+	// paid by that plan. Off by default. See https://docs.keera.ch/operate/claude-plans/.
 	ClaudeSubscriptions bool
 
 	// Redis is where replicas share their rate limits, from KEERA_REDIS_URL.
 	// Nil, the default, keeps limits per process, so N replicas allow N times
-	// the limit. See docs/gateway.md.
+	// the limit. See https://docs.keera.ch/operate/settings/#traffic.
 	Redis *redis.Options
 	// RedisPrefix namespaces the keys, so two deployments can share one Redis.
 	RedisPrefix string
 
 	// TrustedProxies are the proxies in front of the gateway, whose
-	// X-Forwarded-For says where a request came from. See docs/install.md.
+	// X-Forwarded-For says where a request came from. See https://docs.keera.ch/operate/settings/#traffic.
 	TrustedProxies []netip.Prefix
 
 	// UI serves the control panel from the listener's root.
@@ -114,10 +114,10 @@ type Config struct {
 	// Empty uses the Host header for the first two and leaves the link out.
 	PublicURL string
 	// ChatURL is Keera Chat's origin. A sign-in started there may hand back
-	// to its /auth/callback. Empty allows only loopback. See docs/sso.md.
+	// to its /auth/callback. Empty allows only loopback. See https://docs.keera.ch/operate/sign-on/.
 	ChatURL string
 	// AgentsURL is Keera Agents' origin, which a sign-in may hand back to as
-	// it does to Keera Chat. See docs/agents.md.
+	// it does to Keera Chat. See https://docs.keera.ch/operate/agents/.
 	AgentsURL string
 	// AgentsServiceKey is what Keera Agents' server sends to the routes under
 	// /control/v1/service, and nowhere else. Empty turns them off.
@@ -131,7 +131,7 @@ type Config struct {
 	OIDC []authn.OIDCConfig
 	// Passkeys lets administrators create accounts that sign in with a
 	// passkey instead of a directory. Nil when off, the default, as such an
-	// account outlives its owner leaving the directory. See docs/sso.md.
+	// account outlives its owner leaving the directory. See https://docs.keera.ch/operate/sign-on/.
 	Passkeys *authn.RelyingParty
 }
 

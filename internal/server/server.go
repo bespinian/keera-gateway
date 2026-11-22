@@ -35,7 +35,7 @@ required:
   KEERA_OPERATOR_KEY    credential for the control API
   KEERA_SECRET_KEY      encrypts stored credentials (openssl rand -hex 32)
 
-Every other setting is in docs/install.md and the pages it links.
+Every other setting is in https://docs.keera.ch/operate/settings/ and the pages it links.
 `
 
 // Run dispatches one invocation. It returns an error, so the entry point owns

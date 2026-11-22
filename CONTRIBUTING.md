@@ -15,8 +15,9 @@ agree to when you do.
 
 ## Making a change
 
-[docs/run-locally.md](docs/run-locally.md) shows how to build, run and test
-Keera on your machine.
+`make dev` runs Keera on your machine: the gateway rebuilds on each save, and
+Postgres and the models run in containers. [AGENTS.md](AGENTS.md#commands)
+lists the other `make` targets.
 
 Run `make check` before you open a pull request; CI also runs the linter. If
 your change touches the database, Redis, rate limiting or the control plane,

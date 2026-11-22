@@ -42,7 +42,7 @@ type dialect interface {
 	usage(raw []byte) *tokenUsage
 	stream(alias string) nativeStream
 	// onKey makes a body fit to send on the deployment's key, or says why it
-	// cannot be. See docs/billing.md.
+	// cannot be. See https://docs.keera.ch/manage/billing/.
 	onKey(b *body) string
 	// stripHostedTools removes the tools the provider runs itself and returns
 	// their names. See hosted.go.

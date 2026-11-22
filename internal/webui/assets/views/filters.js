@@ -1201,7 +1201,7 @@ const RULES_EXAMPLE = `(?i)\\bsk-[a-z0-9]{20,}\\b     => <API-KEY>
 
 // A gate cannot remove anything, so it says what may not go. One sentence
 // works best on small chat models and decision models alike; see
-// docs/filters.md#for-a-gate.
+// https://docs.keera.ch/manage/filters/#create-a-rewrite-or-gate-filter.
 const GATE_EXAMPLE = `Refuse requests containing real customer data or credentials.`;
 
 const PROMPT_EXAMPLE = `Replace passwords and API keys with <CREDENTIAL>, and \

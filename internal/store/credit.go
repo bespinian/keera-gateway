@@ -9,7 +9,7 @@ import (
 )
 
 // CreditAccount is an organisation's credit for the deployment's provider
-// keys, in CHF. See docs/billing.md.
+// keys, in CHF. See https://docs.keera.ch/manage/billing/.
 type CreditAccount struct {
 	OrgID         string `json:"org_id"`
 	BalanceMicros int64  `json:"balance_micros"`

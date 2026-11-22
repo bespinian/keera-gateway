@@ -2,7 +2,7 @@
 
 -- A billing line can come from another service, so far only Keera Agents
 -- billing its machines. Such a line bills an item, such as CPU time, not a
--- model, so it says what it bills and how much of it. See docs/billing.md.
+-- model, so it says what it bills and how much of it. See https://docs.keera.ch/manage/billing/.
 ALTER TABLE billing_lines
     -- Empty for the gateway's own lines; 'agents' for Keera Agents'.
     ADD COLUMN service         text NOT NULL DEFAULT '',

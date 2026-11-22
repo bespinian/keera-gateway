@@ -18,7 +18,7 @@ import (
 // The caller is identified by the Keera key in KeyHeader, sent from
 // ANTHROPIC_CUSTOM_HEADERS. That subscription key reaches only subscription
 // models, so a copied settings file cannot spend the organisation's money.
-// See docs/subscriptions.md.
+// See https://docs.keera.ch/operate/claude-plans/.
 
 // KeyHeader carries the Keera key when Authorization carries the caller's
 // Claude sign-in.

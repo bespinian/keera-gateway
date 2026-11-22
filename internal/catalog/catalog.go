@@ -65,7 +65,7 @@ type Model struct {
 	// outside must state it.
 	Location string `yaml:"location"`
 	// Subscription says each caller's own Claude subscription pays, and the
-	// gateway forwards their sign-in. See docs/subscriptions.md.
+	// gateway forwards their sign-in. See https://docs.keera.ch/operate/claude-plans/.
 	Subscription bool `yaml:"subscription"`
 	Disabled     bool `yaml:"disabled"`
 }

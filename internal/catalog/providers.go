@@ -14,7 +14,7 @@ import (
 // product id).
 //
 // A provider is a table of defaults, not an adapter. Anthropic and OpenAI are
-// also sent their own APIs untranslated. See docs/gateway.md.
+// also sent their own APIs untranslated. See https://docs.keera.ch/use/api/.
 type Provider struct {
 	Name string `json:"name"`
 	// Endpoint is the OpenAI-compatible base URL, without a trailing slash.

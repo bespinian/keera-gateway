@@ -16,7 +16,7 @@ import (
 // A person can be in several organisations, with a role in each. Each is a
 // row in users, and the rows share the identity the person first signed in
 // with. A session or a command-line token is in one of them at a time, and
-// switching moves it to another. See docs/sso.md.
+// switching moves it to another. See https://docs.keera.ch/operate/sign-on/#organisations-and-domains.
 
 // lastOrgCookie remembers the organisation this browser was last in, so the
 // next sign-in lands there. It only chooses among the person's own.

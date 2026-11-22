@@ -16,7 +16,7 @@ const (
 )
 
 // platformKeys reads the deployment's own provider keys, such as
-// KEERA_PROVIDER_ANTHROPIC_API_KEY. See docs/billing.md.
+// KEERA_PROVIDER_ANTHROPIC_API_KEY. See https://docs.keera.ch/operate/settings/#hosted-providers-and-billing.
 func platformKeys() (catalog.Platform, error) {
 	out := catalog.Platform{}
 	known := []string{}

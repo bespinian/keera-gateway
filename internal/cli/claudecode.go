@@ -18,7 +18,7 @@ import (
 // `keera connect claude-code` gives this machine its own key and writes it
 // into Claude Code's settings, so nobody copies a key. Running it again
 // replaces the key. With --subscription, Claude Code keeps its Claude sign-in;
-// see docs/subscriptions.md.
+// see https://docs.keera.ch/operate/claude-plans/.
 
 type claudeSetup struct {
 	org, project, model string

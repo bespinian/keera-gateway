@@ -21,7 +21,7 @@ import (
 
 // An LDAP provider signs people in with their directory password, from Active
 // Directory or OpenLDAP. The panel asks for the password and the gateway binds
-// as the person. See docs/sso.md.
+// as the person. See https://docs.keera.ch/operate/sign-on/.
 
 // LDAPConfig is what an LDAP provider adds to the common settings.
 type LDAPConfig struct {

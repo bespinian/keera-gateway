@@ -10,7 +10,7 @@ import (
 )
 
 // Signup is a sign-in that matched no organisation, waiting for the person to
-// create one or to accept an invitation. See docs/sso.md.
+// create one or to accept an invitation. See https://docs.keera.ch/operate/sign-on/#organisations-and-domains.
 type Signup struct {
 	TokenHash  []byte
 	Provider   string

@@ -46,7 +46,7 @@ type Options struct {
 	// without credit cannot use them.
 	Prepaid bool
 	// GatewayFee is the price per million tokens, in micros, on every other
-	// model. Zero, the default, leaves them free. See docs/billing.md.
+	// model. Zero, the default, leaves them free. See https://docs.keera.ch/manage/billing/.
 	GatewayFee int64
 }
 

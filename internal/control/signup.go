@@ -17,7 +17,7 @@ import (
 
 // Signing up: a sign-in that matched no organisation, through a provider that
 // allows it, ends on a screen where the person creates an organisation or
-// joins the one that invited them. See docs/sso.md.
+// joins the one that invited them. See https://docs.keera.ch/operate/sign-on/#organisations-and-domains.
 
 // signupCookie carries the sign-up between the callback and that screen. It
 // is Strict, because only the panel's own requests may use it.

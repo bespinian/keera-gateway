@@ -23,7 +23,7 @@ import (
 )
 
 // Claude Code signed in to a Claude plan, for `keera connect claude-code
-// --subscription`. See docs/subscriptions.md.
+// --subscription`. See https://docs.keera.ch/operate/claude-plans/.
 
 var errSubscriptionsOff = errors.New("this deployment does not take Claude subscriptions; " +
 	"run 'keera connect claude-code' without --subscription to use a Keera key instead")

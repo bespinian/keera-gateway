@@ -16,7 +16,7 @@ import (
 
 // The MCP servers the gateway stands in front of, and the log of their tool
 // calls. A server belongs to one organisation, and its administrators change
-// it. See docs/mcp.md.
+// it. See https://docs.keera.ch/manage/mcp/.
 
 // listMCPServers is readable by anyone in the organisation: a developer needs
 // to know which servers exist to connect to them. Their addresses are for the

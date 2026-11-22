@@ -22,4 +22,14 @@ Only the latest release gets security fixes.
 ## Verifying a release
 
 Every release archive and image is signed with build provenance.
-[docs/install.md](docs/install.md#the-keera-command) shows how to check it.
+To check a download:
+
+```sh
+sha256sum --check --ignore-missing SHA256SUMS
+gh attestation verify keera_v0.1.0_linux_amd64.tar.gz --repo bespinian/keera-gateway \
+  --signer-workflow bespinian/keera-gateway/.github/workflows/release-build.yml
+```
+
+`--signer-workflow` checks that the release workflow signed the file, not some
+other workflow in the repository. Check the image the same way, with
+`oci://ghcr.io/bespinian/keera-gateway:<tag>` in place of the file.

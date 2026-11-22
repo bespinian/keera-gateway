@@ -36,7 +36,7 @@ func pick(id string, branches map[string]*Step) *Step {
 	}
 }
 
-// exampleRouter is the one in docs/routers.md.
+// exampleRouter is the one in https://docs.keera.ch/manage/routers/.
 func exampleRouter() Router {
 	return Router{OrgID: "org_1", Alias: "safe", Start: &Step{
 		ID: "secrets", Kind: StepFilter, Ref: "secrets",

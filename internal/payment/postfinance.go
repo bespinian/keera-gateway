@@ -1,5 +1,5 @@
 // Package payment takes payments for prepaid credit through PostFinance
-// Checkout. See docs/billing.md.
+// Checkout. See https://docs.keera.ch/operate/settings/#hosted-providers-and-billing.
 //
 // Card details never reach the gateway: the customer types them on
 // PostFinance's payment page. What comes back is a transaction and, if asked

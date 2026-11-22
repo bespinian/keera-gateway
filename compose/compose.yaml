@@ -24,7 +24,7 @@ services:
     volumes:
       # ",z" relabels for SELinux hosts; harmless elsewhere.
       - ./models.yaml:/etc/keera/models.yaml:ro,z
-    # Every setting in .env reaches the gateway. docs/install.md explains them.
+    # Every setting in .env reaches the gateway. https://docs.keera.ch/operate/settings/ explains them.
     env_file: .env
     # These win over .env.
     environment:
@@ -99,7 +99,7 @@ services:
 
   # Keera Decider: Laya, a 421M classifier, served by laya-serve. It answers
   # routers and gate filters in one pass on CPU. See
-  # docs/gateway.md#decision-models.
+  # https://docs.keera.ch/manage/routers/#how-a-route-step-chooses.
   #
   # laya-serve has no authentication without LAYA_API_KEY, so it is not
   # published.

@@ -9,7 +9,7 @@ import (
 
 // RecurringCharge is a fee an operator charges an organisation every month or
 // year, such as for a dedicated model. Each period is charged to the saved
-// card when it starts, and is not credited. See docs/billing.md.
+// card when it starts, and is not credited. See https://docs.keera.ch/manage/billing/.
 type RecurringCharge struct {
 	ID           string `json:"id"`
 	OrgID        string `json:"org_id"`

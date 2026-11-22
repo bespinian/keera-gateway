@@ -11,7 +11,7 @@ import (
 
 // PlatformKey is the deployment's own account at a provider. Every
 // organisation's models of that provider use it, billed at list price. See
-// docs/billing.md.
+// https://docs.keera.ch/manage/billing/.
 type PlatformKey struct {
 	APIKey string
 	// ProductID completes the endpoint of a provider that needs one, such as

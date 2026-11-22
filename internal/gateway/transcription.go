@@ -18,7 +18,7 @@ import (
 // A transcription is a multipart form, not JSON: the audio and a few text
 // fields. The gateway reads the text fields into a body like any other
 // request, so the model name, limits and filters work as they do for chat,
-// and keeps the audio aside to send on unchanged. See docs/gateway.md.
+// and keeps the audio aside to send on unchanged. See https://docs.keera.ch/use/api/.
 
 // audioField is the one part that may be a file. Any other file part is
 // refused: a backend may read it as text, and no filter would have seen it.
