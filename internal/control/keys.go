@@ -201,13 +201,13 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	if !ok {
 		return
 	}
-	owner := o.OrgID
 	if !s.subscriptionsAllowed(w, o.Kind == policy.KeySubscription) {
 		return
 	}
-	if (in.ExpiresIn != nil || in.ExpiresAt != nil) && !p.CanAdminOrg(owner) {
+	admin := p.CanAdminOrg(o.OrgID)
+	if (in.ExpiresIn != nil || in.ExpiresAt != nil) && !admin {
 		forbid(w, "a member cannot choose how long a key lasts; "+
-			"the new key keeps the old one's lifetime")
+			"the new key ends when the old one would have")
 		return
 	}
 	next := store.KeyInfo{ID: id.New("key"), Name: strings.TrimSpace(in.Name)}
@@ -216,7 +216,7 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	}
 	secret, hash, prefix := auth.Generate()
 	next.Prefix = prefix
-	info, err := s.st.RotateKey(r.Context(), writeOrg(p), oldID, next, hash, !p.CanAdminOrg(owner))
+	info, err := s.st.RotateKey(r.Context(), writeOrg(p), oldID, next, hash, !admin)
 	if errors.Is(err, policy.ErrKeyExpired) {
 		conflict(w, "key_expired",
 			"that key has expired; ask an administrator for a new one")
@@ -242,7 +242,7 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		s.fail(w, err)
 		return
 	}
-	s.auditf(r, p, owner, "key.rotate", "key", info.ID, map[string]any{
+	s.auditf(r, p, o.OrgID, "key.rotate", "key", info.ID, map[string]any{
 		"replaced_key_id": oldID, "project_id": info.ProjectID, "user_id": info.UserID,
 		"name": info.Name, "prefix": info.Prefix, "kind": info.Kind,
 	})

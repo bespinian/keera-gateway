@@ -707,17 +707,21 @@ func (s *Store) RotateKey(ctx context.Context, orgID, oldID string, next KeyInfo
 		if next.Name == "" {
 			next.Name = old.Name
 		}
-		// Keep the lifetime, not the date: a key rotated a week before it lapses
-		// should not get a replacement that lapses in a week.
+		// An administrator's rotation keeps the lifetime, not the date: a key
+		// rotated a week before it lapses should not get a replacement that
+		// lapses in a week. A member's keeps the date, so that rotating cannot
+		// make a key last.
+		now := time.Now()
 		if next.ExpiresAt == nil && old.ExpiresAt != nil {
-			t := time.Now().Add(max(old.ExpiresAt.Sub(old.CreatedAt).Round(time.Hour), time.Hour))
-			if keepDate {
-				t = *old.ExpiresAt
+			switch {
+			case !keepDate:
+				t := now.Add(max(old.ExpiresAt.Sub(old.CreatedAt).Round(time.Hour), time.Hour))
+				next.ExpiresAt = &t
+			case old.ExpiresAt.After(now):
+				next.ExpiresAt = old.ExpiresAt
+			default:
+				return policy.ErrKeyExpired
 			}
-			next.ExpiresAt = &t
-		}
-		if keepDate && next.ExpiresAt != nil && !next.ExpiresAt.After(time.Now()) {
-			return policy.ErrKeyExpired
 		}
 
 		if next, err = insertKey(ctx, tx, next, hash); err != nil {
@@ -728,7 +732,6 @@ func (s *Store) RotateKey(ctx context.Context, orgID, oldID string, next KeyInfo
 		}
 		// Spend counts by key id, so without this a new key would start its
 		// budgets and quotas again from zero.
-		now := time.Now()
 		if _, err := tx.Exec(ctx, `INSERT INTO spend (scope_type, scope_id, period, period_start, micros)
 			SELECT scope_type, $2 || substr(scope_id, length($1) + 1), period, period_start, micros
 			FROM spend WHERE scope_type = 'key' AND `+scopeOwner+` = $1

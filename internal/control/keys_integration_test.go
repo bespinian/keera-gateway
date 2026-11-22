@@ -88,7 +88,7 @@ func TestAMemberRotatesTheirOwnKeyAndItKeepsItsLimits(t *testing.T) {
 	// The lifetime is the administrator's choice, so a member cannot stretch it.
 	w := tn.call(tn.srv.rotateKey, alice, http.MethodPost, "/v1/keys/key_alice/rotate",
 		`{"expires_in_seconds":315360000}`)
-	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "lifetime") {
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "how long a key lasts") {
 		t.Errorf("a member choosing the lifetime = %d %s, want 403", w.Code, w.Body)
 	}
 

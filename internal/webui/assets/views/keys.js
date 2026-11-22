@@ -266,8 +266,7 @@ export async function keysView(ctx) {
             canActivate(ctx, k) && stateOf(k) === "pending"
               ? activateButton(ctx, k, "btn btn-sm")
               : null,
-            // Expired keys can be rotated too: a member cannot issue a new key.
-            canRevoke(ctx, k) && canRotate(k)
+            canRotate(ctx, k)
               ? h(
                   "button",
                   {
@@ -439,9 +438,12 @@ export function canBeRevoked(k) {
 
 // A pending key has no secret to replace yet, so it is activated instead. A
 // key an app issued is held by that app, so a new secret would reach nobody.
-export function canRotate(k) {
+// A member's new key ends when the old one would have, so an expired key is
+// an administrator's to rotate.
+export function canRotate(ctx, k) {
   const state = stateOf(k);
-  return state !== "revoked" && state !== "pending" && !k.issued_by;
+  if (state === "expired" && !isAdmin(ctx)) return false;
+  return canRevoke(ctx, k) && state !== "revoked" && state !== "pending" && !k.issued_by;
 }
 
 export function prefixOf(k) {

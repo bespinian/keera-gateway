@@ -270,7 +270,7 @@ export async function keyDetailView(ctx) {
         ? activateButton(ctx, key)
         : null,
       // Rotation revokes the old key, so the screen moves to the new one.
-      canRevoke(ctx, key) && canRotate(key)
+      canRotate(ctx, key)
         ? h(
             "button",
             {
