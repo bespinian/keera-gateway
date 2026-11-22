@@ -130,21 +130,25 @@ func (r *Recorder) Run(ctx context.Context) {
 	defer close(r.done)
 	t := time.NewTicker(r.opts.FlushInterval)
 	defer t.Stop()
+	// A write under way when shutdown begins is finished, not cancelled:
+	// its events were charged, and the drain would not see them again.
+	// WriteTimeout still bounds it.
+	write := context.WithoutCancel(ctx)
 
 	for {
 		select {
 		case e := <-r.billed:
-			r.add(ctx, e)
+			r.add(write, e)
 			continue
 		default:
 		}
 		select {
 		case e := <-r.billed:
-			r.add(ctx, e)
+			r.add(write, e)
 		case e := <-r.ch:
-			r.add(ctx, e)
+			r.add(write, e)
 		case <-t.C:
-			r.flush(ctx)
+			r.flush(write)
 		case <-ctx.Done():
 			r.drain(ctx)
 			return

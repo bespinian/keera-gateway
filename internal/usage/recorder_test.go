@@ -186,6 +186,42 @@ func (hangWriter) WriteEvents(ctx context.Context, _ []store.Event) error {
 	return ctx.Err()
 }
 
+func TestAWriteUnderWayWhenShutdownStartsIsFinished(t *testing.T) {
+	// Its events were charged. Cancelling the write would abort it, and the
+	// drain would never see them again.
+	synctest.Test(t, func(t *testing.T) {
+		w := &abortableWriter{release: make(chan struct{})}
+		r, stop := run(t, w, Options{BatchSize: 1, FlushInterval: time.Hour})
+		r.Record(event("a"))
+		synctest.Wait() // the write is under way
+
+		go stop()
+		synctest.Wait() // shutdown has begun
+		close(w.release)
+		stop()
+
+		if got := r.Written(); got != 1 {
+			t.Errorf("Written = %d, want the event whose write was under way", got)
+		}
+		if got := r.Dropped(); got != 0 {
+			t.Errorf("Dropped = %d, want none", got)
+		}
+	})
+}
+
+// abortableWriter holds a write until it is released, and gives it up when
+// its context ends, as a database driver does.
+type abortableWriter struct{ release chan struct{} }
+
+func (a *abortableWriter) WriteEvents(ctx context.Context, _ []store.Event) error {
+	select {
+	case <-a.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func TestAHungWriteIsGivenUpAfterWriteTimeout(t *testing.T) {
 	// Without a bound, one hung connection stops the only writer.
 	synctest.Test(t, func(t *testing.T) {
