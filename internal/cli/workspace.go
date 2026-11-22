@@ -488,7 +488,9 @@ const (
 )
 
 // sshBlock is the ssh configuration for every workspace. --url is written
-// in, so it reaches this gateway whatever else this machine signs in to.
+// in, so it reaches this gateway whatever else this machine signs in to. It
+// ends with 'Match all', since a comment does not end a Host section: the
+// options the config had at its top would apply only to workspaces.
 func sshBlock(keera, base, key string) string {
 	return strings.Join([]string{
 		sshBlockStart,
@@ -497,6 +499,7 @@ func sshBlock(keera, base, key string) string {
 		"  User agent",
 		"  IdentityFile " + quoteSSH(key),
 		"  IdentitiesOnly yes",
+		"Match all",
 		sshBlockEnd,
 	}, "\n") + "\n"
 }

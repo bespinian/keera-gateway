@@ -43,6 +43,14 @@ func TestWithSSHBlock(t *testing.T) {
 		!strings.HasSuffix(twice, mine) {
 		t.Errorf("a second run:\n%s", twice)
 	}
+	// Options above the first Host line apply to every host. Put after the
+	// block, they must still, so the block's section has to end.
+	global := "Include ~/.orbstack/ssh/config\nIdentityFile ~/.ssh/id_work\nHost github.com\n  User git\n"
+	got := withSSHBlock(global, block)
+	keeraAt, matchAt := strings.Index(got, "Host *"+sshHostSuffix), strings.Index(got, "\nMatch all\n")
+	if matchAt < keeraAt || matchAt > strings.Index(got, "Include ~/.orbstack") {
+		t.Errorf("the workspace section does not end before the config's own options:\n%s", got)
+	}
 	if quoteSSH("/Users/Ada Lovelace/keera") != `"/Users/Ada Lovelace/keera"` {
 		t.Error("a path with a space is not quoted")
 	}
