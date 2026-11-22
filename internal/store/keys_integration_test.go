@@ -244,7 +244,7 @@ func TestActivateKeyGivesAPendingKeyItsSecretOnce(t *testing.T) {
 		t.Errorf("pending key by id: err = %v, want ErrKeyPending", err)
 	}
 	if _, err := st.RotateKey(ctx, AnyOrg, "key_pending", KeyInfo{ID: "key_rotated"},
-		[]byte("hash-rotated-0000000000000000000")); !errors.Is(err, policy.ErrKeyPending) {
+		[]byte("hash-rotated-0000000000000000000"), false); !errors.Is(err, policy.ErrKeyPending) {
 		t.Errorf("rotating a pending key: err = %v, want ErrKeyPending", err)
 	}
 
@@ -289,5 +289,79 @@ func TestActivateKeyGivesAPendingKeyItsSecretOnce(t *testing.T) {
 	if _, err := st.ActivateKey(ctx, AnyOrg, "key_nobody", "", []byte("hash-nobody-00000000000000000000"),
 		"keera_sk_nobody"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("activating an unknown key: err = %v, want ErrNotFound", err)
+	}
+}
+
+// Spend counts by key id, so a rotated key carries what the old one spent in
+// the open windows, or its budgets would start again from zero. A member's
+// rotation keeps the date the key ends, so rotating cannot make it last.
+func TestARotatedKeyKeepsItsSpendAndAMembersKeepsItsDate(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	now := time.Now()
+	ends := now.Add(48 * time.Hour).Truncate(time.Microsecond)
+	if _, err := st.CreateKey(ctx, KeyInfo{
+		ID: "key_m", OrgID: f.orgID, ProjectID: f.projectID, Name: "m", ExpiresAt: &ends,
+	}, []byte("hash-of-key_m-000000000000000000")); err != nil {
+		t.Fatal(err)
+	}
+	day, month := policy.PeriodDay.Start(now), policy.PeriodMonth.Start(now)
+	for _, r := range []struct {
+		id     string
+		period policy.Period
+		start  time.Time
+	}{
+		{"key_m", policy.PeriodDay, day},
+		{"key_m", policy.PeriodMonth, month},
+		{"key_m|requests", policy.PeriodMonth, month},
+		{"key_m", policy.PeriodMonth, month.AddDate(0, -1, 0)},
+	} {
+		if _, err := st.pool.Exec(ctx, `INSERT INTO spend (scope_type, scope_id, period, period_start, micros)
+			VALUES ('key', $1, $2, $3, 7)`, r.id, string(r.period), r.start); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	next, err := st.RotateKey(ctx, AnyOrg, "key_m", KeyInfo{ID: "key_m2", Prefix: "keera_sk_m2"},
+		[]byte("hash-of-key_m2-00000000000000000"), true)
+	if err != nil {
+		t.Fatalf("RotateKey: %v", err)
+	}
+	if next.ExpiresAt == nil || !next.ExpiresAt.Equal(ends) {
+		t.Errorf("a member's new key ends %v, want %v", next.ExpiresAt, ends)
+	}
+	var got []string
+	rows, err := st.pool.Query(ctx, `SELECT scope_id || ' ' || period FROM spend
+		WHERE scope_type = 'key' AND scope_id LIKE 'key_m2%' AND micros = 7 ORDER BY 1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, s)
+	}
+	if want := []string{"key_m2 day", "key_m2 month", "key_m2|requests month"}; !slices.Equal(got, want) {
+		t.Errorf("the new key's spend = %q, want %q", got, want)
+	}
+
+	// An administrator's rotation keeps the lifetime instead, counted from now.
+	next, err = st.RotateKey(ctx, AnyOrg, "key_m2", KeyInfo{ID: "key_m3", Prefix: "keera_sk_m3"},
+		[]byte("hash-of-key_m3-00000000000000000"), false)
+	if err != nil || next.ExpiresAt == nil || !next.ExpiresAt.After(ends) {
+		t.Errorf("an administrator's new key = %+v, %v; want it to end after %v", next.ExpiresAt, err, ends)
+	}
+
+	past := now.Add(-time.Hour)
+	if _, err := st.CreateKey(ctx, KeyInfo{
+		ID: "key_old", OrgID: f.orgID, ProjectID: f.projectID, Name: "old", ExpiresAt: &past,
+	}, []byte("hash-of-key_old-0000000000000000")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.RotateKey(ctx, AnyOrg, "key_old", KeyInfo{ID: "key_new", Prefix: "keera_sk_new"},
+		[]byte("hash-of-key_new-0000000000000000"), true); !errors.Is(err, policy.ErrKeyExpired) {
+		t.Errorf("a member rotating an expired key: err = %v, want ErrKeyExpired", err)
 	}
 }

@@ -880,7 +880,7 @@ func TestASubscriptionKeyKeepsItsKindAndItsPlanUsage(t *testing.T) {
 
 	// A rotated subscription key stays one, so it still cannot spend money.
 	next, err := st.RotateKey(ctx, AnyOrg, "key_sub", KeyInfo{ID: "key_sub2", Prefix: "keera_sk_pl2"},
-		[]byte("hash-of-keera_sk_pl2-32-bytes!!!!"))
+		[]byte("hash-of-keera_sk_pl2-32-bytes!!!!"), false)
 	if err != nil || next.Kind != policy.KeySubscription {
 		t.Errorf("RotateKey = %+v, %v; want a subscription key", next, err)
 	}

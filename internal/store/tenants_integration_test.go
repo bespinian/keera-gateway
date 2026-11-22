@@ -587,7 +587,7 @@ func TestAWriteHeldToAnotherOrganisationFindsNothing(t *testing.T) {
 		},
 		"RotateKey": func(o string) error {
 			_, err := st.RotateKey(ctx, o, f.keyID, KeyInfo{ID: "key_rotated", Prefix: "keera_sk_rot"},
-				[]byte("hash-of-rotated-key-32-bytes!!!!"))
+				[]byte("hash-of-rotated-key-32-bytes!!!!"), false)
 			return err
 		},
 		// An empty orgID matches no row.

@@ -182,10 +182,11 @@ func (s *Server) activateKey(w http.ResponseWriter, r *http.Request, p *authn.Pr
 	}{KeyInfo: info, Key: secret})
 }
 
-// rotateKey replaces a key with a new one that keeps its project, person, kind
-// and guardrails, and revokes the old one. Whoever may revoke a key may rotate
-// it, so a member can replace their own leaked key. Only an administrator may
-// change its lifetime, so a 30-day key is not rotated into one for years.
+// rotateKey replaces a key with a new one that keeps its project, person, kind,
+// guardrails and spend, and revokes the old one. Whoever may revoke a key may
+// rotate it, so a member can replace their own leaked key. Only an
+// administrator may change its lifetime, so a 30-day key is not rotated into
+// one for years: a member's new key ends when the old one would have.
 func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	var in struct {
 		Name      string     `json:"name"`
@@ -215,7 +216,12 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	}
 	secret, hash, prefix := auth.Generate()
 	next.Prefix = prefix
-	info, err := s.st.RotateKey(r.Context(), writeOrg(p), oldID, next, hash)
+	info, err := s.st.RotateKey(r.Context(), writeOrg(p), oldID, next, hash, !p.CanAdminOrg(owner))
+	if errors.Is(err, policy.ErrKeyExpired) {
+		conflict(w, "key_expired",
+			"that key has expired; ask an administrator for a new one")
+		return
+	}
 	if errors.Is(err, policy.ErrKeyRevoked) {
 		conflict(w, "key_revoked",
 			"that key was already revoked, so there is nothing to rotate; issue a new one")

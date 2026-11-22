@@ -1803,10 +1803,11 @@ paths:
       tags: [keys]
       summary: Rotate an API key
       description: |
-        Issues a new key with the old one's project, person, kind and
-        guardrails, and revokes the old one. An administrator may, and so may a
+        Issues a new key with the old one's project, person, kind, guardrails
+        and spend, and revokes the old one. An administrator may, and so may a
         member for a key in their own name, but only an administrator may set
-        its lifetime. The secret is in `key` and is shown only this once.
+        its lifetime: a member's new key ends when the old one would have. The
+        secret is in `key` and is shown only this once.
       requestBody:
         required: true
         description: Send `{}` to keep the name and lifetime.
@@ -1825,7 +1826,8 @@ paths:
                   minimum: 1
                   description: |
                     Lifetime from now. Not with `expires_at`. Neither gives the
-                    new key the old one's lifetime, counted from now.
+                    new key the old one's lifetime, counted from now, or for a
+                    member the old one's end date.
                 expires_at:
                   type: string
                   format: date-time
@@ -1859,7 +1861,8 @@ paths:
           $ref: "#/components/responses/Conflict"
           description: |
             It is revoked (`key_revoked`), not yet activated (`key_pending`),
-            or was issued by Keera Agents (`agents_key`).
+            expired and rotated by a member (`key_expired`), or was issued by
+            Keera Agents (`agents_key`).
         "501":
           $ref: "#/components/responses/Disabled"
           description: A subscription key, while this deployment takes no Claude subscriptions (`subscriptions_disabled`).

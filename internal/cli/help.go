@@ -340,9 +340,10 @@ var commands = []command{
 				prose: "For a key that has leaked, and for the ordinary rotation a policy asks " +
 					"for. A name finds the working key with that name; an id out of " +
 					"'keera key list' names a key outright. --name and --expires override " +
-					"what it had; everything else, including its project and its guardrails, " +
-					"is carried over. A member may rotate their own keys, but not choose " +
-					"--expires: the new key keeps the old one's lifetime.\n\n" +
+					"what it had; everything else, including its project, its guardrails and " +
+					"what it spent, is carried over. A member may rotate their own keys, " +
+					"but not choose --expires: the new key ends when the old one would " +
+					"have.\n\n" +
 					"The old key stops working at once, so it asks for the key's name first; " +
 					"--yes skips that, for a script.",
 			},

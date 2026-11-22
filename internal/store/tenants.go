@@ -674,13 +674,16 @@ func (s *Store) ActivateKey(ctx context.Context, orgID, id, name string, hash []
 var ErrIssuedKey = errors.New("store: the key was issued by an app")
 
 // RotateKey replaces the key oldID with next in one transaction: next gets the
-// old key's organisation, project, person, kind and guardrails, and the old
-// key is revoked. An empty next.Name keeps the old name. A nil next.ExpiresAt
-// keeps the old key's lifetime, counted from now.
+// old key's organisation, project, person, kind, guardrails and what it spent
+// in the open day and month, and the old key is revoked. An empty next.Name
+// keeps the old name. A nil next.ExpiresAt keeps the old key's lifetime,
+// counted from now, or with keepDate its date, so a member cannot make their
+// key last longer by rotating it.
 //
 // Doing it in steps could leave both keys live, or the new one without the
 // old one's limits.
 func (s *Store) RotateKey(ctx context.Context, orgID, oldID string, next KeyInfo, hash []byte,
+	keepDate bool,
 ) (KeyInfo, error) {
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var old KeyInfo
@@ -708,13 +711,29 @@ func (s *Store) RotateKey(ctx context.Context, orgID, oldID string, next KeyInfo
 		// should not get a replacement that lapses in a week.
 		if next.ExpiresAt == nil && old.ExpiresAt != nil {
 			t := time.Now().Add(max(old.ExpiresAt.Sub(old.CreatedAt).Round(time.Hour), time.Hour))
+			if keepDate {
+				t = *old.ExpiresAt
+			}
 			next.ExpiresAt = &t
+		}
+		if keepDate && next.ExpiresAt != nil && !next.ExpiresAt.After(time.Now()) {
+			return policy.ErrKeyExpired
 		}
 
 		if next, err = insertKey(ctx, tx, next, hash); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, copyKeyGuardrailSQL, oldID, next.ID); err != nil {
+			return err
+		}
+		// Spend counts by key id, so without this a new key would start its
+		// budgets and quotas again from zero.
+		now := time.Now()
+		if _, err := tx.Exec(ctx, `INSERT INTO spend (scope_type, scope_id, period, period_start, micros)
+			SELECT scope_type, $2 || substr(scope_id, length($1) + 1), period, period_start, micros
+			FROM spend WHERE scope_type = 'key' AND `+scopeOwner+` = $1
+			  AND ((period = 'day' AND period_start = $3) OR (period = 'month' AND period_start = $4))`,
+			oldID, next.ID, policy.PeriodDay.Start(now), policy.PeriodMonth.Start(now)); err != nil {
 			return err
 		}
 		_, err = tx.Exec(ctx, "UPDATE api_keys SET revoked_at = now() WHERE id = $1", oldID)
