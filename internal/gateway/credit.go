@@ -111,24 +111,28 @@ func (c *call) most(b *body) (t policy.Tokens, prompt int) {
 }
 
 // billUnreported bills a request on the deployment's key that came back
-// without a usage record. See mostTokens. A model priced by the minute that
-// reports tokens but no length is billed its longest audio, or it would be
-// free.
+// without a usage record. See mostTokens. A stream cut before its output
+// count keeps its exact input, and its output is billed the ceiling. A model
+// priced by the minute that reports tokens but no length is billed its
+// longest audio, or it would be free.
 func (s *Server) billUnreported(c *call, b *body) {
 	if !c.model.PlatformKey {
 		return
 	}
 	noTokens := !c.ev.Tokens().Any()
 	noAudio := c.model.AudioMicrosPerMinute > 0 && c.ev.AudioMillis == 0
-	if !noTokens && !noAudio {
+	if !noTokens && !noAudio && !c.outputOpen {
 		return
 	}
 	t, _ := c.most(c.sent(b))
-	if noTokens {
+	switch {
+	case noTokens:
 		c.ev.InputTokens, c.ev.OutputTokens = t.Input, t.Output
+	case c.outputOpen:
+		c.ev.OutputTokens = max(c.ev.OutputTokens, t.Output)
 	}
 	c.ev.AudioMillis, c.ev.Estimated = t.AudioMillis, true
-	s.log.Warn("a request on the deployment's key came back without a usage record; "+
+	s.log.Warn("a request on the deployment's key came back without a whole usage record; "+
 		"it is billed the most it may have used", "model", c.alias,
 		httpx.LogIDs(c.r.Context()))
 }

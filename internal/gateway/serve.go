@@ -57,6 +57,10 @@ type call struct {
 	// prompts are the system prompts of the router steps passed, in order.
 	prompts []string
 
+	// outputOpen says a stream was cut before its output count arrived, and
+	// the provider may have written more than was streamed.
+	outputOpen bool
+
 	decision routeDecision
 	// earlier is what the route steps before the last one in a router
 	// spent. The last one's is decision.
@@ -1117,6 +1121,9 @@ func (s *Server) relayStream(c *call, resp *http.Response, answered time.Time, p
 	if stats.usage != nil {
 		setUsage(&c.ev, stats.usage)
 		c.ev.Estimated = stats.partial
+		// Cut off without the provider saying it stopped, the answer may have
+		// gone on. See billUnreported.
+		c.outputOpen = stats.partial && !stoppedWriting(stats.cut)
 		return
 	}
 	// On the deployment's key, a missing record is billed the most the call

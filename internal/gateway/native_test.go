@@ -558,6 +558,47 @@ func TestANativeStreamCutShortKeepsItsInputCount(t *testing.T) {
 	}
 }
 
+// On the deployment's key, a stream cut before its output count is billed its
+// ceiling: the provider may have written on after the cut. One the provider
+// ended with an error stopped there, so the streamed estimate stands.
+func TestANativeStreamCutShortOnTheDeploymentsKeyIsBilledItsCeiling(t *testing.T) {
+	for _, tc := range []struct {
+		name, end string
+		want      int
+	}{
+		{"cut", "", 64},
+		{"failed", `data: {"type":"error","error":{"type":"overloaded_error","message":"busy"}}` + "\n\n", 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, `data: {"type":"message_start","message":{"model":"m",`+
+					`"usage":{"input_tokens":400,"output_tokens":1}}}`+"\n\n")
+				for range 3 {
+					_, _ = io.WriteString(w, `data: {"type":"content_block_delta","index":0,`+
+						`"delta":{"type":"text_delta","text":"x"}}`+"\n\n")
+				}
+				_, _ = io.WriteString(w, tc.end)
+			}
+			h, _ := providerHarness(t, "anthropic", "claude-opus-5", backend, nil)
+			onPlatformKey(h, "keera-frontier")
+
+			resp := h.post(t, "/v1/messages", `{"model":"keera-frontier","max_tokens":64,"stream":true,`+
+				`"messages":[{"role":"user","content":"hi"}]}`)
+			_, _ = io.ReadAll(resp.Body)
+
+			ev := h.sink.last(t)
+			if ev.InputTokens != 400 || ev.OutputTokens != tc.want || !ev.Estimated {
+				t.Errorf("tokens = %d in, %d out, estimated %v; want the exact 400 in, %d out, "+
+					"marked as an estimate", ev.InputTokens, ev.OutputTokens, ev.Estimated, tc.want)
+			}
+			if len(ev.Bills) != 1 || ev.Bills[0].OutputTokens != tc.want {
+				t.Errorf("bills = %+v, want %d output tokens", ev.Bills, tc.want)
+			}
+		})
+	}
+}
+
 func TestANativeStreamDoesNotCountMessageStartAsTheFirstToken(t *testing.T) {
 	// Anthropic opens the message, and pings, before the model writes.
 	synctest.Test(t, func(t *testing.T) {

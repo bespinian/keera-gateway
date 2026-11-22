@@ -69,12 +69,23 @@ func (h *heldText) add(n int) error {
 	return nil
 }
 
-var errAnswerTooLarge = streamFailure{"the model's answer is larger than the gateway holds " +
+var errAnswerTooLarge = streamFailure{msg: "the model's answer is larger than the gateway holds " +
 	"(KEERA_MAX_RESPONSE_BYTES)"}
 
 // streamFailure is an upstream stream that ended without a whole answer. Its
 // message is safe to show the client.
-type streamFailure struct{ msg string }
+type streamFailure struct {
+	msg string
+	// reported says the upstream sent an error, so it stopped writing there.
+	reported bool
+}
+
+// stoppedWriting says the upstream itself ended the answer with an error, so
+// nothing was written after what was streamed.
+func stoppedWriting(cut error) bool {
+	f, ok := errors.AsType[streamFailure](cut)
+	return ok && f.reported
+}
 
 func (f streamFailure) Error() string { return f.msg }
 
@@ -93,9 +104,9 @@ func (c *chatChunks) failure() error { return endedFailure(c.upstreamErr, c.fini
 func endedFailure(upstreamErr string, ended bool) error {
 	switch {
 	case upstreamErr != "":
-		return streamFailure{"the model failed while answering: " + upstreamErr}
+		return streamFailure{msg: "the model failed while answering: " + upstreamErr, reported: true}
 	case !ended:
-		return streamFailure{"the model's answer stopped before it was finished"}
+		return streamFailure{msg: "the model's answer stopped before it was finished"}
 	}
 	return nil
 }
