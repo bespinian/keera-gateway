@@ -643,25 +643,27 @@ func (s *Server) setup(w http.ResponseWriter, r *http.Request, p *authn.Principa
 const maxWindow = 10 * 366 * 24 * time.Hour
 
 // timeRange resolves a window from either a pair of timestamps or a duration.
-// The default is the last 30 days, the window of a monthly invoice and budget.
+// The default is the 30 days before 'to', the window of a monthly invoice and
+// budget, so a window that ends in the past needs no 'from'.
 func timeRange(fromStr, toStr, since string) (from, to time.Time, err error) {
-	to = time.Now()
+	now := time.Now()
+	to = now
+	if toStr != "" {
+		if to, err = time.Parse(time.RFC3339, toStr); err != nil {
+			return from, to, errors.New("'to' must be an RFC3339 timestamp")
+		}
+	}
 	from = to.AddDate(0, 0, -30)
 	if since != "" {
 		d, perr := time.ParseDuration(since)
 		if perr != nil || d <= 0 {
 			return from, to, errors.New("'since' must be a positive duration such as 24h")
 		}
-		from = to.Add(-d)
+		from = now.Add(-d)
 	}
 	if fromStr != "" {
 		if from, err = time.Parse(time.RFC3339, fromStr); err != nil {
 			return from, to, errors.New("'from' must be an RFC3339 timestamp")
-		}
-	}
-	if toStr != "" {
-		if to, err = time.Parse(time.RFC3339, toStr); err != nil {
-			return from, to, errors.New("'to' must be an RFC3339 timestamp")
 		}
 	}
 	if !from.Before(to) {

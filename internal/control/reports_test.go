@@ -344,3 +344,14 @@ func TestAReportWindowIsAtMostTenYears(t *testing.T) {
 		}
 	}
 }
+
+// A window that ends in the past needs no 'from': it is the 30 days before.
+func TestAWindowWithOnlyToEndsThere(t *testing.T) {
+	from, to, err := timeRange("", "2025-01-31T00:00:00Z", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC); !from.Equal(want) || !to.Equal(want.AddDate(0, 0, 30)) {
+		t.Errorf("window = %v to %v, want the 30 days before 2025-01-31", from, to)
+	}
+}
