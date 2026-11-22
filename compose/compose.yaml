@@ -24,7 +24,8 @@ services:
     volumes:
       # ",z" relabels for SELinux hosts; harmless elsewhere.
       - ./models.yaml:/etc/keera/models.yaml:ro,z
-    # Every setting in .env reaches the gateway. https://docs.keera.ch/operate/settings/ explains them.
+    # Every setting in .env reaches the gateway. See
+    # https://docs.keera.ch/operate/settings/.
     env_file: .env
     # These win over .env.
     environment:

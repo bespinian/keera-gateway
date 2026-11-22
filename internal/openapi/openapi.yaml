@@ -2045,18 +2045,9 @@ paths:
           in: query
           description: '"1" adds `stats`, `from` and `to`.'
           schema: { type: string, enum: ["1"] }
-        - name: from
-          in: query
-          description: Start of the stats window. Defaults to 30 days ago.
-          schema: { type: string, format: date-time }
-        - name: to
-          in: query
-          description: End of the stats window. Defaults to now.
-          schema: { type: string, format: date-time }
-        - name: since
-          in: query
-          description: The window as a duration back from now, such as `24h`.
-          schema: { type: string }
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Since"
       responses:
         "200":
           description: The organisation's filters.
@@ -2262,18 +2253,9 @@ paths:
           required: true
           schema: { type: string }
         - $ref: "#/components/parameters/OrgID"
-        - name: from
-          in: query
-          description: Defaults to 30 days ago.
-          schema: { type: string, format: date-time }
-        - name: to
-          in: query
-          description: Defaults to now.
-          schema: { type: string, format: date-time }
-        - name: since
-          in: query
-          description: The window as a duration back from now, such as `24h`.
-          schema: { type: string }
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Since"
       responses:
         "200":
           description: The report.
@@ -2314,18 +2296,9 @@ paths:
           in: query
           description: '"1" adds `stats`, `from` and `to`.'
           schema: { type: string, enum: ["1"] }
-        - name: from
-          in: query
-          description: Start of the stats window. Defaults to 30 days ago.
-          schema: { type: string, format: date-time }
-        - name: to
-          in: query
-          description: End of the stats window. Defaults to now.
-          schema: { type: string, format: date-time }
-        - name: since
-          in: query
-          description: The window as a duration back from now, such as `24h`.
-          schema: { type: string }
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Since"
       responses:
         "200":
           description: The organisation's routers.
@@ -2529,18 +2502,9 @@ paths:
           required: true
           schema: { type: string }
         - $ref: "#/components/parameters/OrgID"
-        - name: from
-          in: query
-          description: Defaults to 30 days ago.
-          schema: { type: string, format: date-time }
-        - name: to
-          in: query
-          description: Defaults to now.
-          schema: { type: string, format: date-time }
-        - name: since
-          in: query
-          description: The window as a duration back from now, such as `24h`.
-          schema: { type: string }
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Since"
       responses:
         "200":
           description: The report.
@@ -2585,18 +2549,9 @@ paths:
           in: query
           description: '"1" adds `stats`, `from` and `to`.'
           schema: { type: string, enum: ["1"] }
-        - name: from
-          in: query
-          description: Start of the stats window. Defaults to 30 days ago.
-          schema: { type: string, format: date-time }
-        - name: to
-          in: query
-          description: End of the stats window. Defaults to now.
-          schema: { type: string, format: date-time }
-        - name: since
-          in: query
-          description: The window as a duration back from now, such as `24h`.
-          schema: { type: string }
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Since"
       responses:
         "200":
           description: The organisation's models.
@@ -2972,18 +2927,9 @@ paths:
         most called first, with no paging.
       parameters:
         - $ref: "#/components/parameters/OrgID"
-        - name: from
-          in: query
-          description: Defaults to 30 days ago.
-          schema: { type: string, format: date-time }
-        - name: to
-          in: query
-          description: Defaults to now.
-          schema: { type: string, format: date-time }
-        - name: since
-          in: query
-          description: The window as a duration back from now, such as `24h`.
-          schema: { type: string }
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Since"
         - name: project_id
           in: query
           schema: { type: string }
@@ -3224,18 +3170,9 @@ paths:
         own. The window is widened to whole days. The operator key has no
         keys, so it gets an empty list and `anonymous`.
       parameters:
-        - name: from
-          in: query
-          description: Defaults to 30 days ago.
-          schema: { type: string, format: date-time }
-        - name: to
-          in: query
-          description: Defaults to now.
-          schema: { type: string, format: date-time }
-        - name: since
-          in: query
-          description: The window as a duration back from now, such as `24h`.
-          schema: { type: string }
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Since"
       responses:
         "200":
           description: The clients.
@@ -3320,25 +3257,9 @@ paths:
       description: The dashboard in one call. Narrowed to a project, key, person or model, it is that thing's own screen. A member sees the whole organisation's, like an administrator.
       parameters:
         - $ref: "#/components/parameters/OrgID"
-        - name: from
-          in: query
-          description: "Start of the window. Default: 30 days before `to`."
-          schema:
-            type: string
-            format: date-time
-        - name: to
-          in: query
-          description: "End of the window. Default: now."
-          schema:
-            type: string
-            format: date-time
-        - name: since
-          in: query
-          description: The window as a duration back from now, such as `24h`. `from` wins over it.
-          schema:
-            type: string
-            examples:
-              - 24h
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Since"
         - name: project_id
           in: query
           description: Only this project's requests.
@@ -3399,25 +3320,9 @@ paths:
       description: "The deployment as a picture: the clients that called, every model of the organisation, and the traffic between them. A member sees only the traffic of their own keys."
       parameters:
         - $ref: "#/components/parameters/OrgID"
-        - name: from
-          in: query
-          description: "Start of the window. Default: 30 days before `to`."
-          schema:
-            type: string
-            format: date-time
-        - name: to
-          in: query
-          description: "End of the window. Default: now."
-          schema:
-            type: string
-            format: date-time
-        - name: since
-          in: query
-          description: The window as a duration back from now, such as `24h`. `from` wins over it.
-          schema:
-            type: string
-            examples:
-              - 24h
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Since"
       responses:
         "200":
           description: OK
@@ -3482,25 +3387,9 @@ paths:
       description: Requests, tokens and cost per group. Over more than two days it counts whole days, and `from` and `to` say so. A member sees the whole organisation's, like an administrator.
       parameters:
         - $ref: "#/components/parameters/OrgID"
-        - name: from
-          in: query
-          description: "Start of the window. Default: 30 days before `to`."
-          schema:
-            type: string
-            format: date-time
-        - name: to
-          in: query
-          description: "End of the window. Default: now."
-          schema:
-            type: string
-            format: date-time
-        - name: since
-          in: query
-          description: The window as a duration back from now, such as `24h`. `from` wins over it.
-          schema:
-            type: string
-            examples:
-              - 24h
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Since"
         - name: group_by
           in: query
           description: What each row is. Default `model`.
@@ -3609,25 +3498,9 @@ paths:
           description: Only this action, such as `billing.topup`.
           schema:
             type: string
-        - name: from
-          in: query
-          description: "Start of the window. Default: 30 days before `to`."
-          schema:
-            type: string
-            format: date-time
-        - name: to
-          in: query
-          description: "End of the window. Default: now."
-          schema:
-            type: string
-            format: date-time
-        - name: since
-          in: query
-          description: The window as a duration back from now, such as `24h`. `from` wins over it.
-          schema:
-            type: string
-            examples:
-              - 24h
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Since"
         - name: limit
           in: query
           description: Entries per page. Default 100, at most 5000.
@@ -3692,25 +3565,9 @@ paths:
       description: One row per inference request, whatever happened to it. An administrator reads the whole organisation's; a member only the requests made with their own keys.
       parameters:
         - $ref: "#/components/parameters/OrgID"
-        - name: from
-          in: query
-          description: "Start of the window. Default: 30 days before `to`."
-          schema:
-            type: string
-            format: date-time
-        - name: to
-          in: query
-          description: "End of the window. Default: now."
-          schema:
-            type: string
-            format: date-time
-        - name: since
-          in: query
-          description: The window as a duration back from now, such as `24h`. `from` wins over it.
-          schema:
-            type: string
-            examples:
-              - 24h
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Since"
         - name: project_id
           in: query
           description: Only this project's requests.
@@ -3942,25 +3799,9 @@ paths:
       description: The request log grouped into tasks. A member sees only the sessions of their own keys. See https://docs.keera.ch/monitor/requests-and-sessions/.
       parameters:
         - $ref: "#/components/parameters/OrgID"
-        - name: from
-          in: query
-          description: "Start of the window. Default: 30 days before `to`."
-          schema:
-            type: string
-            format: date-time
-        - name: to
-          in: query
-          description: "End of the window. Default: now."
-          schema:
-            type: string
-            format: date-time
-        - name: since
-          in: query
-          description: The window as a duration back from now, such as `24h`. `from` wins over it.
-          schema:
-            type: string
-            examples:
-              - 24h
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Since"
         - name: project_id
           in: query
           description: Only this project's requests.
@@ -7534,6 +7375,32 @@ components:
         The panel's sign-in. A request that changes something must also send
         the `X-CSRF-Token` header, with the token from `GET /control/v1/me`.
   parameters:
+    From:
+      name: from
+      in: query
+      description: |
+        Start of the window, at most 10 years before `to`. Default: 30 days
+        before `to`.
+      schema:
+        type: string
+        format: date-time
+    To:
+      name: to
+      in: query
+      description: "End of the window. Default: now."
+      schema:
+        type: string
+        format: date-time
+    Since:
+      name: since
+      in: query
+      description: |
+        The window as a duration back from now, such as `24h`, in place of
+        `from`. `from` wins over it.
+      schema:
+        type: string
+        examples:
+          - 24h
     OrgID:
       name: org_id
       in: query

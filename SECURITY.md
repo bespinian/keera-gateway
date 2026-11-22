@@ -26,7 +26,7 @@ To check a download:
 
 ```sh
 sha256sum --check --ignore-missing SHA256SUMS
-gh attestation verify keera_v0.1.0_linux_amd64.tar.gz --repo bespinian/keera-gateway \
+gh attestation verify keera_vX.Y.Z_linux_amd64.tar.gz --repo bespinian/keera-gateway \
   --signer-workflow bespinian/keera-gateway/.github/workflows/release-build.yml
 ```
 
