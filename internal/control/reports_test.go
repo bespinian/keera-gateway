@@ -325,3 +325,22 @@ func TestParseStatusReadsAClassAsWellAsACode(t *testing.T) {
 		}
 	}
 }
+
+// A chart holds a point per day in memory, so a window is kept to ten years.
+func TestAReportWindowIsAtMostTenYears(t *testing.T) {
+	for _, tc := range []struct {
+		from, to, since string
+		ok              bool
+	}{
+		{"2020-01-01T00:00:00Z", "2029-12-31T00:00:00Z", "", true},
+		{"", "", "8760h", true},
+		{"0001-01-01T00:00:00Z", "9999-12-31T00:00:00Z", "", false},
+		{"2000-01-01T00:00:00Z", "2026-01-01T00:00:00Z", "", false},
+		{"", "", "1000000h", false},
+	} {
+		_, _, err := timeRange(tc.from, tc.to, tc.since)
+		if (err == nil) != tc.ok {
+			t.Errorf("from %q to %q since %q: error %v", tc.from, tc.to, tc.since, err)
+		}
+	}
+}

@@ -638,6 +638,10 @@ func (s *Server) setup(w http.ResponseWriter, r *http.Request, p *authn.Principa
 	httpx.WriteJSON(w, http.StatusOK, st)
 }
 
+// maxWindow is the longest window a report covers. A chart has a point per
+// day, all held in memory, so a window of millennia could exhaust the server.
+const maxWindow = 10 * 366 * 24 * time.Hour
+
 // timeRange resolves a window from either a pair of timestamps or a duration.
 // The default is the last 30 days, the window of a monthly invoice and budget.
 func timeRange(fromStr, toStr, since string) (from, to time.Time, err error) {
@@ -662,6 +666,9 @@ func timeRange(fromStr, toStr, since string) (from, to time.Time, err error) {
 	}
 	if !from.Before(to) {
 		return from, to, errors.New("'from' must be before 'to'")
+	}
+	if to.Sub(from) > maxWindow {
+		return from, to, errors.New("the window may be at most 10 years long")
 	}
 	return from, to, nil
 }
