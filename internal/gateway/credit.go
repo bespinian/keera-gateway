@@ -206,19 +206,30 @@ func (c *call) outputTokens(b *body) int {
 	return outputCeiling(b)
 }
 
+// mostAnswers caps how many answers a request is held for, so the hold cannot
+// overflow. It is OpenAI's own limit on `n`.
+const mostAnswers = 128
+
+// outputCeiling is the ceiling of each answer times the answers asked for.
+// `n` and `best_of` ask for several, and the provider bills every one.
 func outputCeiling(b *body) int {
-	asked := 0
+	asked, answers := 0, 1
 	if b != nil {
 		for _, field := range []string{"max_tokens", "max_completion_tokens", "max_output_tokens"} {
 			if v, ok := b.ceiling(field); ok && v > 0 {
 				asked = max(asked, int(min(v, mostOutputTokens)))
 			}
 		}
+		for _, field := range []string{"n", "best_of"} {
+			if v, ok := b.ceiling(field); ok && v > 1 {
+				answers = max(answers, int(min(v, mostAnswers)))
+			}
+		}
 	}
 	if asked == 0 {
 		asked = unstatedOutputTokens
 	}
-	return asked
+	return asked * answers
 }
 
 // checkCredit says why a check may not call these models, or "" if it may. A

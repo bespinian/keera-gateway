@@ -229,6 +229,11 @@ func TestOutputCeiling(t *testing.T) {
 		{`{"max_output_tokens":700,"max_tokens":500}`, 700},
 		{`{"max_completion_tokens":"900"}`, 900},
 		{`{"max_tokens":1e300}`, mostOutputTokens},
+		{`{"max_completion_tokens":1000,"n":4}`, 4000},
+		{`{"max_tokens":1000,"n":2,"best_of":5}`, 5000},
+		{`{"n":3}`, 3 * unstatedOutputTokens},
+		{`{"max_tokens":1000,"n":1e9}`, 1000 * mostAnswers},
+		{`{"max_tokens":1000,"n":0}`, 1000},
 	} {
 		b, err := parseBody([]byte(tc.body))
 		if err != nil {
