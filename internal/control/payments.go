@@ -30,6 +30,9 @@ type Payments struct {
 	VATBP int64
 }
 
+// recentPayments is how many payments the account shows.
+const recentPayments = 10
+
 // The bounds of one payment, in CHF micros. The upper catches a typo before a
 // card does.
 const (
@@ -80,7 +83,8 @@ func (s *Server) creditAccount(w http.ResponseWriter, r *http.Request, p *authn.
 		s.fail(w, err)
 		return
 	}
-	list, err := s.st.ListPayments(r.Context(), orgID, "", 20)
+	// The panel shows these and pages back through listPayments for older ones.
+	list, err := s.st.ListPayments(r.Context(), orgID, "", recentPayments)
 	if err != nil {
 		s.fail(w, err)
 		return

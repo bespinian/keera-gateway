@@ -25,6 +25,7 @@ import {
   banner,
   csvButton,
   capitalise,
+  loadMore,
 } from "../ui.js";
 
 // Keera Agents' items, in the order its table shows them.
@@ -356,6 +357,10 @@ function period(p) {
 
 const stateTones = { paid: "good", pending: "warn", failed: "bad" };
 
+// The account answers with the latest 10 payments; older ones load in pages.
+const recentPayments = 10;
+const paymentsPage = 50;
+
 async function creditSection(ctx) {
   const res = await api.creditAccount(ctx.orgID);
   if (!res.payments) return null;
@@ -599,8 +604,28 @@ async function creditSection(ctx) {
     failed,
     actions,
     chargesTable(ctx, charges, a),
-    sectionHead("Payments", "the latest 20"),
+    sectionHead("Payments"),
     list,
+    olderPayments(ctx, recent, list),
+  );
+}
+
+// olderPayments adds pages of older payments to the list, for a receipt from
+// long ago. A short first page has nothing older.
+function olderPayments(ctx, recent, list) {
+  if (recent.length < recentPayments) return null;
+  let before = recent[recent.length - 1].id;
+  return loadMore(
+    paymentsPage,
+    async () => {
+      const next = await api.payments(ctx.orgID, before, paymentsPage);
+      const rows = next.data || [];
+      recent.push(...rows);
+      list.redraw();
+      before = next.next_before;
+      return rows.length;
+    },
+    "That is every payment.",
   );
 }
 

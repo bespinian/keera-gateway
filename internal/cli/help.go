@@ -763,7 +763,13 @@ var commands = []command{
 			},
 			{
 				name: "payments", summary: "the payments, newest first",
-				flags: []string{"limit", "json"},
+				flags: []string{"limit", "before", "json"},
+				prose: "--before goes back further: it prints the payments older than the one " +
+					"given. A full page ends with the command for the next one.",
+				examples: []string{
+					"keera billing payments --limit 100",
+					"keera billing payments --before pay_06c1k2rt8g3m4n5p6q7r8s9t0v",
+				},
 			},
 			{
 				name: "receipt", args: "<payment>",

@@ -1883,6 +1883,35 @@ func TestBillingForgetCardConfirms(t *testing.T) {
 	f.request("DELETE", "/v1/billing/account/card")
 }
 
+// A full page of payments ends with the command for older ones, which sends
+// --before on.
+func TestBillingPaymentsPagesBack(t *testing.T) {
+	payment := func(id string) map[string]any {
+		return map[string]any{"id": id, "org_id": "org_1", "state": "paid", "amount_micros": 100_000_000}
+	}
+	page := map[string]any{
+		"GET /v1/billing/payments": map[string]any{
+			"data": []any{payment("pay_2"), payment("pay_1")}, "next_before": "pay_1",
+		},
+	}
+	newFakeControl(t, page)
+	t.Setenv("KEERA_ORG", "org_1")
+
+	got := capture(t, "billing", "payments", "--limit", "2")
+	if !strings.Contains(got, "keera billing payments --before pay_1") {
+		t.Errorf("a full page does not say how to see older payments:\n%s", got)
+	}
+	if got := capture(t, "billing", "payments", "--limit", "3"); strings.Contains(got, "--before") {
+		t.Errorf("a short page points to older payments:\n%s", got)
+	}
+
+	f := newFakeControl(t, page)
+	capture(t, "billing", "payments", "--before", "pay_1")
+	if q := f.request("GET", "/v1/billing/payments").query; !strings.Contains(q, "before=pay_1") {
+		t.Errorf("the query %q does not send before=pay_1", q)
+	}
+}
+
 func stdin(t *testing.T, text string) {
 	t.Helper()
 	r, w, err := os.Pipe()

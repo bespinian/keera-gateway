@@ -4127,7 +4127,7 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Payment"
-                    description: The latest 20 payments, newest first.
+                    description: The latest 10 payments, newest first. `GET /control/v1/billing/payments` lists older ones.
                   charges:
                     type: array
                     items:

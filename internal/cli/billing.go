@@ -26,6 +26,7 @@ type billingRun struct {
 	saveCard bool
 	note     string
 	limit    int
+	before   string
 	output   string
 	name     string
 	every    string
@@ -55,6 +56,8 @@ func billingCmd(ctx context.Context, args []string) error {
 	r.fs.StringVar(&r.note, "note", "", "why, shown in the organisation's payments")
 	r.reword("grant", "note", "why, shown in the organisation's payments (required)")
 	r.fs.IntVar(&r.limit, "limit", reportLimit, limitUsage)
+	r.reword("payments", "limit", fmt.Sprintf("how many to print, up to %d", paymentsMax))
+	r.fs.StringVar(&r.before, "before", "", "print the payments older than this one, by its id")
 	r.fs.StringVar(&r.output, "output", "",
 		"the file to save it to, or - for standard output (default: keera-receipt-<date>-<payment>.pdf)")
 	if done, err := r.parse(); done {
@@ -564,13 +567,16 @@ func (r *billingRun) invoiced(ctx context.Context) error {
 	})
 }
 
+// paymentsMax is the most payments the server lists at once.
+const paymentsMax = 500
+
 func (r *billingRun) payments(ctx context.Context) error {
 	org, err := orgIfGiven(ctx, r.c, r.org)
 	if err != nil {
 		return err
 	}
 	q := url.Values{}
-	setIfGiven(q, map[string]string{"org_id": org, "limit": strconv.Itoa(r.limit)})
+	setIfGiven(q, map[string]string{"org_id": org, "limit": strconv.Itoa(r.limit), "before": r.before})
 	payments, err := list[store.Payment](ctx, r.c, "/v1/billing/payments?"+q.Encode())
 	if err != nil {
 		return err
@@ -586,7 +592,14 @@ func (r *billingRun) payments(ctx context.Context) error {
 			names[o.ID] = o.Name
 		}
 	}
-	return out(r.asJSON, payments, func(w *table) { printPayments(w, payments, names) })
+	return out(r.asJSON, payments, func(w *table) {
+		printPayments(w, payments, names)
+		// A full page may have older payments behind it.
+		if n := len(payments); n > 0 && (n == r.limit || n == paymentsMax) {
+			_, _ = fmt.Fprintf(w, "\nOlder payments: %s\n",
+				style.cmd("keera billing payments --before "+payments[len(payments)-1].ID))
+		}
+	})
 }
 
 // receipt saves the invoice PostFinance renders for a paid payment.

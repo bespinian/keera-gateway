@@ -318,6 +318,9 @@ export const api = {
       amount_micros: amountMicros,
       save_card: saveCard,
     }),
+  // Older payments than the account shows: before is a payment id.
+  payments: (orgID, before, limit) =>
+    get("/v1/billing/payments" + query({ org_id: orgID, before, limit })),
   // PostFinance's invoice, as a PDF.
   receipt: async (id) => {
     const res = await request(
