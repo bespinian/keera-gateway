@@ -529,38 +529,14 @@ func (s *Server) admit(c *call, b *body) bool {
 }
 
 func (s *Server) admitted(c *call, b *body) bool {
-	// Every call, whichever model: the charge pays for the organisation's
-	// use of the deployment, not for one model.
-	if err := s.budgets.ChargesPaid(c.res.Key.OrgID, c.now); err != nil {
-		s.refuse(c, refusal{
-			status: http.StatusPaymentRequired,
-			typ:    "insufficient_quota", code: "charge_due",
-			msg:    err.Error(),
-			advise: true,
-		})
-		return false
-	}
-	if why := s.filterOutside(c.res, s.callFilters(c)); why != "" {
-		s.refuse(c, locationRefusal(why))
-		return false
-	}
-	if ref, ok := s.checkRates(c.res.Scopes, c.now); !ok {
-		s.refuse(c, ref)
-		return false
-	}
-	if ref, ok := s.checkQuotas(c.res.Quotas, c.now); !ok {
+	if ref, ok := s.checkAccess(c.res, s.callFilters(c), c.now); !ok {
 		s.refuse(c, ref)
 		return false
 	}
 	if s.billed(c) {
 		var err error
 		if c.held, err = s.budgets.HoldCredit(c.res.Key.OrgID, s.creditHold(c, c.sent(b))); err != nil {
-			s.refuse(c, refusal{
-				status: http.StatusPaymentRequired,
-				typ:    "insufficient_quota", code: "credit_exhausted",
-				msg:    err.Error(),
-				advise: true,
-			})
+			s.refuse(c, paymentRefusal("credit_exhausted", err))
 			return false
 		}
 	}
@@ -587,14 +563,43 @@ func (s *Server) checkBudgets(c *call, scopes []policy.Scope) (refusal, bool) {
 		s.log.Error("unexpected budget error", "error", err,
 			httpx.LogIDs(c.r.Context()))
 	}
-	// 402 rather than 429: a client that reads "slow down" would retry against
-	// a limit that does not lift until the period rolls over.
+	return paymentRefusal("budget_exceeded", err), false
+}
+
+// checkAccess runs the checks every model call and tool call passes, in this
+// order. Like checkRates, it only decides.
+func (s *Server) checkAccess(res *policy.Resolved, filters []string, now time.Time) (refusal, bool) {
+	// The charge pays for the organisation's use of the deployment, not for
+	// one model.
+	if err := s.budgets.ChargesPaid(res.Key.OrgID, now); err != nil {
+		return paymentRefusal("charge_due", err), false
+	}
+	if why := s.filterOutside(res, filters); why != "" {
+		return locationRefusal(why), false
+	}
+	if ref, ok := s.checkRates(res.Scopes, now); !ok {
+		return ref, false
+	}
+	return s.checkQuotas(res.Quotas, now)
+}
+
+// paymentRefusal is 402 rather than 429: a client that reads "slow down" would
+// retry against a limit that does not lift by waiting.
+func paymentRefusal(code string, err error) refusal {
 	return refusal{
 		status: http.StatusPaymentRequired,
-		typ:    "insufficient_quota", code: "budget_exceeded",
+		typ:    "insufficient_quota", code: code,
 		msg:    err.Error(),
 		advise: true,
-	}, false
+	}
+}
+
+func unsupportedParameter(msg string) refusal {
+	return refusal{
+		status: http.StatusBadRequest,
+		typ:    "invalid_request_error", code: "unsupported_parameter",
+		msg: msg,
+	}
 }
 
 // useRoute lets a route step choose the model. It runs after the budget
@@ -681,11 +686,7 @@ func (s *Server) useNative(c *call, b *body) (*body, bool) {
 			}
 		}
 		if len(kept) == 0 {
-			s.refuse(c, refusal{
-				status: http.StatusBadRequest,
-				typ:    "invalid_request_error", code: "unsupported_parameter",
-				msg: why + ". The model '" + c.alias + "' is not one of them",
-			})
+			s.refuse(c, unsupportedParameter(why+". The model '"+c.alias+"' is not one of them"))
 			return nil, false
 		}
 		c.chain = kept
@@ -712,11 +713,7 @@ func (s *Server) useNative(c *call, b *body) (*body, bool) {
 		return m.PlatformKey && c.sendsNative(m)
 	}) {
 		if why := d.onKey(c.native); why != "" {
-			s.refuse(c, refusal{
-				status: http.StatusBadRequest,
-				typ:    "invalid_request_error", code: "unsupported_parameter",
-				msg: why,
-			})
+			s.refuse(c, unsupportedParameter(why))
 			return nil, false
 		}
 	}
