@@ -48,7 +48,7 @@ import { orgNameOf } from "./orgs.js";
 import { facts, routerLinks } from "./detail.js";
 import { usedBy } from "./router-tree.js";
 import { tryFilter } from "./try.js";
-import { canDecide } from "./route-step.js";
+import { canDecide, deciderHint, readerSelect } from "./route-step.js";
 
 const DELETE_WARNING =
   "A filter still used by a guardrail or a router cannot be " +
@@ -435,7 +435,6 @@ export async function filterDetailView(ctx) {
       ["/filters", "Filters"],
       [
         f ? modePills(f) : pill(`Deleted from ${orgNameOf(ctx)}`, "warn"),
-        f && f.model ? pill("Deciding model: " + f.model) : null,
       ],
       [
         rangePicker(ctx, since),
@@ -702,17 +701,21 @@ function detailBanners(rep, f) {
         { style },
         h(
           "div",
-          {},
-          h("strong", {}, "This filter is in shadow."),
-          " It runs but enforces nothing: the refusals below did not " +
-            "happen, the rewrites were discarded, and every request reached " +
-            "the model as sent.",
-        ),
-        h(
-          "div",
-          { class: "hint" },
-          "The cost is real: the generation runs and is charged. When the " +
-            "numbers look right, edit the filter and turn shadow off.",
+          { class: "stack" },
+          h(
+            "div",
+            {},
+            h("strong", {}, "This filter is in shadow."),
+            " It runs but enforces nothing: the refusals below did not " +
+              "happen, the rewrites were discarded, and every request " +
+              "reached the model as sent.",
+          ),
+          h(
+            "div",
+            {},
+            "The cost is real: the generation runs and is charged. When the " +
+              "numbers look right, edit the filter and turn shadow off.",
+          ),
         ),
       ),
     );
@@ -881,26 +884,7 @@ function editFilter(ctx, existing, readers, { onSaved } = {}) {
       "Takes credentials and client names out of anything leaving the cluster",
     value: f.description || "",
   });
-  const model = h(
-    "select",
-    { class: "select" },
-    h(
-      "option",
-      { value: "" },
-      readers.length ? "Choose a model" : "No chat model exists",
-    ),
-    readers.map((m) =>
-      h(
-        "option",
-        { value: m.alias, selected: m.alias === f.model },
-        m.alias +
-          (m.kind === "decision" ? " - decision model, gates only" : "") +
-          (m.max_context_tokens
-            ? ` - ${compact(m.max_context_tokens)} context`
-            : ""),
-      ),
-    ),
-  );
+  const model = readerSelect(readers, f.model);
   const prompt = h("textarea", { class: "input", rows: "8" });
 
   const enforceSelect = h(
@@ -980,6 +964,9 @@ function editFilter(ctx, existing, readers, { onSaved } = {}) {
       opt.hidden = opt.disabled = decision && !gate;
       if (opt.disabled && opt.selected) model.value = "";
     }
+    for (const group of model.querySelectorAll("optgroup")) {
+      group.hidden = [...group.children].every((opt) => opt.hidden);
+    }
     // A gate's example suits a decision model too.
     if (prompt.value === "" || EXAMPLES.includes(prompt.value)) {
       prompt.value = gate ? GATE_EXAMPLE : PROMPT_EXAMPLE;
@@ -996,7 +983,12 @@ function editFilter(ctx, existing, readers, { onSaved } = {}) {
       return;
     }
     modelHint.textContent = gate
-      ? "A small, fast model, ideally a local one."
+      ? [
+          "A small, fast model, ideally a local one.",
+          deciderHint(readers, model.value, "the gate refuses anything longer"),
+        ]
+          .filter(Boolean)
+          .join(" ")
       : "A small, fast model, ideally a local one. Its context must be at " +
         "least as large as the models it guards.";
     promptHint.textContent = gate

@@ -336,10 +336,10 @@ func (d *demo) people(ctx context.Context) error {
 }
 
 // secretRules are the pattern filter every request passes through.
-const secretRules = `(?i)\b(?:sk|pk|rk)-[a-z0-9_-]{20,}\b => [CREDENTIAL]
-(?i)\bpostgres(?:ql)?://[^\s:@]+:[^\s@]+@ => postgres://[CREDENTIAL]@
-\b756\.\d{4}\.\d{4}\.\d{2}\b => [AHV NUMBER]
-\bCH\d{2}(?: ?[0-9A-Z]{4}){4} ?[0-9A-Z]\b => [IBAN]
+const secretRules = `(?i)\b(?:sk|pk|rk)-[a-z0-9_-]{20,}\b => <CREDENTIAL>
+(?i)\bpostgres(?:ql)?://[^\s:@]+:[^\s@]+@ => postgres://<CREDENTIAL>@
+\b756\.\d{4}\.\d{4}\.\d{2}\b => <AHV NUMBER>
+\bCH\d{2}(?: ?[0-9A-Z]{4}){4} ?[0-9A-Z]\b => <IBAN>
 -----BEGIN [A-Z ]*PRIVATE KEY----- => REFUSE: that moves a private key out`
 
 func (d *demo) filters(ctx context.Context) error {
@@ -355,7 +355,7 @@ func (d *demo) filters(ctx context.Context) error {
 		},
 		{
 			"redact-names", "--mode", "rewrite", "--model", localModel, "--shadow",
-			"--prompt", "Replace the name of every person with [NAME]. Change nothing else.",
+			"--prompt", "Replace the name of every person with <NAME>. Change nothing else.",
 			"--description", "Takes names out of support chats. In shadow while it is tuned.",
 		},
 	} {

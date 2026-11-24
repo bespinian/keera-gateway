@@ -759,6 +759,10 @@ input[type="checkbox"]:disabled {
 .fold .field-row:not(:last-child) > .field {
   margin-bottom: 14px;
 }
+/* The same for the last field of a group of fields. */
+.fold .field-group:not(:last-child) > .field:last-child {
+  margin-bottom: 14px;
+}
 
 .seg {
   display: inline-flex;

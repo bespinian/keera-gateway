@@ -18,6 +18,7 @@ import {
   modeTiles,
   banner,
   card,
+  compact,
 } from "../ui.js";
 import { facts } from "./detail.js";
 
@@ -123,6 +124,54 @@ export function canDecide(m) {
   return (m.kind === "chat" || m.kind === "decision") && !m.subscription;
 }
 
+/** readerSelect is the dropdown of readers. Decision models come first, as
+ *  they are built for choosing. Nothing is chosen for the admin: a decision
+ *  model reads little, and what it cannot read is refused or falls back. */
+export function readerSelect(readers, selected) {
+  const option = (m) =>
+    h(
+      "option",
+      { value: m.alias, selected: m.alias === selected },
+      m.alias +
+        (m.max_context_tokens
+          ? ` - ${compact(m.max_context_tokens)} context`
+          : ""),
+    );
+  const deciders = readers.filter((m) => m.kind === "decision");
+  const chat = readers.filter((m) => m.kind !== "decision");
+  return h(
+    "select",
+    { class: "select" },
+    h(
+      "option",
+      { value: "" },
+      readers.length ? "Choose a model" : "No chat model exists",
+    ),
+    deciders.length
+      ? h("optgroup", { label: "Decision models" }, deciders.map(option))
+      : null,
+    chat.length
+      ? h("optgroup", { label: "Chat models" }, chat.map(option))
+      : null,
+  );
+}
+
+/** deciderHint is the sentence the model's hint ends with: what a chosen
+ *  decision model cannot read, or that one would be quicker. tooLong says
+ *  what happens to a longer request. */
+export function deciderHint(readers, alias, tooLong) {
+  const m = readers.find((r) => r.alias === alias);
+  if (m?.kind === "decision") {
+    const most = m.max_context_tokens;
+    return (
+      "A decision model only picks an answer, so it is quick." +
+      (most ? ` It reads at most ${compact(most)} tokens; ${tooLong}.` : "")
+    );
+  }
+  const decider = readers.find((r) => r.kind === "decision");
+  return decider ? `A decision model such as ${decider.alias} is quicker.` : "";
+}
+
 /** routeFields builds the form for a route step. read returns what it sets
  *  or throws what is missing. The mode comes first: it decides whether the
  *  list is a menu, an order, or size bands. */
@@ -131,22 +180,7 @@ export function routeFields(models, step) {
   const chatModels = readers.filter((m) => m.kind === "chat");
   const creating = !step.mode && !(step.destinations || []).length;
 
-  const model = h(
-    "select",
-    { class: "select" },
-    h(
-      "option",
-      { value: "" },
-      readers.length ? "Choose a model" : "No chat model exists",
-    ),
-    readers.map((m) =>
-      h(
-        "option",
-        { value: m.alias, selected: m.alias === step.model },
-        m.alias + (m.kind === "decision" ? " - decision model" : ""),
-      ),
-    ),
-  );
+  const model = readerSelect(readers, step.model);
   const prompt = h("textarea", { class: "input", rows: "8" });
   // A decision model answers a short question, so it gets its own example.
   const exampleFor = (alias) =>
@@ -456,13 +490,24 @@ export function routeFields(models, step) {
 
   // Fields only an instruction step has. Hidden, so nobody writes an
   // instruction the step then ignores.
-  const modelField = field(
-    "Deciding model",
-    model,
-    // Where this model runs can be wrong without anything here going red.
-    "A small, fast model. It reads every request that reaches this step, so " +
-      "keep it inside the cluster.",
-  );
+  // Where this model runs can be wrong without anything here going red.
+  const modelHint = h("div", { class: "hint" });
+  const syncModelHint = () => {
+    modelHint.textContent = [
+      "A small, fast model. It reads every request that reaches this step, " +
+        "so keep it inside the cluster.",
+      deciderHint(
+        readers,
+        model.value,
+        "anything longer goes where 'When it cannot decide' says",
+      ),
+    ]
+      .filter(Boolean)
+      .join(" ");
+  };
+  syncModelHint();
+  model.addEventListener("change", syncModelHint);
+  const modelField = field("Deciding model", model, modelHint);
   const fallbackHint = h("div", { class: "hint" });
   const fallbackField = field("When it cannot decide", fallback, fallbackHint);
   const fallbackLabel = fallbackField.querySelector("label");

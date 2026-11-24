@@ -1427,7 +1427,7 @@ function editModel(ctx, existing, providers, pick) {
   // Only a chat model states capabilities.
   const capabilityFields = h(
     "div",
-    {},
+    { class: "field-group" },
     Object.entries(CAPABILITIES).map(([c, { name, hint }]) =>
       h(
         "div",
