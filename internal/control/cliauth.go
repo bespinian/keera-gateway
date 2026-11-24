@@ -172,6 +172,41 @@ func (s *Server) cliHandOver(r *http.Request, flow store.LoginFlow, user store.U
 	return flow.CLIRedirect + "?" + q.Encode(), nil
 }
 
+// alreadySignedIn hands a Keera app's sign-in straight back when this browser
+// is signed in to the panel, so the person is not asked again. It reports
+// whether it answered.
+//
+// Only for an app the operator named: its address is fixed, and its state
+// check stops a link from finishing someone else's sign-in. A terminal still
+// signs in the usual way, since any local program can start one.
+func (s *Server) alreadySignedIn(w http.ResponseWriter, r *http.Request) bool {
+	cli, err := cliLoginFrom(r.URL.Query(), s.apps())
+	if err != nil || cli.Redirect == "" {
+		return false
+	}
+	if _, ok := appFor(cli.Redirect, s.apps()); !ok {
+		return false
+	}
+	p, err := s.sessionPrincipal(r)
+	if err != nil {
+		return false
+	}
+	user, err := s.st.UserByID(r.Context(), p.UserID)
+	if err != nil {
+		s.fail(w, err)
+		return true
+	}
+	to, err := s.cliHandOver(r, store.LoginFlow{
+		CLIRedirect: cli.Redirect, CLIChallenge: cli.Challenge, CLIState: cli.State,
+	}, user)
+	if err != nil {
+		s.fail(w, err)
+		return true
+	}
+	http.Redirect(w, r, to, http.StatusFound)
+	return true
+}
+
 // cliToken redeems a one-time code for a token the command line keeps. It
 // needs no sign-in: the code is the credential, the verifier proves the caller
 // started the sign-in, and the code is deleted as it is read.

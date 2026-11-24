@@ -61,6 +61,9 @@ func (s *Server) authConfig(w http.ResponseWriter, _ *http.Request) {
 
 // login starts the authorization code flow.
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	if s.alreadySignedIn(w, r) {
+		return
+	}
 	if s.passkeyLogin(r.URL.Query().Get("provider")) {
 		s.startPasskeyLogin(w, r)
 		return

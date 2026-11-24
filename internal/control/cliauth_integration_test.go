@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -222,5 +223,90 @@ func TestARoleChangeEndsASignedInTerminal(t *testing.T) {
 
 	if status := asToken(t, ts, issued.Token, nil); status != http.StatusUnauthorized {
 		t.Errorf("/v1/me after the role change: status = %d, want 401", status)
+	}
+}
+
+// A browser signed in to the panel is not asked again when Keera Chat or Keera
+// Agents signs in. A terminal still is.
+func TestASignedInBrowserIsHandedStraightBackToAnApp(t *testing.T) {
+	const chat = "https://chat.example.ch"
+	st, ctx := testStore(t)
+	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
+		t.Fatalf("creating the organisation: %v", err)
+	}
+	user, err := st.AddUser(ctx, "user_1", "org_1", "alice@example.ch", "sso:alice", "member")
+	if err != nil {
+		t.Fatalf("creating the person: %v", err)
+	}
+	session, hash, csrf := authn.NewSession()
+	if err := st.CreateSession(ctx, hash, user.ID, csrf, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	srv := New(st, nil, nil, nil, Options{OperatorKey: testOperatorKey, ChatURL: chat},
+		slog.New(slog.DiscardHandler))
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	verifier := authn.NewCLIVerifier()
+	start := func(redirect string, signedIn bool) *url.URL {
+		t.Helper()
+		q := url.Values{
+			"cli_redirect":  {redirect},
+			"cli_challenge": {authn.CLIChallenge(verifier)},
+			"cli_state":     {"state-1"},
+		}
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
+			ts.URL+httpx.ControlPrefix+"/auth/login?"+q.Encode(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if signedIn {
+			req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
+		}
+		client := *ts.Client()
+		client.CheckRedirect = func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("starting the sign-in: %v", err)
+		}
+		_ = res.Body.Close()
+		to, err := res.Location()
+		if err != nil {
+			return &url.URL{}
+		}
+		return to
+	}
+
+	to := start(chat+AppCallbackPath, true)
+	if got := to.Scheme + "://" + to.Host + to.Path; got != chat+AppCallbackPath {
+		t.Fatalf("signed in, the sign-in went to %q, want chat's callback", got)
+	}
+	if to.Query().Get("state") != "state-1" {
+		t.Errorf("state = %q, want chat's own", to.Query().Get("state"))
+	}
+	var issued struct {
+		Token string `json:"token"`
+	}
+	if status := redeem(t, ts, map[string]string{
+		"code": to.Query().Get("code"), "verifier": verifier,
+	}, &issued); status != http.StatusOK {
+		t.Fatalf("redeeming the code: status = %d, want 200", status)
+	}
+	var me struct {
+		Email string `json:"email"`
+	}
+	if status := asToken(t, ts, issued.Token, &me); status != http.StatusOK || me.Email != user.Email {
+		t.Errorf("/v1/me = %d %+v, want the person signed in to the panel", status, me)
+	}
+
+	// Signed out, chat goes through the usual sign-in.
+	if to := start(chat+AppCallbackPath, false); to.Host == "chat.example.ch" {
+		t.Errorf("signed out, the sign-in went straight back to chat: %s", to)
+	}
+	// A terminal is not handed a token without being asked.
+	if to := start("http://127.0.0.1:1234/callback", true); to.Host == "127.0.0.1:1234" {
+		t.Errorf("a terminal was handed a sign-in without asking: %s", to)
 	}
 }
