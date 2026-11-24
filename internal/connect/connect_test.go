@@ -309,7 +309,7 @@ func TestClaudeCodeGetsTheSettingsConnectWrites(t *testing.T) {
 		},
 		{Alias: "keera-code", BackendModel: "qwen", MaxContext: 256_000},
 		{
-			Alias: "claude-haiku", BackendModel: "claude-haiku-4-5", Provider: "anthropic",
+			Alias: "claude-haiku", BackendModel: "claude-haiku-5-5", Provider: "anthropic",
 			MaxContext: 200_000,
 		},
 	}
@@ -334,11 +334,9 @@ func TestClaudeCodeGetsTheSettingsConnectWrites(t *testing.T) {
 			t.Errorf("%s = %q, want %q", name, got.Env[name], want)
 		}
 	}
-	// Claude Code knows Haiku 4.5 by its dated id only, so both are written.
 	want := map[string]string{
-		"claude-opus-5-5":           "claude-opus",
-		"claude-haiku-4-5":          "claude-haiku",
-		"claude-haiku-4-5-20251001": "claude-haiku",
+		"claude-opus-5-5":  "claude-opus",
+		"claude-haiku-5-5": "claude-haiku",
 	}
 	if !maps.Equal(got.ModelOverrides, want) {
 		t.Errorf("modelOverrides = %v, want %v", got.ModelOverrides, want)

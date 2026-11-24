@@ -9206,7 +9206,7 @@ components:
           type: string
         snapshot:
           type: string
-          description: The dated id the maker also uses, such as `claude-haiku-4-5-20251001`.
+          description: The dated id the maker also uses, such as `mistral-embed-2312`.
         location:
           type: string
           description: Where this model runs, when not where the provider is.

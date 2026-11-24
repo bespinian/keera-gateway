@@ -100,7 +100,7 @@ models:
     description: "  the alias every coding agent here is pointed at  "
   - alias: keera-quick
     provider: anthropic
-    backend_model: claude-haiku-4-5
+    backend_model: claude-haiku-5-5
     description: "   "
 `
 	models, err := parseModelFile([]byte(in))
@@ -113,7 +113,7 @@ models:
 	// The model's description, not the provider's, so a router can tell two
 	// aliases apart.
 	if models[0].Description == models[2].Description {
-		t.Errorf("claude-opus-5 and claude-haiku-4-5 share a description: %q",
+		t.Errorf("claude-opus-5 and claude-haiku-5-5 share a description: %q",
 			models[0].Description)
 	}
 	// The entry wins over the table.
@@ -705,8 +705,8 @@ models:
     provider: anthropic
     backend_model: claude-haiku-5-5
   - alias: dated
-    provider: anthropic
-    backend_model: claude-haiku-4-5-20251001
+    provider: mistral
+    backend_model: mistral-embed-2312
   - alias: renamed
     provider: anthropic
     backend_model: claude-haiku-5-5
@@ -718,26 +718,26 @@ models:
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	for i, want := range []string{"Claude Haiku 5.5", "Claude Haiku 4.5", "Haiku", ""} {
+	for i, want := range []string{"Claude Haiku 5.5", "Mistral Embed", "Haiku", ""} {
 		if got := models[i].DisplayName; got != want {
 			t.Errorf("%s: display name = %q, want %q", models[i].Alias, got, want)
 		}
 	}
 }
 
-// A model Anthropic dates can be named by either id, and is priced the same.
+// A model its maker dates can be named by either id, and is priced the same.
 func TestADatedModelIsTheSameModel(t *testing.T) {
 	models, err := parseModelFile([]byte(`
 models:
-  - alias: claude-haiku
-    provider: anthropic
-    backend_model: claude-haiku-4-5-20251001
+  - alias: embed
+    provider: mistral
+    backend_model: mistral-embed-2312
 `))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if p := models[0].InputMicrosPerMTok; p != 960_000 {
-		t.Errorf("input price = %d, want claude-haiku-4-5's", p)
+	if p := models[0].InputMicrosPerMTok; p != 96_000 {
+		t.Errorf("input price = %d, want mistral-embed's", p)
 	}
 }
 

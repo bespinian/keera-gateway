@@ -69,7 +69,7 @@ type ProviderModel struct {
 	// never choose between bare aliases.
 	Description string `json:"description"`
 	// Snapshot is the dated id the maker also names the model by, as in
-	// claude-haiku-4-5-20251001. Claude Code knows such a model only by it.
+	// mistral-embed-2312. Claude Code knows a dated Anthropic model only by it.
 	Snapshot string `json:"snapshot,omitempty"`
 	// Location is where this model runs, for a provider that resells models
 	// served in several places. Empty means the provider's.
@@ -148,14 +148,6 @@ var providers = []Provider{{
 		CachedInputMicrosPerMTok: 192_000,
 		CacheWriteMicrosPerMTok:  2_400_000,
 		Description:              "mid-size and quick - everyday coding; replaced by Claude Sonnet 5.5",
-	}, {
-		ID: "claude-haiku-4-5", DisplayName: "Claude Haiku 4.5",
-		Snapshot:   "claude-haiku-4-5-20251001",
-		MaxContext: 200_000, ReleaseDate: "2025-10-15",
-		InputMicrosPerMTok: 960_000, OutputMicrosPerMTok: 4_800_000,
-		CachedInputMicrosPerMTok: 96_000,
-		CacheWriteMicrosPerMTok:  1_200_000,
-		Description:              "small and fast - short, simple tasks; replaced by Claude Haiku 5.5",
 	}, {
 		ID: "claude-opus-5", DisplayName: "Claude Opus 5",
 		MaxContext: 1_000_000, ReleaseDate: "2026-07-24",

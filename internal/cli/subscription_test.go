@@ -140,13 +140,18 @@ func TestModelOverridesTellClaudeCodeWhichModelEachAliasIs(t *testing.T) {
 			Kind: policy.KindChat, Enabled: true, Subscription: true,
 		},
 	}
-	// Claude Code knows Haiku 4.5 by its dated id only, so both are written.
+	// Claude Code knows a dated model by its dated id only, so both are
+	// written. No model in the table is dated now, so the test names its own.
+	names := map[string][]string{
+		"claude-haiku-4-5":          {"claude-haiku-4-5-20251001"},
+		"claude-haiku-4-5-20251001": {"claude-haiku-4-5"},
+	}
 	want := map[string]string{
 		"claude-haiku-4-5":          "claude-haiku",
 		"claude-haiku-4-5-20251001": "claude-haiku",
 		"claude-opus-5-5":           "claude-opus",
 	}
-	got := connect.ClaudeOverrides(connectList(subscriptionModels(models)), connect.ClaudeNames())
+	got := connect.ClaudeOverrides(connectList(subscriptionModels(models)), names)
 	if !maps.Equal(got, want) {
 		t.Errorf("overrides = %v, want %v", got, want)
 	}

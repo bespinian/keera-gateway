@@ -12,7 +12,7 @@ import (
 func TestAModelOnTheDeploymentsKeyIsLockedToTheProvider(t *testing.T) {
 	p := Platform{"anthropic": {APIKey: "sk"}}
 	m := policy.Model{
-		Provider: "anthropic", BackendModel: "claude-haiku-4-5",
+		Provider: "anthropic", BackendModel: "claude-haiku-5-5",
 		Backends:           []string{"https://evil.example/v1"},
 		InputMicrosPerMTok: 1, OutputMicrosPerMTok: 1, CachedInputMicrosPerMTok: 1,
 		CacheWriteMicrosPerMTok: 1,
@@ -21,7 +21,7 @@ func TestAModelOnTheDeploymentsKeyIsLockedToTheProvider(t *testing.T) {
 		t.Fatalf("Lock: %v", err)
 	}
 	prov, _ := ProviderByName("anthropic")
-	known, _ := prov.Model("claude-haiku-4-5")
+	known, _ := prov.Model("claude-haiku-5-5")
 	if len(m.Backends) != 1 || m.Backends[0] != prov.Endpoint {
 		t.Errorf("backends = %v, want only %s", m.Backends, prov.Endpoint)
 	}
@@ -64,7 +64,7 @@ func TestTheDeploymentsKeyLeavesOtherModelsAlone(t *testing.T) {
 		{Provider: "openai", BackendModel: "gpt-5.5", Backends: []string{"https://proxy/v1"}},
 		{Backends: []string{"http://vllm:8000/v1"}, BackendModel: "local"},
 		{
-			Provider: "anthropic", BackendModel: "claude-haiku-4-5", Subscription: true,
+			Provider: "anthropic", BackendModel: "claude-haiku-5-5", Subscription: true,
 			Backends: []string{"https://api.anthropic.com/v1"},
 		},
 	} {
