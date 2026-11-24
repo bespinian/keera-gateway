@@ -65,6 +65,26 @@ func TestFitProviderFixesWhatProvidersRefuse(t *testing.T) {
 		provider: "anthropic", model: "claude-sonnet-4-20250514", path: "/messages",
 		in:   `{"max_tokens":64,"temperature":0}`,
 		want: map[string]any{"max_tokens": float64(64), "temperature": float64(0)},
+	}, {
+		name:     "Mistral gets top_p 1 under greedy sampling",
+		provider: "mistral", model: "mistral-large-4", path: "/chat/completions",
+		in:   `{"max_tokens":64,"temperature":0}`,
+		want: map[string]any{"max_tokens": float64(64), "temperature": float64(0), "top_p": float64(1)},
+	}, {
+		name:     "a client's top_p goes to 1 under greedy sampling",
+		provider: "mistral", model: "mistral-large-4", path: "/chat/completions",
+		in:   `{"temperature":0.0,"top_p":0.9}`,
+		want: map[string]any{"temperature": float64(0), "top_p": float64(1)},
+	}, {
+		name:     "Mistral keeps top_p when it samples",
+		provider: "mistral", model: "mistral-large-4", path: "/chat/completions",
+		in:   `{"temperature":0.7,"top_p":0.9}`,
+		want: map[string]any{"temperature": 0.7, "top_p": 0.9},
+	}, {
+		name:     "Mistral without a temperature is left alone",
+		provider: "mistral", model: "mistral-large-4", path: "/chat/completions",
+		in:   `{"max_tokens":64}`,
+		want: map[string]any{"max_tokens": float64(64)},
 	}}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

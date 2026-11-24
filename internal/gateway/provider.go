@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
@@ -10,9 +11,10 @@ import (
 // valid request. OpenAI's reasoning models (all but gpt-4 and older) want
 // max_completion_tokens instead of max_tokens, and refuse a non-default
 // temperature or top_p. Anthropic's models since Opus 4.7 refuse temperature,
-// top_p and top_k. The gateway's own filters, routers and checks send a
-// temperature of 0, so these are fixed here; dropping a setting the model
-// would reject changes nothing.
+// top_p and top_k. Mistral reads a temperature of 0 as greedy sampling and
+// then wants top_p at 1, which is not its default. The gateway's own filters,
+// routers and checks send a temperature of 0, so these are fixed here;
+// changing a setting the model would reject changes nothing.
 func fitProvider(m policy.Model, path string, payload []byte) []byte {
 	switch {
 	case m.Provider == "openai" && (path == "/chat/completions" || path == "/responses"):
@@ -31,8 +33,26 @@ func fitProvider(m policy.Model, path string, payload []byte) []byte {
 			return payload
 		}
 		return b.encode()
+	case m.Provider == "mistral" && path == "/chat/completions":
+		return fitMistral(payload)
 	}
 	return payload
+}
+
+// fitMistral sets top_p to 1 under greedy sampling. Greedy sampling ignores
+// top_p, so a client's own top_p changes nothing there either.
+func fitMistral(payload []byte) []byte {
+	b, err := parseBody(payload)
+	if err != nil {
+		return payload
+	}
+	raw, ok := b.value("temperature")
+	var t float64
+	if !ok || json.Unmarshal(raw, &t) != nil || t != 0 {
+		return payload
+	}
+	b.set("top_p", json.RawMessage("1"))
+	return b.encode()
 }
 
 func fitOpenAI(m policy.Model, path string, payload []byte) []byte {
