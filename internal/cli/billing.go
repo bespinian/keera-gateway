@@ -374,13 +374,9 @@ func (r *billingRun) charges(ctx context.Context) error {
 		}
 		return out(false, charges, func(w *table) { printCharges(w, charges, hasCard, nil) })
 	}
-	orgs, err := list[store.Org](ctx, r.c, "/v1/orgs")
+	names, err := orgNames(ctx, r.c)
 	if err != nil {
 		return err
-	}
-	names := make(map[string]string, len(orgs))
-	for _, o := range orgs {
-		names[o.ID] = o.Name
 	}
 	return out(false, charges, func(w *table) { printCharges(w, charges, false, names) })
 }
@@ -583,13 +579,9 @@ func (r *billingRun) payments(ctx context.Context) error {
 	}
 	var names map[string]string
 	if r.org == "" && !r.asJSON && spansOrgs(payments, func(p store.Payment) string { return p.OrgID }) {
-		orgs, err := list[store.Org](ctx, r.c, "/v1/orgs")
-		if err != nil {
+		var err error
+		if names, err = orgNames(ctx, r.c); err != nil {
 			return err
-		}
-		names = make(map[string]string, len(orgs))
-		for _, o := range orgs {
-			names[o.ID] = o.Name
 		}
 	}
 	return out(r.asJSON, payments, func(w *table) {

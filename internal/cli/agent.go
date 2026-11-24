@@ -117,24 +117,24 @@ func agentPath(id string) string { return "/api/v1/agents/" + url.PathEscape(id)
 // findAgent takes an agent's id or name. Names are unique in an
 // organisation, and Keera Agents only takes ids.
 func findAgent(ctx context.Context, a *agents, given string) (agentEntry, error) {
-	list, err := listOf[agentEntry](ctx, a, "/api/v1/agents")
+	all, err := list[agentEntry](ctx, a, "/api/v1/agents")
 	if err != nil {
 		return agentEntry{}, err
 	}
-	return pickOne(list, given, "agent", "agent list", func(e agentEntry) (string, string) { return e.ID, e.Name })
+	return pickOne(all, given, "agent", "agent list", func(e agentEntry) (string, string) { return e.ID, e.Name })
 }
 
 func (r *agentRun) list(ctx context.Context, a *agents) error {
-	list, err := listOf[agentEntry](ctx, a, "/api/v1/agents")
+	all, err := list[agentEntry](ctx, a, "/api/v1/agents")
 	if err != nil {
 		return err
 	}
-	return out(r.asJSON, list, func(w *table) {
-		if len(list) == 0 {
+	return out(r.asJSON, all, func(w *table) {
+		if len(all) == 0 {
 			printNone(w, "agents", "keera agent create <name> --model <model>")
 			return
 		}
-		printAgents(w, list...)
+		printAgents(w, all...)
 	})
 }
 

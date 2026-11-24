@@ -98,7 +98,7 @@ func (r *taskRun) list(ctx context.Context, a *agents) error {
 		}
 		q.Set("agent_id", e.ID)
 	}
-	tasks, err := listOf[taskEntry](ctx, a, "/api/v1/tasks?"+q.Encode())
+	tasks, err := list[taskEntry](ctx, a, "/api/v1/tasks?"+q.Encode())
 	if err != nil {
 		return err
 	}

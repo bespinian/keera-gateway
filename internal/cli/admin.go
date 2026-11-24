@@ -59,13 +59,31 @@ func split(args []string) (sub string, rest []string) {
 	return args[0], args[1:]
 }
 
+// caller is the control API's client or Keera Agents'.
+type caller interface {
+	do(ctx context.Context, method, path string, in, out any) error
+}
+
 // list reads a {"data": [...]} listing.
-func list[T any](ctx context.Context, c *client, path string) ([]T, error) {
+func list[T any](ctx context.Context, c caller, path string) ([]T, error) {
 	var res struct {
 		Data []T `json:"data"`
 	}
 	err := c.do(ctx, "GET", path, nil, &res)
 	return res.Data, err
+}
+
+// orgNames maps each organisation's id to its name.
+func orgNames(ctx context.Context, c *client) (map[string]string, error) {
+	orgs, err := list[store.Org](ctx, c, "/v1/orgs")
+	if err != nil {
+		return nil, err
+	}
+	names := make(map[string]string, len(orgs))
+	for _, o := range orgs {
+		names[o.ID] = o.Name
+	}
+	return names, nil
 }
 
 func inOrg(path, orgID string) string {

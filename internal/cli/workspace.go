@@ -678,7 +678,7 @@ func (r *workspaceRun) sshKeys(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	keys, err := listOf[sshKey](ctx, a, "/api/v1/me/ssh-keys")
+	keys, err := list[sshKey](ctx, a, "/api/v1/me/ssh-keys")
 	if err != nil {
 		return err
 	}
@@ -702,7 +702,7 @@ func (r *workspaceRun) removeSSHKey(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	keys, err := listOf[sshKey](ctx, a, "/api/v1/me/ssh-keys")
+	keys, err := list[sshKey](ctx, a, "/api/v1/me/ssh-keys")
 	if err != nil {
 		return err
 	}

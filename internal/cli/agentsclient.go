@@ -126,15 +126,6 @@ func agentsError(status int, raw []byte) error {
 	return &apiError{Status: status, Message: errorMessage(raw)}
 }
 
-// listOf reads a {"data": [...]} listing from Keera Agents.
-func listOf[T any](ctx context.Context, a *agents, path string) ([]T, error) {
-	var res struct {
-		Data []T `json:"data"`
-	}
-	err := a.do(ctx, "GET", path, nil, &res)
-	return res.Data, err
-}
-
 // pickOne finds an entry by id, or else by name ignoring case. Names need
 // not be unique, so a name several share is refused rather than guessed.
 // listCmd is the command that lists them, such as "agent list".

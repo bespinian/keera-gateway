@@ -80,11 +80,11 @@ func schedulePath(id string) string { return "/api/v1/schedules/" + url.PathEsca
 
 // findSchedule takes a schedule's id or name.
 func findSchedule(ctx context.Context, a *agents, given string) (scheduleEntry, error) {
-	list, err := listOf[scheduleEntry](ctx, a, "/api/v1/schedules")
+	schedules, err := list[scheduleEntry](ctx, a, "/api/v1/schedules")
 	if err != nil {
 		return scheduleEntry{}, err
 	}
-	return pickOne(list, given, "schedule", "schedule list", func(s scheduleEntry) (string, string) {
+	return pickOne(schedules, given, "schedule", "schedule list", func(s scheduleEntry) (string, string) {
 		return s.ID, s.Name
 	})
 }
@@ -98,16 +98,16 @@ func (r *scheduleRun) list(ctx context.Context, a *agents) error {
 		}
 		path += "?agent_id=" + url.QueryEscape(e.ID)
 	}
-	list, err := listOf[scheduleEntry](ctx, a, path)
+	schedules, err := list[scheduleEntry](ctx, a, path)
 	if err != nil {
 		return err
 	}
-	return out(r.asJSON, list, func(w *table) {
-		if len(list) == 0 {
+	return out(r.asJSON, schedules, func(w *table) {
+		if len(schedules) == 0 {
 			printNone(w, "schedules", `keera schedule create <name> --agent <agent> --cron "0 9 * * 1-5" --prompt <prompt>`)
 			return
 		}
-		printSchedules(w, true, list...)
+		printSchedules(w, true, schedules...)
 	})
 }
 
