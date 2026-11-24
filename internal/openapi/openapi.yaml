@@ -4806,6 +4806,16 @@ paths:
                     A monthly budget on the key itself, in millionths of a
                     franc. Zero or absent sets none; the project's and the
                     organisation's budgets apply either way.
+                allowed_tools:
+                  type: array
+                  items:
+                    type: string
+                  description: |
+                    The MCP servers the key may call, as in a guardrail: a
+                    server's alias for all of its tools, or `alias/tool` for
+                    one. Absent allows all the project allows; empty allows
+                    none. A server the organisation does not have is refused
+                    with `mcp_server_not_found`.
       responses:
         "201":
           description: The new key.
@@ -4983,13 +4993,19 @@ paths:
                     description: Models first, then routers.
                     items:
                       type: object
-                      required: [alias, kind]
+                      required: [alias, kind, capabilities]
                       properties:
                         alias:
                           type: string
                         kind:
                           type: string
                           enum: [model, router]
+                        capabilities:
+                          allOf:
+                            - $ref: "#/components/schemas/Capabilities"
+                          description: |
+                            A router's are those every model it may send
+                            to states.
                   transcription_models:
                     type: array
                     description: |
@@ -4997,13 +5013,15 @@ paths:
                       that reads those as chat models never offers one.
                     items:
                       type: object
-                      required: [alias, kind]
+                      required: [alias, kind, capabilities]
                       properties:
                         alias:
                           type: string
                         kind:
                           type: string
                           enum: [model]
+                        capabilities:
+                          $ref: "#/components/schemas/Capabilities"
                   mcp_servers:
                     type: array
                     items:

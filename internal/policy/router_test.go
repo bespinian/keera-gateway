@@ -70,6 +70,31 @@ func TestRouterExampleIsValid(t *testing.T) {
 	}
 }
 
+// A router can do only what every model it may send to can: a request may
+// end at any of them. The model it decides with does not count.
+func TestRouterCapabilities(t *testing.T) {
+	models := map[string]Model{
+		"local":  {Alias: "local", Capabilities: []Capability{CapabilityTools}},
+		"hosted": {Alias: "hosted", Capabilities: []Capability{CapabilityTools, CapabilityVision}},
+		"picker": {Alias: "picker"},
+	}
+	find := func(alias string) (Model, bool) { m, ok := models[alias]; return m, ok }
+	if got := exampleRouter().Capabilities(find); !slices.Equal(got, []Capability{CapabilityTools}) {
+		t.Errorf("Capabilities() = %v, want [tools]", got)
+	}
+
+	models["local"] = Model{Alias: "local"}
+	if got := exampleRouter().Capabilities(find); got == nil || len(got) != 0 {
+		t.Errorf("with a model that calls no tools: %v, want []", got)
+	}
+
+	delete(models, "local")
+	models["hosted"] = Model{Alias: "hosted", Capabilities: []Capability{CapabilityTools}}
+	if got := exampleRouter().Capabilities(find); len(got) != 0 {
+		t.Errorf("with a model it cannot find: %v, want []", got)
+	}
+}
+
 func TestRouterSurvivesJSON(t *testing.T) {
 	raw, err := json.Marshal(exampleRouter())
 	if err != nil {

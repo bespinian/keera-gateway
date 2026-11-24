@@ -244,6 +244,26 @@ func (p Router) Reaches() []string {
 	return out
 }
 
+// Capabilities are those every model the router may send to states: a
+// request can end at any of them. A model find does not know counts as
+// stating none.
+func (p Router) Capabilities(find func(alias string) (Model, bool)) []Capability {
+	reaches := p.Reaches()
+	out := []Capability{}
+	if len(reaches) == 0 {
+		return out
+	}
+	for _, c := range Capabilities {
+		if !slices.ContainsFunc(reaches, func(alias string) bool {
+			m, ok := find(alias)
+			return !ok || !m.Can(c)
+		}) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // ReadsWith lists every model that may read a request through the router:
 // those it may send to, and those its route steps decide with.
 func (p Router) ReadsWith() []string {

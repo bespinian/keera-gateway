@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"slices"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -110,7 +110,7 @@ func TestTheCatalogueIsWhatAKeyInTheProjectMayUse(t *testing.T) {
 	res := policy.Resolve(policy.Key{OrgID: "org_a", ProjectID: "project_a", Kind: policy.KeyStandard},
 		&org, &project, nil)
 	catalogue := []policy.Model{
-		{Alias: "keera-code", Kind: policy.KindChat, Enabled: true},
+		{Alias: "keera-code", Kind: policy.KindChat, Enabled: true, Capabilities: []policy.Capability{policy.CapabilityTools}},
 		// Allowed by the organisation, not by the project.
 		{Alias: "keera-speed", Kind: policy.KindChat, Enabled: true},
 		{Alias: "embed", Kind: policy.KindEmbedding, Enabled: true},
@@ -118,7 +118,11 @@ func TestTheCatalogueIsWhatAKeyInTheProjectMayUse(t *testing.T) {
 		{Alias: "whisper", Kind: policy.KindTranscription, Enabled: true},
 		{Alias: "whisper-old", Kind: policy.KindTranscription, Enabled: false},
 	}
-	routers := []policy.Router{{Alias: "safe"}, {Alias: "other"}}
+	// safe sends only to keera-code, so it calls tools as keera-code does.
+	routers := []policy.Router{
+		{Alias: "safe", Start: &policy.Step{ID: "out", Kind: policy.StepModel, Ref: "keera-code"}},
+		{Alias: "other"},
+	}
 	servers := []policy.MCPServer{
 		{Alias: "github", Enabled: true},
 		{Alias: "docs", Enabled: false},
@@ -130,12 +134,14 @@ func TestTheCatalogueIsWhatAKeyInTheProjectMayUse(t *testing.T) {
 	if got.ProjectID != "project_a" || len(got.Projects) != 2 || got.Projects[1].Name != "other" {
 		t.Errorf("projects = %q %+v", got.ProjectID, got.Projects)
 	}
-	want := []serviceModel{{"keera-code", "model"}, {"safe", "router"}}
-	if !slices.Equal(got.Models, want) {
+	tools := []policy.Capability{policy.CapabilityTools}
+	want := []serviceModel{{"keera-code", "model", tools}, {"safe", "router", tools}}
+	if !reflect.DeepEqual(got.Models, want) {
 		t.Errorf("models = %+v, want %+v", got.Models, want)
 	}
-	wantSpeech := []serviceModel{{"whisper", "model"}}
-	if !slices.Equal(got.TranscriptionModels, wantSpeech) {
+	// A model that states no capabilities says so with [], not null.
+	wantSpeech := []serviceModel{{"whisper", "model", []policy.Capability{}}}
+	if !reflect.DeepEqual(got.TranscriptionModels, wantSpeech) {
 		t.Errorf("transcription models = %+v, want %+v", got.TranscriptionModels, wantSpeech)
 	}
 	if len(got.MCPServers) != 1 || got.MCPServers[0].Alias != "github" {

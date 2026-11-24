@@ -143,6 +143,56 @@ func TestAnAgentsKeyCarriesItsOwnBudget(t *testing.T) {
 	}
 }
 
+// The MCP servers an agent may call sit on its key, so the gateway enforces
+// them. Empty allows none. A revoked key's list keeps no server in use.
+func TestAnAgentsKeyCarriesItsMCPServers(t *testing.T) {
+	g := newAgentsGateway(t)
+	for _, alias := range []string{"github", "jira"} {
+		if err := g.st.UpsertMCPServer(g.ctx, policy.MCPServer{
+			OrgID: "org_a", Alias: alias, URL: "https://mcp.example.ch", Enabled: true,
+		}, store.Credential{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		name, tools string
+		github      bool
+	}{
+		{"one server", `["github"]`, true},
+		{"none", `[]`, false},
+	} {
+		var k issuedKey
+		code, body := g.service("POST", "/v1/service/keys",
+			`{"org_id":"org_a","user_id":"user_alice","name":"x","allowed_tools":`+tc.tools+`}`, &k)
+		if code != http.StatusCreated {
+			t.Fatalf("%s: issuing: %d %s", tc.name, code, body)
+		}
+		lim, err := g.st.GetGuardrail(g.ctx, policy.ScopeKey, k.ID)
+		if err != nil || lim.AllowedTools == nil || len(lim.Budgets) != 0 {
+			t.Fatalf("%s: guardrail = %+v, %v", tc.name, lim, err)
+		}
+		res, err := g.st.LookupKey(g.ctx, auth.Hash(k.Key))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.AllowsServer("github") != tc.github || res.AllowsServer("jira") {
+			t.Errorf("%s: github %v, jira %v; want github %v and no jira", tc.name,
+				res.AllowsServer("github"), res.AllowsServer("jira"), tc.github)
+		}
+		if tc.github {
+			if users, _ := g.st.MCPServerUsers(g.ctx, "org_a", "github"); len(users) != 1 {
+				t.Errorf("users of github = %+v; want the key", users)
+			}
+			if code, body := g.service("DELETE", "/v1/service/keys/"+k.ID+"?org_id=org_a", "", nil); code != http.StatusNoContent {
+				t.Fatalf("revoking: %d %s", code, body)
+			}
+			if users, _ := g.st.MCPServerUsers(g.ctx, "org_a", "github"); len(users) != 0 {
+				t.Errorf("users of github after revoking = %+v; want none", users)
+			}
+		}
+	}
+}
+
 // A key is refused for somebody outside the organisation, somebody disabled,
 // or on another organisation's project, with a reason Keera Agents can log.
 func TestAKeyForAnAgentIsRefusedWhereItWouldNotBelong(t *testing.T) {
@@ -167,6 +217,7 @@ func TestAKeyForAnAgentIsRefusedWhereItWouldNotBelong(t *testing.T) {
 		{"another organisation's person", `{"org_id":"org_a","user_id":"user_dave","name":"x"}`, 404, "nobody"},
 		{"a disabled person", `{"org_id":"org_a","user_id":"user_bob","name":"x"}`, 403, "disabled"},
 		{"another organisation's project", `{"org_id":"org_a","user_id":"user_alice","project_id":"` + theirs + `","name":"x"}`, 404, "no project"},
+		{"an MCP server it does not have", `{"org_id":"org_a","user_id":"user_alice","name":"x","allowed_tools":["nope"]}`, 400, "mcp_server_not_found"},
 		{"a field it does not know", `{"org_id":"org_a","user_id":"user_alice","name":"x","kind":"subscription"}`, 400, "kind"},
 	} {
 		code, body := g.service("POST", "/v1/service/keys", tc.body, nil)

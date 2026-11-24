@@ -92,6 +92,10 @@ type serviceKeyRequest struct {
 	// zero sets no cap of its own; the project's and organisation's budgets
 	// apply either way.
 	BudgetMicros *int64 `json:"budget_micros"`
+	// AllowedTools narrows the MCP servers and tools the key may call, as
+	// in a guardrail. Absent allows all the project allows; empty allows
+	// none.
+	AllowedTools []string `json:"allowed_tools"`
 }
 
 // serviceCreateKey issues a key for an agent, in the name of the person it
@@ -149,6 +153,10 @@ func (s *Server) serviceCreateKey(w http.ResponseWriter, r *http.Request, p *aut
 			return
 		}
 	}
+	lim := policy.Limits{AllowedTools: in.AllowedTools}
+	if !s.checkAllowedTools(w, r, in.OrgID, &lim) {
+		return
+	}
 
 	secret, hash, prefix := auth.Generate()
 	info := store.KeyInfo{
@@ -160,11 +168,12 @@ func (s *Server) serviceCreateKey(w http.ResponseWriter, r *http.Request, p *aut
 		budget = *in.BudgetMicros
 	}
 	if budget > 0 {
+		lim.Budgets = []policy.Budget{{BudgetMicros: budget, Period: policy.PeriodMonth}}
+	}
+	if budget > 0 || lim.AllowedTools != nil {
 		// The key's own guardrail. It is written with the key, so the key
 		// never works without it.
-		info, err = s.st.CreateKeyWithLimits(r.Context(), info, hash, policy.Limits{
-			Budgets: []policy.Budget{{BudgetMicros: budget, Period: policy.PeriodMonth}},
-		})
+		info, err = s.st.CreateKeyWithLimits(r.Context(), info, hash, lim)
 	} else {
 		info, err = s.st.CreateKey(r.Context(), info, hash)
 	}
@@ -179,7 +188,7 @@ func (s *Server) serviceCreateKey(w http.ResponseWriter, r *http.Request, p *aut
 	s.auditf(r, p, info.OrgID, "key.create", "key", info.ID, map[string]any{
 		"org_id": info.OrgID, "project_id": info.ProjectID, "user_id": info.UserID,
 		"name": info.Name, "prefix": info.Prefix, "kind": info.Kind,
-		"issued_by": info.IssuedBy, "budget_micros": budget,
+		"issued_by": info.IssuedBy, "budget_micros": budget, "allowed_tools": lim.AllowedTools,
 	})
 	s.keyChanged(r, info.ID)
 
@@ -346,6 +355,9 @@ type serviceModel struct {
 	// Kind is "model" or "router": a router is named like a model, but
 	// decides by itself where a request goes.
 	Kind string `json:"kind"`
+	// Capabilities is never left out, so a client can tell a model that
+	// states none from a gateway too old to say.
+	Capabilities []policy.Capability `json:"capabilities"`
 }
 
 type serviceServer struct {
@@ -368,17 +380,22 @@ func catalogueOf(projectID string, projects []store.Project, res *policy.Resolve
 		if !m.Enabled || !res.MayUse(m) {
 			continue
 		}
+		sm := serviceModel{Alias: m.Alias, Kind: "model", Capabilities: m.Capabilities}
+		if sm.Capabilities == nil {
+			sm.Capabilities = []policy.Capability{}
+		}
 		switch m.Kind {
 		case policy.KindChat:
-			out.Models = append(out.Models, serviceModel{Alias: m.Alias, Kind: "model"})
+			out.Models = append(out.Models, sm)
 		case policy.KindTranscription:
-			out.TranscriptionModels = append(out.TranscriptionModels, serviceModel{Alias: m.Alias, Kind: "model"})
+			out.TranscriptionModels = append(out.TranscriptionModels, sm)
 		}
 	}
 	// A router is named and allowed like a model.
+	find := modelFinder(catalogue)
 	for _, r := range routers {
-		if res.MayCallRouter(r, modelFinder(catalogue)) {
-			out.Models = append(out.Models, serviceModel{Alias: r.Alias, Kind: "router"})
+		if res.MayCallRouter(r, find) {
+			out.Models = append(out.Models, serviceModel{Alias: r.Alias, Kind: "router", Capabilities: r.Capabilities(find)})
 		}
 	}
 	for _, sv := range servers {

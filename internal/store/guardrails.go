@@ -128,6 +128,8 @@ type GuardrailRef struct {
 
 // scopesNaming lists the guardrails in one organisation that name alias.
 // match is the SQL condition, with alias as $2; it is always a constant.
+// A revoked or expired key's guardrail is left out: it is never applied, and
+// Keera Agents leaves one behind each time it replaces an agent's key.
 func (s *Store) scopesNaming(ctx context.Context, match, orgID, alias string) ([]GuardrailRef, error) {
 	return queryAll(ctx, s.pool, scanGuardrailRef, `
 		SELECT p.scope_type, p.scope_id, COALESCE(o.name, pr.name, k.name, p.scope_id)
@@ -135,6 +137,7 @@ func (s *Store) scopesNaming(ctx context.Context, match, orgID, alias string) ([
 		LEFT JOIN orgs      o ON p.scope_type = 'org'     AND o.id = p.scope_id AND o.id = $1
 		LEFT JOIN projects pr ON p.scope_type = 'project' AND pr.id = p.scope_id AND pr.org_id = $1
 		LEFT JOIN api_keys  k ON p.scope_type = 'key'     AND k.id = p.scope_id AND k.org_id = $1
+			AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at > now())
 		WHERE `+match+`
 		  AND (o.id IS NOT NULL OR pr.id IS NOT NULL OR k.id IS NOT NULL)
 		ORDER BY p.scope_type, p.scope_id`, orgID, alias)
