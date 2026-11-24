@@ -99,13 +99,14 @@ func TestServiceHandlersRefuseAnyoneButKeeraAgents(t *testing.T) {
 }
 
 // The catalogue offers what a key in the project may use: enabled chat
-// models and routers the guardrails allow, and enabled MCP servers they allow.
+// models and routers the guardrails allow, transcription models apart, and
+// enabled MCP servers they allow.
 func TestTheCatalogueIsWhatAKeyInTheProjectMayUse(t *testing.T) {
 	org := policy.Limits{
-		AllowedModels: []string{"keera-code", "keera-speed", "safe"},
+		AllowedModels: []string{"keera-code", "keera-speed", "safe", "whisper", "whisper-old"},
 		AllowedTools:  []string{"github/search_code", "docs"},
 	}
-	project := policy.Limits{AllowedModels: []string{"keera-code", "safe"}}
+	project := policy.Limits{AllowedModels: []string{"keera-code", "safe", "whisper", "whisper-old"}}
 	res := policy.Resolve(policy.Key{OrgID: "org_a", ProjectID: "project_a", Kind: policy.KeyStandard},
 		&org, &project, nil)
 	catalogue := []policy.Model{
@@ -114,6 +115,8 @@ func TestTheCatalogueIsWhatAKeyInTheProjectMayUse(t *testing.T) {
 		{Alias: "keera-speed", Kind: policy.KindChat, Enabled: true},
 		{Alias: "embed", Kind: policy.KindEmbedding, Enabled: true},
 		{Alias: "claude", Kind: policy.KindChat, Enabled: true, Subscription: true},
+		{Alias: "whisper", Kind: policy.KindTranscription, Enabled: true},
+		{Alias: "whisper-old", Kind: policy.KindTranscription, Enabled: false},
 	}
 	routers := []policy.Router{{Alias: "safe"}, {Alias: "other"}}
 	servers := []policy.MCPServer{
@@ -131,6 +134,10 @@ func TestTheCatalogueIsWhatAKeyInTheProjectMayUse(t *testing.T) {
 	if !slices.Equal(got.Models, want) {
 		t.Errorf("models = %+v, want %+v", got.Models, want)
 	}
+	wantSpeech := []serviceModel{{"whisper", "model"}}
+	if !slices.Equal(got.TranscriptionModels, wantSpeech) {
+		t.Errorf("transcription models = %+v, want %+v", got.TranscriptionModels, wantSpeech)
+	}
 	if len(got.MCPServers) != 1 || got.MCPServers[0].Alias != "github" {
 		t.Errorf("MCP servers = %+v, want only github", got.MCPServers)
 	}
@@ -139,7 +146,7 @@ func TestTheCatalogueIsWhatAKeyInTheProjectMayUse(t *testing.T) {
 	none := catalogueOf("project_a", projects,
 		policy.Resolve(policy.Key{Kind: policy.KeyStandard}, &policy.Limits{AllowedModels: []string{}}, nil, nil),
 		catalogue, nil, nil)
-	if none.Models == nil || none.MCPServers == nil || len(none.Models) != 0 {
+	if none.Models == nil || none.TranscriptionModels == nil || none.MCPServers == nil || len(none.Models) != 0 {
 		t.Errorf("an empty catalogue = %+v", none)
 	}
 }

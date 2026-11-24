@@ -326,10 +326,13 @@ func (s *Server) serviceCatalog(w http.ResponseWriter, r *http.Request, p *authn
 
 // serviceCatalogue is the answer of GET /v1/service/catalog.
 type serviceCatalogue struct {
-	ProjectID  string           `json:"project_id"`
-	Projects   []serviceProject `json:"projects"`
-	Models     []serviceModel   `json:"models"`
-	MCPServers []serviceServer  `json:"mcp_servers"`
+	ProjectID string           `json:"project_id"`
+	Projects  []serviceProject `json:"projects"`
+	Models    []serviceModel   `json:"models"`
+	// TranscriptionModels are apart from Models, so a client that reads
+	// Models as chat models never offers one.
+	TranscriptionModels []serviceModel  `json:"transcription_models"`
+	MCPServers          []serviceServer `json:"mcp_servers"`
 }
 
 type serviceProject struct {
@@ -337,7 +340,7 @@ type serviceProject struct {
 	Name string `json:"name"`
 }
 
-// serviceModel is a chat model or a router.
+// serviceModel is a model or a router.
 type serviceModel struct {
 	Alias string `json:"alias"`
 	// Kind is "model" or "router": a router is named like a model, but
@@ -355,15 +358,21 @@ func catalogueOf(projectID string, projects []store.Project, res *policy.Resolve
 ) serviceCatalogue {
 	out := serviceCatalogue{
 		ProjectID: projectID, Projects: []serviceProject{},
-		Models: []serviceModel{}, MCPServers: []serviceServer{},
+		Models: []serviceModel{}, TranscriptionModels: []serviceModel{}, MCPServers: []serviceServer{},
 	}
 	for _, p := range projects {
 		out.Projects = append(out.Projects, serviceProject{ID: p.ID, Name: p.Name})
 	}
 	// A standard key cannot reach subscription models, which MayUse checks.
 	for _, m := range catalogue {
-		if m.Enabled && m.Kind == policy.KindChat && res.MayUse(m) {
+		if !m.Enabled || !res.MayUse(m) {
+			continue
+		}
+		switch m.Kind {
+		case policy.KindChat:
 			out.Models = append(out.Models, serviceModel{Alias: m.Alias, Kind: "model"})
+		case policy.KindTranscription:
+			out.TranscriptionModels = append(out.TranscriptionModels, serviceModel{Alias: m.Alias, Kind: "model"})
 		}
 	}
 	// A router is named and allowed like a model.

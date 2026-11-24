@@ -4945,7 +4945,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [project_id, projects, models, mcp_servers]
+                required: [project_id, projects, models, transcription_models, mcp_servers]
                 properties:
                   project_id:
                     type: string
@@ -4973,6 +4973,20 @@ paths:
                         kind:
                           type: string
                           enum: [model, router]
+                  transcription_models:
+                    type: array
+                    description: |
+                      Transcription models, apart from `models` so a client
+                      that reads those as chat models never offers one.
+                    items:
+                      type: object
+                      required: [alias, kind]
+                      properties:
+                        alias:
+                          type: string
+                        kind:
+                          type: string
+                          enum: [model]
                   mcp_servers:
                     type: array
                     items:
