@@ -356,7 +356,7 @@ func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
-	if !s.matchesOperatorKey(strings.TrimSpace(in.Key)) {
+	if !s.operatorKey.matches(strings.TrimSpace(in.Key)) {
 		// The same message whatever was wrong with it.
 		unauthorized(w, "invalid_api_key",
 			"that operator key is not valid")
@@ -641,10 +641,10 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request, p *authn.Principal) 
 		// Whether the deployment bills organisations: it holds its own
 		// provider key, charges the gateway fee, or Keera Agents can bill its
 		// machines here.
-		"billing": len(s.opts.Platform) > 0 || s.opts.GatewayFee > 0 || s.hasServiceKey,
+		"billing": len(s.opts.Platform) > 0 || s.opts.GatewayFee > 0 || s.serviceKey.set,
 		// Whether Keera Agents can bill its machines here. It does once it
 		// has prices.
-		"agents_billing": s.hasServiceKey,
+		"agents_billing": s.serviceKey.set,
 		// The gateway fee per million tokens, in micros, or 0.
 		"gateway_fee_micros": s.opts.GatewayFee,
 		// Whether organisations pay for those keys in advance, by card.

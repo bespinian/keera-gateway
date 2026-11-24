@@ -62,7 +62,7 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		badRequest(w, err.Error())
 		return
 	}
-	orgID, ok := s.requireOrg(w, p, in.OrgID, orgRequired)
+	orgID, ok := s.requireOrg(w, p, in.OrgID)
 	if !ok {
 		return
 	}

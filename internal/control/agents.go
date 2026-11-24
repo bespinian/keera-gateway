@@ -31,13 +31,13 @@ import (
 // serviceAuthenticated is authenticated for the service routes.
 func (s *Server) serviceAuthenticated(next handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.hasServiceKey {
+		if !s.serviceKey.set {
 			switchedOff(w, "agents_disabled", "this deployment does not work with Keera "+
 				"Agents; its operator turns it on with KEERA_AGENTS_SERVICE_KEY")
 			return
 		}
 		presented, err := auth.FromHeader(r.Header.Get("Authorization"))
-		if err != nil || !constantTimeEqual(presented, s.serviceHash) {
+		if err != nil || !s.serviceKey.matches(presented) {
 			unauthorized(w, "unauthenticated", "this route is for Keera Agents; send its "+
 				"service key as 'Authorization: Bearer <key>'")
 			return
@@ -55,12 +55,6 @@ func requireService(w http.ResponseWriter, p *authn.Principal) bool {
 		return false
 	}
 	return true
-}
-
-// missing answers 404 with a reason. Keera Agents is told what is missing,
-// since it already knows every id it sends.
-func missing(w http.ResponseWriter, msg string) {
-	httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "not_found", msg)
 }
 
 // serviceOrg reads the organisation a service request named, or answers why

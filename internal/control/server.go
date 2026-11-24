@@ -102,16 +102,10 @@ type Server struct {
 	opts     Options
 	log      *slog.Logger
 
-	// hasOperatorKey guards operatorHash: without it, a server with no operator
-	// key would accept sha256(""), which anyone can send.
-	operatorHash   [32]byte
-	hasOperatorKey bool
-	// metricsHash is the same for the scrape token.
-	metricsHash     [32]byte
-	hasMetricsToken bool
-	// serviceHash is the same for Keera Agents' service key.
-	serviceHash   [32]byte
-	hasServiceKey bool
+	operatorKey  secretHash
+	metricsToken secretHash
+	// serviceKey is Keera Agents' service key.
+	serviceKey secretHash
 
 	// signIn throttles some unauthenticated routes per client address, and
 	// password sign-ins per account. It is in memory, so each replica counts on
@@ -133,15 +127,12 @@ func New(st *store.Store, reg *registry.Registry, m *metrics.Registry, rec *usag
 	opts.SessionGap = cmp.Or(opts.SessionGap, store.DefaultSessionGap)
 	return &Server{
 		st: st, reg: reg, metrics: m, recorder: rec, opts: opts,
-		operatorHash:    sha256.Sum256([]byte(opts.OperatorKey)),
-		hasOperatorKey:  opts.OperatorKey != "",
-		metricsHash:     sha256.Sum256([]byte(opts.MetricsToken)),
-		hasMetricsToken: opts.MetricsToken != "",
-		serviceHash:     sha256.Sum256([]byte(opts.AgentsServiceKey)),
-		hasServiceKey:   opts.AgentsServiceKey != "",
-		signIn:          ratelimit.New(),
-		feed:            newRequestFeed(),
-		log:             log,
+		operatorKey:  newSecretHash(opts.OperatorKey),
+		metricsToken: newSecretHash(opts.MetricsToken),
+		serviceKey:   newSecretHash(opts.AgentsServiceKey),
+		signIn:       ratelimit.New(),
+		feed:         newRequestFeed(),
+		log:          log,
 	}
 }
 
@@ -341,8 +332,7 @@ func (s *Server) mux() *httpx.Mux {
 	// Everything under the control prefix is the API. Without this, a typo in
 	// a path would fall through to the panel and answer HTML with a 200.
 	mux.HandleFunc(httpx.ControlPrefix+"/", func(w http.ResponseWriter, r *http.Request) {
-		httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "not_found",
-			"the control API has no route "+r.Method+" "+r.URL.Path)
+		missing(w, "the control API has no route "+r.Method+" "+r.URL.Path)
 	})
 	if s.opts.ServeUI {
 		mux.Handle("/", webui.Handler())
@@ -432,7 +422,7 @@ func (s *Server) throttle(name string, perMinute int, msg string,
 // a stray API key costs a string comparison and not a query.
 func (s *Server) principal(r *http.Request) (*authn.Principal, error) {
 	if presented, err := auth.FromHeader(r.Header.Get("Authorization")); err == nil {
-		if s.matchesOperatorKey(presented) {
+		if s.operatorKey.matches(presented) {
 			return &authn.Principal{Via: authn.MethodOperatorKey, Role: authn.RoleOperator}, nil
 		}
 		if strings.HasPrefix(presented, authn.CLITokenPrefix) {
@@ -443,18 +433,26 @@ func (s *Server) principal(r *http.Request) (*authn.Principal, error) {
 	return s.sessionPrincipal(r)
 }
 
-// With nothing configured, nothing matches.
-func (s *Server) matchesOperatorKey(presented string) bool {
-	return s.hasOperatorKey && constantTimeEqual(presented, s.operatorHash)
+// secretHash is a configured secret, kept only as its hash. Comparing hashes
+// takes the same time whatever the length of what is presented.
+type secretHash struct {
+	sum [32]byte
+	set bool
 }
 
-func (s *Server) matchesMetricsToken(presented string) bool {
-	return s.hasMetricsToken && constantTimeEqual(presented, s.metricsHash)
+func newSecretHash(secret string) secretHash {
+	return secretHash{sum: sha256.Sum256([]byte(secret)), set: secret != ""}
 }
 
-func constantTimeEqual(presented string, want [32]byte) bool {
+// matches is false while no secret is set: otherwise an empty one would accept
+// sha256(""), which anyone can send.
+func (h secretHash) matches(presented string) bool {
 	got := sha256.Sum256([]byte(presented))
-	return subtle.ConstantTimeCompare(got[:], want[:]) == 1
+	return h.set && subtle.ConstantTimeCompare(got[:], h.sum[:]) == 1
+}
+
+func missing(w http.ResponseWriter, msg string) {
+	httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "not_found", msg)
 }
 
 func forbid(w http.ResponseWriter, msg string) {
@@ -568,15 +566,14 @@ func (s *Server) scopeOrg(w http.ResponseWriter, p *authn.Principal, requested s
 // told by a route that needs one.
 const orgRequired = "choose an organisation: pass org_id, or run 'keera org switch' first"
 
-// requireOrg is scopeOrg for a route that needs exactly one organisation. An
-// operator looking at all of them at once is told msg.
-func (s *Server) requireOrg(w http.ResponseWriter, p *authn.Principal, requested, msg string) (string, bool) {
+// requireOrg is scopeOrg for a route that needs exactly one organisation.
+func (s *Server) requireOrg(w http.ResponseWriter, p *authn.Principal, requested string) (string, bool) {
 	orgID, ok := s.scopeOrg(w, p, requested)
 	if !ok {
 		return "", false
 	}
 	if orgID == "" {
-		needOrg(w, msg)
+		needOrg(w, orgRequired)
 		return "", false
 	}
 	return orgID, true
@@ -588,7 +585,7 @@ func needOrg(w http.ResponseWriter, msg string) {
 
 // queryOrg is requireOrg for the organisation named in ?org_id.
 func (s *Server) queryOrg(w http.ResponseWriter, r *http.Request, p *authn.Principal) (string, bool) {
-	return s.requireOrg(w, p, r.URL.Query().Get("org_id"), orgRequired)
+	return s.requireOrg(w, p, r.URL.Query().Get("org_id"))
 }
 
 // adminOrg is queryOrg for a request that changes something of the
@@ -599,7 +596,7 @@ func (s *Server) adminOrg(w http.ResponseWriter, r *http.Request, p *authn.Princ
 
 // orgToAdmin is adminOrg for an organisation named in the body.
 func (s *Server) orgToAdmin(w http.ResponseWriter, p *authn.Principal, requested string) (string, bool) {
-	orgID, ok := s.requireOrg(w, p, requested, orgRequired)
+	orgID, ok := s.requireOrg(w, p, requested)
 	return orgID, ok && s.requireOrgAdmin(w, p, orgID)
 }
 
@@ -666,7 +663,7 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 // metrics are labelled by organisation. The scrape token can read it too.
 func (s *Server) metricsRoute(w http.ResponseWriter, r *http.Request) {
 	if presented, err := auth.FromHeader(r.Header.Get("Authorization")); err == nil &&
-		s.matchesMetricsToken(presented) {
+		s.metricsToken.matches(presented) {
 		s.writeMetrics(w)
 		return
 	}
@@ -719,12 +716,11 @@ func (s *Server) auditf(r *http.Request, p *authn.Principal, orgID, action,
 func (s *Server) fail(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
-		httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "not_found", "not found")
+		missing(w, "not found")
 	case store.IsMissingOrg(err):
 		// Only an operator can name an organisation that is not theirs, so
 		// only they get here, and a typo is not an internal error.
-		httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "not_found",
-			"no such organisation")
+		missing(w, "no such organisation")
 	case errors.Is(err, authn.ErrForbidden):
 		forbid(w, err.Error())
 	default:
