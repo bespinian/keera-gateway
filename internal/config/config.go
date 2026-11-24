@@ -1,5 +1,5 @@
 // Package config reads the gateway's settings from the environment. The model
-// files are templates that each new organisation starts from.
+// template file is what each new organisation starts from.
 package config
 
 import (
@@ -72,8 +72,8 @@ type Config struct {
 	SpendRefresh time.Duration
 
 	// UsageRetention and AuditRetention are how long usage events and audit
-	// entries are kept. Ended keys go with usage. Zero, the
-	// default, keeps them for ever. See https://docs.keera.ch/operate/settings/#retention.
+	// entries are kept. Ended keys go with usage. Zero, the default, keeps them
+	// for ever. See https://docs.keera.ch/operate/settings/#retention.
 	UsageRetention time.Duration
 	AuditRetention time.Duration
 

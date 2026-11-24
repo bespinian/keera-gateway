@@ -100,8 +100,6 @@ type Transaction struct {
 	State               string  `json:"state"`
 	Currency            string  `json:"currency"`
 	AuthorizationAmount float64 `json:"authorizationAmount"`
-	CustomerID          string  `json:"customerId"`
-	MerchantReference   string  `json:"merchantReference"`
 	UserFailureMessage  string  `json:"userFailureMessage"`
 	Token               *struct {
 		ID int64 `json:"id"`
@@ -196,28 +194,21 @@ func (c *Client) Card(ctx context.Context, token int64) (Card, error) {
 	return card, nil
 }
 
-// Document is a file PostFinance renders, such as an invoice.
-type Document struct {
-	Title string
-	Data  []byte
-}
-
 // InvoiceDocument renders a transaction's invoice, its receipt, from the
-// space's invoice template.
-func (c *Client) InvoiceDocument(ctx context.Context, id int64) (Document, error) {
+// space's invoice template, and returns the PDF.
+func (c *Client) InvoiceDocument(ctx context.Context, id int64) ([]byte, error) {
 	var v struct {
-		Title string `json:"title"`
 		// A []byte reads the base64 PostFinance sends.
 		Data []byte `json:"data"`
 	}
 	err := c.call(ctx, http.MethodGet, txPath(id)+"/invoice-document", nil, &v, maxDocument)
 	if err != nil {
-		return Document{}, err
+		return nil, err
 	}
 	if !bytes.HasPrefix(v.Data, []byte("%PDF-")) {
-		return Document{}, errors.New("postfinance: the invoice document is not a PDF")
+		return nil, errors.New("postfinance: the invoice document is not a PDF")
 	}
-	return Document{Title: v.Title, Data: v.Data}, nil
+	return v.Data, nil
 }
 
 // DeleteToken forgets a saved card at PostFinance.

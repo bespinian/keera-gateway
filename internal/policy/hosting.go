@@ -67,7 +67,7 @@ func (m Model) LocationFromBackends() (string, error) {
 }
 
 // CheckBackend says what is wrong with a model's backends, or nil. The control
-// API and template files share it.
+// API and the template file share it.
 func (m Model) CheckBackend() error {
 	switch {
 	case len(m.Backends) == 0:

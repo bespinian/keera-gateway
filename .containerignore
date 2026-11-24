@@ -5,7 +5,6 @@ result
 .git
 .github
 .claude
-docs
 /build
 # The compose credentials. The build stage copies the whole context, so they
 # would otherwise sit in its layers and the build cache.

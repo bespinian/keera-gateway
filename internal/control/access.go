@@ -184,10 +184,6 @@ func (s *Server) accessKeys(r *http.Request, orgID, orgName string, keys []store
 	return shown, nil
 }
 
-// callable is every name a client may put in the model field: the
-// organisation's models and routers. Without routers, a key whose allow-list
-// names only one would look like it may call nothing.
-
 // scopeSays is what one level adds to a request: its instruction and
 // filters. Both add up down the chain, so they are reported per level.
 type scopeSays struct {
@@ -286,7 +282,8 @@ func (s *Server) levelState(res *policy.Resolved, sc policy.Scope, orgName strin
 }
 
 // allowedModels is what a key may actually call: the enabled models its
-// kind reaches and its guardrails permit, then the routers.
+// kind reaches and its guardrails permit, then the routers. Without routers, a
+// key whose allow-list names only one would look like it may call nothing.
 func allowedModels(res *policy.Resolved, models []policy.Model, routers []policy.Router) []string {
 	out := []string{}
 	for _, m := range models {

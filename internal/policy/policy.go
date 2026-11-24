@@ -884,7 +884,9 @@ func Resolve(key Key, org, project, own *Limits) *Resolved {
 func (r *Resolved) narrow(lim *Limits) {
 	r.AllowedModels = intersect(r.AllowedModels, lim.AllowedModels)
 	r.AllowedLocations = intersect(r.AllowedLocations, lim.AllowedLocations)
-	r.SystemPrompt = JoinPrompts(r.SystemPrompt, deref(lim.SystemPrompt))
+	if lim.SystemPrompt != nil {
+		r.SystemPrompt = JoinPrompts(r.SystemPrompt, *lim.SystemPrompt)
+	}
 	r.Filters = appendFilters(r.Filters, lim.Filters)
 	r.AllowedTools = intersectTools(r.AllowedTools, lim.AllowedTools)
 }
@@ -948,14 +950,6 @@ func appendFilters(cur, next []string) []string {
 		}
 	}
 	return cur
-}
-
-func deref[T any](p *T) T {
-	var zero T
-	if p == nil {
-		return zero
-	}
-	return *p
 }
 
 // ErrBudgetExceeded says which budget is spent, how much, and when it resets,

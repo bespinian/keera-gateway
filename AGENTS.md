@@ -26,7 +26,7 @@ image and the compose deployment, which is also the development loop.
 | `internal/auth`      | API key hashing and verification.                                |
 | `internal/webui`     | The control panel, embedded in the server binary.                |
 | `internal/policy`    | The tenancy model and how limits combine.                        |
-| `internal/catalog`   | The template files and the hosted-provider catalogue.            |
+| `internal/catalog`   | The model template file and the hosted-provider catalogue.       |
 | `internal/registry`  | The gateway's in-memory view of the control plane.               |
 | `internal/connect`   | The client list the panel and `keera connect` share.             |
 | `internal/ratelimit` | Request and token rate limiting.                                 |

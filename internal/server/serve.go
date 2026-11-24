@@ -485,8 +485,8 @@ func retain(ctx context.Context, st *store.Store, cfg config.Config, log *slog.L
 }
 
 // purgeOld deletes usage events and audit entries past their windows, and
-// keys that ended before the usage window. Daily usage totals are
-// kept for ever: they are small, and long reports read them.
+// keys that ended before the usage window. Daily usage totals are kept for
+// ever: they are small, and long reports read them.
 func purgeOld(ctx context.Context, st *store.Store, cfg config.Config, log *slog.Logger) {
 	if !myTurn(ctx, st, log, "retention", retentionInterval) {
 		return

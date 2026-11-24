@@ -159,8 +159,8 @@ func TestAnInvoiceArrivesAsAPDF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if doc.Title != "Invoice 42" || string(doc.Data) != string(pdf) {
-		t.Errorf("document = %q, %d bytes", doc.Title, len(doc.Data))
+	if string(doc) != string(pdf) {
+		t.Errorf("document = %d bytes, want %d", len(doc), len(pdf))
 	}
 }
 

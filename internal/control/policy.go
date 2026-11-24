@@ -146,9 +146,9 @@ func (s *Server) effectiveGuardrails(w http.ResponseWriter, r *http.Request, p *
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// scopeChain finds the organisation and project above a scope. The caller
-// must be in that organisation, so another tenant's guardrails cannot be
-// reached by guessing an id.
+// scopeChain finds the organisation and project above a scope. It does not
+// check access: the caller checks the organisation it returns, so another
+// tenant's guardrails cannot be reached by guessing an id.
 func (s *Server) scopeChain(ctx context.Context, scope policy.ScopeType, scopeID string) (
 	orgID, projectID string, err error,
 ) {

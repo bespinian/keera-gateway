@@ -31,10 +31,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # Before the linters: formatting is a one-command fix.
-      - name: Check formatting
-        run: make fmt-check
-
       - name: Vet
         run: make vet
 

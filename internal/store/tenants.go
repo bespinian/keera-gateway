@@ -141,7 +141,7 @@ func (k KeyInfo) State(now time.Time) string {
 }
 
 // OrgTemplate is what a new organisation starts with: a copy of each model
-// from the template files.
+// from the template file.
 type OrgTemplate struct {
 	Models []policy.Model
 }

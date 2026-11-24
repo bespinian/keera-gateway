@@ -25,7 +25,7 @@ env_files = []
 
   # vendor/ is thousands of files that change only on purpose; watching it
   # slows the start for nothing.
-  exclude_dir = ["vendor", "build", "testdata", "docs", ".git"]
+  exclude_dir = ["vendor", "build", ".git"]
   exclude_regex = ["_test\\.go"]
 
   # SIGINT lets the binary release :8080. Killing it outright makes the next

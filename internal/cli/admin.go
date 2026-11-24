@@ -184,8 +184,6 @@ func printNone(w io.Writer, what, add string) {
 	_, _ = fmt.Fprintf(w, "No %s. Add one with: %s\n", what, add)
 }
 
-// handOver prints the secret alone on stdout, so 'KEY=$(keera key create …)'
-// captures it.
 // handOver prints a new secret on stdout, so it can be piped, and on stderr
 // what it is and next, what to do with it.
 func handOver(secret, said, next string) {

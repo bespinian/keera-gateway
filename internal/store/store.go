@@ -107,7 +107,8 @@ func Open(ctx context.Context, dsn string, maxConns int32) (*Store, error) {
 
 func (s *Store) Close() { s.pool.Close() }
 
-// Pool exposes the underlying pool, for tests that set up rows directly.
+// Pool exposes the underlying pool, for tests and the demo data that set up
+// rows directly.
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }

@@ -129,9 +129,14 @@ lint:
 
 .PHONY: fmt-check
 fmt-check:
-	@# Only the source directories, so vendor/ is skipped.
-	@out=$$(gofmt -l cmd internal); \
-		test -z "$$out" || { echo "not gofmt-clean:"; echo "$$out"; exit 1; }
+	@# gofumpt, as CI lint checks it. Without golangci-lint, plain gofmt over
+	@# the source directories, so vendor/ is skipped.
+	@if command -v $(GOLANGCI_LINT) >/dev/null 2>&1; then \
+		$(GOLANGCI_LINT) fmt --diff ./... || { echo "Fix it with: golangci-lint fmt"; exit 1; }; \
+	else \
+		out=$$(gofmt -l cmd internal scripts); \
+		test -z "$$out" || { echo "not gofmt-clean:"; echo "$$out"; exit 1; }; \
+	fi
 
 .PHONY: clean
 clean:

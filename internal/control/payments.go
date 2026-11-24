@@ -432,7 +432,7 @@ func (s *Server) paymentReceipt(w http.ResponseWriter, r *http.Request, p *authn
 			string(pm.State))
 		return
 	}
-	doc, err := pay.Client.InvoiceDocument(r.Context(), pm.TransactionID)
+	pdf, err := pay.Client.InvoiceDocument(r.Context(), pm.TransactionID)
 	if err != nil {
 		s.log.Warn("reading a receipt from PostFinance failed", "payment", pm.ID,
 			"transaction", pm.TransactionID, "error", err)
@@ -444,8 +444,8 @@ func (s *Server) paymentReceipt(w http.ResponseWriter, r *http.Request, p *authn
 	w.Header().Set("Content-Type", "application/pdf")
 	w.Header().Set("Content-Disposition",
 		mime.FormatMediaType("attachment", map[string]string{"filename": name}))
-	w.Header().Set("Content-Length", strconv.Itoa(len(doc.Data)))
-	_, _ = w.Write(doc.Data)
+	w.Header().Set("Content-Length", strconv.Itoa(len(pdf)))
+	_, _ = w.Write(pdf)
 }
 
 // grantCredit adds credit to an organisation without a payment, or takes

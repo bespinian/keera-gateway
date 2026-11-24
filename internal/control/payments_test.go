@@ -61,8 +61,7 @@ func newFakePostFinance(t *testing.T) *fakePostFinance {
 		}
 		tx := payment.Transaction{
 			ID: id, State: "PENDING", Currency: in.Currency,
-			AuthorizationAmount: amount, CustomerID: in.CustomerID,
-			MerchantReference: in.MerchantReference,
+			AuthorizationAmount: amount,
 		}
 		f.state[id] = tx
 		f.mu.Unlock()

@@ -1,4 +1,4 @@
-// Package catalog reads the template files, and knows the hosted providers a
+// Package catalog reads the model template file, and knows the hosted providers a
 // model can name. Every new organisation starts with a copy of each declared
 // model, which it may then change or remove.
 package catalog
@@ -74,22 +74,17 @@ type Model struct {
 	Disabled     bool `yaml:"disabled"`
 }
 
-// LoadModels reads and validates a model template file.
+// LoadModels reads and validates a model template file. Errors name the file.
 func LoadModels(path string) ([]policy.Model, error) {
-	return load(path, parseModelFile)
-}
-
-// load reads a template file and parses it, naming the file in any error.
-func load[T any](path string, parse func([]byte) ([]T, error)) ([]T, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	entries, err := parse(raw)
+	models, err := parseModelFile(raw)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	return entries, nil
+	return models, nil
 }
 
 func parseModelFile(raw []byte) ([]policy.Model, error) {
@@ -100,7 +95,7 @@ func parseModelFile(raw []byte) ([]policy.Model, error) {
 	if len(f.Models) == 0 {
 		return nil, errors.New("catalogue declares no models")
 	}
-	return parseEntries(f.Models, "models", "alias", func(m Model) string { return m.Alias }, ParseModel)
+	return parseModels(f.Models)
 }
 
 // decodeStrict reads a template file and refuses unknown fields, so a misspelt
@@ -114,27 +109,26 @@ func decodeStrict(raw []byte, out any) error {
 	return nil
 }
 
-// parseEntries parses each entry of a template file and refuses a name used
-// twice. Errors name the entry by index, and by name when it has one.
-func parseEntries[E, T any](entries []E, list, field string, name func(E) string, parse func(E) (T, error)) ([]T, error) {
-	seen := make(map[string]bool, len(entries))
-	out := make([]T, 0, len(entries))
-	for i, e := range entries {
-		n := name(e)
-		var parsed T
+// parseModels parses each model of a template file and refuses an alias used
+// twice. Errors name the model by index, and by alias when it has one.
+func parseModels(models []Model) ([]policy.Model, error) {
+	seen := make(map[string]bool, len(models))
+	out := make([]policy.Model, 0, len(models))
+	for i, m := range models {
+		var parsed policy.Model
 		var err error
-		if n != "" && seen[n] {
-			err = fmt.Errorf("%s %q is declared twice", field, n)
+		if m.Alias != "" && seen[m.Alias] {
+			err = fmt.Errorf("alias %q is declared twice", m.Alias)
 		} else {
-			parsed, err = parse(e)
+			parsed, err = ParseModel(m)
 		}
 		switch {
-		case err != nil && n == "":
-			return nil, fmt.Errorf("%s[%d]: %w", list, i, err)
+		case err != nil && m.Alias == "":
+			return nil, fmt.Errorf("models[%d]: %w", i, err)
 		case err != nil:
-			return nil, fmt.Errorf("%s[%d] (%s): %w", list, i, n, err)
+			return nil, fmt.Errorf("models[%d] (%s): %w", i, m.Alias, err)
 		}
-		seen[n] = true
+		seen[m.Alias] = true
 		out = append(out, parsed)
 	}
 	return out, nil
