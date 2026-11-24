@@ -629,37 +629,18 @@ func (s *Server) refreshCredit(ctx context.Context) {
 	}
 }
 
-// paymentsEvery is how often the automatic top-ups and the pending payments
+// PaymentsEvery is how often the automatic top-ups and the pending payments
 // are looked at.
-const paymentsEvery = 30 * time.Second
+const PaymentsEvery = 30 * time.Second
 
-// RunPayments charges the saved cards of accounts that ran low and of
+// CheckPayments charges the saved cards of accounts that ran low and of
 // recurring charges that are due, and settles payments whose webhook never
-// came, until ctx ends. Replicas take turns, so
-// one looks each round. A payment is credited once, whether the webhook or this
-// check gets there first.
-func (s *Server) RunPayments(ctx context.Context) {
-	if s.opts.Payments == nil {
-		return
-	}
-	t := time.NewTicker(paymentsEvery)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			if ok, err := s.st.TakeTurn(ctx, "payments", paymentsEvery); !ok {
-				if err != nil && ctx.Err() == nil {
-					s.log.Warn("asking whether to look at payments failed", "error", err)
-				}
-				continue
-			}
-			s.topUpDue(ctx)
-			s.chargesDue(ctx)
-			s.settlePending(ctx, time.Now())
-		}
-	}
+// came. A payment is credited once, whether the webhook or this check gets
+// there first.
+func (s *Server) CheckPayments(ctx context.Context) {
+	s.topUpDue(ctx)
+	s.chargesDue(ctx)
+	s.settlePending(ctx, time.Now())
 }
 
 func (s *Server) topUpDue(ctx context.Context) {

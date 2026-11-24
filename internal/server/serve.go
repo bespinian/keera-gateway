@@ -121,6 +121,7 @@ func serve(ctx context.Context) error {
 		log.Info("passkeys enabled", "rp_id", cfg.Passkeys.ID())
 	}
 
+	payments := buildPayments(cfg)
 	ctl := control.New(st, reg, mreg, recorder, control.Options{
 		OperatorKey:         cfg.OperatorKey,
 		MetricsToken:        cfg.MetricsToken,
@@ -139,7 +140,7 @@ func serve(ctx context.Context) error {
 		Template:            template,
 		Platform:            cfg.Platform,
 		GatewayFee:          cfg.GatewayFee,
-		Payments:            buildPayments(cfg),
+		Payments:            payments,
 		ClaudeSubscriptions: cfg.ClaudeSubscriptions,
 	}, log)
 
@@ -160,7 +161,15 @@ func serve(ctx context.Context) error {
 	// Lets the panel show a request as soon as it is recorded.
 	wg.Go(func() { ctl.Run(bg) })
 	// Charges saved cards that ran low, and settles payments.
-	wg.Go(func() { ctl.RunPayments(bg) })
+	if payments != nil {
+		wg.Go(func() {
+			every(bg, control.PaymentsEvery, false, func(time.Time) {
+				if myTurn(bg, st, log, "payments", control.PaymentsEvery) {
+					ctl.CheckPayments(bg)
+				}
+			})
+		})
+	}
 	wg.Go(func() { sweep(bg, reg, limiter, ctl, st, log) })
 	wg.Go(func() { retain(bg, st, cfg, log) })
 
