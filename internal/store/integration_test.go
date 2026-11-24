@@ -52,11 +52,10 @@ func db(t *testing.T) (*Store, context.Context) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	t.Cleanup(cancel)
-	if _, err := testStore.pool.Exec(ctx, `TRUNCATE orgs, projects, users, api_keys, guardrails,
-		models, filters, filter_runs, routers, usage_events, usage_daily, spend, audit_log, sessions,
-		login_flows, cli_codes, cli_tokens, mcp_servers, tool_calls,
-		billing_lines, credit_accounts, payments, identities, job_runs
-		RESTART IDENTITY CASCADE`); err != nil {
+	// Every table but the migration record, so a new table needs no change here.
+	if _, err := testStore.pool.Exec(ctx, `DO $$ BEGIN EXECUTE (SELECT 'TRUNCATE ' || string_agg(quote_ident(tablename), ', ')
+		|| ' RESTART IDENTITY CASCADE' FROM pg_tables
+		WHERE schemaname = current_schema() AND tablename <> 'schema_migrations'); END $$`); err != nil {
 		t.Fatalf("emptying the database: %v", err)
 	}
 	return testStore, ctx
