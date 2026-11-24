@@ -361,11 +361,7 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "415":
-          description: The body was not sent as `application/json`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/NotJSON"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "503":
@@ -418,11 +414,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "415":
-          description: The body was not sent as `application/json`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/NotJSON"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "501":
@@ -468,11 +460,7 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "415":
-          description: The body was not sent as `application/json`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/NotJSON"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "501":
@@ -512,11 +500,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "415":
-          description: The body was not sent as `application/json`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/NotJSON"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "501":
@@ -570,11 +554,7 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
         "415":
-          description: The body was not sent as `application/json`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/NotJSON"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "501":
@@ -4192,11 +4172,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "413":
-          description: The body is too large.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/PayloadTooLarge"
         "501":
           $ref: "#/components/responses/Disabled"
   /control/v1/billing/account/card:
@@ -4289,11 +4265,7 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "413":
-          description: The body is too large.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/PayloadTooLarge"
         "501":
           $ref: "#/components/responses/Disabled"
         "502":
@@ -4437,11 +4409,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "413":
-          description: The body is too large.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/PayloadTooLarge"
         "501":
           $ref: "#/components/responses/Disabled"
   /control/v1/billing/charges:
@@ -4528,11 +4496,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "413":
-          description: The body is too large.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/PayloadTooLarge"
         "501":
           $ref: "#/components/responses/Disabled"
   /control/v1/billing/charges/{id}:
@@ -5192,36 +5156,11 @@ paths:
         - apiKey: []
         - keeraKey: []
       parameters:
-        - name: X-Request-Id
-          in: header
-          description: "An id for the request. Kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`, otherwise replaced."
-          schema:
-            type: string
-        - name: X-Client-Request-Id
-          in: header
-          description: "The client's own id, as OpenAI's API takes it: printable ASCII, up to 512 characters. It is logged and sent on to OpenAI models. An invalid one is ignored."
-          schema:
-            type: string
-        - name: X-Keera-Client
-          in: header
-          description: The client's own name, which wins over the `User-Agent` in reports.
-          schema:
-            type: string
-        - name: Content-Encoding
-          in: header
-          description: The body may be gzip or deflate.
-          schema:
-            type: string
-            enum:
-              - identity
-              - gzip
-              - x-gzip
-              - deflate
-        - name: X-Keera-Session
-          in: header
-          description: Names the session (task) this request belongs to, instead of the one the gateway derives from the opening prompt. `X-Session-Id`, `Helicone-Session-Id` and `X-Claude-Code-Session-Id` are read too; the first with a value wins. See https://docs.keera.ch/monitor/requests-and-sessions/.
-          schema:
-            type: string
+        - $ref: "#/components/parameters/RequestID"
+        - $ref: "#/components/parameters/ClientRequestID"
+        - $ref: "#/components/parameters/KeeraClient"
+        - $ref: "#/components/parameters/ContentEncoding"
+        - $ref: "#/components/parameters/KeeraSession"
       requestBody:
         required: true
         content:
@@ -5259,74 +5198,35 @@ paths:
           description: The provider's answer, in this API's format.
           headers:
             X-Request-Id:
-              description: "The request's id. One the client sent is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`."
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Request-Id"
             X-Keera-Model:
-              description: The alias that answered; behind a router, the destination that answered.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Model"
             X-Keera-Router:
-              description: The router and where it sent the request, as `router -> model`, with ` (fallback)` or ` (every destination failed)` when so.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Router"
             X-Keera-Filters:
-              description: The filters that acted on the request, in order, comma-separated.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Filters"
             X-Keera-Removed-Tools:
-              description: Hosted tools taken out on the deployment's key.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Removed-Tools"
             X-Keera-Removed-Fields:
-              description: Fields taken out on the deployment's key.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Removed-Fields"
             X-Keera-Budget-Remaining:
-              description: What is left to spend at the tightest level with a budget, in CHF.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Budget-Remaining"
             X-Keera-Budget-Limit:
-              description: That level's budget, in CHF.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Budget-Limit"
             X-Keera-Budget-Reset:
-              description: When that budget resets.
-              schema:
-                type: string
-                format: date-time
+              $ref: "#/components/headers/X-Keera-Budget-Reset"
             X-Keera-Budget-Scope:
-              description: "The level: `org`, `project` or `key`."
-              schema:
-                type: string
-                enum:
-                  - org
-                  - project
-                  - key
+              $ref: "#/components/headers/X-Keera-Budget-Scope"
             X-RateLimit-Limit-Requests:
-              description: Requests per minute at the tightest level that limits them.
-              schema:
-                type: integer
+              $ref: "#/components/headers/X-RateLimit-Limit-Requests"
             X-RateLimit-Remaining-Requests:
-              description: Requests left in that bucket.
-              schema:
-                type: integer
+              $ref: "#/components/headers/X-RateLimit-Remaining-Requests"
             X-Keera-RateLimit-Scope:
-              description: "The level: `org`, `project` or `key`."
-              schema:
-                type: string
-                enum:
-                  - org
-                  - project
-                  - key
+              $ref: "#/components/headers/X-Keera-RateLimit-Scope"
             Retry-After:
-              description: Passed on from the provider.
-              schema:
-                type: integer
+              $ref: "#/components/headers/Retry-After"
             X-Should-Retry:
-              description: Passed on from the provider.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Should-Retry"
           content:
             application/json:
               schema:
@@ -5337,63 +5237,27 @@ paths:
                 type: string
                 description: "Server-sent events, when the request set `stream: true`."
         "400":
-          description: The body or a field is not valid. Codes include `invalid_body`, `missing_model`, `context_length_exceeded` and `unsupported_parameter`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceBadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "402":
-          description: "A budget is spent (`budget_exceeded`), the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`), or a recurring charge is due that no saved card can pay (`charge_due`). Not 429: it does not lift by waiting."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferencePaymentRequired"
         "403":
-          description: Refused by a filter (`filter_refused`), by a filter whose model runs outside the locations the key's guardrails allow (`location_not_allowed`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceForbidden"
         "404":
-          description: No such model, or the key may not use it (`model_not_found`). The message says where a model of another kind is served.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceNotFound"
         "413":
-          description: The body is over the gateway's limit (`request_too_large`, 32 MiB by default), or too long for a filter's model (`filter_input_too_large`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceTooLarge"
         "415":
-          description: A `Content-Encoding` other than gzip or deflate (`unsupported_encoding`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/UnsupportedEncoding"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "502":
-          description: The model's backend could not be reached or gave an answer that could not be read (`upstream_unavailable`, `upstream_error`), or a filter failed.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceBadGateway"
         "503":
-          description: No backend serves the model (`no_backend`), a router or filter could not decide, or the control plane is unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceUnavailable"
         default:
-          description: Any other error status the model's provider gave, such as 504 or 529, passed on in the caller's error shape.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/ProviderError"
       description: OpenAI's Chat Completions API, for any chat model or router the key may use, whatever provider serves it.
   /api/v1/completions:
     post:
@@ -5409,31 +5273,10 @@ paths:
         - apiKey: []
         - keeraKey: []
       parameters:
-        - name: X-Request-Id
-          in: header
-          description: "An id for the request. Kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`, otherwise replaced."
-          schema:
-            type: string
-        - name: X-Client-Request-Id
-          in: header
-          description: "The client's own id, as OpenAI's API takes it: printable ASCII, up to 512 characters. It is logged and sent on to OpenAI models. An invalid one is ignored."
-          schema:
-            type: string
-        - name: X-Keera-Client
-          in: header
-          description: The client's own name, which wins over the `User-Agent` in reports.
-          schema:
-            type: string
-        - name: Content-Encoding
-          in: header
-          description: The body may be gzip or deflate.
-          schema:
-            type: string
-            enum:
-              - identity
-              - gzip
-              - x-gzip
-              - deflate
+        - $ref: "#/components/parameters/RequestID"
+        - $ref: "#/components/parameters/ClientRequestID"
+        - $ref: "#/components/parameters/KeeraClient"
+        - $ref: "#/components/parameters/ContentEncoding"
       requestBody:
         required: true
         content:
@@ -5463,74 +5306,35 @@ paths:
           description: The provider's answer, in this API's format.
           headers:
             X-Request-Id:
-              description: "The request's id. One the client sent is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`."
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Request-Id"
             X-Keera-Model:
-              description: The alias that answered; behind a router, the destination that answered.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Model"
             X-Keera-Router:
-              description: The router and where it sent the request, as `router -> model`, with ` (fallback)` or ` (every destination failed)` when so.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Router"
             X-Keera-Filters:
-              description: The filters that acted on the request, in order, comma-separated.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Filters"
             X-Keera-Removed-Tools:
-              description: Hosted tools taken out on the deployment's key.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Removed-Tools"
             X-Keera-Removed-Fields:
-              description: Fields taken out on the deployment's key.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Removed-Fields"
             X-Keera-Budget-Remaining:
-              description: What is left to spend at the tightest level with a budget, in CHF.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Budget-Remaining"
             X-Keera-Budget-Limit:
-              description: That level's budget, in CHF.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Budget-Limit"
             X-Keera-Budget-Reset:
-              description: When that budget resets.
-              schema:
-                type: string
-                format: date-time
+              $ref: "#/components/headers/X-Keera-Budget-Reset"
             X-Keera-Budget-Scope:
-              description: "The level: `org`, `project` or `key`."
-              schema:
-                type: string
-                enum:
-                  - org
-                  - project
-                  - key
+              $ref: "#/components/headers/X-Keera-Budget-Scope"
             X-RateLimit-Limit-Requests:
-              description: Requests per minute at the tightest level that limits them.
-              schema:
-                type: integer
+              $ref: "#/components/headers/X-RateLimit-Limit-Requests"
             X-RateLimit-Remaining-Requests:
-              description: Requests left in that bucket.
-              schema:
-                type: integer
+              $ref: "#/components/headers/X-RateLimit-Remaining-Requests"
             X-Keera-RateLimit-Scope:
-              description: "The level: `org`, `project` or `key`."
-              schema:
-                type: string
-                enum:
-                  - org
-                  - project
-                  - key
+              $ref: "#/components/headers/X-Keera-RateLimit-Scope"
             Retry-After:
-              description: Passed on from the provider.
-              schema:
-                type: integer
+              $ref: "#/components/headers/Retry-After"
             X-Should-Retry:
-              description: Passed on from the provider.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Should-Retry"
           content:
             application/json:
               schema:
@@ -5541,63 +5345,27 @@ paths:
                 type: string
                 description: "Server-sent events, when the request set `stream: true`."
         "400":
-          description: The body or a field is not valid. Codes include `invalid_body`, `missing_model`, `context_length_exceeded` and `unsupported_parameter`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceBadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "402":
-          description: "A budget is spent (`budget_exceeded`), the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`), or a recurring charge is due that no saved card can pay (`charge_due`). Not 429: it does not lift by waiting."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferencePaymentRequired"
         "403":
-          description: Refused by a filter (`filter_refused`), by a filter whose model runs outside the locations the key's guardrails allow (`location_not_allowed`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceForbidden"
         "404":
-          description: No such model, or the key may not use it (`model_not_found`). The message says where a model of another kind is served.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceNotFound"
         "413":
-          description: The body is over the gateway's limit (`request_too_large`, 32 MiB by default), or too long for a filter's model (`filter_input_too_large`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceTooLarge"
         "415":
-          description: A `Content-Encoding` other than gzip or deflate (`unsupported_encoding`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/UnsupportedEncoding"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "502":
-          description: The model's backend could not be reached or gave an answer that could not be read (`upstream_unavailable`, `upstream_error`), or a filter failed.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceBadGateway"
         "503":
-          description: No backend serves the model (`no_backend`), a router or filter could not decide, or the control plane is unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceUnavailable"
         default:
-          description: Any other error status the model's provider gave, such as 504 or 529, passed on in the caller's error shape.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/ProviderError"
       description: OpenAI's legacy Completions API, for completion models.
   /api/v1/embeddings:
     post:
@@ -5613,31 +5381,10 @@ paths:
         - apiKey: []
         - keeraKey: []
       parameters:
-        - name: X-Request-Id
-          in: header
-          description: "An id for the request. Kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`, otherwise replaced."
-          schema:
-            type: string
-        - name: X-Client-Request-Id
-          in: header
-          description: "The client's own id, as OpenAI's API takes it: printable ASCII, up to 512 characters. It is logged and sent on to OpenAI models. An invalid one is ignored."
-          schema:
-            type: string
-        - name: X-Keera-Client
-          in: header
-          description: The client's own name, which wins over the `User-Agent` in reports.
-          schema:
-            type: string
-        - name: Content-Encoding
-          in: header
-          description: The body may be gzip or deflate.
-          schema:
-            type: string
-            enum:
-              - identity
-              - gzip
-              - x-gzip
-              - deflate
+        - $ref: "#/components/parameters/RequestID"
+        - $ref: "#/components/parameters/ClientRequestID"
+        - $ref: "#/components/parameters/KeeraClient"
+        - $ref: "#/components/parameters/ContentEncoding"
       requestBody:
         required: true
         content:
@@ -5661,137 +5408,62 @@ paths:
           description: The provider's answer, in this API's format.
           headers:
             X-Request-Id:
-              description: "The request's id. One the client sent is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`."
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Request-Id"
             X-Keera-Model:
-              description: The alias that answered; behind a router, the destination that answered.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Model"
             X-Keera-Router:
-              description: The router and where it sent the request, as `router -> model`, with ` (fallback)` or ` (every destination failed)` when so.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Router"
             X-Keera-Filters:
-              description: The filters that acted on the request, in order, comma-separated.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Filters"
             X-Keera-Removed-Tools:
-              description: Hosted tools taken out on the deployment's key.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Removed-Tools"
             X-Keera-Removed-Fields:
-              description: Fields taken out on the deployment's key.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Removed-Fields"
             X-Keera-Budget-Remaining:
-              description: What is left to spend at the tightest level with a budget, in CHF.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Budget-Remaining"
             X-Keera-Budget-Limit:
-              description: That level's budget, in CHF.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Budget-Limit"
             X-Keera-Budget-Reset:
-              description: When that budget resets.
-              schema:
-                type: string
-                format: date-time
+              $ref: "#/components/headers/X-Keera-Budget-Reset"
             X-Keera-Budget-Scope:
-              description: "The level: `org`, `project` or `key`."
-              schema:
-                type: string
-                enum:
-                  - org
-                  - project
-                  - key
+              $ref: "#/components/headers/X-Keera-Budget-Scope"
             X-RateLimit-Limit-Requests:
-              description: Requests per minute at the tightest level that limits them.
-              schema:
-                type: integer
+              $ref: "#/components/headers/X-RateLimit-Limit-Requests"
             X-RateLimit-Remaining-Requests:
-              description: Requests left in that bucket.
-              schema:
-                type: integer
+              $ref: "#/components/headers/X-RateLimit-Remaining-Requests"
             X-Keera-RateLimit-Scope:
-              description: "The level: `org`, `project` or `key`."
-              schema:
-                type: string
-                enum:
-                  - org
-                  - project
-                  - key
+              $ref: "#/components/headers/X-Keera-RateLimit-Scope"
             Retry-After:
-              description: Passed on from the provider.
-              schema:
-                type: integer
+              $ref: "#/components/headers/Retry-After"
             X-Should-Retry:
-              description: Passed on from the provider.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Should-Retry"
           content:
             application/json:
               schema:
                 type: object
                 additionalProperties: true
         "400":
-          description: The body or a field is not valid. Codes include `invalid_body`, `missing_model`, `context_length_exceeded` and `unsupported_parameter`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceBadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "402":
-          description: "A budget is spent (`budget_exceeded`), the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`), or a recurring charge is due that no saved card can pay (`charge_due`). Not 429: it does not lift by waiting."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferencePaymentRequired"
         "403":
-          description: Refused by a filter (`filter_refused`), by a filter whose model runs outside the locations the key's guardrails allow (`location_not_allowed`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceForbidden"
         "404":
-          description: No such model, or the key may not use it (`model_not_found`). The message says where a model of another kind is served.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceNotFound"
         "413":
-          description: The body is over the gateway's limit (`request_too_large`, 32 MiB by default), or too long for a filter's model (`filter_input_too_large`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceTooLarge"
         "415":
-          description: A `Content-Encoding` other than gzip or deflate (`unsupported_encoding`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/UnsupportedEncoding"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "502":
-          description: The model's backend could not be reached or gave an answer that could not be read (`upstream_unavailable`, `upstream_error`), or a filter failed.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceBadGateway"
         "503":
-          description: No backend serves the model (`no_backend`), a router or filter could not decide, or the control plane is unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceUnavailable"
         default:
-          description: Any other error status the model's provider gave, such as 504 or 529, passed on in the caller's error shape.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/ProviderError"
       description: For embedding models.
   /api/v1/audio/transcriptions:
     post:
@@ -5807,31 +5479,10 @@ paths:
         - apiKey: []
         - keeraKey: []
       parameters:
-        - name: X-Request-Id
-          in: header
-          description: "An id for the request. Kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`, otherwise replaced."
-          schema:
-            type: string
-        - name: X-Client-Request-Id
-          in: header
-          description: "The client's own id, as OpenAI's API takes it: printable ASCII, up to 512 characters. It is logged and sent on to OpenAI models. An invalid one is ignored."
-          schema:
-            type: string
-        - name: X-Keera-Client
-          in: header
-          description: The client's own name, which wins over the `User-Agent` in reports.
-          schema:
-            type: string
-        - name: Content-Encoding
-          in: header
-          description: The body may be gzip or deflate.
-          schema:
-            type: string
-            enum:
-              - identity
-              - gzip
-              - x-gzip
-              - deflate
+        - $ref: "#/components/parameters/RequestID"
+        - $ref: "#/components/parameters/ClientRequestID"
+        - $ref: "#/components/parameters/KeeraClient"
+        - $ref: "#/components/parameters/ContentEncoding"
       requestBody:
         required: true
         content:
@@ -5875,74 +5526,35 @@ paths:
           description: The provider's answer, in this API's format.
           headers:
             X-Request-Id:
-              description: "The request's id. One the client sent is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`."
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Request-Id"
             X-Keera-Model:
-              description: The alias that answered; behind a router, the destination that answered.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Model"
             X-Keera-Router:
-              description: The router and where it sent the request, as `router -> model`, with ` (fallback)` or ` (every destination failed)` when so.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Router"
             X-Keera-Filters:
-              description: The filters that acted on the request, in order, comma-separated.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Filters"
             X-Keera-Removed-Tools:
-              description: Hosted tools taken out on the deployment's key.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Removed-Tools"
             X-Keera-Removed-Fields:
-              description: Fields taken out on the deployment's key.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Removed-Fields"
             X-Keera-Budget-Remaining:
-              description: What is left to spend at the tightest level with a budget, in CHF.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Budget-Remaining"
             X-Keera-Budget-Limit:
-              description: That level's budget, in CHF.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Budget-Limit"
             X-Keera-Budget-Reset:
-              description: When that budget resets.
-              schema:
-                type: string
-                format: date-time
+              $ref: "#/components/headers/X-Keera-Budget-Reset"
             X-Keera-Budget-Scope:
-              description: "The level: `org`, `project` or `key`."
-              schema:
-                type: string
-                enum:
-                  - org
-                  - project
-                  - key
+              $ref: "#/components/headers/X-Keera-Budget-Scope"
             X-RateLimit-Limit-Requests:
-              description: Requests per minute at the tightest level that limits them.
-              schema:
-                type: integer
+              $ref: "#/components/headers/X-RateLimit-Limit-Requests"
             X-RateLimit-Remaining-Requests:
-              description: Requests left in that bucket.
-              schema:
-                type: integer
+              $ref: "#/components/headers/X-RateLimit-Remaining-Requests"
             X-Keera-RateLimit-Scope:
-              description: "The level: `org`, `project` or `key`."
-              schema:
-                type: string
-                enum:
-                  - org
-                  - project
-                  - key
+              $ref: "#/components/headers/X-Keera-RateLimit-Scope"
             Retry-After:
-              description: Passed on from the provider.
-              schema:
-                type: integer
+              $ref: "#/components/headers/Retry-After"
             X-Should-Retry:
-              description: Passed on from the provider.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Should-Retry"
           content:
             application/json:
               schema:
@@ -5963,55 +5575,23 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "402":
-          description: "A budget is spent (`budget_exceeded`), the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`), or a recurring charge is due that no saved card can pay (`charge_due`). Not 429: it does not lift by waiting."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferencePaymentRequired"
         "403":
-          description: Refused by a filter (`filter_refused`), by a filter whose model runs outside the locations the key's guardrails allow (`location_not_allowed`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceForbidden"
         "404":
-          description: No such model, or the key may not use it (`model_not_found`). The message says where a model of another kind is served.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceNotFound"
         "413":
-          description: The body is over the gateway's limit (`request_too_large`, 32 MiB by default), or too long for a filter's model (`filter_input_too_large`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceTooLarge"
         "415":
-          description: A `Content-Encoding` other than gzip or deflate (`unsupported_encoding`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/UnsupportedEncoding"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "502":
-          description: The model's backend could not be reached or gave an answer that could not be read (`upstream_unavailable`, `upstream_error`), or a filter failed.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceBadGateway"
         "503":
-          description: No backend serves the model (`no_backend`), a router or filter could not decide, or the control plane is unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceUnavailable"
         default:
-          description: Any other error status the model's provider gave, such as 504 or 529, passed on in the caller's error shape.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/ProviderError"
       description: "For transcription models: turns audio into text. The audio may be up to the gateway's body limit."
   /api/v1/rerank:
     post:
@@ -6027,31 +5607,10 @@ paths:
         - apiKey: []
         - keeraKey: []
       parameters:
-        - name: X-Request-Id
-          in: header
-          description: "An id for the request. Kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`, otherwise replaced."
-          schema:
-            type: string
-        - name: X-Client-Request-Id
-          in: header
-          description: "The client's own id, as OpenAI's API takes it: printable ASCII, up to 512 characters. It is logged and sent on to OpenAI models. An invalid one is ignored."
-          schema:
-            type: string
-        - name: X-Keera-Client
-          in: header
-          description: The client's own name, which wins over the `User-Agent` in reports.
-          schema:
-            type: string
-        - name: Content-Encoding
-          in: header
-          description: The body may be gzip or deflate.
-          schema:
-            type: string
-            enum:
-              - identity
-              - gzip
-              - x-gzip
-              - deflate
+        - $ref: "#/components/parameters/RequestID"
+        - $ref: "#/components/parameters/ClientRequestID"
+        - $ref: "#/components/parameters/KeeraClient"
+        - $ref: "#/components/parameters/ContentEncoding"
       requestBody:
         required: true
         content:
@@ -6084,137 +5643,62 @@ paths:
           description: The provider's answer, in this API's format.
           headers:
             X-Request-Id:
-              description: "The request's id. One the client sent is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`."
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Request-Id"
             X-Keera-Model:
-              description: The alias that answered; behind a router, the destination that answered.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Model"
             X-Keera-Router:
-              description: The router and where it sent the request, as `router -> model`, with ` (fallback)` or ` (every destination failed)` when so.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Router"
             X-Keera-Filters:
-              description: The filters that acted on the request, in order, comma-separated.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Filters"
             X-Keera-Removed-Tools:
-              description: Hosted tools taken out on the deployment's key.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Removed-Tools"
             X-Keera-Removed-Fields:
-              description: Fields taken out on the deployment's key.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Removed-Fields"
             X-Keera-Budget-Remaining:
-              description: What is left to spend at the tightest level with a budget, in CHF.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Budget-Remaining"
             X-Keera-Budget-Limit:
-              description: That level's budget, in CHF.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Budget-Limit"
             X-Keera-Budget-Reset:
-              description: When that budget resets.
-              schema:
-                type: string
-                format: date-time
+              $ref: "#/components/headers/X-Keera-Budget-Reset"
             X-Keera-Budget-Scope:
-              description: "The level: `org`, `project` or `key`."
-              schema:
-                type: string
-                enum:
-                  - org
-                  - project
-                  - key
+              $ref: "#/components/headers/X-Keera-Budget-Scope"
             X-RateLimit-Limit-Requests:
-              description: Requests per minute at the tightest level that limits them.
-              schema:
-                type: integer
+              $ref: "#/components/headers/X-RateLimit-Limit-Requests"
             X-RateLimit-Remaining-Requests:
-              description: Requests left in that bucket.
-              schema:
-                type: integer
+              $ref: "#/components/headers/X-RateLimit-Remaining-Requests"
             X-Keera-RateLimit-Scope:
-              description: "The level: `org`, `project` or `key`."
-              schema:
-                type: string
-                enum:
-                  - org
-                  - project
-                  - key
+              $ref: "#/components/headers/X-Keera-RateLimit-Scope"
             Retry-After:
-              description: Passed on from the provider.
-              schema:
-                type: integer
+              $ref: "#/components/headers/Retry-After"
             X-Should-Retry:
-              description: Passed on from the provider.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Should-Retry"
           content:
             application/json:
               schema:
                 type: object
                 additionalProperties: true
         "400":
-          description: The body or a field is not valid. Codes include `invalid_body`, `missing_model`, `context_length_exceeded` and `unsupported_parameter`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceBadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "402":
-          description: "A budget is spent (`budget_exceeded`), the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`), or a recurring charge is due that no saved card can pay (`charge_due`). Not 429: it does not lift by waiting."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferencePaymentRequired"
         "403":
-          description: Refused by a filter (`filter_refused`), by a filter whose model runs outside the locations the key's guardrails allow (`location_not_allowed`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceForbidden"
         "404":
-          description: No such model, or the key may not use it (`model_not_found`). The message says where a model of another kind is served.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceNotFound"
         "413":
-          description: The body is over the gateway's limit (`request_too_large`, 32 MiB by default), or too long for a filter's model (`filter_input_too_large`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceTooLarge"
         "415":
-          description: A `Content-Encoding` other than gzip or deflate (`unsupported_encoding`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/UnsupportedEncoding"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "502":
-          description: The model's backend could not be reached or gave an answer that could not be read (`upstream_unavailable`, `upstream_error`), or a filter failed.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceBadGateway"
         "503":
-          description: No backend serves the model (`no_backend`), a router or filter could not decide, or the control plane is unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceUnavailable"
         default:
-          description: Any other error status the model's provider gave, such as 504 or 529, passed on in the caller's error shape.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/ProviderError"
       description: For rerank models. Scores each document against the query. The body goes on as sent, so it is the shape the model's provider takes; vLLM and llama.cpp take this one. The same as `/api/v2/rerank`.
   /api/v2/rerank:
     post:
@@ -6230,31 +5714,10 @@ paths:
         - apiKey: []
         - keeraKey: []
       parameters:
-        - name: X-Request-Id
-          in: header
-          description: "An id for the request. Kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`, otherwise replaced."
-          schema:
-            type: string
-        - name: X-Client-Request-Id
-          in: header
-          description: "The client's own id, as OpenAI's API takes it: printable ASCII, up to 512 characters. It is logged and sent on to OpenAI models. An invalid one is ignored."
-          schema:
-            type: string
-        - name: X-Keera-Client
-          in: header
-          description: The client's own name, which wins over the `User-Agent` in reports.
-          schema:
-            type: string
-        - name: Content-Encoding
-          in: header
-          description: The body may be gzip or deflate.
-          schema:
-            type: string
-            enum:
-              - identity
-              - gzip
-              - x-gzip
-              - deflate
+        - $ref: "#/components/parameters/RequestID"
+        - $ref: "#/components/parameters/ClientRequestID"
+        - $ref: "#/components/parameters/KeeraClient"
+        - $ref: "#/components/parameters/ContentEncoding"
       requestBody:
         required: true
         content:
@@ -6287,137 +5750,62 @@ paths:
           description: The provider's answer, in this API's format.
           headers:
             X-Request-Id:
-              description: "The request's id. One the client sent is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`."
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Request-Id"
             X-Keera-Model:
-              description: The alias that answered; behind a router, the destination that answered.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Model"
             X-Keera-Router:
-              description: The router and where it sent the request, as `router -> model`, with ` (fallback)` or ` (every destination failed)` when so.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Router"
             X-Keera-Filters:
-              description: The filters that acted on the request, in order, comma-separated.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Filters"
             X-Keera-Removed-Tools:
-              description: Hosted tools taken out on the deployment's key.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Removed-Tools"
             X-Keera-Removed-Fields:
-              description: Fields taken out on the deployment's key.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Removed-Fields"
             X-Keera-Budget-Remaining:
-              description: What is left to spend at the tightest level with a budget, in CHF.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Budget-Remaining"
             X-Keera-Budget-Limit:
-              description: That level's budget, in CHF.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Budget-Limit"
             X-Keera-Budget-Reset:
-              description: When that budget resets.
-              schema:
-                type: string
-                format: date-time
+              $ref: "#/components/headers/X-Keera-Budget-Reset"
             X-Keera-Budget-Scope:
-              description: "The level: `org`, `project` or `key`."
-              schema:
-                type: string
-                enum:
-                  - org
-                  - project
-                  - key
+              $ref: "#/components/headers/X-Keera-Budget-Scope"
             X-RateLimit-Limit-Requests:
-              description: Requests per minute at the tightest level that limits them.
-              schema:
-                type: integer
+              $ref: "#/components/headers/X-RateLimit-Limit-Requests"
             X-RateLimit-Remaining-Requests:
-              description: Requests left in that bucket.
-              schema:
-                type: integer
+              $ref: "#/components/headers/X-RateLimit-Remaining-Requests"
             X-Keera-RateLimit-Scope:
-              description: "The level: `org`, `project` or `key`."
-              schema:
-                type: string
-                enum:
-                  - org
-                  - project
-                  - key
+              $ref: "#/components/headers/X-Keera-RateLimit-Scope"
             Retry-After:
-              description: Passed on from the provider.
-              schema:
-                type: integer
+              $ref: "#/components/headers/Retry-After"
             X-Should-Retry:
-              description: Passed on from the provider.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Should-Retry"
           content:
             application/json:
               schema:
                 type: object
                 additionalProperties: true
         "400":
-          description: The body or a field is not valid. Codes include `invalid_body`, `missing_model`, `context_length_exceeded` and `unsupported_parameter`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceBadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "402":
-          description: "A budget is spent (`budget_exceeded`), the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`), or a recurring charge is due that no saved card can pay (`charge_due`). Not 429: it does not lift by waiting."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferencePaymentRequired"
         "403":
-          description: Refused by a filter (`filter_refused`), by a filter whose model runs outside the locations the key's guardrails allow (`location_not_allowed`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceForbidden"
         "404":
-          description: No such model, or the key may not use it (`model_not_found`). The message says where a model of another kind is served.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceNotFound"
         "413":
-          description: The body is over the gateway's limit (`request_too_large`, 32 MiB by default), or too long for a filter's model (`filter_input_too_large`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceTooLarge"
         "415":
-          description: A `Content-Encoding` other than gzip or deflate (`unsupported_encoding`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/UnsupportedEncoding"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "502":
-          description: The model's backend could not be reached or gave an answer that could not be read (`upstream_unavailable`, `upstream_error`), or a filter failed.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceBadGateway"
         "503":
-          description: No backend serves the model (`no_backend`), a router or filter could not decide, or the control plane is unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceUnavailable"
         default:
-          description: Any other error status the model's provider gave, such as 504 or 529, passed on in the caller's error shape.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/ProviderError"
       description: For rerank models, at Cohere's path, so Cohere's SDK works against the gateway. The same as `/api/v1/rerank`.
   /api/v1/messages:
     post:
@@ -6433,36 +5821,11 @@ paths:
         - apiKey: []
         - keeraKey: []
       parameters:
-        - name: X-Request-Id
-          in: header
-          description: "An id for the request. Kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`, otherwise replaced."
-          schema:
-            type: string
-        - name: X-Client-Request-Id
-          in: header
-          description: "The client's own id, as OpenAI's API takes it: printable ASCII, up to 512 characters. It is logged and sent on to OpenAI models. An invalid one is ignored."
-          schema:
-            type: string
-        - name: X-Keera-Client
-          in: header
-          description: The client's own name, which wins over the `User-Agent` in reports.
-          schema:
-            type: string
-        - name: Content-Encoding
-          in: header
-          description: The body may be gzip or deflate.
-          schema:
-            type: string
-            enum:
-              - identity
-              - gzip
-              - x-gzip
-              - deflate
-        - name: X-Keera-Session
-          in: header
-          description: Names the session (task) this request belongs to, instead of the one the gateway derives from the opening prompt. `X-Session-Id`, `Helicone-Session-Id` and `X-Claude-Code-Session-Id` are read too; the first with a value wins. See https://docs.keera.ch/monitor/requests-and-sessions/.
-          schema:
-            type: string
+        - $ref: "#/components/parameters/RequestID"
+        - $ref: "#/components/parameters/ClientRequestID"
+        - $ref: "#/components/parameters/KeeraClient"
+        - $ref: "#/components/parameters/ContentEncoding"
+        - $ref: "#/components/parameters/KeeraSession"
         - name: anthropic-version
           in: header
           description: Passed on to Anthropic models. Defaults to the version the gateway knows.
@@ -6518,74 +5881,35 @@ paths:
           description: The provider's answer, in this API's format.
           headers:
             X-Request-Id:
-              description: "The request's id. One the client sent is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`."
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Request-Id"
             X-Keera-Model:
-              description: The alias that answered; behind a router, the destination that answered.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Model"
             X-Keera-Router:
-              description: The router and where it sent the request, as `router -> model`, with ` (fallback)` or ` (every destination failed)` when so.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Router"
             X-Keera-Filters:
-              description: The filters that acted on the request, in order, comma-separated.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Filters"
             X-Keera-Removed-Tools:
-              description: Hosted tools taken out on the deployment's key.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Removed-Tools"
             X-Keera-Removed-Fields:
-              description: Fields taken out on the deployment's key.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Removed-Fields"
             X-Keera-Budget-Remaining:
-              description: What is left to spend at the tightest level with a budget, in CHF.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Budget-Remaining"
             X-Keera-Budget-Limit:
-              description: That level's budget, in CHF.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Budget-Limit"
             X-Keera-Budget-Reset:
-              description: When that budget resets.
-              schema:
-                type: string
-                format: date-time
+              $ref: "#/components/headers/X-Keera-Budget-Reset"
             X-Keera-Budget-Scope:
-              description: "The level: `org`, `project` or `key`."
-              schema:
-                type: string
-                enum:
-                  - org
-                  - project
-                  - key
+              $ref: "#/components/headers/X-Keera-Budget-Scope"
             X-RateLimit-Limit-Requests:
-              description: Requests per minute at the tightest level that limits them.
-              schema:
-                type: integer
+              $ref: "#/components/headers/X-RateLimit-Limit-Requests"
             X-RateLimit-Remaining-Requests:
-              description: Requests left in that bucket.
-              schema:
-                type: integer
+              $ref: "#/components/headers/X-RateLimit-Remaining-Requests"
             X-Keera-RateLimit-Scope:
-              description: "The level: `org`, `project` or `key`."
-              schema:
-                type: string
-                enum:
-                  - org
-                  - project
-                  - key
+              $ref: "#/components/headers/X-Keera-RateLimit-Scope"
             Retry-After:
-              description: Passed on from the provider.
-              schema:
-                type: integer
+              $ref: "#/components/headers/Retry-After"
             X-Should-Retry:
-              description: Passed on from the provider.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Should-Retry"
           content:
             application/json:
               schema:
@@ -6608,55 +5932,23 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "402":
-          description: "A budget is spent (`budget_exceeded`), the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`), or a recurring charge is due that no saved card can pay (`charge_due`). Not 429: it does not lift by waiting."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferencePaymentRequired"
         "403":
-          description: Refused by a filter (`filter_refused`), by a filter whose model runs outside the locations the key's guardrails allow (`location_not_allowed`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceForbidden"
         "404":
-          description: No such model, or the key may not use it (`model_not_found`). The message says where a model of another kind is served.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceNotFound"
         "413":
-          description: The body is over the gateway's limit (`request_too_large`, 32 MiB by default), or too long for a filter's model (`filter_input_too_large`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceTooLarge"
         "415":
-          description: A `Content-Encoding` other than gzip or deflate (`unsupported_encoding`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/UnsupportedEncoding"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "502":
-          description: The model's backend could not be reached or gave an answer that could not be read (`upstream_unavailable`, `upstream_error`), or a filter failed.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceBadGateway"
         "503":
-          description: No backend serves the model (`no_backend`), a router or filter could not decide, or the control plane is unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceUnavailable"
         default:
-          description: Any other error status the model's provider gave, such as 504 or 529, passed on in the caller's error shape.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/ProviderError"
       description: |-
         Anthropic's Messages API: the same chat models, routers and guardrails as chat completions, in Anthropic's format, translated where the model is not Anthropic's. Errors come in Anthropic's shape, with `type: error`.
 
@@ -6676,31 +5968,10 @@ paths:
         - apiKey: []
         - keeraKey: []
       parameters:
-        - name: X-Request-Id
-          in: header
-          description: "An id for the request. Kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`, otherwise replaced."
-          schema:
-            type: string
-        - name: X-Client-Request-Id
-          in: header
-          description: "The client's own id, as OpenAI's API takes it: printable ASCII, up to 512 characters. It is logged and sent on to OpenAI models. An invalid one is ignored."
-          schema:
-            type: string
-        - name: X-Keera-Client
-          in: header
-          description: The client's own name, which wins over the `User-Agent` in reports.
-          schema:
-            type: string
-        - name: Content-Encoding
-          in: header
-          description: The body may be gzip or deflate.
-          schema:
-            type: string
-            enum:
-              - identity
-              - gzip
-              - x-gzip
-              - deflate
+        - $ref: "#/components/parameters/RequestID"
+        - $ref: "#/components/parameters/ClientRequestID"
+        - $ref: "#/components/parameters/KeeraClient"
+        - $ref: "#/components/parameters/ContentEncoding"
       requestBody:
         required: true
         content:
@@ -6734,9 +6005,7 @@ paths:
           description: The estimate.
           headers:
             X-Request-Id:
-              description: "The request's id. One the client sent is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`."
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Request-Id"
           content:
             application/json:
               schema:
@@ -6775,11 +6044,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "503":
-          description: The control plane is unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/ControlPlaneUnavailable"
   /api/v1/responses:
     post:
       tags:
@@ -6794,36 +6059,11 @@ paths:
         - apiKey: []
         - keeraKey: []
       parameters:
-        - name: X-Request-Id
-          in: header
-          description: "An id for the request. Kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`, otherwise replaced."
-          schema:
-            type: string
-        - name: X-Client-Request-Id
-          in: header
-          description: "The client's own id, as OpenAI's API takes it: printable ASCII, up to 512 characters. It is logged and sent on to OpenAI models. An invalid one is ignored."
-          schema:
-            type: string
-        - name: X-Keera-Client
-          in: header
-          description: The client's own name, which wins over the `User-Agent` in reports.
-          schema:
-            type: string
-        - name: Content-Encoding
-          in: header
-          description: The body may be gzip or deflate.
-          schema:
-            type: string
-            enum:
-              - identity
-              - gzip
-              - x-gzip
-              - deflate
-        - name: X-Keera-Session
-          in: header
-          description: Names the session (task) this request belongs to, instead of the one the gateway derives from the opening prompt. `X-Session-Id`, `Helicone-Session-Id` and `X-Claude-Code-Session-Id` are read too; the first with a value wins. See https://docs.keera.ch/monitor/requests-and-sessions/.
-          schema:
-            type: string
+        - $ref: "#/components/parameters/RequestID"
+        - $ref: "#/components/parameters/ClientRequestID"
+        - $ref: "#/components/parameters/KeeraClient"
+        - $ref: "#/components/parameters/ContentEncoding"
+        - $ref: "#/components/parameters/KeeraSession"
       requestBody:
         required: true
         content:
@@ -6860,74 +6100,35 @@ paths:
           description: The provider's answer, in this API's format.
           headers:
             X-Request-Id:
-              description: "The request's id. One the client sent is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`."
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Request-Id"
             X-Keera-Model:
-              description: The alias that answered; behind a router, the destination that answered.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Model"
             X-Keera-Router:
-              description: The router and where it sent the request, as `router -> model`, with ` (fallback)` or ` (every destination failed)` when so.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Router"
             X-Keera-Filters:
-              description: The filters that acted on the request, in order, comma-separated.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Filters"
             X-Keera-Removed-Tools:
-              description: Hosted tools taken out on the deployment's key.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Removed-Tools"
             X-Keera-Removed-Fields:
-              description: Fields taken out on the deployment's key.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Removed-Fields"
             X-Keera-Budget-Remaining:
-              description: What is left to spend at the tightest level with a budget, in CHF.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Budget-Remaining"
             X-Keera-Budget-Limit:
-              description: That level's budget, in CHF.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Keera-Budget-Limit"
             X-Keera-Budget-Reset:
-              description: When that budget resets.
-              schema:
-                type: string
-                format: date-time
+              $ref: "#/components/headers/X-Keera-Budget-Reset"
             X-Keera-Budget-Scope:
-              description: "The level: `org`, `project` or `key`."
-              schema:
-                type: string
-                enum:
-                  - org
-                  - project
-                  - key
+              $ref: "#/components/headers/X-Keera-Budget-Scope"
             X-RateLimit-Limit-Requests:
-              description: Requests per minute at the tightest level that limits them.
-              schema:
-                type: integer
+              $ref: "#/components/headers/X-RateLimit-Limit-Requests"
             X-RateLimit-Remaining-Requests:
-              description: Requests left in that bucket.
-              schema:
-                type: integer
+              $ref: "#/components/headers/X-RateLimit-Remaining-Requests"
             X-Keera-RateLimit-Scope:
-              description: "The level: `org`, `project` or `key`."
-              schema:
-                type: string
-                enum:
-                  - org
-                  - project
-                  - key
+              $ref: "#/components/headers/X-Keera-RateLimit-Scope"
             Retry-After:
-              description: Passed on from the provider.
-              schema:
-                type: integer
+              $ref: "#/components/headers/Retry-After"
             X-Should-Retry:
-              description: Passed on from the provider.
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Should-Retry"
           content:
             application/json:
               schema:
@@ -6938,63 +6139,27 @@ paths:
                 type: string
                 description: "Server-sent events, when the request set `stream: true`."
         "400":
-          description: The body or a field is not valid. Codes include `invalid_body`, `missing_model`, `context_length_exceeded` and `unsupported_parameter`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceBadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "402":
-          description: "A budget is spent (`budget_exceeded`), the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`), or a recurring charge is due that no saved card can pay (`charge_due`). Not 429: it does not lift by waiting."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferencePaymentRequired"
         "403":
-          description: Refused by a filter (`filter_refused`), by a filter whose model runs outside the locations the key's guardrails allow (`location_not_allowed`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceForbidden"
         "404":
-          description: No such model, or the key may not use it (`model_not_found`). The message says where a model of another kind is served.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceNotFound"
         "413":
-          description: The body is over the gateway's limit (`request_too_large`, 32 MiB by default), or too long for a filter's model (`filter_input_too_large`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceTooLarge"
         "415":
-          description: A `Content-Encoding` other than gzip or deflate (`unsupported_encoding`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/UnsupportedEncoding"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "502":
-          description: The model's backend could not be reached or gave an answer that could not be read (`upstream_unavailable`, `upstream_error`), or a filter failed.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceBadGateway"
         "503":
-          description: No backend serves the model (`no_backend`), a router or filter could not decide, or the control plane is unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/InferenceUnavailable"
         default:
-          description: Any other error status the model's provider gave, such as 504 or 529, passed on in the caller's error shape.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/ProviderError"
       description: "OpenAI's Responses API: the same chat models, routers and guardrails, translated where the model is not OpenAI's. On the deployment's key, `store` is turned off."
   /api/v1/models:
     get:
@@ -7015,9 +6180,7 @@ paths:
           description: OK
           headers:
             X-Request-Id:
-              description: "The request's id. One the client sent is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`."
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Request-Id"
           content:
             application/json:
               schema:
@@ -7031,11 +6194,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "503":
-          description: The control plane is unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/ControlPlaneUnavailable"
   /api/v1/models/{alias}:
     get:
       tags:
@@ -7062,9 +6221,7 @@ paths:
           description: OK
           headers:
             X-Request-Id:
-              description: "The request's id. One the client sent is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`."
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Request-Id"
           content:
             application/json:
               schema:
@@ -7084,11 +6241,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "503":
-          description: The control plane is unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/ControlPlaneUnavailable"
   /api/api/hello:
     head:
       tags:
@@ -7102,9 +6255,7 @@ paths:
           description: OK
           headers:
             X-Request-Id:
-              description: "The request's id. One the client sent is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`."
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Request-Id"
   /api/mcp/{alias}:
     parameters:
       - name: alias
@@ -7150,11 +6301,7 @@ paths:
           description: Must match the tool name or URI in the message when sent.
           schema:
             type: string
-        - name: X-Keera-Session
-          in: header
-          description: Names the session (task) this request belongs to, instead of the one the gateway derives from the opening prompt. `X-Session-Id`, `Helicone-Session-Id` and `X-Claude-Code-Session-Id` are read too; the first with a value wins. See https://docs.keera.ch/monitor/requests-and-sessions/.
-          schema:
-            type: string
+        - $ref: "#/components/parameters/KeeraSession"
         - name: X-Keera-Client
           in: header
           description: The client's own name, which wins over the `User-Agent`.
@@ -7175,9 +6322,7 @@ paths:
           description: The server's answer, or a JSON-RPC error from the gateway.
           headers:
             X-Request-Id:
-              description: "The request's id. One the client sent is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`."
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Request-Id"
             Mcp-Session-Id:
               description: The session the server gave, passed back.
               schema:
@@ -7198,9 +6343,7 @@ paths:
           description: "Accepted: the body held only notifications or responses."
           headers:
             X-Request-Id:
-              description: "The request's id. One the client sent is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`."
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Request-Id"
             Mcp-Session-Id:
               description: The session the server gave, passed back.
               schema:
@@ -7216,29 +6359,13 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: The server is in a private network and the organisation has not paid yet (`org_limited`), or a subscription key while the deployment takes none.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/MCPForbidden"
         "404":
-          description: No such server, it is disabled, or the key may not call any of its tools (`mcp_server_not_found`). Subscription keys reach no MCP server.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/MCPNotFound"
         "502":
-          description: The server could not be reached or read (`mcp_unavailable`), or it refused the gateway's credential for it (`mcp_credential_refused`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/MCPBadGateway"
         "503":
-          description: The control plane is unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/ControlPlaneUnavailable"
         "413":
           description: The body is over the gateway's limit.
           content:
@@ -7287,9 +6414,7 @@ paths:
           description: The server's own messages.
           headers:
             X-Request-Id:
-              description: "The request's id. One the client sent is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`."
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Request-Id"
             Mcp-Session-Id:
               description: The session the server gave, passed back.
               schema:
@@ -7301,29 +6426,13 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: The server is in a private network and the organisation has not paid yet (`org_limited`), or a subscription key while the deployment takes none.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/MCPForbidden"
         "404":
-          description: No such server, it is disabled, or the key may not call any of its tools (`mcp_server_not_found`). Subscription keys reach no MCP server.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/MCPNotFound"
         "502":
-          description: The server could not be reached or read (`mcp_unavailable`), or it refused the gateway's credential for it (`mcp_credential_refused`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/MCPBadGateway"
         "503":
-          description: The control plane is unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/ControlPlaneUnavailable"
         default:
           description: Any other status the server gave, passed on.
     delete:
@@ -7355,9 +6464,7 @@ paths:
           description: Ended.
           headers:
             X-Request-Id:
-              description: "The request's id. One the client sent is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`."
-              schema:
-                type: string
+              $ref: "#/components/headers/X-Request-Id"
             Mcp-Session-Id:
               description: The session the server gave, passed back.
               schema:
@@ -7365,29 +6472,13 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: The server is in a private network and the organisation has not paid yet (`org_limited`), or a subscription key while the deployment takes none.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/MCPForbidden"
         "404":
-          description: No such server, it is disabled, or the key may not call any of its tools (`mcp_server_not_found`). Subscription keys reach no MCP server.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/MCPNotFound"
         "502":
-          description: The server could not be reached or read (`mcp_unavailable`), or it refused the gateway's credential for it (`mcp_credential_refused`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/MCPBadGateway"
         "503":
-          description: The control plane is unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/ControlPlaneUnavailable"
         default:
           description: Any other status the server gave, such as 204 or 405, passed on.
 components:
@@ -7456,6 +6547,41 @@ components:
       description: |
         The organisation to act on. Only an operator, who belongs to none,
         needs it; everyone else acts on their own.
+      schema:
+        type: string
+    RequestID:
+      name: X-Request-Id
+      in: header
+      description: "An id for the request. Kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`, otherwise replaced."
+      schema:
+        type: string
+    ClientRequestID:
+      name: X-Client-Request-Id
+      in: header
+      description: "The client's own id, as OpenAI's API takes it: printable ASCII, up to 512 characters. It is logged and sent on to OpenAI models. An invalid one is ignored."
+      schema:
+        type: string
+    KeeraClient:
+      name: X-Keera-Client
+      in: header
+      description: The client's own name, which wins over the `User-Agent` in reports.
+      schema:
+        type: string
+    ContentEncoding:
+      name: Content-Encoding
+      in: header
+      description: The body may be gzip or deflate.
+      schema:
+        type: string
+        enum:
+          - identity
+          - gzip
+          - x-gzip
+          - deflate
+    KeeraSession:
+      name: X-Keera-Session
+      in: header
+      description: Names the session (task) this request belongs to, instead of the one the gateway derives from the opening prompt. `X-Session-Id`, `Helicone-Session-Id` and `X-Claude-Code-Session-Id` are read too; the first with a value wins. See https://docs.keera.ch/monitor/requests-and-sessions/.
       schema:
         type: string
   schemas:
@@ -10637,3 +9763,157 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
+    NotJSON:
+      description: The body was not sent as `application/json`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InferenceBadRequest:
+      description: The body or a field is not valid. Codes include `invalid_body`, `missing_model`, `context_length_exceeded` and `unsupported_parameter`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InferencePaymentRequired:
+      description: "A budget is spent (`budget_exceeded`), the organisation's prepaid credit for the deployment's provider keys is (`credit_exhausted`), or a recurring charge is due that no saved card can pay (`charge_due`). Not 429: it does not lift by waiting."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InferenceForbidden:
+      description: Refused by a filter (`filter_refused`), by a filter whose model runs outside the locations the key's guardrails allow (`location_not_allowed`), a model the organisation may not use until it has paid (`org_limited`), or a subscription key while the deployment takes none (`subscriptions_off`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InferenceNotFound:
+      description: No such model, or the key may not use it (`model_not_found`). The message says where a model of another kind is served.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InferenceTooLarge:
+      description: The body is over the gateway's limit (`request_too_large`, 32 MiB by default), or too long for a filter's model (`filter_input_too_large`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    UnsupportedEncoding:
+      description: A `Content-Encoding` other than gzip or deflate (`unsupported_encoding`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InferenceBadGateway:
+      description: The model's backend could not be reached or gave an answer that could not be read (`upstream_unavailable`, `upstream_error`), or a filter failed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InferenceUnavailable:
+      description: No backend serves the model (`no_backend`), a router or filter could not decide, or the control plane is unavailable.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ProviderError:
+      description: Any other error status the model's provider gave, such as 504 or 529, passed on in the caller's error shape.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ControlPlaneUnavailable:
+      description: The control plane is unavailable.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    MCPForbidden:
+      description: The server is in a private network and the organisation has not paid yet (`org_limited`), or a subscription key while the deployment takes none.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    MCPNotFound:
+      description: No such server, it is disabled, or the key may not call any of its tools (`mcp_server_not_found`). Subscription keys reach no MCP server.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    MCPBadGateway:
+      description: The server could not be reached or read (`mcp_unavailable`), or it refused the gateway's credential for it (`mcp_credential_refused`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  headers:
+    X-Request-Id:
+      description: "The request's id. One the client sent is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -`."
+      schema:
+        type: string
+    X-Keera-Model:
+      description: The alias that answered; behind a router, the destination that answered.
+      schema:
+        type: string
+    X-Keera-Router:
+      description: The router and where it sent the request, as `router -> model`, with ` (fallback)` or ` (every destination failed)` when so.
+      schema:
+        type: string
+    X-Keera-Filters:
+      description: The filters that acted on the request, in order, comma-separated.
+      schema:
+        type: string
+    X-Keera-Removed-Tools:
+      description: Hosted tools taken out on the deployment's key.
+      schema:
+        type: string
+    X-Keera-Removed-Fields:
+      description: Fields taken out on the deployment's key.
+      schema:
+        type: string
+    X-Keera-Budget-Remaining:
+      description: What is left to spend at the tightest level with a budget, in CHF.
+      schema:
+        type: string
+    X-Keera-Budget-Limit:
+      description: That level's budget, in CHF.
+      schema:
+        type: string
+    X-Keera-Budget-Reset:
+      description: When that budget resets.
+      schema:
+        type: string
+        format: date-time
+    X-Keera-Budget-Scope:
+      description: "The level: `org`, `project` or `key`."
+      schema:
+        type: string
+        enum:
+          - org
+          - project
+          - key
+    X-RateLimit-Limit-Requests:
+      description: Requests per minute at the tightest level that limits them.
+      schema:
+        type: integer
+    X-RateLimit-Remaining-Requests:
+      description: Requests left in that bucket.
+      schema:
+        type: integer
+    X-Keera-RateLimit-Scope:
+      description: "The level: `org`, `project` or `key`."
+      schema:
+        type: string
+        enum:
+          - org
+          - project
+          - key
+    Retry-After:
+      description: Passed on from the provider.
+      schema:
+        type: integer
+    X-Should-Retry:
+      description: Passed on from the provider.
+      schema:
+        type: string
