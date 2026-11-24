@@ -49,7 +49,7 @@ func platformServer(ctx context.Context, t *testing.T, st *store.Store) *Server 
 	}, slog.New(slog.DiscardHandler))
 }
 
-const haiku = `{"provider":"anthropic","backend_model":"claude-haiku-4-5",
+const haiku = `{"provider":"anthropic","backend_model":"claude-haiku-5-5",
 	"backends":["https://proxy.example/v1"],"input_micros_per_mtok":1,
 	"output_micros_per_mtok":1,"enabled":true}`
 
@@ -70,7 +70,7 @@ func TestAModelOnTheDeploymentsKeyTakesNoKeyAndListPrices(t *testing.T) {
 		t.Fatal(err)
 	}
 	prov, _ := catalog.ProviderByName("anthropic")
-	known, _ := prov.Model("claude-haiku-4-5")
+	known, _ := prov.Model("claude-haiku-5-5")
 	if !got.PlatformKey || got.Backends[0] != prov.Endpoint ||
 		got.InputMicrosPerMTok != known.InputMicrosPerMTok {
 		t.Errorf("saved = %+v, want the provider's endpoint and list prices", got)
@@ -83,7 +83,7 @@ func TestAModelOnTheDeploymentsKeyTakesNoKeyAndListPrices(t *testing.T) {
 	}
 
 	// A model the price table does not know cannot be billed.
-	unknown := strings.Replace(haiku, "claude-haiku-4-5", "claude-from-the-future", 1)
+	unknown := strings.Replace(haiku, "claude-haiku-5-5", "claude-from-the-future", 1)
 	if w := invoke(s.putModel, admin("org_1"), http.MethodPut, "/v1/models/new", unknown); w.Code != http.StatusBadRequest {
 		t.Errorf("an unpriced model was accepted: %d %s", w.Code, w.Body)
 	}
@@ -124,7 +124,7 @@ func TestSavingAModelOnTheDeploymentsKeyRemovesItsOwn(t *testing.T) {
 	s := platformServer(ctx, t, st)
 	if err := st.UpsertModel(ctx, policy.Model{
 		OrgID: "org_1", Alias: "fast", Kind: policy.KindChat,
-		Provider: "anthropic", BackendModel: "claude-haiku-4-5", Location: "usa",
+		Provider: "anthropic", BackendModel: "claude-haiku-5-5", Location: "usa",
 		Backends: []string{"https://proxy.example/v1"}, Enabled: true,
 	}, store.ReplaceCredential([]byte("sealed"))); err != nil {
 		t.Fatal(err)
