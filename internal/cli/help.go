@@ -20,7 +20,7 @@ var (
 	modelFieldFlags = []string{
 		"provider", "backend", "product-id", "backend-model", "kind",
 		"display-name", "description", "max-context-tokens", "release-date", "location",
-		"price-in", "price-out", "price-cached", "price-cache-write", "price-audio",
+		"capabilities", "price-in", "price-out", "price-cached", "price-cache-write", "price-audio",
 	}
 	mcpFieldFlags    = []string{"endpoint", "description", "auth-header", "api-key"}
 	filterFieldFlags = []string{"mode", "model", "prompt", "rules", "description"}
@@ -363,7 +363,11 @@ var commands = []command{
 			"other. 'keera model apply' adds the models of a file to an organisation that " +
 			"already exists.\n\n" +
 			"--description says what a model is for. Clients see it, and a router's " +
-			"instruction step reads it to choose between models. See https://docs.keera.ch/manage/models/.",
+			"instruction step reads it to choose between models.\n\n" +
+			"--capabilities says what a chat model can do beyond text: tools, if it calls " +
+			"tools, as coding agents need, and vision, if it reads images. A gate on a model " +
+			"that reads images is shown them too. 'keera model check' tests tool calls. " +
+			"See https://docs.keera.ch/manage/models/.",
 		subs: []subcommand{
 			{name: "list", summary: "the models you can use", flags: []string{"json"}},
 			{

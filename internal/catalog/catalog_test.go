@@ -111,6 +111,17 @@ func TestParseRejectsWhatWouldFailSilentlyAtRuntime(t *testing.T) {
 			wantErr: "YYYY-MM-DD",
 		},
 		{
+			name:    "a capability this build does not know",
+			in:      "models:\n  - alias: a\n    backends: [\"http://x/v1\"]\n    backend_model: m\n    capabilities: [vison]",
+			wantErr: "capability \"vison\" is not known",
+		},
+		{
+			// Only a chat request carries images.
+			name:    "a capability on a model that is not chat",
+			in:      "models:\n  - alias: a\n    kind: embedding\n    backends: [\"http://x/v1\"]\n    backend_model: m\n    capabilities: [vision]",
+			wantErr: "only a chat model states capabilities",
+		},
+		{
 			name:    "not YAML at all",
 			in:      "models: [[[",
 			wantErr: "parse catalogue",

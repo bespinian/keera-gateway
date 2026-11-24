@@ -20,10 +20,12 @@ func probeServer(t *testing.T) *Server {
 		Options{}, slog.New(slog.DiscardHandler))
 }
 
+// chatAlias says it calls tools, as a model set up for agents does.
 func chatAlias(url string) policy.Model {
 	return policy.Model{
 		Alias: "keera-code", Kind: policy.KindChat,
 		Backends: []string{url + "/v1"}, BackendModel: "keera-code", Enabled: true,
+		Capabilities: []policy.Capability{policy.CapabilityTools},
 	}
 }
 
@@ -61,6 +63,16 @@ func TestCheckModelPassesOnARealToolCall(t *testing.T) {
 	}
 	if len(p.Warnings) != 0 {
 		t.Errorf("unexpected warnings: %v", p.Warnings)
+	}
+
+	// A model that calls tools but does not say so is missed by whoever
+	// looks for one.
+	m := chatAlias(upstream.URL)
+	m.Capabilities = nil
+	if p := probeServer(t).CheckModel(t.Context(), m); !p.OK ||
+		!anyContains(p.Warnings, "capabilities leave out tools") {
+		t.Errorf("ok = %v, warnings = %v, want a pass that asks for the capability",
+			p.OK, p.Warnings)
 	}
 }
 
@@ -107,6 +119,9 @@ func TestCheckModelWarnsWhenTheBackendRefusesTools(t *testing.T) {
 	}
 	if !anyContains(p.Warnings, "--enable-auto-tool-choice") {
 		t.Errorf("warnings = %v, want one naming --enable-auto-tool-choice", p.Warnings)
+	}
+	if !anyContains(p.Warnings, "capabilities say it calls tools") {
+		t.Errorf("warnings = %v, want one saying the capability is wrong", p.Warnings)
 	}
 }
 
@@ -312,5 +327,62 @@ func TestSampleNeverCutsACharacterInHalf(t *testing.T) {
 	}
 	if want := strings.Repeat("a", 399) + "…"; got != want {
 		t.Errorf("got %q, want the text cut before the character", got[390:])
+	}
+}
+
+// visionBackend makes a tool call, and answers a request with an image with
+// status and body.
+func visionBackend(status int, body string) http.HandlerFunc {
+	tools := sseBackend(`{"model":"keera-code","choices":[{"delta":{"tool_calls":[` +
+		`{"index":0,"function":{"name":"get_build_status","arguments":"{}"}}]}}]}`)
+	return func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(raw), "image_url") {
+			tools(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body)
+	}
+}
+
+func visionAlias(url string) policy.Model {
+	m := chatAlias(url)
+	m.Capabilities = []policy.Capability{policy.CapabilityTools, policy.CapabilityVision}
+	return m
+}
+
+// A gate on a model that states vision is shown images, so the check makes
+// sure the backend reads one.
+func TestCheckModelShowsAModelThatReadsImagesOne(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		want   string
+	}{
+		{"reads it", http.StatusOK, `{"choices":[{"message":{"content":"Red."}}]}`, ""},
+		{"refuses it", http.StatusBadRequest, `{"error":{"message":"no images"}}`, "Take vision out"},
+		{
+			"does not see it", http.StatusOK,
+			`{"choices":[{"message":{"content":"I see no image."}}]}`, "may not see images",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(visionBackend(tc.status, tc.body))
+			defer upstream.Close()
+
+			p := probeServer(t).CheckModel(t.Context(), visionAlias(upstream.URL))
+			if !p.OK {
+				t.Fatalf("the check failed: %s", p.Error)
+			}
+			switch {
+			case tc.want == "" && len(p.Warnings) != 0:
+				t.Errorf("unexpected warnings: %v", p.Warnings)
+			case tc.want != "" && !anyContains(p.Warnings, tc.want):
+				t.Errorf("warnings = %v, want one saying %q", p.Warnings, tc.want)
+			}
+		})
 	}
 }

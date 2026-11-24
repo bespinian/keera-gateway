@@ -38,7 +38,13 @@ import { requestLog } from "./requestlog.js";
 import { setOutcome, namesFrom } from "./logfilters.js";
 import { sessionLog } from "./sessions.js";
 import { modelsCell, summarise } from "./guardrails.js";
-import { openModel, checkModel, deleteModel, servedName } from "./models.js";
+import {
+  openModel,
+  checkModel,
+  deleteModel,
+  servedName,
+  kindName,
+} from "./models.js";
 import {
   activateButton,
   canActivate,
@@ -375,7 +381,7 @@ export async function modelDetailView(ctx) {
     hide: { model: true },
     meta: model
       ? [
-          pill(model.kind),
+          pill(kindName(model.kind)),
           model.enabled ? pill("Enabled", "good") : pill("Disabled", "warn"),
           model.max_context_tokens
             ? pill(`${compact(model.max_context_tokens)} context`)

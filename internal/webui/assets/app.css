@@ -1564,6 +1564,13 @@ th.num .th-sort {
   line-height: 1.45;
   color: var(--muted);
 }
+/* The kind sits on the facts, however long the description above. */
+.model-tile-kind {
+  margin-top: auto;
+}
+.model-tile-kind + .model-tile-facts {
+  margin-top: 0;
+}
 /* At the bottom, so the numbers line up across a row of tiles. */
 .model-tile-facts {
   display: grid;

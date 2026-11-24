@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -238,6 +239,8 @@ type treeDoc struct {
 	raws   map[string][]byte
 	values []string
 	set    []func(string)
+	// imgs are the images the walk met, as URLs. See textDoc.
+	imgs []string
 	// err is the first misspelled key the walk met. See checkKeys.
 	err error
 	// unread names the first block, item or part the walk could not read.
@@ -314,6 +317,21 @@ func (d *treeDoc) addField(obj map[string]any, key string) {
 }
 
 func (d *treeDoc) texts() []string { return d.values }
+
+func (d *treeDoc) images() []string { return d.imgs }
+
+// addImage collects an image's URL, an http one or a data URL. Anything else,
+// such as a file id only the provider can read, is left out. OpenAI's chat
+// nests the URL in an object; vLLM also takes it bare.
+func (d *treeDoc) addImage(v any) {
+	if obj, ok := v.(map[string]any); ok {
+		v = obj["url"]
+	}
+	if u, ok := v.(string); ok && (strings.HasPrefix(u, "data:image/") ||
+		strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://")) {
+		d.imgs = append(d.imgs, u)
+	}
+}
 
 func (d *treeDoc) apply(b *body, replaced []string) error {
 	if len(replaced) != len(d.set) {

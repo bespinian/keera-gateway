@@ -2211,7 +2211,7 @@ paths:
         or what any other model says when asked afterwards. The prompts are not
         stored. It runs the filter's
         model, so it can cost money. See
-        https://docs.keera.ch/manage/filters/.
+        https://docs.keera.ch/manage/filters/#what-a-gate-reads.
       parameters:
         - name: alias
           in: path
@@ -2682,6 +2682,8 @@ paths:
                   description: Price per minute of audio, for a transcription model sold by the minute.
                 long_prompt:
                   $ref: "#/components/schemas/PriceTier"
+                capabilities:
+                  $ref: "#/components/schemas/Capabilities"
                 max_context_tokens:
                   type: integer
                 release_date:
@@ -8388,6 +8390,11 @@ components:
           type: string
         expect_refusal:
           type: boolean
+        images:
+          type: integer
+          description: |
+            Test images sent with the text: one for a gate whose model reads
+            images. Left out when none.
         confidence:
           type: number
           minimum: 0
@@ -9024,6 +9031,8 @@ components:
           format: int64
         long_prompt:
           $ref: "#/components/schemas/PriceTier"
+        capabilities:
+          $ref: "#/components/schemas/Capabilities"
         max_context_tokens:
           type: integer
         release_date:
@@ -9043,6 +9052,16 @@ components:
           description: The deployment holds the provider's key, and bills the model.
         enabled:
           type: boolean
+    Capabilities:
+      type: array
+      items:
+        type: string
+        enum: [tools, vision]
+      description: |
+        What a chat model can do beyond text. `tools`: it calls tools, which
+        coding agents need. `vision`: it reads images, and a gate on it is
+        shown the request's images too. See
+        https://docs.keera.ch/manage/models/#capabilities.
     PriceTier:
       type: object
       description: The prices for a prompt longer than `above_tokens`.
@@ -9194,6 +9213,8 @@ components:
           type: string
           enum: [chat, completion, embedding, rerank, transcription, decision]
           description: Left out for a chat model.
+        capabilities:
+          $ref: "#/components/schemas/Capabilities"
         max_context_tokens:
           type: integer
         release_date:
@@ -10467,6 +10488,8 @@ components:
         location:
           type: string
           description: Where prompts sent to it go.
+        capabilities:
+          $ref: "#/components/schemas/Capabilities"
         destinations:
           type: array
           items:

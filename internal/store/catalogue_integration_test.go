@@ -36,6 +36,10 @@ func TestModelWithoutAReleaseDate(t *testing.T) {
 		t.Errorf("release date = %q, location = %q, want empty and onprem",
 			got.ReleaseDate, got.Location)
 	}
+	// An empty list, never null, so clients always see one.
+	if got.Capabilities == nil || len(got.Capabilities) != 0 {
+		t.Errorf("capabilities = %#v, want an empty list", got.Capabilities)
+	}
 }
 
 // The schema takes every kind the gateway knows, so a new kind cannot be
@@ -85,7 +89,8 @@ func TestModelCatalogueRoundTrip(t *testing.T) {
 		},
 		MaxContext: 65536, Enabled: true,
 		Provider: "anthropic", ReleaseDate: "2026-07-24", Location: "usa",
-		DisplayName: "Qwen2.5 Coder 32B",
+		DisplayName:  "Qwen2.5 Coder 32B",
+		Capabilities: []policy.Capability{policy.CapabilityVision},
 	}
 	if err := st.UpsertModel(ctx, m, Credential{}); err != nil {
 		t.Fatalf("UpsertModel: %v", err)
@@ -117,6 +122,9 @@ func TestModelCatalogueRoundTrip(t *testing.T) {
 	if got.ReleaseDate != "2026-07-24" || got.Location != "usa" {
 		t.Errorf("release date = %q, location = %q, want 2026-07-24 and usa",
 			got.ReleaseDate, got.Location)
+	}
+	if !slices.Equal(got.Capabilities, m.Capabilities) {
+		t.Errorf("capabilities = %v, want the stored %v", got.Capabilities, m.Capabilities)
 	}
 
 	// An edit that does not mention the credential keeps it.

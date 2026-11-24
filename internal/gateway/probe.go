@@ -1,12 +1,16 @@
 package gateway
 
 import (
+	"bytes"
 	"cmp"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"maps"
 	"net/http"
 	"slices"
@@ -174,8 +178,50 @@ func (s *Server) checkChat(ctx context.Context, m policy.Model, p Probe) Probe {
 		p.OK = true
 	}
 	p.Warnings = chatWarnings(p, m)
+	if m.Can(policy.CapabilityVision) {
+		p.Warnings = append(p.Warnings, s.checkVision(ctx, m)...)
+	}
 	return p
 }
+
+// checkVision shows a model that states vision a red square. A gate on it is
+// shown the request's images, so a wrong vision mark makes such a gate refuse
+// every request with an image. Its warnings say so.
+func (s *Server) checkVision(ctx context.Context, m policy.Model) []string {
+	var p Probe
+	body, ok := s.probeAnswer(ctx, m, "/chat/completions", map[string]any{
+		"model": m.BackendModel,
+		"messages": []map[string]any{{"role": "user", "content": []map[string]any{
+			{"type": "text", "text": "What colour is this image? Answer in one word."},
+			{"type": "image_url", "image_url": map[string]string{"url": testImageURL}},
+		}}},
+		"stream": false, "max_tokens": 128, "temperature": 0,
+	}, &p)
+	if !ok {
+		return []string{"its capabilities say it reads images, but asked with one, " +
+			p.Error + ". A gate on this model refuses every request with an image. " +
+			"Take vision out of its capabilities."}
+	}
+	r := &probeReply{}
+	r.scan(body)
+	if answer := r.text.String(); !strings.Contains(strings.ToLower(answer), "red") {
+		return []string{fmt.Sprintf("its capabilities say it reads images, but asked the "+
+			"colour of a red square, it answered %q. It may not see images.", sample(answer))}
+	}
+	return nil
+}
+
+// testImageURL is a red square as a PNG data URL. Checks of a model or a gate
+// that reads images send it.
+var testImageURL = func() string {
+	img := image.NewRGBA(image.Rect(0, 0, 64, 64))
+	for i := 0; i < len(img.Pix); i += 4 {
+		img.Pix[i], img.Pix[i+3] = 255, 255
+	}
+	var b bytes.Buffer
+	_ = png.Encode(&b, img)
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(b.Bytes())
+}()
 
 // chatProbe is the chat check's request: the tool question, or, for a
 // backend that refuses tools, a plain one.
@@ -263,6 +309,16 @@ func chatWarnings(p Probe, m policy.Model) []string {
 	if p.OK && !p.Streamed {
 		out = append(out, "the backend did not stream. Editors show a completion token by "+
 			"token; buffered, it arrives all at once at the end.")
+	}
+	// The capability is what people choose a model for an agent by, so it
+	// should match what the check found.
+	switch tools := m.Can(policy.CapabilityTools); {
+	case p.ToolCalls && !tools:
+		out = append(out, "the model calls tools, but its capabilities leave out tools. "+
+			"Add them, so people choosing a model for a coding agent find this one.")
+	case p.ToolsOff && tools:
+		out = append(out, "its capabilities say it calls tools, but the backend refuses "+
+			"them. Turn tools on, or take tools out of its capabilities.")
 	}
 	return append(out, servedWarnings(p, m)...)
 }

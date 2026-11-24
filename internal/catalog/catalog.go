@@ -32,8 +32,9 @@ type Model struct {
 	// DisplayName is the model's name for people, such as Claude Haiku 5.5.
 	DisplayName string `yaml:"display_name"`
 	// Provider names a known hosted endpoint (see `keera model catalogue`). It
-	// fills in the backend, context window, prices, display name,
-	// description, release date and location, which the entry may override.
+	// fills in the backend, context window, prices, capabilities, display
+	// name, description, release date and location, which the entry may
+	// override.
 	Provider string   `yaml:"provider"`
 	Backends []string `yaml:"backends"`
 	// ProductID completes a per-customer endpoint, such as an Infomaniak AI
@@ -57,7 +58,10 @@ type Model struct {
 	// AudioMicrosPerMinute prices a minute of audio, for a transcription
 	// model sold by the minute.
 	AudioMicrosPerMinute *int64 `yaml:"audio_micros_per_minute"`
-	MaxContext           *int   `yaml:"max_context_tokens"`
+	// Capabilities are what the model can do beyond text, such as vision.
+	// Unset, a provider fills in its own; an empty list states none.
+	Capabilities []policy.Capability `yaml:"capabilities"`
+	MaxContext   *int                `yaml:"max_context_tokens"`
 	// ReleaseDate is the day the model came out, as YYYY-MM-DD.
 	ReleaseDate string `yaml:"release_date"`
 	// Location is where the model runs: a country, such as ch or usa, or
@@ -178,6 +182,7 @@ func ParseModel(m Model) (policy.Model, error) {
 		CacheWriteMicrosPerMTok:  deref(m.CacheWriteMicrosPerMTok),
 		LongPrompt:               m.LongPrompt,
 		AudioMicrosPerMinute:     deref(m.AudioMicrosPerMinute),
+		Capabilities:             m.Capabilities,
 		MaxContext:               deref(m.MaxContext),
 		ReleaseDate:              m.ReleaseDate,
 		Location:                 m.Location,
@@ -226,6 +231,15 @@ func CheckModel(m *policy.Model, priced bool) error {
 		if err := prov.Check(m.Kind, m.BackendModel, priced); err != nil {
 			return err
 		}
+	}
+	caps, err := policy.CheckCapabilities(m.Capabilities)
+	if err != nil {
+		return err
+	}
+	m.Capabilities = caps
+	if len(caps) > 0 && m.Kind != policy.KindChat {
+		// Only a chat request carries images, and only a gate reads them.
+		return fmt.Errorf("only a chat model states capabilities, and this one is %s", m.Kind)
 	}
 	// Every model runs somewhere: unstated, it is the provider's location, or
 	// read off the backend.

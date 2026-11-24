@@ -26,10 +26,12 @@ type modelFlags struct {
 	kind         string
 	displayName  string
 	description  string
-	// named and describe record whether --display-name and --description were
-	// given, so an empty one clears.
+	// named, describe and capable record whether --display-name,
+	// --description and --capabilities were given, so an empty one clears.
 	named          bool
 	describe       bool
+	capable        bool
+	capabilityList string
 	maxContext     int
 	releaseDate    string
 	location       string
@@ -67,6 +69,10 @@ func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 	fs.IntVar(&f.maxContext, "max-context-tokens", -1, "context window: advertised to clients, and a request that cannot fit is refused")
 	fs.StringVar(&f.releaseDate, "release-date", "",
 		"the day the model came out, as YYYY-MM-DD (a --provider model starts with that provider's own)")
+	fs.StringVar(&f.capabilityList, "capabilities", "",
+		"what a chat model can do beyond text, comma-separated: tools, for one that calls "+
+			"tools, and vision, for one that reads images (a --provider model starts with "+
+			"that provider's own)")
 	fs.StringVar(&f.location, "location", "",
 		"where the model runs, such as ch, usa or onprem (default: the provider's; "+
 			"without one, onprem for a backend inside your network)")
@@ -152,6 +158,12 @@ func applyModelFlags(m catalog.Model, f *modelFlags) catalog.Model {
 	if f.releaseDate != "" {
 		m.ReleaseDate = f.releaseDate
 	}
+	if f.capable {
+		m.Capabilities = []policy.Capability{}
+		for _, c := range splitList(f.capabilityList) {
+			m.Capabilities = append(m.Capabilities, policy.Capability(c))
+		}
+	}
 	if f.location != "" {
 		m.Location = f.location
 	}
@@ -184,6 +196,7 @@ func clearModelValues(m catalog.Model) catalog.Model {
 	m.CacheWriteMicrosPerMTok = nil
 	m.LongPrompt = nil
 	m.AudioMicrosPerMinute = nil
+	m.Capabilities = nil
 	m.MaxContext = nil
 	return m
 }
@@ -240,11 +253,13 @@ func declared(m policy.Model) catalog.Model {
 		CacheWriteMicrosPerMTok:  &writePrice,
 		LongPrompt:               m.LongPrompt,
 		AudioMicrosPerMinute:     &audioPrice,
-		MaxContext:               &maxContext,
-		ReleaseDate:              m.ReleaseDate,
-		Location:                 m.Location,
-		Subscription:             m.Subscription,
-		Disabled:                 !m.Enabled,
+		// Never nil, so the provider's do not come back over a cleared list.
+		Capabilities: append([]policy.Capability{}, m.Capabilities...),
+		MaxContext:   &maxContext,
+		ReleaseDate:  m.ReleaseDate,
+		Location:     m.Location,
+		Subscription: m.Subscription,
+		Disabled:     !m.Enabled,
 	}
 }
 
@@ -275,6 +290,7 @@ func modelCmd(ctx context.Context, args []string) error {
 	}
 	r.f.named = given(r.fs, "display-name")
 	r.f.describe = given(r.fs, "description")
+	r.f.capable = given(r.fs, "capabilities")
 
 	// No organisation needed. validate needs no server either, so CI can run
 	// it.
@@ -627,6 +643,9 @@ func printModel(w *table, m policy.Model) {
 	showIfSet(w, "provider", m.Provider)
 	show(w, "location", dash(m.Location))
 	showIfSet(w, "released", m.ReleaseDate)
+	if m.Kind == policy.KindChat {
+		show(w, "capabilities", capabilityWords(m.Capabilities))
+	}
 	// Printed even when missing: without one a router knows the model by its
 	// alias alone.
 	if m.Description != "" {
@@ -664,6 +683,14 @@ func printModel(w *table, m policy.Model) {
 			"what the API would have charged")
 	}
 	show(w, "enabled", yesNo(m.Enabled))
+}
+
+// capabilityWords lists a model's capabilities, or says it has none.
+func capabilityWords(cs []policy.Capability) string {
+	if len(cs) == 0 {
+		return "(none - text only, no tools or images)"
+	}
+	return policy.JoinCapabilities(cs, ",")
 }
 
 // credentialSource helps an operator debugging a 401.

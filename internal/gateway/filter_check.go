@@ -51,6 +51,9 @@ type FilterVerdict struct {
 	Refused       bool     `json:"refused"`
 	Reason        string   `json:"reason,omitempty"`
 	ExpectRefusal bool     `json:"expect_refusal"`
+	// Images is how many test images went with the text: one for a gate
+	// whose model reads images, so a backend that refuses them shows here.
+	Images int `json:"images,omitempty"`
 	// Confidence is this verdict's share of probability, from 0 to 1. Near 0.5
 	// the gate cannot tell the samples apart. 0 means unknown: the backend sent
 	// no logprobs.
@@ -118,7 +121,7 @@ func (s *Server) CheckFilter(ctx context.Context, f policy.Filter) FilterProbe {
 	}
 
 	start := time.Now()
-	out, cost, err := s.runFilter(ctx, f, m, filterCheckSample, nil)
+	out, cost, err := s.runFilter(ctx, f, m, filterCheckSample, nil, nil)
 	p.TotalMS = time.Since(start).Milliseconds()
 	p.CostMicros = cost.micros
 	s.billCheck(f.OrgID, cost.bills)
@@ -147,28 +150,37 @@ func sampleSegments(out []string) []FilterSegment {
 func (s *Server) checkGate(ctx context.Context, f policy.Filter, m policy.Model,
 	p FilterProbe,
 ) FilterProbe {
+	// The ordinary half carries a harmless image, for a gate that is shown
+	// images.
 	halves := []struct {
 		sent          []string
+		images        []string
 		expectRefusal bool
 	}{
-		{gateCheckSensitive, true},
-		{gateCheckOrdinary, false},
+		{gateCheckSensitive, nil, true},
+		{gateCheckOrdinary, shownImages(f, m, []string{testImageURL}), false},
 	}
 
 	start := time.Now()
 	for _, half := range halves {
-		_, cost, err := s.runFilter(ctx, f, m, half.sent, nil)
+		_, cost, err := s.runFilter(ctx, f, m, half.sent, half.images, nil)
 		p.CostMicros += cost.micros
 		s.billCheck(f.OrgID, cost.bills)
 		v := FilterVerdict{
 			Sent: half.sent, ExpectRefusal: half.expectRefusal, Confidence: cost.confidence,
+			Images: len(half.images),
 		}
 		switch outcome, reason, _ := filterOutcome(half.sent, nil, err); outcome {
 		case store.FilterRefuse:
 			v.Refused, v.Reason = true, reason
 		case store.FilterError:
-			// Such a gate would refuse everything.
+			// Such a gate would refuse everything, or everything with an image.
 			p.Error = err.Error()
+			if len(half.images) > 0 {
+				p.Error = "with a test image: " + p.Error + ". If the model cannot read " +
+					"images, this gate refuses every request with one: take vision out " +
+					"of the model's capabilities"
+			}
 			p.TotalMS = time.Since(start).Milliseconds()
 			return p
 		}

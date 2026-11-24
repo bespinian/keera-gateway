@@ -200,6 +200,12 @@ export async function modelsView(ctx) {
           m.max_context_tokens ? compact(m.max_context_tokens) : dash(),
       },
       {
+        label: "Kind",
+        shrink: true,
+        sortKey: kindOf,
+        cell: kindCell,
+      },
+      {
         // Same median and window as the model's own screen.
         label: "First token",
         num: true,
@@ -272,6 +278,7 @@ export async function modelsView(ctx) {
           ...(m.backends || []),
         ].join(" "),
       searchLabel: "models",
+      choices: narrowing([kindChoice(models, (m) => m)], models),
       ctx,
       open: (m) => "/models/" + encodeURIComponent(m.alias),
     },
@@ -376,6 +383,12 @@ export async function catalogueView(ctx) {
           r.m.max_context_tokens ? compact(r.m.max_context_tokens) : dash(),
       },
       {
+        label: "Kind",
+        shrink: true,
+        sortKey: (r) => kindOf(r.m),
+        cell: (r) => kindCell(r.m),
+      },
+      {
         label: "Input / MTok",
         num: true,
         shrink: true,
@@ -435,33 +448,29 @@ export async function catalogueView(ctx) {
         ].join(" "),
       searchLabel: "models",
       tile: (r) => catalogueTile(ctx, r),
-      choices: [
-        {
-          label: "Locations",
-          options: [...new Set(rows.map(runsIn))]
-            .filter(Boolean)
-            .map((l) => ({ value: l, label: locationName(l) })),
-          test: (r, v) => runsIn(r) === v,
-        },
-        {
-          label: "Providers",
-          options: providers.map((p) => ({
-            value: p.name,
-            label: providerName(p.name),
-          })),
-          test: (r, v) => r.p.name === v,
-        },
-        {
-          label: "Kinds",
+      choices: narrowing(
+        [
+          {
+            label: "Locations",
+            options: [...new Set(rows.map(runsIn))]
+              .filter(Boolean)
+              .map((l) => ({ value: l, label: locationName(l) })),
+            test: (r, v) => runsIn(r) === v,
+          },
+          {
+            label: "Providers",
+            options: providers.map((p) => ({
+              value: p.name,
+              label: providerName(p.name),
+            })),
+            test: (r, v) => r.p.name === v,
+          },
           // The model's own kind: a provider that serves embeddings also
-          // serves chat models, which are not embeddings. No kind means chat.
-          options: KINDS.filter((k) =>
-            rows.some((r) => (r.m.kind || "chat") === k),
-          ).map((k) => ({ value: k, label: kindName(k) })),
-          test: (r, v) => (r.m.kind || "chat") === v,
-        },
-        // A dropdown with one choice filters nothing.
-      ].filter((c) => c.options.length > 1),
+          // serves chat models, which are not embeddings.
+          kindChoice(rows, (r) => r.m),
+        ],
+        rows,
+      ),
       // Models that need the organisation's own key are hidden by default.
       // Shown only when keys are mixed.
       toggles: [
@@ -533,6 +542,9 @@ function catalogueTile(ctx, r) {
     r.m.description
       ? h("p", { class: "model-tile-what" }, r.m.description)
       : null,
+    // Above the facts, at the same height in every tile of a row. The facts
+    // grid has no room for a pill.
+    h("div", { class: "model-tile-kind" }, kindCell(r.m)),
     h(
       "dl",
       { class: "model-tile-facts", title: "Prices per million tokens" },
@@ -557,6 +569,70 @@ function catalogueTile(ctx, r) {
         )
       : null,
   );
+}
+
+// CAPABILITIES are what a chat model can state it does beyond text, with
+// its name and what the form says about it.
+const CAPABILITIES = {
+  tools: {
+    name: "Tool calling",
+    hint:
+      "Coding agents need it. Check the model to see whether its backend " +
+      "returns tool calls.",
+  },
+  vision: {
+    name: "Vision",
+    hint:
+      "A gate on this model is shown the request's images too. Turn it on " +
+      "only if the backend takes images, or the gate fails.",
+  },
+};
+
+function capabilityName(c) {
+  return CAPABILITIES[c]?.name || c;
+}
+
+// kindOf is a model's kind. No kind means chat.
+function kindOf(m) {
+  return m.kind || "chat";
+}
+
+// kindChoice filters rows by their model's kind.
+function kindChoice(rows, model) {
+  return {
+    label: "Kinds",
+    options: KINDS.filter((k) => rows.some((r) => kindOf(model(r)) === k)).map(
+      (k) => ({ value: k, label: kindName(k) }),
+    ),
+    test: (r, v) => kindOf(model(r)) === v,
+  };
+}
+
+// narrowing keeps the dropdowns that can hide a row: one that every row
+// passes filters nothing.
+function narrowing(choices, rows) {
+  return choices.filter((c) =>
+    c.options.some((o) => rows.some((r) => !c.test(r, o.value))),
+  );
+}
+
+// kindCell is the model's kind, which says which API the model is on.
+// Capabilities are shown only on a model's own page.
+function kindCell(m) {
+  return pill(kindName(kindOf(m)));
+}
+
+// capabilityCell says what a chat model can do, or that it does neither.
+function capabilityCell(m) {
+  const pills = (m.capabilities || []).map((c) => pill(capabilityName(c)));
+  return pills.length
+    ? h("span", { class: "wrap-chips" }, pills)
+    : h("span", { class: "muted" }, "none - text only, no tools or images");
+}
+
+// can says whether a model states capability c.
+function can(m, c) {
+  return (m.capabilities || []).includes(c);
 }
 
 function chf(micros) {
@@ -639,6 +715,14 @@ function viewModel(ctx, m) {
           : h("span", { class: "mono" }, m.backend_model),
         "The model the backend runs.",
       ),
+      m.kind === "chat"
+        ? readRow(
+            "Capabilities",
+            capabilityCell(m),
+            "Tool calling: coding agents can use it. Vision: it reads images, and a gate on " +
+              "it is shown the request's images too.",
+          )
+        : null,
       h(
         "div",
         { class: "field-row" },
@@ -704,7 +788,11 @@ function viewModel(ctx, m) {
       m.audio_micros_per_minute
         ? readRow(
             "Price per minute of audio (CHF)",
-            h("span", { class: "nowrap" }, listPrice(m.audio_micros_per_minute)),
+            h(
+              "span",
+              { class: "nowrap" },
+              listPrice(m.audio_micros_per_minute),
+            ),
             "What each minute of audio sent to this model costs, as its " +
               "answer reports it.",
           )
@@ -893,7 +981,7 @@ const KINDS = [
   "decision",
 ];
 
-function kindName(kind) {
+export function kindName(kind) {
   return (
     {
       chat: "Chat",
@@ -935,7 +1023,7 @@ const PRODUCT_ID = "{product_id}";
 // templateOf is the address p serves model m at. A kind may have its own, as
 // Infomaniak's rerank models do. See EndpointFor in providers.go.
 function templateOf(p, m) {
-  return (m && p.endpoints && p.endpoints[m.kind || "chat"]) || p.endpoint;
+  return (m && p.endpoints && p.endpoints[kindOf(m)]) || p.endpoint;
 }
 
 // endpointOf fills in the product id where needed. Null while it is missing.
@@ -1131,7 +1219,10 @@ function editModel(ctx, existing, providers, pick) {
         "eu",
         "usa",
         ...(providers || [])
-          .flatMap((p) => [p.location, ...(p.models || []).map((x) => x.location)])
+          .flatMap((p) => [
+            p.location,
+            ...(p.models || []).map((x) => x.location),
+          ])
           .filter(Boolean),
         ...(m.location ? [m.location] : []),
       ]),
@@ -1159,7 +1250,7 @@ function editModel(ctx, existing, providers, pick) {
     priceWrite,
     priceAudio,
   };
-  setKinds(kind, KINDS, m.kind || "chat");
+  setKinds(kind, KINDS, kindOf(m));
 
   // The key is never sent back, so empty means "keep it", not "none".
   const apiKey = h("input", {
@@ -1180,6 +1271,12 @@ function editModel(ctx, existing, providers, pick) {
     type: "checkbox",
     checked: m.enabled !== false,
   });
+  const capBoxes = Object.fromEntries(
+    Object.keys(CAPABILITIES).map((c) => [
+      c,
+      h("input", { type: "checkbox", checked: can(m, c) }),
+    ]),
+  );
 
   // overridden holds the provider values this entry replaced. They stay
   // editable.
@@ -1324,6 +1421,24 @@ function editModel(ctx, existing, providers, pick) {
       marks.priceAudio,
     ),
   );
+  // Only a chat model states capabilities.
+  const capabilityFields = h(
+    "div",
+    {},
+    Object.entries(CAPABILITIES).map(([c, { name, hint }]) =>
+      h(
+        "div",
+        { class: "field" },
+        h("label", { class: "row-tight" }, capBoxes[c], name),
+        h("div", { class: "hint" }, hint),
+      ),
+    ),
+  );
+  const syncCapabilities = () => {
+    capabilityFields.hidden = kind.value !== "chat";
+  };
+  kind.addEventListener("change", syncCapabilities);
+  syncCapabilities();
   const extras = h(
     "div",
     {},
@@ -1354,6 +1469,7 @@ function editModel(ctx, existing, providers, pick) {
     feeNote,
     cacheRow,
     audioRow,
+    capabilityFields,
     h(
       "div",
       { class: "field" },
@@ -1401,6 +1517,8 @@ function editModel(ctx, existing, providers, pick) {
     layout,
     productSlot,
     alias,
+    capBoxes,
+    syncCapabilities,
     existing: !!existing,
     // Read from the entry, not guessed from its backend URL.
     initial: existing ? presetOf(providers, existing) : null,
@@ -1571,8 +1689,14 @@ function editModel(ctx, existing, providers, pick) {
         cached_input_micros_per_mtok: toMicros(priceCached.value),
         cache_write_micros_per_mtok: toMicros(priceWrite.value),
         audio_micros_per_minute:
-          kind.value === "transcription" ? statedMicros(priceAudio.value) : null,
+          kind.value === "transcription"
+            ? statedMicros(priceAudio.value)
+            : null,
         long_prompt: longPrompt(),
+        capabilities:
+          kind.value === "chat"
+            ? Object.keys(CAPABILITIES).filter((c) => capBoxes[c].checked)
+            : [],
         subscription: paidByPlan,
         enabled: enabled.checked,
       };
@@ -1809,11 +1933,12 @@ function hostedFields(ctx, providers, form) {
     }
     // Clears the endpoint until a product id is in.
     syncEndpoint();
-    setKinds(
-      fields.kind,
-      p.kinds,
-      known ? known.kind || "chat" : fields.kind.value,
-    );
+    setKinds(fields.kind, p.kinds, known ? kindOf(known) : fields.kind.value);
+    // The table knows what its models can do; another model is left as
+    // it was.
+    if (known)
+      for (const c in CAPABILITIES) form.capBoxes[c].checked = can(known, c);
+    form.syncCapabilities();
     if (!state.aliasDirty) alias.value = known ? aliasFor(known.id) : "";
     paintMachinery("auto");
     paintPresets(state.preset, fields, marks, state);

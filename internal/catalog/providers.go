@@ -32,6 +32,9 @@ type Provider struct {
 	// Location is where prompts go: ch, eu or usa. It is the default for its
 	// models.
 	Location string `json:"location"`
+	// ChatCapabilities are what each of its chat models can do, unless the
+	// model states its own. Model and Providers fill them in.
+	ChatCapabilities []policy.Capability `json:"-"`
 	// Kinds are the APIs its models are served on. The table leaves it out:
 	// Providers fills it from Models, so the two cannot disagree.
 	Kinds  []policy.Kind   `json:"kinds"`
@@ -65,6 +68,9 @@ type ProviderModel struct {
 	// AudioMicrosPerMinute prices a minute of audio, for a transcription model
 	// sold by the minute.
 	AudioMicrosPerMinute int64 `json:"audio_micros_per_minute,omitempty"`
+	// Capabilities are what the model can do beyond text, such as reading
+	// images. Nil means the provider's ChatCapabilities.
+	Capabilities []policy.Capability `json:"capabilities,omitempty"`
 	// Description is the default for an entry that states none, so routers
 	// never choose between bare aliases.
 	Description string `json:"description"`
@@ -76,13 +82,26 @@ type ProviderModel struct {
 	Location string `json:"location,omitempty"`
 }
 
+// The table shares these lists; Model and Providers hand out copies.
+var (
+	readsImages = []policy.Capability{policy.CapabilityVision}
+	callsTools  = []policy.Capability{policy.CapabilityTools}
+	// Sorted, as CheckCapabilities leaves a list.
+	readsImagesCallsTools = []policy.Capability{policy.CapabilityTools, policy.CapabilityVision}
+)
+
 // providers is the built-in table.
 //
 // Prices are micro-CHF per million tokens, or per minute of audio for a
 // transcription model sold by the minute, at list price unless a provider
 // says otherwise; an entry can override them. Prices listed in USD are
 // converted at 0.96 CHF per USD. Last checked against each pricing page on
-// 2026-11-21.
+// 2026-11-24.
+//
+// Capabilities come from each provider's own pages, checked on 2026-11-24. A
+// model is marked only where its provider says so for that model: a wrong
+// vision mark makes a gate fail, and a model that does more than it says is
+// only missing from a filter.
 //
 // Release dates come from each maker's announcement. An FP8 build takes the
 // date of its base model. Retired models are dropped before they retire.
@@ -99,6 +118,8 @@ var providers = []Provider{{
 	Endpoint:    "https://api.anthropic.com/v1",
 	CachedInput: true,
 	Location:    "usa",
+	// Every chat model of Anthropic reads images and calls tools.
+	ChatCapabilities: readsImagesCallsTools,
 	Models: []ProviderModel{{
 		ID: "claude-opus-5-5", DisplayName: "Claude Opus 5.5",
 		MaxContext: 1_000_000, ReleaseDate: "2026-09-22",
@@ -180,6 +201,8 @@ var providers = []Provider{{
 	// input and 1.5 times for output. From gpt-5.6 on, a cache write costs a
 	// quarter more than input; before, the same. GPT-5.6 Sol's price is a
 	// promotion until 2026-11-30; OpenAI has not published the price after it.
+	// Every chat model of OpenAI reads images and calls tools.
+	ChatCapabilities: readsImagesCallsTools,
 	Models: []ProviderModel{{
 		ID: "gpt-6.2-astra", DisplayName: "GPT-6.2 Astra",
 		MaxContext: 1_050_000, ReleaseDate: "2026-11-17",
@@ -363,6 +386,8 @@ var providers = []Provider{{
 	Endpoint:    "https://generativelanguage.googleapis.com/v1beta/openai",
 	CachedInput: true,
 	Location:    "usa",
+	// Every chat model of Google reads images and calls tools.
+	ChatCapabilities: readsImagesCallsTools,
 	Models: []ProviderModel{{
 		ID: "gemini-4-neon", DisplayName: "Gemini 4 Neon",
 		MaxContext: 1_048_576, ReleaseDate: "2026-11-18",
@@ -434,6 +459,8 @@ var providers = []Provider{{
 	Endpoint:    "https://api.deepseek.com",
 	CachedInput: true,
 	Location:    "cn",
+	// Every chat model of DeepSeek calls tools, as its model pages say.
+	ChatCapabilities: callsTools,
 	Models: []ProviderModel{{
 		ID: "deepseek-v4-pro", DisplayName: "DeepSeek V4 Pro",
 		MaxContext: 1_000_000, ReleaseDate: "2026-08-13",
@@ -446,6 +473,7 @@ var providers = []Provider{{
 		InputMicrosPerMTok: 288_000, OutputMicrosPerMTok: 1_152_000,
 		CachedInputMicrosPerMTok: 5_760,
 		Description:              "large and quick, reads images - coding, agent work and long documents",
+		Capabilities:             readsImagesCallsTools,
 	}},
 }, {
 	Name:    "mistral",
@@ -457,18 +485,22 @@ var providers = []Provider{{
 	Endpoint:    "https://api.mistral.ai/v1",
 	CachedInput: true,
 	Location:    "eu",
+	// Every chat model of Mistral calls tools, as its model pages say.
+	ChatCapabilities: callsTools,
 	Models: []ProviderModel{{
 		ID: "mistral-large-4", DisplayName: "Mistral Large 4",
 		MaxContext: 1_000_000, ReleaseDate: "2026-10-06",
 		InputMicrosPerMTok: 672_000, OutputMicrosPerMTok: 2_016_000,
 		CachedInputMicrosPerMTok: 67_200,
 		Description:              "very large - hard coding, agent and reasoning work, with images",
+		Capabilities:             readsImagesCallsTools,
 	}, {
 		ID: "mistral-small-2603", DisplayName: "Mistral Small 4",
 		MaxContext: 262_144, ReleaseDate: "2026-03-16",
 		InputMicrosPerMTok: 144_000, OutputMicrosPerMTok: 576_000,
 		CachedInputMicrosPerMTok: 14_400,
 		Description:              "small and fast, with reasoning - everyday chat, coding and agent tasks",
+		Capabilities:             readsImagesCallsTools,
 	}, {
 		ID: "codestral-2508", DisplayName: "Codestral 25.08",
 		MaxContext: 128_000, ReleaseDate: "2025-07-30",
@@ -487,30 +519,35 @@ var providers = []Provider{{
 		InputMicrosPerMTok: 144_000, OutputMicrosPerMTok: 480_000,
 		CachedInputMicrosPerMTok: 28_800,
 		Description:              "mid-size, quick all-rounder - code, reasoning and tool use",
+		Capabilities:             readsImagesCallsTools,
 	}, {
 		ID: "deepseek-v4-1-flash-1017", DisplayName: "DeepSeek V4.1 Flash",
 		MaxContext: 1_000_000, ReleaseDate: "2026-10-17",
 		InputMicrosPerMTok: 288_000, OutputMicrosPerMTok: 1_152_000,
 		CachedInputMicrosPerMTok: 6_720,
 		Description:              "large and quick, in preview - large codebases and long documents",
+		Capabilities:             readsImagesCallsTools,
 	}, {
 		ID: "ministral-14b-2512", DisplayName: "Ministral 3 14B",
 		MaxContext: 262_144, ReleaseDate: "2025-12-02",
 		InputMicrosPerMTok: 192_000, OutputMicrosPerMTok: 192_000,
 		CachedInputMicrosPerMTok: 19_200,
 		Description:              "small - simple chat, text and image tasks",
+		Capabilities:             readsImagesCallsTools,
 	}, {
 		ID: "ministral-8b-2512", DisplayName: "Ministral 3 8B",
 		MaxContext: 262_144, ReleaseDate: "2025-12-02",
 		InputMicrosPerMTok: 144_000, OutputMicrosPerMTok: 144_000,
 		CachedInputMicrosPerMTok: 14_400,
 		Description:              "very small - short, high-volume tasks",
+		Capabilities:             readsImagesCallsTools,
 	}, {
 		ID: "ministral-3b-2512", DisplayName: "Ministral 3 3B",
 		MaxContext: 262_144, ReleaseDate: "2025-12-02",
 		InputMicrosPerMTok: 96_000, OutputMicrosPerMTok: 96_000,
 		CachedInputMicrosPerMTok: 9_600,
 		Description:              "tiny - classification, extraction and other simple tasks",
+		Capabilities:             readsImagesCallsTools,
 	}, {
 		// The Voxtral transcribers are priced per minute of audio and report
 		// it as prompt_audio_seconds. Mistral's cheaper rate for cached audio
@@ -559,44 +596,52 @@ var providers = []Provider{{
 		ID: "mistral-small-swiss", DisplayName: "Mistral Small Swiss",
 		MaxContext:         30_000,
 		InputMicrosPerMTok: 150_000, OutputMicrosPerMTok: 450_000,
-		Description: "small and fast - translation, summaries and simple chat",
+		Description:  "small and fast - translation, summaries and simple chat",
+		Capabilities: callsTools,
 	}, {
 		ID: "glm5", DisplayName: "GLM-5.2",
 		MaxContext: 130_000, ReleaseDate: "2026-06-16",
 		InputMicrosPerMTok: 2_154_000, OutputMicrosPerMTok: 6_772_000,
-		Description: "large - long agent sessions, hard code and terminal work",
+		Description:  "large - long agent sessions, hard code and terminal work",
+		Capabilities: callsTools,
 	}, {
 		ID: "deepseek-v4-flash", DisplayName: "DeepSeek V4.1 Flash",
 		MaxContext: 1_000_000, ReleaseDate: "2026-10-17",
 		InputMicrosPerMTok: 375_000, OutputMicrosPerMTok: 1_500_000,
-		Description: "large and quick, in preview - large codebases and long documents",
+		Description:  "large and quick, in preview - large codebases and long documents",
+		Capabilities: callsTools,
 	}, {
 		ID: "gpt-eu", DisplayName: "GPT EU",
 		MaxContext: 124_000, ReleaseDate: "2025-08-05", Location: "eu",
 		InputMicrosPerMTok: 375_000, OutputMicrosPerMTok: 1_500_000,
-		Description: "mid-size reasoning model - general questions and tool use",
+		Description:  "mid-size reasoning model - general questions and tool use",
+		Capabilities: callsTools,
 	}, {
 		ID: "deepseek-r1", DisplayName: "DeepSeek V4 Pro",
 		MaxContext: 128_000, ReleaseDate: "2026-08-13", Location: "eu",
 		InputMicrosPerMTok: 2_625_000, OutputMicrosPerMTok: 5_250_000,
-		Description: "very large, with reasoning - hard coding and long agent sessions",
+		Description:  "very large, with reasoning - hard coding and long agent sessions",
+		Capabilities: callsTools,
 	}, {
 		ID: "gemma-3", DisplayName: "Gemma 3 27B",
 		MaxContext: 128_000, ReleaseDate: "2025-03-12", Location: "eu",
 		InputMicrosPerMTok: 150_000, OutputMicrosPerMTok: 450_000,
-		Description: "mid-size and quick - documents and answers from search results",
+		Description:  "mid-size and quick - documents and answers from search results",
+		Capabilities: readsImages,
 	}, {
 		// PeakPrivacy says Qwen3 runs in Europe in one place and in
 		// Switzerland in another, and does not mark it Swiss in its price list.
 		ID: "qwen-3-fast", DisplayName: "Qwen3 Fast",
 		MaxContext: 262_000, Location: "eu",
 		InputMicrosPerMTok: 450_000, OutputMicrosPerMTok: 1_350_000,
-		Description: "mid-size and quick - everyday questions in many languages",
+		Description:  "mid-size and quick - everyday questions in many languages",
+		Capabilities: callsTools,
 	}, {
 		ID: "qwen-3", DisplayName: "Qwen3",
 		MaxContext: 256_000, Location: "eu",
 		InputMicrosPerMTok: 300_000, OutputMicrosPerMTok: 900_000,
-		Description: "mid-size, with a thinking mode - reasoning in many languages",
+		Description:  "mid-size, with a thinking mode - reasoning in many languages",
+		Capabilities: callsTools,
 	}},
 }, {
 	Name:    "infomaniak",
@@ -611,42 +656,51 @@ var providers = []Provider{{
 	Location: "ch",
 	// Ids are the upstream names, capitals and all, as the endpoint expects.
 	// Prices are Infomaniak's list price times 1.12, on purpose. An embedding
-	// or a rerank writes nothing, so it has no output price.
+	// or a rerank writes nothing, so it has no output price. Capabilities are
+	// the "Modality" and "Function call" of each model on its open-source
+	// models page; its FAQ still says reading images is being looked at.
 	Models: []ProviderModel{{
 		ID: "Qwen/Qwen3.5-397B-A17B-FP8", DisplayName: "Qwen3.5 397B A17B FP8",
 		MaxContext: 200_000, ReleaseDate: "2026-02-16",
 		InputMicrosPerMTok: 896_000, OutputMicrosPerMTok: 4_032_000,
-		Description: "large - hard reasoning, planning and tool use",
+		Description:  "large - hard reasoning, planning and tool use",
+		Capabilities: readsImagesCallsTools,
 	}, {
 		ID: "moonshotai/Kimi-K2.6", DisplayName: "Kimi K2.6",
 		MaxContext: 256_000, ReleaseDate: "2026-04-20",
 		InputMicrosPerMTok: 672_000, OutputMicrosPerMTok: 3_360_000,
-		Description: "large - coding and agent work",
+		Description:  "large - coding and agent work",
+		Capabilities: readsImagesCallsTools,
 	}, {
 		ID: "mistralai/Mistral-Small-4-119B-2603", DisplayName: "Mistral Small 4",
 		MaxContext: 256_000, ReleaseDate: "2026-03-16",
 		InputMicrosPerMTok: 224_000, OutputMicrosPerMTok: 840_000,
-		Description: "mid-size - plain instructions or longer reasoning",
+		Description:  "mid-size - plain instructions or longer reasoning",
+		Capabilities: readsImagesCallsTools,
 	}, {
 		ID: "swiss-ai/Apertus-v1.5-70B", DisplayName: "Apertus v1.5 70B",
 		MaxContext: 100_000, ReleaseDate: "2026-07-24",
 		InputMicrosPerMTok: 784_000, OutputMicrosPerMTok: 2_800_000,
-		Description: "mid-size, open training data - work that must be auditable",
+		Description:  "mid-size, open training data - work that must be auditable",
+		Capabilities: readsImagesCallsTools,
 	}, {
 		ID: "google/gemma-4-31B-it", DisplayName: "Gemma 4 31B",
 		MaxContext: 100_000, ReleaseDate: "2026-04-02",
 		InputMicrosPerMTok: 224_000, OutputMicrosPerMTok: 448_000,
-		Description: "mid-size and quick - documents, chatbots and ordinary code",
+		Description:  "mid-size and quick - documents, chatbots and ordinary code",
+		Capabilities: callsTools,
 	}, {
 		ID: "Qwen/Qwen3.8-27B-FP8", DisplayName: "Qwen3.8 27B FP8",
 		MaxContext: 100_000, ReleaseDate: "2026-08-14",
 		InputMicrosPerMTok: 448_000, OutputMicrosPerMTok: 3_360_000,
-		Description: "small but strong for its size - ordinary code and questions",
+		Description:  "small but strong for its size - ordinary code and questions",
+		Capabilities: readsImagesCallsTools,
 	}, {
 		ID: "mistralai/Ministral-3-14B-Instruct-2512", DisplayName: "Ministral 3 14B",
 		MaxContext: 100_000, ReleaseDate: "2025-12-02",
 		InputMicrosPerMTok: 336_000, OutputMicrosPerMTok: 448_000,
-		Description: "small and quick - chatbots, short edits and everyday questions",
+		Description:  "small and quick - chatbots, short edits and everyday questions",
+		Capabilities: readsImagesCallsTools,
 	}, {
 		ID: "Qwen/Qwen3-Embedding-8B", DisplayName: "Qwen3 Embedding 8B",
 		Kind: policy.KindEmbedding, MaxContext: 8_192, ReleaseDate: "2025-06-05",
@@ -659,7 +713,8 @@ var providers = []Provider{{
 		InputMicrosPerMTok: 72_800,
 		Description:        "embedding, 3584 dimensions - semantic search and RAG in many languages",
 	}, {
-		// Infomaniak's own id for all-MiniLM-L12-v2.
+		// Infomaniak's own id for all-MiniLM-L12-v2. Infomaniak serves it free;
+		// a small price keeps it inside budgets.
 		ID: "mini_lm_l12_v2", DisplayName: "all-MiniLM-L12-v2",
 		Kind: policy.KindEmbedding, MaxContext: 128,
 		InputMicrosPerMTok: 10_000,
@@ -688,17 +743,20 @@ var providers = []Provider{{
 		ID: "MiniMaxAI/MiniMax-M2.5", DisplayName: "MiniMax M2.5",
 		MaxContext: 196_608, ReleaseDate: "2026-02-12",
 		InputMicrosPerMTok: 1_940_000, OutputMicrosPerMTok: 9_700_000,
-		Description: "large - long coding and agent tasks with many steps",
+		Description:  "large - long coding and agent tasks with many steps",
+		Capabilities: callsTools,
 	}, {
 		ID: "NVIDIA/NVIDIA-Nemotron-3-Super-120B-A12B", DisplayName: "Nemotron 3 Super",
 		MaxContext: 131_072, ReleaseDate: "2026-03-11",
 		InputMicrosPerMTok: 2_000_000, OutputMicrosPerMTok: 5_000_000,
-		Description: "large reasoning model - hard problems",
+		Description:  "large reasoning model - hard problems",
+		Capabilities: callsTools,
 	}, {
 		ID: "deepseek-ai/DeepSeek-V4-Flash-0731", DisplayName: "DeepSeek V4 Flash",
 		MaxContext: 524_288, ReleaseDate: "2026-07-31",
 		InputMicrosPerMTok: 450_000, OutputMicrosPerMTok: 1_800_000,
-		Description: "mid-size and quick - large codebases and long documents",
+		Description:  "mid-size and quick - large codebases and long documents",
+		Capabilities: callsTools,
 	}, {
 		ID: "Qwen/Qwen3-Coder-Next", DisplayName: "Qwen3 Coder Next",
 		MaxContext: 262_144, ReleaseDate: "2026-02-03",
@@ -708,22 +766,28 @@ var providers = []Provider{{
 		ID: "zai-org/GLM-5.3-Flash", DisplayName: "GLM-5.3 Flash",
 		MaxContext: 262_144, ReleaseDate: "2026-08-26",
 		InputMicrosPerMTok: 300_000, OutputMicrosPerMTok: 1_500_000,
-		Description: "mid-size, quick all-rounder - code, reasoning and tool use",
+		Description:  "mid-size, quick all-rounder - code, reasoning and tool use",
+		Capabilities: readsImagesCallsTools,
 	}, {
 		ID: "openai/gpt-oss-120b", DisplayName: "gpt-oss-120b",
 		MaxContext: 131_072, ReleaseDate: "2025-08-05",
 		InputMicrosPerMTok: 400_000, OutputMicrosPerMTok: 1_600_000,
-		Description: "mid-size, reasons before it answers - everyday work and tool use",
+		Description:  "mid-size, reasons before it answers - everyday work and tool use",
+		Capabilities: callsTools,
 	}, {
+		// stepping stone names it for "multimodal tasks"; its tool calls are
+		// stated only for the Qwen family, so they are not marked.
 		ID: "Qwen/Qwen3.8-27B", DisplayName: "Qwen3.8 27B",
 		MaxContext: 262_144, ReleaseDate: "2026-08-14",
 		InputMicrosPerMTok: 250_000, OutputMicrosPerMTok: 1_500_000,
-		Description: "small but strong for its size - ordinary code and questions",
+		Description:  "small but strong for its size - ordinary code and questions",
+		Capabilities: readsImages,
 	}, {
 		ID: "google/gemma-4-31B-it", DisplayName: "Gemma 4 31B",
 		MaxContext: 163_840, ReleaseDate: "2026-04-02",
 		InputMicrosPerMTok: 250_000, OutputMicrosPerMTok: 1_000_000,
-		Description: "mid-size and quick - documents, chatbots and ordinary code",
+		Description:  "mid-size and quick - documents, chatbots and ordinary code",
+		Capabilities: readsImagesCallsTools,
 	}, {
 		ID: "Qwen/Qwen3.5-35B-A3B-FP8", DisplayName: "Qwen3.5 35B A3B FP8",
 		MaxContext: 131_072, ReleaseDate: "2026-02-24",
@@ -733,22 +797,26 @@ var providers = []Provider{{
 		ID: "apertus-ai/Apertus-v1.5-8B", DisplayName: "Apertus v1.5 8B",
 		MaxContext: 131_072, ReleaseDate: "2026-07-24",
 		InputMicrosPerMTok: 20_000, OutputMicrosPerMTok: 100_000,
-		Description: "small, open training data - simple tasks",
+		Description:  "small, open training data - simple tasks",
+		Capabilities: callsTools,
 	}, {
 		ID: "allenai/olmOCR-2-7B", DisplayName: "olmOCR 2",
 		MaxContext: 8_192, ReleaseDate: "2025-10-22",
 		InputMicrosPerMTok: 60_000, OutputMicrosPerMTok: 290_000,
-		Description: "OCR - turns images of pages into text; not for chat or code",
+		Description:  "OCR - turns images of pages into text; not for chat or code",
+		Capabilities: readsImages,
 	}, {
 		ID: "lightonai/LightOnOCR-2-1B", DisplayName: "LightOnOCR 2",
 		MaxContext: 16_384, ReleaseDate: "2026-01-19",
 		InputMicrosPerMTok: 20_000, OutputMicrosPerMTok: 60_000,
-		Description: "small, fast OCR - turns images of pages into text; not for chat or code",
+		Description:  "small, fast OCR - turns images of pages into text; not for chat or code",
+		Capabilities: readsImages,
 	}, {
 		ID: "opendatalab/MinerU2.5-2509-1.2B", DisplayName: "MinerU 2.5",
 		MaxContext: 16_384, ReleaseDate: "2025-09-19",
 		InputMicrosPerMTok: 20_000, OutputMicrosPerMTok: 60_000,
-		Description: "document parsing - turns images of pages into text, tables and formulas; not for chat",
+		Description:  "document parsing - turns images of pages into text, tables and formulas; not for chat",
+		Capabilities: readsImages,
 	}, {
 		ID: "BAAI/bge-m3", DisplayName: "BGE M3",
 		Kind: policy.KindEmbedding, MaxContext: 8_192, ReleaseDate: "2024-01-30",
@@ -784,15 +852,19 @@ var providers = []Provider{{
 	// out: Phoeniqs does not say which rerank API it speaks. An embedding
 	// writes nothing, so it has no output price.
 	Models: []ProviderModel{{
+		// Phoeniqs names it and Qwen3 VL 235B as the models that work in
+		// Cursor's agent mode, which calls tools.
 		ID: "inference-glm5", DisplayName: "GLM-5",
 		MaxContext: 131_072, ReleaseDate: "2026-06-16",
 		InputMicrosPerMTok: 1_077_000, OutputMicrosPerMTok: 3_386_000,
-		Description: "large - long agent sessions, hard code and terminal work",
+		Description:  "large - long agent sessions, hard code and terminal work",
+		Capabilities: callsTools,
 	}, {
 		ID: "inference-qwen3-vl-235b", DisplayName: "Qwen3 VL 235B",
 		MaxContext: 128_000, ReleaseDate: "2025-09-23",
 		InputMicrosPerMTok: 700_300, OutputMicrosPerMTok: 2_000_000,
-		Description: "large, reads images - screenshots, diagrams and scans",
+		Description:  "large, reads images - screenshots, diagrams and scans",
+		Capabilities: readsImagesCallsTools,
 	}, {
 		ID: "inference-deepseek-v4-flash", DisplayName: "DeepSeek V4 Flash",
 		MaxContext: 1_000_000, ReleaseDate: "2026-07-31",
@@ -802,17 +874,21 @@ var providers = []Provider{{
 		ID: "inference-glm5-flash", DisplayName: "GLM-5 Flash",
 		MaxContext: 1_000_000, ReleaseDate: "2026-08-26",
 		InputMicrosPerMTok: 123_000, OutputMicrosPerMTok: 410_000,
-		Description: "mid-size, quick all-rounder - code, reasoning and tool use",
+		Description:  "mid-size, quick all-rounder - code, reasoning and tool use",
+		Capabilities: callsTools,
 	}, {
+		// The same model as GLM-5 Flash, so it calls tools too.
 		ID: "inference-glm5-flash-compact", DisplayName: "GLM-5 Flash Compact",
 		MaxContext: 524_288, ReleaseDate: "2026-08-26",
 		InputMicrosPerMTok: 62_500, OutputMicrosPerMTok: 416_700,
-		Description: "GLM-5 Flash with a smaller context - quicker and cheaper",
+		Description:  "GLM-5 Flash with a smaller context - quicker and cheaper",
+		Capabilities: callsTools,
 	}, {
 		ID: "inference-apertus-v15-70b", DisplayName: "Apertus v1.5 70B",
 		MaxContext: 262_144, ReleaseDate: "2026-07-24",
 		InputMicrosPerMTok: 619_500, OutputMicrosPerMTok: 2_220_100,
-		Description: "mid-size, open training data - work that must be auditable",
+		Description:  "mid-size, open training data - work that must be auditable",
+		Capabilities: readsImagesCallsTools,
 	}, {
 		ID: "inference-gpt-oss-120b", DisplayName: "gpt-oss-120b",
 		MaxContext: 131_072, ReleaseDate: "2025-08-05",
@@ -822,17 +898,20 @@ var providers = []Provider{{
 		ID: "inference-llama4-maverick", DisplayName: "Llama 4 Maverick",
 		MaxContext: 1_048_576, ReleaseDate: "2025-04-05",
 		InputMicrosPerMTok: 269_300, OutputMicrosPerMTok: 1_077_300,
-		Description: "mid-size, reads up to four images a prompt - long documents",
+		Description:  "mid-size, reads up to four images a prompt - long documents",
+		Capabilities: readsImages,
 	}, {
 		ID: "inference-gemma4-31b", DisplayName: "Gemma 4 31B",
 		MaxContext: 131_072, ReleaseDate: "2026-04-02",
 		InputMicrosPerMTok: 118_000, OutputMicrosPerMTok: 325_000,
-		Description: "mid-size and quick, reads images - documents, chatbots and ordinary code",
+		Description:  "mid-size and quick, reads images - documents, chatbots and ordinary code",
+		Capabilities: readsImages,
 	}, {
 		ID: "inference-llama4-scout-17b", DisplayName: "Llama 4 Scout",
 		MaxContext: 62_256, ReleaseDate: "2025-04-05",
 		InputMicrosPerMTok: 192_400, OutputMicrosPerMTok: 638_700,
-		Description: "small and quick, reads images - short inputs",
+		Description:  "small and quick, reads images - short inputs",
+		Capabilities: readsImages,
 	}, {
 		ID: "inference-qwq-32b", DisplayName: "QwQ 32B",
 		MaxContext: 32_768, ReleaseDate: "2025-03-06",
@@ -857,19 +936,22 @@ var providers = []Provider{{
 		ID: "inference-granite-vision-2b", DisplayName: "Granite Vision 3.2 2B",
 		MaxContext: 8_192, ReleaseDate: "2025-02-26",
 		InputMicrosPerMTok: 77_000, OutputMicrosPerMTok: 77_000,
-		Description: "tiny vision model - describes images and reads charts; not for chat",
+		Description:  "tiny vision model - describes images and reads charts; not for chat",
+		Capabilities: readsImages,
 	}, {
 		// Phoeniqs names no upstream model. Its description is the title of the
 		// DeepSeek-OCR paper, so it is DeepSeek-OCR, not DeepSeek-OCR 2.
 		ID: "inference-deepseek-ocr", DisplayName: "DeepSeek-OCR",
 		MaxContext: 8_192, ReleaseDate: "2025-10-20",
 		InputMicrosPerMTok: 384_800, OutputMicrosPerMTok: 1_539_100,
-		Description: "OCR - turns images of pages and receipts into text; not for chat or code",
+		Description:  "OCR - turns images of pages and receipts into text; not for chat or code",
+		Capabilities: readsImages,
 	}, {
 		ID: "inference-miner-u25", DisplayName: "MinerU 2.5",
 		MaxContext: 8_192, ReleaseDate: "2026-05-21",
 		InputMicrosPerMTok: 538_500, OutputMicrosPerMTok: 76_900,
-		Description: "document parsing - turns images of pages into text, tables and formulas; not for chat",
+		Description:  "document parsing - turns images of pages into text, tables and formulas; not for chat",
+		Capabilities: readsImages,
 	}, {
 		ID: "inference-bge-m3", DisplayName: "BGE M3",
 		Kind: policy.KindEmbedding, MaxContext: 8_192, ReleaseDate: "2024-01-30",
@@ -918,48 +1000,56 @@ var providers = []Provider{{
 		InputMicrosPerMTok: 74_700, OutputMicrosPerMTok: 1_822_500,
 		CachedInputMicrosPerMTok: 16_200,
 		Description:              "mid-size, quick all-rounder - code, reasoning and tool use",
+		Capabilities:             readsImagesCallsTools,
 	}, {
 		ID: "Qwen/Qwen3.8-Flash-Next-FP8", DisplayName: "Qwen3.8 Flash Next FP8",
 		MaxContext: 262_144, ReleaseDate: "2026-08-26",
 		InputMicrosPerMTok: 34_800, OutputMicrosPerMTok: 2_019_500,
 		CachedInputMicrosPerMTok: 4_700,
 		Description:              "mid-size and quick, reads images and video - long inputs and everyday questions",
+		Capabilities:             readsImages,
 	}, {
 		ID: "google/gemma-4-31B-it", DisplayName: "Gemma 4 31B",
 		MaxContext: 262_144, ReleaseDate: "2026-04-02",
 		InputMicrosPerMTok: 68_000, OutputMicrosPerMTok: 420_000,
 		CachedInputMicrosPerMTok: 13_600,
 		Description:              "mid-size and quick, reads images - documents, chatbots and ordinary code",
+		Capabilities:             readsImages,
 	}, {
 		ID: "Qwen/Qwen3.8-27B-FP8", DisplayName: "Qwen3.8 27B FP8",
 		MaxContext: 262_144, ReleaseDate: "2026-08-14",
 		InputMicrosPerMTok: 23_400, OutputMicrosPerMTok: 504_900,
 		CachedInputMicrosPerMTok: 2_300,
 		Description:              "small but strong for its size, reads images - ordinary code and questions",
+		Capabilities:             readsImages,
 	}, {
 		ID: "swiss-ai/Apertus-v1.5-70B", DisplayName: "Apertus v1.5 70B",
 		MaxContext: 262_144, ReleaseDate: "2026-07-24",
 		InputMicrosPerMTok: 194_600, OutputMicrosPerMTok: 392_800,
 		CachedInputMicrosPerMTok: 19_500,
 		Description:              "mid-size, open training data - work that must be auditable",
+		Capabilities:             readsImages,
 	}, {
 		ID: "swiss-ai/Apertus-v1.5-70B-thinking", DisplayName: "Apertus v1.5 70B Thinking",
 		MaxContext: 262_144, ReleaseDate: "2026-07-24",
 		InputMicrosPerMTok: 194_600, OutputMicrosPerMTok: 392_800,
 		CachedInputMicrosPerMTok: 19_500,
 		Description:              "mid-size, open training data, reasons first, no tool calls - hard questions",
+		Capabilities:             readsImages,
 	}, {
 		ID: "swiss-ai/Apertus-v1.5-8B", DisplayName: "Apertus v1.5 8B",
 		MaxContext: 262_144, ReleaseDate: "2026-07-24",
 		InputMicrosPerMTok: 18_500, OutputMicrosPerMTok: 40_400,
 		CachedInputMicrosPerMTok: 1_900,
 		Description:              "small, open training data - simple tasks",
+		Capabilities:             readsImages,
 	}, {
 		ID: "swiss-ai/Apertus-v1.5-8B-thinking", DisplayName: "Apertus v1.5 8B Thinking",
 		MaxContext: 262_144, ReleaseDate: "2026-07-24",
 		InputMicrosPerMTok: 18_500, OutputMicrosPerMTok: 40_400,
 		CachedInputMicrosPerMTok: 1_900,
 		Description:              "small, open training data, reasons first, no tool calls - simple questions",
+		Capabilities:             readsImages,
 	}},
 }}
 
@@ -991,9 +1081,20 @@ func (p Provider) clone() Provider {
 	p.Endpoints = maps.Clone(p.Endpoints)
 	p.Models = slices.Clone(p.Models)
 	for i := range p.Models {
+		p.Models[i] = p.withCapabilities(p.Models[i])
 		p.Models[i].LongPrompt = p.Models[i].longPrompt()
 	}
 	return p
+}
+
+// withCapabilities fills in the provider's capabilities for a chat model that
+// states none, as a copy.
+func (p Provider) withCapabilities(m ProviderModel) ProviderModel {
+	if m.Capabilities == nil && m.kindOrChat() == policy.KindChat {
+		m.Capabilities = p.ChatCapabilities
+	}
+	m.Capabilities = slices.Clone(m.Capabilities)
+	return m
 }
 
 // EndpointFor is the base URL a kind is served at.
@@ -1036,7 +1137,7 @@ func (p Provider) Locations() []string {
 func (p Provider) Model(id string) (ProviderModel, bool) {
 	for _, m := range p.Models {
 		if m.ID == id || (m.Snapshot != "" && m.Snapshot == id) {
-			return m, true
+			return p.withCapabilities(m), true
 		}
 	}
 	return ProviderModel{}, false
@@ -1231,6 +1332,9 @@ func fillFromTable(m Model, known ProviderModel) Model {
 	}
 	if m.AudioMicrosPerMinute == nil {
 		m.AudioMicrosPerMinute = &known.AudioMicrosPerMinute
+	}
+	if m.Capabilities == nil {
+		m.Capabilities = known.Capabilities
 	}
 	return m
 }

@@ -189,7 +189,9 @@ func addResponsesPart(d *treeDoc, part map[string]any) {
 		d.addField(part, "refusal")
 	case "input_file":
 		addFileText(d, part)
-	case "input_image", "input_audio":
+	case "input_image":
+		d.addImage(part["image_url"])
+	case "input_audio":
 	default:
 		d.cannotRead("a content part", typ)
 	}

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -2134,5 +2135,41 @@ func TestGuardrailSetLocationsKeepsTheModels(t *testing.T) {
 	if len(locs) != 2 || locs[0] != "ch" || locs[1] != "onprem" ||
 		len(models) != 1 || models[0] != "keera-speed" {
 		t.Errorf("sent %v", body)
+	}
+}
+
+// A model's capabilities are kept by a change that does not touch them, go
+// with a model the next one replaces, and --capabilities "" clears them.
+func TestCapabilitiesFollowTheModel(t *testing.T) {
+	vision := []policy.Capability{policy.CapabilityVision}
+	current := declared(policy.Model{
+		Alias: "keera-big", Kind: policy.KindChat, Provider: "anthropic",
+		Backends: []string{"https://api.anthropic.com/v1"}, BackendModel: "claude-opus-5",
+		Capabilities: vision, Location: "usa", Enabled: true,
+	})
+	parse := func(args ...string) policy.Model {
+		t.Helper()
+		fs := flag.NewFlagSet("model", flag.ContinueOnError)
+		f := registerModelFlags(fs)
+		if err := fs.Parse(args); err != nil {
+			t.Fatal(err)
+		}
+		f.capable = given(fs, "capabilities")
+		got, err := catalog.ParseModel(applyModelFlags(current, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := parse("--price-in", "1"); !slices.Equal(got.Capabilities, vision) {
+		t.Errorf("a price change dropped the capabilities: %v", got.Capabilities)
+	}
+	if got := parse("--capabilities", ""); got.Capabilities == nil || len(got.Capabilities) != 0 {
+		t.Errorf("--capabilities \"\" kept %v", got.Capabilities)
+	}
+	// Qwen3 Coder Next at stepping stone is not known to read images.
+	got := parse("--provider", "stepping-stone", "--backend-model", "Qwen/Qwen3-Coder-Next")
+	if len(got.Capabilities) != 0 {
+		t.Errorf("the old model's capabilities were kept: %v", got.Capabilities)
 	}
 }

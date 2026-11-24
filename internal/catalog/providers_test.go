@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -818,5 +819,57 @@ models:
 	if _, err := parseModelFile([]byte(chat)); err == nil ||
 		!strings.Contains(err.Error(), "transcription") {
 		t.Errorf("a chat model priced per minute: err = %v, want a refusal", err)
+	}
+}
+
+// Every chat model at Anthropic reads images and calls tools. An entry may
+// still state none, and a model without a provider states its own.
+func TestCapabilitiesComeFromTheTable(t *testing.T) {
+	p, _ := ProviderByName("anthropic")
+	known := p.Models[0].ID
+	models, err := parseModelFile([]byte(`
+models:
+  - alias: keera-frontier
+    provider: anthropic
+    backend_model: ` + known + `
+  - alias: keera-blind
+    provider: anthropic
+    backend_model: ` + known + `
+    capabilities: []
+  - alias: keera-code
+    backends: ["http://keera-code:8000/v1"]
+    backend_model: keera-code
+    capabilities: [Vision, vision]
+  - alias: keera-text
+    backends: ["http://keera-code:8000/v1"]
+    backend_model: keera-code
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	vision := []policy.Capability{policy.CapabilityVision}
+	both := []policy.Capability{policy.CapabilityTools, policy.CapabilityVision}
+	for i, want := range [][]policy.Capability{both, {}, vision, {}} {
+		if got := models[i].Capabilities; !slices.Equal(got, want) || got == nil {
+			t.Errorf("%s: capabilities = %#v, want %#v", models[i].Alias, got, want)
+		}
+	}
+}
+
+// A provider's capabilities are its chat models': a transcription model of
+// the same provider states none.
+func TestOnlyChatModelsTakeTheProvidersCapabilities(t *testing.T) {
+	p, _ := ProviderByName("openai")
+	for _, m := range p.Models {
+		reads := slices.Contains(m.Capabilities, policy.CapabilityVision)
+		if chat := m.kindOrChat() == policy.KindChat; reads != chat {
+			t.Errorf("%s (%s): reads images = %v", m.ID, m.kindOrChat(), reads)
+		}
+	}
+	// A copy, so a caller cannot change the table.
+	want := slices.Clone(p.Models[0].Capabilities)
+	p.Models[0].Capabilities[0] = "changed"
+	if again, _ := ProviderByName("openai"); !slices.Equal(again.Models[0].Capabilities, want) {
+		t.Error("changing a copy changed the table")
 	}
 }

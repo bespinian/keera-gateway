@@ -72,11 +72,11 @@ func (anthropicDialect) read(b *body) (*treeDoc, error) {
 	return d, nil
 }
 
-// blocksWithoutText carry no text a filter reads: media, calls the model
-// wrote (as on the chat surface), signed thinking, and references to files
-// and tools.
+// blocksWithoutText carry no text a filter reads: calls the model wrote (as
+// on the chat surface), signed thinking, and references to files and tools.
+// An image is read apart. See addImageBlock.
 var blocksWithoutText = map[string]bool{
-	"image": true, "tool_use": true, "server_tool_use": true, "mcp_tool_use": true,
+	"tool_use": true, "server_tool_use": true, "mcp_tool_use": true,
 	"thinking": true, "redacted_thinking": true, "container_upload": true,
 	"tool_reference": true,
 }
@@ -94,6 +94,8 @@ func addTextBlock(d *treeDoc, block map[string]any) {
 		}
 	case "text":
 		d.addField(block, "text")
+	case "image":
+		addImageBlock(d, block)
 	// A compaction summary stands for the earlier conversation.
 	case "compaction":
 		d.addField(block, "content")
@@ -129,6 +131,22 @@ func addTextBlock(d *treeDoc, block map[string]any) {
 		default:
 			d.cannotRead("a content block", typ)
 		}
+	}
+}
+
+// addImageBlock collects an image block's picture: inline bytes as a data
+// URL, or its URL. A file id only Anthropic can read is left out.
+func addImageBlock(d *treeDoc, block map[string]any) {
+	src, _ := block["source"].(map[string]any)
+	switch src["type"] {
+	case "base64":
+		media, _ := src["media_type"].(string)
+		data, _ := src["data"].(string)
+		if media != "" && data != "" {
+			d.addImage("data:" + media + ";base64," + data)
+		}
+	case "url":
+		d.addImage(src["url"])
 	}
 }
 

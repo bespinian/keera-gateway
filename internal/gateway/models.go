@@ -26,6 +26,8 @@ type modelEntry struct {
 	Description string `json:"description,omitempty"`
 	// Location says where prompts sent to the model go.
 	Location string `json:"location,omitempty"`
+	// Capabilities say what the model can do beyond text, such as vision.
+	Capabilities []policy.Capability `json:"capabilities,omitempty"`
 	// Destinations is set only on routers, which tells them from models.
 	Destinations []string `json:"destinations,omitempty"`
 }
@@ -34,7 +36,7 @@ func modelEntryOf(m policy.Model) modelEntry {
 	e := modelEntry{
 		ID: m.Alias, Object: "model", Type: "model", Created: created(m), OwnedBy: "keera",
 		MaxContext: m.MaxContext, DisplayName: cmp.Or(m.DisplayName, m.Alias),
-		Description: m.Description, Location: m.Location,
+		Description: m.Description, Location: m.Location, Capabilities: m.Capabilities,
 	}
 	if e.Created != 0 {
 		e.CreatedAt = time.Unix(e.Created, 0).UTC().Format(time.RFC3339)

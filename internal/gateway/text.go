@@ -10,11 +10,14 @@ import (
 
 // textDoc is the text of one request body that filters and routers read: the
 // strings a filter may rewrite, and how to put them back. Only prose counts.
-// Tool-call arguments, images and audio are left out, since rewriting them
-// could produce a request the plane rejects. That is a real limit of this
-// guardrail.
+// Tool-call arguments and audio are left out, since rewriting them could
+// produce a request the plane rejects. That is a real limit of this guardrail.
+//
+// images are the request's images as URLs, inline ones as data URLs. They are
+// never rewritten: only a gate whose model reads images is shown them.
 type textDoc interface {
 	texts() []string
+	images() []string
 	apply(b *body, replaced []string) error
 }
 
@@ -99,11 +102,11 @@ func addChatContent(d *treeDoc, msg map[string]any) error {
 	return nil
 }
 
-// chatMediaParts carry no text a filter could read: images, audio, video and
-// files pass through unchanged.
+// chatMediaParts carry no text a filter could read: audio, video, files and
+// image embeddings pass through unchanged. Images are read apart.
 var chatMediaParts = map[string]bool{
-	"image_url": true, "input_image": true, "image_embeds": true,
-	"input_audio": true, "audio_url": true, "video_url": true, "file": true,
+	"image_embeds": true, "input_audio": true, "audio_url": true, "video_url": true,
+	"file": true,
 }
 
 // addChatPart collects the text of one content part. OpenAI and vLLM read
@@ -120,6 +123,9 @@ func addChatPart(d *treeDoc, part map[string]any) error {
 		return addText(d, part, "thinking")
 	case t == "search_result" || t == "document":
 		addTextBlock(d, part)
+		return nil
+	case t == "image_url" || t == "input_image":
+		d.addImage(part["image_url"])
 		return nil
 	case chatMediaParts[t]:
 		return nil

@@ -314,7 +314,7 @@ func (s *Server) TryFilter(ctx context.Context, f policy.Filter, prompts []strin
 		}
 		tr := FilterTrial{Prompt: prompt}
 		tr.Asked = s.ask(ctx, f.OrgID, func(log *callLog) (int64, []policy.BillLine) {
-			out, cost, err := s.runFilter(ctx, f, m, []string{prompt}, log)
+			out, cost, err := s.runFilter(ctx, f, m, []string{prompt}, nil, log)
 			tr.Confidence, tr.Read = cost.confidence, cost.read
 			tr.settle(out, err)
 			return cost.micros, cost.bills

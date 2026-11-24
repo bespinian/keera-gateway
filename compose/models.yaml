@@ -40,9 +40,10 @@ models:
       Decides, does not write. A classifier for routers and gate filters.
 
 # A hosted model, for work a small local model cannot do, or before there are
-# GPUs. `provider` fills in the endpoint, context window, prices, description,
-# release date and location; see `keera model catalogue`. Uncomment and
-# restart, then each organisation's administrator stores the key:
+# GPUs. `provider` fills in the endpoint, context window, prices,
+# capabilities, description, release date and location; see `keera model
+# catalogue`. Uncomment and restart, then each organisation's administrator
+# stores the key:
 #
 #   keera model set keera-frontier --api-key @-
 #

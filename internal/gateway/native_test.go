@@ -923,3 +923,45 @@ func TestCountTokensSkipsABlockItCannotRead(t *testing.T) {
 		t.Errorf("texts = %v, %v; want the text alone", doc, err)
 	}
 }
+
+// A gate that reads images is shown those a Messages request carries, a tool's
+// among them. A file id only Anthropic can open is left out.
+func TestFiltersCollectTheImagesOfAMessagesRequest(t *testing.T) {
+	b, err := parseBody([]byte(`{"model":"m","messages":[{"role":"user","content":[` +
+		`{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBOR"}},` +
+		`{"type":"image","source":{"type":"url","url":"https://example.com/a.png"}},` +
+		`{"type":"image","source":{"type":"file","file_id":"file_1"}},` +
+		`{"type":"tool_result","tool_use_id":"t1","content":[` +
+		`{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"/9j"}}]}]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := anthropicDialect{}.text(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"data:image/png;base64,iVBOR", "https://example.com/a.png",
+		"data:image/jpeg;base64,/9j",
+	}
+	if got := doc.images(); !slices.Equal(got, want) {
+		t.Errorf("images = %q, want %q", got, want)
+	}
+}
+
+func TestFiltersCollectTheImagesOfAResponsesRequest(t *testing.T) {
+	b, err := parseBody([]byte(`{"model":"m","input":[{"role":"user","content":[` +
+		`{"type":"input_text","text":"what is this?"},` +
+		`{"type":"input_image","image_url":"data:image/png;base64,iVBOR"},` +
+		`{"type":"input_image","file_id":"file_1"}]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := responsesDialect{}.text(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := doc.images(); !slices.Equal(got, []string{"data:image/png;base64,iVBOR"}) {
+		t.Errorf("images = %q, want the inline image only", got)
+	}
+}

@@ -81,6 +81,54 @@ func (k Kind) Valid() bool {
 		k == KindTranscription || k == KindDecision
 }
 
+// Capability is something a model can do beyond reading and writing text.
+// It is a list, not a flag, so more can come without a new field.
+type Capability string
+
+const (
+	// CapabilityVision says a chat model reads images. A gate whose model has
+	// it is shown the request's images too.
+	CapabilityVision Capability = "vision"
+	// CapabilityTools says a chat model calls tools, which coding agents
+	// need. `keera model check` tests it.
+	CapabilityTools Capability = "tools"
+)
+
+// Capabilities lists every capability a model can state, sorted as
+// CheckCapabilities sorts a model's.
+var Capabilities = []Capability{CapabilityTools, CapabilityVision}
+
+// Valid reports whether c is a capability this build knows.
+func (c Capability) Valid() bool { return slices.Contains(Capabilities, c) }
+
+// CheckCapabilities sorts a model's capabilities and drops repeats. It
+// refuses one this build does not know, so a typo is not silently ignored.
+func CheckCapabilities(cs []Capability) ([]Capability, error) {
+	out := make([]Capability, 0, len(cs))
+	for _, c := range cs {
+		c = Capability(strings.ToLower(strings.TrimSpace(string(c))))
+		if !c.Valid() {
+			return nil, fmt.Errorf("capability %q is not known; Keera Gateway knows: %s",
+				c, JoinCapabilities(Capabilities, ", "))
+		}
+		out = append(out, c)
+	}
+	slices.Sort(out)
+	return slices.Compact(out), nil
+}
+
+// JoinCapabilities joins capabilities with sep, such as "tools,vision".
+func JoinCapabilities(cs []Capability, sep string) string {
+	names := make([]string, len(cs))
+	for i, c := range cs {
+		names[i] = string(c)
+	}
+	return strings.Join(names, sep)
+}
+
+// Can reports whether the model states capability c.
+func (m Model) Can(c Capability) bool { return slices.Contains(m.Capabilities, c) }
+
 // Model is one of an organisation's models. Clients only ever name the Alias,
 // so the model behind it can change without any client changing.
 type Model struct {
@@ -115,6 +163,9 @@ type Model struct {
 	// LongPrompt prices a prompt above its threshold, for providers that charge
 	// more for long prompts. Nil means one price for every length.
 	LongPrompt *PriceTier `json:"long_prompt,omitempty"`
+	// Capabilities are what the model can do beyond text, such as reading
+	// images. Never nil, so clients always see a list.
+	Capabilities []Capability `json:"capabilities"`
 	// MaxContext is shown on /v1/models, and a request that cannot fit is
 	// refused. Without a tokeniser the check counts the least a request can be,
 	// so a request near the limit is left to the inference plane.

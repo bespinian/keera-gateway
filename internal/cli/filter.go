@@ -294,8 +294,11 @@ func printVerdict(w *table, v gateway.FilterVerdict) {
 }
 
 func gateSampleLabel(v gateway.FilterVerdict) string {
-	if v.ExpectRefusal {
+	switch {
+	case v.ExpectRefusal:
 		return "a credential and a client"
+	case v.Images > 0:
+		return "ordinary source code and a test image"
 	}
 	return "ordinary source code"
 }

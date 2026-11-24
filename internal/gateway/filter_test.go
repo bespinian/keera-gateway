@@ -93,7 +93,9 @@ func filterModels() map[string]policy.Model {
 type guardCall struct {
 	instruction string
 	segments    []string
-	logprobs    bool
+	// images are the URLs of the image parts after the segments.
+	images   []string
+	logprobs bool
 }
 
 // guardBackend is a stand-in backend. The model served as guard answers with
@@ -105,7 +107,7 @@ func guardBackend(guard string, reply func(guardCall) string, answer http.Handle
 			Model    string `json:"model"`
 			Logprobs bool   `json:"logprobs"`
 			Messages []struct {
-				Content string `json:"content"`
+				Content json.RawMessage `json:"content"`
 			} `json:"messages"`
 		}
 		_ = json.Unmarshal(raw, &sent)
@@ -116,10 +118,28 @@ func guardBackend(guard string, reply func(guardCall) string, answer http.Handle
 		}
 		c := guardCall{logprobs: sent.Logprobs}
 		if len(sent.Messages) > 0 {
-			c.instruction = sent.Messages[0].Content
+			_ = json.Unmarshal(sent.Messages[0].Content, &c.instruction)
 		}
 		if len(sent.Messages) > 1 {
-			_ = json.Unmarshal([]byte(sent.Messages[1].Content), &c.segments)
+			var input string
+			if json.Unmarshal(sent.Messages[1].Content, &input) != nil {
+				// Parts: the segments as text, then the images.
+				var parts []struct {
+					Text     string `json:"text"`
+					ImageURL struct {
+						URL string `json:"url"`
+					} `json:"image_url"`
+				}
+				_ = json.Unmarshal(sent.Messages[1].Content, &parts)
+				for _, p := range parts {
+					if p.ImageURL.URL != "" {
+						c.images = append(c.images, p.ImageURL.URL)
+					} else {
+						input = p.Text
+					}
+				}
+			}
+			_ = json.Unmarshal([]byte(input), &c.segments)
 		}
 		_, _ = io.WriteString(w, reply(c))
 	}
@@ -1213,6 +1233,136 @@ func TestARequestWithNoFilterableTextIsForwardedWithoutAFilterRun(t *testing.T) 
 	}
 }
 
+/* ---------------------------------------------------- gates and images */
+
+const (
+	pngURL = "data:image/png;base64,iVBOR"
+	// imageChat is a question and one image.
+	imageChat = `{"model":"keera-code","messages":[{"role":"user","content":[` +
+		`{"type":"text","text":"what is this?"},` +
+		`{"type":"image_url","image_url":{"url":"` + pngURL + `"}}]}]}`
+)
+
+// imageGateHarness is a gate whose model reads images, or not. It records
+// what the gate's model was sent. wrap, if given, stands in front of the
+// backend.
+func imageGateHarness(t *testing.T, vision bool, mode policy.FilterMode,
+	reply string, wrap ...func(http.HandlerFunc) http.HandlerFunc,
+) (*harness, *[]guardCall) {
+	t.Helper()
+	var calls []guardCall
+	backend := guardBackend("guard-served", func(c guardCall) string {
+		calls = append(calls, c)
+		return chatAnswer(reply, 100, 2)
+	}, jsonBackend(hiAnswer))
+	for _, w := range wrap {
+		backend = w(backend)
+	}
+	models := filterModels()
+	if vision {
+		guard := models["keera-guard"]
+		guard.Capabilities = []policy.Capability{policy.CapabilityVision}
+		models["keera-guard"] = guard
+	}
+	resolved := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, nil, nil, nil)
+	resolved.Filters = []string{"look"}
+	h := newHarness(t, backend, models, resolved)
+	h.src.filters = map[string]policy.Filter{
+		"org_1/look": {
+			OrgID: "org_1", Alias: "look", Mode: mode, Model: "keera-guard",
+			Prompt: "Refuse pictures of people.",
+		},
+	}
+	return h, &calls
+}
+
+func TestAGateWhoseModelReadsImagesIsShownThem(t *testing.T) {
+	h, calls := imageGateHarness(t, true, policy.FilterModeGate, "REFUSED: shows a person")
+
+	resp := h.post(t, "/v1/chat/completions", imageChat)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 from the gate that saw the image", resp.StatusCode)
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("the gate's model was called %d times, want once", len(*calls))
+	}
+	c := (*calls)[0]
+	if !slices.Equal(c.images, []string{pngURL}) {
+		t.Errorf("images = %q, want the request's one image", c.images)
+	}
+	if !slices.Equal(c.segments, []string{"what is this?"}) {
+		t.Errorf("segments = %q, want the text beside it", c.segments)
+	}
+	if !strings.Contains(c.instruction, "followed by an image") {
+		t.Errorf("the instruction does not say images follow: %s", c.instruction)
+	}
+}
+
+// A model that does not read images is asked as before, or its backend
+// would refuse the call and the gate fail closed.
+func TestAGateWhoseModelReadsOnlyTextIsNotShownImages(t *testing.T) {
+	h, calls := imageGateHarness(t, false, policy.FilterModeGate, "ALLOW")
+
+	if resp := h.post(t, "/v1/chat/completions", imageChat); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if len(*calls) != 1 || len((*calls)[0].images) != 0 {
+		t.Fatalf("calls = %+v, want one with text only", *calls)
+	}
+	if strings.Contains((*calls)[0].instruction, "images") {
+		t.Errorf("a gate that sees no images was told of them: %s", (*calls)[0].instruction)
+	}
+}
+
+// Nothing rewrites an image, so a rewrite filter is never shown one.
+func TestARewriteFilterIsNotShownImages(t *testing.T) {
+	h, calls := imageGateHarness(t, true, policy.FilterModeRewrite, `["what is this?"]`)
+
+	if resp := h.post(t, "/v1/chat/completions", imageChat); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if len(*calls) != 1 || len((*calls)[0].images) != 0 {
+		t.Fatalf("calls = %+v, want one with text only", *calls)
+	}
+}
+
+// A request of only an image has something for such a gate to judge.
+func TestAGateThatReadsImagesJudgesARequestOfOnlyAnImage(t *testing.T) {
+	h, calls := imageGateHarness(t, true, policy.FilterModeGate, "REFUSED: shows a person")
+
+	resp := h.post(t, "/v1/chat/completions", `{"model":"keera-code","messages":[`+
+		`{"role":"user","content":[{"type":"image_url","image_url":{"url":"`+pngURL+`"}}]}]}`)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	if len(*calls) != 1 || !slices.Equal((*calls)[0].images, []string{pngURL}) {
+		t.Fatalf("calls = %+v, want the image judged", *calls)
+	}
+}
+
+func TestExtractChatCollectsImages(t *testing.T) {
+	b, err := parseBody([]byte(`{"messages":[{"role":"user","content":[
+		{"type":"image_url","image_url":{"url":"https://example.com/a.png"}},
+		{"type":"image_url","image_url":"data:image/jpeg;base64,/9j"},
+		{"type":"input_image","image_url":"data:image/gif;base64,R0l"},
+		{"type":"image_url","image_url":{"url":"file-abc"}}]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := extractChat(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A file id is not an image another model can open.
+	want := []string{
+		"https://example.com/a.png", "data:image/jpeg;base64,/9j",
+		"data:image/gif;base64,R0l",
+	}
+	if got := doc.images(); !slices.Equal(got, want) {
+		t.Errorf("images = %q, want %q", got, want)
+	}
+}
+
 /* ---------------------------------- gates read from the first token */
 
 // gateHarnessServingLogprobs is a gate in front of a backend that serves
@@ -1483,5 +1633,99 @@ func TestARefusalReasonCutShortStaysWithinItsCap(t *testing.T) {
 	}
 	if got := sanitizeReason(strings.Repeat("a", policy.MaxRefusalReasonBytes)); strings.HasSuffix(got, "…") {
 		t.Errorf("a reason that fits was cut: %q", got)
+	}
+}
+
+// An agent's history keeps every screenshot. A gate is shown only the newest
+// few, which every backend that reads images takes.
+func TestAGateIsShownOnlyTheNewestImages(t *testing.T) {
+	h, calls := imageGateHarness(t, true, policy.FilterModeGate, "ALLOW")
+
+	var parts, want []string
+	for i := range maxGateImages + 2 {
+		u := fmt.Sprintf("data:image/png;base64,%d", i)
+		parts = append(parts, `{"type":"image_url","image_url":{"url":"`+u+`"}}`)
+		want = append(want, u)
+	}
+	want = want[2:]
+	resp := h.post(t, "/v1/chat/completions", `{"model":"keera-code","messages":[`+
+		`{"role":"user","content":[`+strings.Join(parts, ",")+`]}]}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if len(*calls) != 1 || !slices.Equal((*calls)[0].images, want) {
+		t.Fatalf("calls = %+v, want the newest %d images", *calls, maxGateImages)
+	}
+	if !strings.Contains((*calls)[0].instruction, fmt.Sprintf("followed by %d images", maxGateImages)) {
+		t.Errorf("the instruction miscounts the images: %s", (*calls)[0].instruction)
+	}
+}
+
+// A failed call is billed at the most it may have cost. A screenshot is
+// megabytes of base64, but its tokens depend on its pixels.
+func TestAnImageCountsAsTokensNotAsItsBytes(t *testing.T) {
+	big := "data:image/png;base64," + strings.Repeat("A", 3<<20)
+	q := guardQuestion{
+		instruction: "Refuse pictures of people.", input: []byte(`["hi"]`),
+		images: []string{big}, outputTokens: 8,
+	}
+	payload, err := guardRequest(policy.Model{BackendModel: "m"}, q.instruction, q.input,
+		q.images, q.outputTokens, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := q.mostTokens(payload)
+	if got.Input < imageTokensAtMost || got.Input > imageTokensAtMost+200 {
+		t.Errorf("input = %d tokens, want about %d for one image and a little text",
+			got.Input, imageTokensAtMost)
+	}
+	if got.Output != 8 {
+		t.Errorf("output = %d, want the question's 8", got.Output)
+	}
+}
+
+// A gate whose model reads images is checked with one, so a backend that
+// refuses images shows before real requests are refused.
+func TestAGateCheckSendsATestImageToAModelThatReadsImages(t *testing.T) {
+	h, calls := imageGateHarness(t, true, policy.FilterModeGate, "ALLOW")
+	p := h.srv.CheckFilter(t.Context(), h.src.filters["org_1/look"])
+	if !p.OK || len(p.Verdicts) != 2 {
+		t.Fatalf("ok = %v, verdicts = %+v, error = %q", p.OK, p.Verdicts, p.Error)
+	}
+	if p.Verdicts[0].Images != 0 || p.Verdicts[1].Images != 1 {
+		t.Errorf("images = %d and %d, want the ordinary half to carry one",
+			p.Verdicts[0].Images, p.Verdicts[1].Images)
+	}
+	if len(*calls) != 2 || !slices.Equal((*calls)[1].images, []string{testImageURL}) {
+		t.Errorf("calls = %+v, want the test image in the second", *calls)
+	}
+
+	// A model that reads only text is checked with text only.
+	h, calls = imageGateHarness(t, false, policy.FilterModeGate, "ALLOW")
+	p = h.srv.CheckFilter(t.Context(), h.src.filters["org_1/look"])
+	if !p.OK || p.Verdicts[1].Images != 0 || len((*calls)[1].images) != 0 {
+		t.Errorf("ok = %v, verdicts = %+v, want no image sent", p.OK, p.Verdicts)
+	}
+}
+
+func TestAGateCheckSaysWhenItsModelRefusesImages(t *testing.T) {
+	refuseImages := func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			raw, _ := io.ReadAll(r.Body)
+			if strings.Contains(string(raw), "image_url") {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, `{"error":{"message":"images are not supported"}}`)
+				return
+			}
+			r.Body = io.NopCloser(strings.NewReader(string(raw)))
+			next(w, r)
+		}
+	}
+	h, _ := imageGateHarness(t, true, policy.FilterModeGate, "ALLOW", refuseImages)
+	p := h.srv.CheckFilter(t.Context(), h.src.filters["org_1/look"])
+	if p.OK || !strings.Contains(p.Error, "with a test image") ||
+		!strings.Contains(p.Error, "take vision out") {
+		t.Errorf("ok = %v, error = %q, want a failure naming the image", p.OK, p.Error)
 	}
 }

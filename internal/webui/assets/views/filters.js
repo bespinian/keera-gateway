@@ -281,7 +281,9 @@ function report(probe) {
             {},
             v.expect_refusal
               ? "A credential and a named client"
-              : "Ordinary source code",
+              : v.images
+                ? "Ordinary source code and a test image"
+                : "Ordinary source code",
             " ",
             pill(
               v.refused ? "Refused" : "Allowed",
