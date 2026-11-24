@@ -36,12 +36,14 @@
   --warn-soft: #fbf0dd;
   --bad: #a92a20;
   --bad-soft: #fbeae8;
-  --s1: #1657c8;
-  --s2: #1c7a4d;
-  --s3: #9a5b00;
+  /* Chart series. Four are the accent and status colours, so they follow the
+     theme by themselves. */
+  --s1: var(--accent);
+  --s2: var(--good);
+  --s3: var(--warn);
   --s4: #7b3fa0;
   --s5: #0e6d7c;
-  --s6: #a92a20;
+  --s6: var(--bad);
   --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 8px 24px -12px rgb(16 24 40 / 18%);
   --shadow-lg:
     0 1px 2px rgb(16 24 40 / 8%), 0 18px 48px -12px rgb(16 24 40 / 28%);
@@ -88,12 +90,8 @@
     --warn-soft: #29200f;
     --bad: #ef7b70;
     --bad-soft: #2b1818;
-    --s1: #6ea8ff;
-    --s2: #57cb90;
-    --s3: #dfa445;
     --s4: #c193da;
     --s5: #58c2d2;
-    --s6: #ef7b70;
     --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 10px 30px -14px rgb(0 0 0 / 70%);
     --shadow-lg: 0 1px 2px rgb(0 0 0 / 50%), 0 24px 60px -12px rgb(0 0 0 / 80%);
     --line: #40444a;
@@ -124,12 +122,8 @@
   --warn-soft: #29200f;
   --bad: #ef7b70;
   --bad-soft: #2b1818;
-  --s1: #6ea8ff;
-  --s2: #57cb90;
-  --s3: #dfa445;
   --s4: #c193da;
   --s5: #58c2d2;
-  --s6: #ef7b70;
   --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 10px 30px -14px rgb(0 0 0 / 70%);
   --shadow-lg: 0 1px 2px rgb(0 0 0 / 50%), 0 24px 60px -12px rgb(0 0 0 / 80%);
   --line: #40444a;

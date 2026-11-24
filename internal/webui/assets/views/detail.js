@@ -649,9 +649,7 @@ async function screen(ctx, spec) {
     );
   }
   if (spec.banner) {
-    wrap.append(
-      banner("warn", { style: { marginBottom: "16px" } }, spec.banner),
-    );
+    wrap.append(banner("warn", spec.banner));
   }
 
   wrap.append(overviewTiles(o));

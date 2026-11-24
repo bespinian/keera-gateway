@@ -709,7 +709,6 @@ function limitedNotice() {
   if (asksCredit) return null;
   return banner(
     "info",
-    { style: { marginBottom: "16px" } },
     "This organisation is new. " +
       // With payments on, such a model is paid from credit, so it is open.
       (state.me.provider_keys && !state.me.payments
@@ -745,7 +744,6 @@ function chargeNotice() {
     : " An administrator can pay it under Billing.";
   return banner(
     started ? "bad" : "warn",
-    { style: { marginBottom: "16px" } },
     started
       ? `Every call is refused: a recurring charge has been due since ${day}, and no saved card can pay it.`
       : `A recurring charge is due on ${day}, and there is no saved card to pay it. Pay it before then, or every call is refused.`,

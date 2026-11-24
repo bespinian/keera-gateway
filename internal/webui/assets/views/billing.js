@@ -748,7 +748,6 @@ function returnBanner(ctx, p, a) {
   if (p.state === "paid") {
     return banner(
       "good",
-      { style: { marginBottom: "16px" } },
       p.kind === "charge"
         ? `Thank you: “${p.item}” is paid until ${day(p.period_end)}.` +
             (a.card ? " The card is saved for the periods after." : "")
@@ -758,7 +757,6 @@ function returnBanner(ctx, p, a) {
   if (p.state === "failed") {
     return banner(
       "bad",
-      { style: { marginBottom: "16px" } },
       `The payment did not go through: ${p.note || "nothing was charged"}.`,
     );
   }
@@ -773,7 +771,6 @@ function returnBanner(ctx, p, a) {
   }
   return banner(
     "info",
-    { style: { marginBottom: "16px" } },
     p.kind === "charge"
       ? "PostFinance is still confirming the payment."
       : "PostFinance is still confirming the payment. The credit is added as soon as it is through.",

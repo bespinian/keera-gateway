@@ -71,7 +71,6 @@ export async function accessView(ctx) {
     wrap.append(
       banner(
         "warn",
-        { style: { marginBottom: "16px" } },
         `${num(recent.length)} ${plural(recent.length, "request was", "requests were")} refused or failed in the ` +
           `last 24 hours: ${statusMeaning(recent[0].status)[0].toLowerCase()}` +
           `${recent.some((f) => f.status !== recent[0].status) ? ", among others" : ""}. ` +

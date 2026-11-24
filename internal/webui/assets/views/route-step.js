@@ -116,9 +116,10 @@ export function tokens(n) {
   return n >= 1000 && n % 1000 === 0 ? n / 1000 + "k" : String(n);
 }
 
-// A decision model only answers choices, so it can decide but never be a
-// destination. A subscription model only answers its caller's own sign-in.
-function canDecide(m) {
+// A decision model only answers choices, so it can route or be a gate's
+// judge, but never be a destination. A subscription model only answers its
+// caller's own sign-in.
+export function canDecide(m) {
   return (m.kind === "chat" || m.kind === "decision") && !m.subscription;
 }
 
@@ -766,8 +767,8 @@ function routeProbe(probe, number) {
             tools: [
               d.error
                 ? pill("Could not decide", "bad")
-                : h("span", { class: "pill pill-good mono" }, d.chosen), // A sample decided at 35% went there by a hair. Needs backend
-              // probabilities.
+                : h("span", { class: "pill pill-good mono" }, d.chosen),
+              // A sample decided at 35% went there by a hair.
               !d.error && d.confidence
                 ? h(
                     "span",

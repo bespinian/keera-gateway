@@ -48,6 +48,7 @@ import { orgNameOf } from "./orgs.js";
 import { facts, routerLinks } from "./detail.js";
 import { usedBy } from "./router-tree.js";
 import { tryFilter } from "./try.js";
+import { canDecide } from "./route-step.js";
 
 const DELETE_WARNING =
   "A filter still used by a guardrail or a router cannot be " +
@@ -63,7 +64,7 @@ export async function filtersView(ctx) {
   const stats = res.stats || {};
   // A subscription model only answers its caller's own sign-in, so no
   // filter can run on it.
-  const readers = models.filter(canRun);
+  const readers = models.filter(canDecide);
   const canEdit = isAdmin(ctx);
   ctx.setSubtitle(`${filters.length} ${plural(filters.length, "filter")}`);
 
@@ -291,7 +292,7 @@ function report(probe) {
               v.refused === v.expect_refusal ? "good" : "warn",
             ),
             // A gate right on both halves at 55% cannot tell them apart; the
-            // pill alone hides that. Needs backend probabilities.
+            // pill alone hides that.
             v.confidence
               ? h(
                   "span",
@@ -464,7 +465,7 @@ export async function filterDetailView(ctx) {
         f && canEdit
           ? busyButton({ title: "Edit this filter" }, "Edit", async () => {
               const r = await api.models(ctx.orgID);
-              editFilter(ctx, f, (r.data || []).filter(canRun));
+              editFilter(ctx, f, (r.data || []).filter(canDecide));
             })
           : null,
         f && canEdit
@@ -851,16 +852,10 @@ const MODES = [
   },
 ];
 
-// A decision model answers a verdict and writes no text, so only a gate can
-// use it.
-function canRun(m) {
-  return (m.kind === "chat" || m.kind === "decision") && !m.subscription;
-}
-
 /** For another screen, such as the router editor. onSaved gets the new alias
  *  instead of a reload, so what was typed there survives. */
 export function newFilter(ctx, models, onSaved) {
-  editFilter(ctx, null, models.filter(canRun), { onSaved });
+  editFilter(ctx, null, models.filter(canDecide), { onSaved });
 }
 
 function editFilter(ctx, existing, readers, { onSaved } = {}) {
