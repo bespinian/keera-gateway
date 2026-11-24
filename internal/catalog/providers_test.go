@@ -348,8 +348,8 @@ func checkProviderModel(t *testing.T, p Provider, m ProviderModel, seenDescripti
 			m.ID, m.CacheWriteMicrosPerMTok, m.InputMicrosPerMTok)
 	}
 	switch {
-	// A transcription has no prompt to cache.
-	case p.CachedInput && m.CachedInputMicrosPerMTok <= 0 && m.kindOrChat() != policy.KindTranscription:
+	// Only a chat model is sent the same context again and again.
+	case p.CachedInput && m.CachedInputMicrosPerMTok <= 0 && m.kindOrChat() == policy.KindChat:
 		// Without it, cached tokens cost up to ten times the console's price.
 		t.Errorf("%s states no cached-input rate; a coding agent's resent "+
 			"context is then charged at the full input price", m.ID)

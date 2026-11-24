@@ -417,6 +417,13 @@ var providers = []Provider{{
 		InputMicrosPerMTok: 720_000, OutputMicrosPerMTok: 3_600_000,
 		CachedInputMicrosPerMTok: 72_000,
 		Description:              "mid-size and quick - everyday agent tasks; replaced by Gemini 3.8 Flash",
+	}, {
+		// Google lists no cache price for it. Its image, audio and video rates
+		// are left out: the OpenAI-compatible route is shown with text only.
+		ID: "gemini-embedding-2", DisplayName: "Gemini Embedding 2",
+		Kind: policy.KindEmbedding, MaxContext: 8_192, ReleaseDate: "2026-03-10",
+		InputMicrosPerMTok: 192_000,
+		Description:        "embedding, 3072 dimensions by default - search and RAG in over 100 languages",
 	}},
 }, {
 	Name:    "deepseek",
