@@ -627,7 +627,7 @@ function capabilityCell(m) {
   const pills = (m.capabilities || []).map((c) => pill(capabilityName(c)));
   return pills.length
     ? h("span", { class: "wrap-chips" }, pills)
-    : h("span", { class: "muted" }, "none - text only, no tools or images");
+    : h("span", { class: "muted" }, "None - text only, no tools or images");
 }
 
 // can says whether a model states capability c.
@@ -654,7 +654,10 @@ function locationCell(loc) {
   if (!loc) return dash();
   return h(
     "span",
-    { class: "nowrap", title: `Prompts to this model go to: ${loc}` },
+    {
+      class: "nowrap",
+      title: `Prompts to this model go to: ${locationName(loc)}`,
+    },
     locationName(loc),
   );
 }
@@ -700,7 +703,7 @@ function viewModel(ctx, m) {
         "What it is for",
         m.description
           ? h("span", {}, m.description)
-          : h("span", { class: "muted" }, "nothing written down"),
+          : h("span", { class: "muted" }, "Nothing written down"),
         "Listed on /api/v1/models and shown to routers choosing a model.",
       ),
       readRow(
@@ -735,7 +738,7 @@ function viewModel(ctx, m) {
           "Released",
           m.release_date
             ? h("span", {}, releaseDay(m.release_date))
-            : h("span", { class: "muted" }, "not known"),
+            : h("span", { class: "muted" }, "Not known"),
           "The day the model came out.",
         ),
       ),
@@ -755,7 +758,7 @@ function viewModel(ctx, m) {
                   ` - ${num(m.max_context_tokens)}`,
                 ),
               )
-            : h("span", { class: "muted" }, "not advertised"),
+            : h("span", { class: "muted" }, "Not advertised"),
           "Advertised to clients. A request that cannot fit is refused.",
         ),
         readRow(
@@ -775,7 +778,7 @@ function viewModel(ctx, m) {
               `${listPrice(m.input_micros_per_mtok)} in · ` +
                 `${listPrice(m.output_micros_per_mtok)} out`,
             )
-          : h("span", { class: "muted" }, "not billed"),
+          : h("span", { class: "muted" }, "Not billed"),
         m.subscription
           ? "What the API would have charged. No budget is charged, " +
               "because each person's Claude subscription pays."
@@ -961,7 +964,7 @@ function priceCell(m) {
       `${listPrice(m.audio_micros_per_minute)} / min of audio`,
     );
   if (!m.input_micros_per_mtok && !m.output_micros_per_mtok)
-    return h("span", { class: "faint" }, "not billed");
+    return h("span", { class: "faint" }, "Not billed");
   return h(
     "span",
     { class: "nowrap muted" },
@@ -1385,7 +1388,7 @@ function editModel(ctx, existing, providers, pick) {
   const aliasField = field(
     "Alias",
     alias,
-    "The name clients use. Changing it breaks them." +
+    "The name clients use, so it cannot change later." +
       ` Only ${orgNameOf(ctx)} can use this model.`,
   );
   const aliasRow = h("div", {});
@@ -1395,14 +1398,14 @@ function editModel(ctx, existing, providers, pick) {
     "div",
     { class: "field-row" },
     field(
-      "Cached input price / Mtok (CHF)",
+      "Cached input price / MTok (CHF)",
       priceCached,
       "For prompt tokens a hosted provider serves from its cache. If " +
         "blank, they are charged at the input price.",
       marks.priceCached,
     ),
     field(
-      "Cache write price / Mtok (CHF)",
+      "Cache write price / MTok (CHF)",
       priceWrite,
       "For prompt tokens a hosted provider writes to its cache. If " +
         "blank, they are charged at the input price.",
@@ -1463,8 +1466,8 @@ function editModel(ctx, existing, providers, pick) {
     h(
       "div",
       { class: "field-row" },
-      field("Input price / Mtok (CHF)", priceIn, null, marks.priceIn),
-      field("Output price / Mtok (CHF)", priceOut, null, marks.priceOut),
+      field("Input price / MTok (CHF)", priceIn, null, marks.priceIn),
+      field("Output price / MTok (CHF)", priceOut, null, marks.priceOut),
     ),
     feeNote,
     cacheRow,

@@ -144,7 +144,7 @@ export async function sessionsView(ctx) {
   }
 
   const list = sessionTable(ctx, rows, names, {}, rank);
-  const tail = h("div", {}, more(params, rows, rank, list));
+  const tail = h("div", {}, more(params, rows, names, rank, list));
   wrap.append(h("div", { style: { marginTop: "16px" } }, list), tail);
   wrap.append(hint(res.gap_seconds));
 
@@ -156,7 +156,9 @@ export async function sessionsView(ctx) {
     addNames(names, next);
     rows.splice(0, rows.length, ...(next.data || []));
     list.redraw();
-    tail.replaceChildren(...[more(params, rows, rank, list)].filter(Boolean));
+    tail.replaceChildren(
+      ...[more(params, rows, names, rank, list)].filter(Boolean),
+    );
   });
   return wrap;
 }
@@ -246,17 +248,17 @@ export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
   const list = sessionTable(ctx, rows, names, hide, rank);
   wrap.append(
     h("div", { style: { marginTop: "12px" } }, list),
-    ...[more(params, rows, rank, list)].filter(Boolean),
+    ...[more(params, rows, names, rank, list)].filter(Boolean),
   );
   return wrap;
 }
 
 // more follows a full page: the pager in time order, a note under a ranking,
 // since the cursor cannot page a ranking.
-function more(params, rows, rank, list) {
+function more(params, rows, names, rank, list) {
   if (rows.length < PAGE) return null;
   if (rank.by !== "") return rankedNote(PAGE, "sessions");
-  return pager(params, rows, list);
+  return pager(params, rows, names, list);
 }
 
 function sessionsCSV(params) {
@@ -267,13 +269,14 @@ function sessionsCSV(params) {
 
 // pager appends the next page. The cursor is the oldest session shown, as
 // next_before.
-function pager(params, rows, list) {
+function pager(params, rows, names, list) {
   return loadMore(
     PAGE,
     async () => {
       const before = rows[rows.length - 1].id;
       const next = await api.sessions({ ...params, before });
       const page = next.data || [];
+      addNames(names, next);
       rows.push(...page);
       list.redraw();
       return page.length;
@@ -464,7 +467,7 @@ export async function sessionDetailView(ctx) {
         ctx,
         "/sessions",
         "Sessions",
-        "This request is not part of a session",
+        "No session has this id",
         "Nothing was recorded under this id, the request has no " +
           "conversation (such as an embedding), or retention has deleted it.",
       );
@@ -667,7 +670,7 @@ function turnStrip(ctx, requests, names) {
         dataset: { tone: tone || "", ...(q.cost_micros ? {} : { empty: "1" }) },
         style: { height: Math.max(6, Math.round(share * 60)) + "px" },
         title:
-          `Request ${i + 1} of ${requests.length} · ${q.alias || "no model"} · ` +
+          `Request ${i + 1} of ${requests.length} · ${q.alias || "No model"} · ` +
           `${label} · ${money(q.cost_micros)}` +
           (q.ttft_ms ? ` · ${ms(q.ttft_ms)} to the first token` : ""),
         "aria-label": `Request ${i + 1}, ${outcomeOf(q)}`,

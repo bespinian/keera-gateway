@@ -331,11 +331,7 @@ function shares(destinations, t) {
       "div",
       { class: "try-shares" },
       list.map((alias, i) => [
-        h(
-          "span",
-          { class: alias === t.chosen ? "mono" : "mono muted" },
-          alias,
-        ),
+        h("span", { class: alias === t.chosen ? "mono" : "mono muted" }, alias),
         meter(t.shares[i], alias === t.chosen ? "" : "muted"),
         h("span", { class: "muted num" }, pct(t.shares[i], 1)),
       ]),

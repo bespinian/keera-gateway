@@ -57,7 +57,10 @@ test("the prompt sent is every message under its role", () => {
   });
   assert.equal(sent, '[system]\nRefuse client data.\n\n[user]\n["hello"]');
   // A decision model's request has no messages; the request is the prompt.
-  assert.equal(promptSent({ request: { state: ["hi"] } }), '{\n  "state": [\n    "hi"\n  ]\n}');
+  assert.equal(
+    promptSent({ request: { state: ["hi"] } }),
+    '{\n  "state": [\n    "hi"\n  ]\n}',
+  );
 });
 
 test("a prompt is named by its first line, cut short", () => {

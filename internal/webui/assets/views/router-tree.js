@@ -73,7 +73,7 @@ export function newID(start) {
 export function summary(start) {
   const out = [];
   for (let s = start; s;) {
-    out.push(s.kind === "rate_limit" ? "rate limit" : s.kind);
+    out.push((KINDS[s.kind] || s.kind).toLowerCase());
     if (s.kind === "route") {
       const n = Object.keys(s.branches || {}).length;
       if (n) out.push(`${n} ${n === 1 ? "branch" : "branches"}`);
@@ -172,7 +172,8 @@ function stepProblem(s, refs) {
 
 /** warnings flags a model filter that rewrites the request before a route
  *  step reads it. Pattern filters only take out secrets, so they don't count.
- *  Mirrors policy.Router.Warnings, in the same words. */
+ *  Mirrors policy.Router.Warnings, but without the step id, which the panel
+ *  never shows. */
 export function warnings(start, filters) {
   const out = [];
   const walk = (s, rewrites) => {
@@ -187,7 +188,7 @@ export function warnings(start, filters) {
       s.kind === "route" && (s.mode || "instruction") === "instruction";
     if (reads && rewrites.length) {
       const msg =
-        `The route step '${s.id}' reads the request after the filter ` +
+        "A route step reads the request after the filter " +
         `'${rewrites.join("', '")}' rewrote it, so it decides on the ` +
         "rewritten text, not what the client sent.";
       if (!out.includes(msg)) out.push(msg);

@@ -205,8 +205,7 @@ async function billSection(ctx) {
       label: "Input",
       num: true,
       // A model priced per minute bills audio, not tokens.
-      cell: (r) =>
-        r.unit ? quantity(r) : compact(r.input_tokens),
+      cell: (r) => (r.unit ? quantity(r) : compact(r.input_tokens)),
       sortKey: (r) => r.input_tokens,
       sortDir: "desc",
     },
@@ -289,7 +288,7 @@ async function billSection(ctx) {
       : null,
     showMachines
       ? [
-          tableHead("Agents and Workspaces", machines, "24px"),
+          tableHead("Agents and workspaces", machines, "24px"),
           table(machineColumns, machines, {
             emptyTitle,
             emptyBody:

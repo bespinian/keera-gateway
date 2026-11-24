@@ -203,7 +203,7 @@ function trafficCell(st) {
   const tone = st.errored > 0 ? "bad" : refusalRate >= 0.05 ? "warn" : "";
   return trafficSummary(
     st.runs,
-    "runs",
+    plural(st.runs, "run"),
     st.errored > 0
       ? pill(`${num(st.errored)} could not run`, "bad")
       : st.refused > 0

@@ -563,7 +563,7 @@ export function showRequest(ctx, q, names) {
 
   modal({
     title: label,
-    subtitle: `${q.alias || "no model"} · ${dateTime(q.created_at)}`,
+    subtitle: `${q.alias || "No model"} · ${dateTime(q.created_at)}`,
     actions,
     wide: true,
     body: h(

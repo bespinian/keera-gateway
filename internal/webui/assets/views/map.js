@@ -7,6 +7,7 @@
 
 import { api } from "../api.js";
 import { orgNameOf } from "./orgs.js";
+import { kindName } from "./models.js";
 import { outcomeOf } from "../status.js";
 import {
   h,
@@ -149,7 +150,7 @@ function sceneFrom(data) {
     hosting: m.hosting,
     endpoint: m.endpoint || "",
     enabled: m.enabled,
-    kindName: m.kind || "",
+    kindName: m.kind ? kindName(m.kind) : "",
   }));
   // The line only means something with models on both sides. With none in
   // the network, hosted models take the upper band and the line goes.
@@ -1008,7 +1009,7 @@ function showTip(tip, canvas, n) {
   if (n.kind === "model") {
     rows.push([
       "Runs at",
-      n.endpoint || hostingLabel(n.hosting) || "no backend",
+      n.endpoint || hostingLabel(n.hosting) || "No backend",
     ]);
     rows.push([
       "Prompts",
@@ -1016,10 +1017,10 @@ function showTip(tip, canvas, n) {
         ? "leave your network"
         : n.hosting === "internal"
           ? "stay in your network"
-          : "unknown",
+          : "Unknown",
     ]);
-    if (n.kindName) rows.push(["Surface", n.kindName]);
-    if (!n.folded && !n.enabled) rows.push(["Status", "disabled"]);
+    if (n.kindName) rows.push(["Kind", n.kindName]);
+    if (!n.folded && !n.enabled) rows.push(["Status", "Disabled"]);
   }
   if (n.folded)
     rows.push(["Folded together", n.rest.map((r) => r.label).join(", ")]);

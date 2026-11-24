@@ -294,7 +294,7 @@ export function routeFields(models, step) {
       const box = h("input", {
         class: "input mono",
         style: { maxWidth: "120px" },
-        placeholder: "no ceiling",
+        placeholder: "No ceiling",
         value: ceilings[alias] ? tokens(ceilings[alias]) : "",
         onInput: () => {
           // Whole tokens, where 'k' means a thousand, as in the CLI.
@@ -608,12 +608,16 @@ export function checkReport(check) {
     body: h(
       "div",
       { class: "stack", style: { gap: "20px" } },
-      check.routes.map((probe) => routeProbe(probe, check.routes.length > 1)),
+      check.routes.map((probe, i) =>
+        routeProbe(probe, check.routes.length > 1 ? i + 1 : 0),
+      ),
     ),
   });
 }
 
-function routeProbe(probe, named) {
+// routeProbe numbers the route steps when there are several, as the panel
+// never shows a step's id.
+function routeProbe(probe, number) {
   const chained = probe.mode !== "instruction";
   const ranked = measures(probe.mode);
   const banded = probe.mode === "size";
@@ -639,13 +643,11 @@ function routeProbe(probe, named) {
   return h(
     "div",
     {},
-    named
+    number
       ? h(
           "h3",
           { style: { margin: "0 0 8px" } },
-          h("span", { class: "mono" }, probe.step),
-          " - ",
-          modeName(probe.mode),
+          `Route step ${number} - ${modeName(probe.mode)}`,
         )
       : null,
     h("p", { class: "muted", style: { marginTop: 0 } }, intro),

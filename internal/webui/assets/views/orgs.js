@@ -56,7 +56,7 @@ export async function orgsView(ctx) {
         cell: (o) =>
           o.email_domain
             ? h("span", { class: "mono" }, o.email_domain)
-            : h("span", { class: "faint" }, "not set"),
+            : h("span", { class: "faint" }, "Not set"),
       },
       {
         label: "Created",

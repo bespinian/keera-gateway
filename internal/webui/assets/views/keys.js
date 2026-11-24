@@ -170,7 +170,7 @@ export async function keysView(ctx) {
                 { class: "muted nowrap", title: dateTime(k.last_used_at) },
                 ago(k.last_used_at),
               )
-            : h("span", { class: "faint nowrap" }, `not ${inPeriod(since)}`),
+            : h("span", { class: "faint nowrap" }, `Not ${inPeriod(since)}`),
       },
       {
         label: range.long,
@@ -238,7 +238,7 @@ export async function keysView(ctx) {
         cell: (k) =>
           k.expires_at
             ? h("span", { class: "muted nowrap" }, date(k.expires_at))
-            : h("span", { class: "faint" }, "never"),
+            : h("span", { class: "faint" }, "Never"),
       },
       {
         // Limits are worth reading in any state; revoking needs a live key.
@@ -443,11 +443,16 @@ export function canBeRevoked(k) {
 export function canRotate(ctx, k) {
   const state = stateOf(k);
   if (state === "expired" && !isAdmin(ctx)) return false;
-  return canRevoke(ctx, k) && state !== "revoked" && state !== "pending" && !k.issued_by;
+  return (
+    canRevoke(ctx, k) &&
+    state !== "revoked" &&
+    state !== "pending" &&
+    !k.issued_by
+  );
 }
 
 export function prefixOf(k) {
-  return k.pending ? "no secret yet" : k.prefix + "…";
+  return k.pending ? "No secret yet" : k.prefix + "…";
 }
 
 // The person a pending key is for, or an admin, who could rotate it anyway.
@@ -510,7 +515,7 @@ export function confirmRotate(ctx, k, { done } = {}) {
     onConfirm: async () => {
       const created = await api.rotateKey(k.id);
       if (done) done(created);
-      showSecret(ctx, created);
+      showSecret(ctx, created, null, "Key rotated");
     },
   });
 }

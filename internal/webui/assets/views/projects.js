@@ -117,7 +117,7 @@ export async function projectsView(ctx) {
             return h(
               "div",
               { class: "stack" },
-              h("span", { class: "faint" }, "no budget"),
+              h("span", { class: "faint" }, "No budget"),
               h(
                 "span",
                 { class: "muted small" },

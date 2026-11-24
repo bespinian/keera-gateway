@@ -182,7 +182,7 @@ export async function peopleView(ctx) {
                 },
                 ago(u.last_active_at),
               )
-            : h("span", { class: "faint nowrap" }, "never"),
+            : h("span", { class: "faint nowrap" }, "Never"),
       },
       {
         label: "Added",

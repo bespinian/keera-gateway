@@ -1083,7 +1083,7 @@ function fieldsFor(env, kind, step, preset) {
         }),
     },
     icon(icons.plus),
-    "New filter",
+    "Create filter",
   );
   return {
     el: field(

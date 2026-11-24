@@ -1001,7 +1001,7 @@ export function loadMore(size, next, end) {
 /** trafficSummary is a row's traffic in two lines: a count, with a pill when
  *  something needs a look, then a faint note. */
 export function trafficSummary(count, noun, flag, note) {
-  if (!count) return h("span", { class: "faint nowrap" }, "no traffic");
+  if (!count) return h("span", { class: "faint nowrap" }, "No traffic");
   return h(
     "div",
     { class: "stack" },

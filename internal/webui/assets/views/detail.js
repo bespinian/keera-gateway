@@ -329,7 +329,7 @@ export async function keyDetailView(ctx) {
               "Expires",
               key.expires_at
                 ? h("span", { class: "muted" }, date(key.expires_at))
-                : h("span", { class: "faint" }, "never"),
+                : h("span", { class: "faint" }, "Never"),
             ],
             [
               "Last used",
@@ -339,7 +339,7 @@ export async function keyDetailView(ctx) {
                     { class: "muted", title: dateTime(key.last_used_at) },
                     ago(key.last_used_at),
                   )
-                : h("span", { class: "faint" }, `not ${inPeriod(since)}`),
+                : h("span", { class: "faint" }, `Not ${inPeriod(since)}`),
             ],
             [
               "Guardrails",
@@ -493,11 +493,11 @@ export async function modelDetailView(ctx) {
                       { class: "faint" },
                       // Backends are for admins, so an empty list does not
                       // mean there are none.
-                      isAdmin(ctx) ? "none" : "not shown to your role",
+                      isAdmin(ctx) ? "None" : "Not shown to your role",
                     ),
               ],
               [
-                "Price / Mtok (CHF)",
+                "Price / MTok (CHF)",
                 model.input_micros_per_mtok || model.output_micros_per_mtok
                   ? h(
                       "span",
@@ -505,7 +505,7 @@ export async function modelDetailView(ctx) {
                       `${listPrice(model.input_micros_per_mtok)} in · ` +
                         `${listPrice(model.output_micros_per_mtok)} out`,
                     )
-                  : h("span", { class: "faint" }, "not billed"),
+                  : h("span", { class: "faint" }, "Not billed"),
               ],
             ]),
           ),
@@ -616,7 +616,7 @@ export async function userDetailView(ctx) {
                   },
                   ago(user.last_active_at),
                 )
-              : h("span", { class: "faint" }, "never"),
+              : h("span", { class: "faint" }, "Never"),
           ],
           user.disabled_at
             ? [
@@ -645,7 +645,7 @@ export async function userDetailView(ctx) {
                     ),
                   ),
                 )
-              : h("span", { class: "faint" }, "none"),
+              : h("span", { class: "faint" }, "None"),
           ],
         ]),
       ),
@@ -802,7 +802,7 @@ const modelsPanel = (o) =>
   barPanel(
     "Models by tokens",
     o.top_models,
-    (r) => r.group || "unknown model",
+    (r) => r.group || "Unknown model",
     (r) => r.input_tokens + r.output_tokens,
     1,
   );
@@ -848,7 +848,7 @@ export function facts(rows) {
 }
 
 export function routerLinks(ctx, routers) {
-  if (!routers.length) return h("span", { class: "muted" }, "none");
+  if (!routers.length) return h("span", { class: "muted" }, "None");
   return h(
     "div",
     { class: "wrap-chips" },

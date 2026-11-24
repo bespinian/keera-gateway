@@ -2640,7 +2640,15 @@ paths:
               properties:
                 kind:
                   type: string
-                  enum: [chat, completion, embedding, rerank, transcription, decision]
+                  enum:
+                    [
+                      chat,
+                      completion,
+                      embedding,
+                      rerank,
+                      transcription,
+                      decision,
+                    ]
                   description: Defaults to chat.
                 backends:
                   type: array
@@ -4947,7 +4955,14 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [project_id, projects, models, transcription_models, mcp_servers]
+                required:
+                  [
+                    project_id,
+                    projects,
+                    models,
+                    transcription_models,
+                    mcp_servers,
+                  ]
                 properties:
                   project_id:
                     type: string
@@ -8074,8 +8089,7 @@ components:
       description: |
         What a request against a scope meets. Rate limits and budgets stay per
         level in `scopes`, because each level is enforced on its own.
-      required:
-        [type, id, levels, allowed_models, allowed_tools, scopes]
+      required: [type, id, levels, allowed_models, allowed_tools, scopes]
       properties:
         type:
           $ref: "#/components/schemas/ScopeType"

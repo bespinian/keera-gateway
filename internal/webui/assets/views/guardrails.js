@@ -247,6 +247,12 @@ function kindOf(value) {
   return KINDS.find((k) => k.value === value);
 }
 
+/** kindName is a kind's name within a sentence. MCP stays in capitals. */
+function kindName(value) {
+  const name = kindOf(value).name;
+  return name.startsWith("MCP") ? name : name.toLowerCase();
+}
+
 /** A copy, so nothing changes until Save. */
 function draftOf(lim) {
   return {
@@ -415,7 +421,7 @@ function render(
       h(
         "h3",
         { style: { margin: "0 0 12px" } },
-        b ? "Change " + kindOf(b.kind).name.toLowerCase() : "Add a guardrail",
+        b ? "Change " + kindName(b.kind) : "Add a guardrail",
       ),
       err,
       picker ? picker.tiles : null,
@@ -970,12 +976,12 @@ function renderReadOnly(
       ),
       readRow(
         LIMITS.rate.label,
-        levelsValue(levels, rateTexts, "unlimited"),
+        levelsValue(levels, rateTexts, "Unlimited"),
         "Each level's rate limit applies on its own. " + LIMITS.rate.hint,
       ),
       readRow(
         "Budget",
-        levelsValue(levels, budgetTexts, "no budget"),
+        levelsValue(levels, budgetTexts, "No budget"),
         "Each budget applies on its own. Past any of them, requests are " +
           "refused until the period resets.",
       ),
@@ -1024,7 +1030,7 @@ function toolsValue(levels) {
           { class: "mono" },
           lv.limits.allowed_tools.length
             ? lv.limits.allowed_tools.join(", ")
-            : "none",
+            : "None",
         ),
       ),
     ),
@@ -1260,7 +1266,15 @@ function describe(lim) {
   if ((lim.filters || []).length) {
     bits.push(`${lim.filters.length} ${plural(lim.filters.length, "filter")}`);
   }
+  if (lim.allowed_tools) bits.push(toolsText(lim.allowed_tools));
   return bits.join(" · ") || "nothing set";
+}
+
+/** toolsText names an MCP tools list in a line of text. */
+function toolsText(list) {
+  if (!list.length) return "no MCP tools";
+  if (list.length > 3) return `${list.length} MCP servers or tools`;
+  return `MCP tools: ${list.join(", ")}`;
 }
 
 /** A prompt is appended to these, so seeing them avoids repeating them. */
@@ -1316,7 +1330,8 @@ function hasAny(lim) {
       (lim.rate_limits || []).length ||
       (lim.budgets || []).length ||
       lim.system_prompt ||
-      (lim.filters || []).length)
+      (lim.filters || []).length ||
+      lim.allowed_tools)
   );
 }
 
@@ -1324,6 +1339,7 @@ export function summarise(lim) {
   const bits = (lim.rate_limits || []).flatMap(rateShort);
   if (lim.system_prompt) bits.push("system prompt");
   for (const name of lim.filters || []) bits.push(`filter: ${name}`);
+  if (lim.allowed_tools) bits.push(toolsText(lim.allowed_tools));
   return bits;
 }
 

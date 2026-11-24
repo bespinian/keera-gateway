@@ -114,7 +114,7 @@ export async function usageView(ctx) {
     if (l.org_id) return `${l.group} · ${orgNameOf(ctx, l.org_id)}`;
     if (groupBy === "org") return orgNameOf(ctx, l.group);
     if (groupBy === "model") return l.group;
-    return nameOf(l.group) || "deleted";
+    return nameOf(l.group) || "Deleted";
   };
   const chartData = res.chart || {};
   const chart = h(
@@ -173,7 +173,7 @@ export async function usageView(ctx) {
       return h(
         "span",
         { class: "stack" },
-        h("span", { class: "faint" }, "deleted"),
+        h("span", { class: "faint" }, "Deleted"),
         h(
           "span",
           { class: "mono faint", style: { fontSize: "11px" } },

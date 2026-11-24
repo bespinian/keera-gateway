@@ -165,13 +165,13 @@ function keyCard(k, ctx) {
       "Last used",
       k.last_used_at
         ? h("span", { title: dateTime(k.last_used_at) }, ago(k.last_used_at))
-        : h("span", { class: "faint" }, "not this month"),
+        : h("span", { class: "faint" }, "Not this month"),
     ),
     fact(
       "Expires",
       k.expires_at
         ? h("span", {}, date(k.expires_at))
-        : h("span", { class: "faint" }, "never"),
+        : h("span", { class: "faint" }, "Never"),
     ),
     fact(
       "This month",
