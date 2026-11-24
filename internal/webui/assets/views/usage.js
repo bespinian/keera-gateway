@@ -13,6 +13,7 @@ import {
   remember,
   RANGES as SHARED_RANGES,
   csvButton,
+  card,
 } from "../ui.js";
 import { lineChart } from "../chart.js";
 import { orgNameOf } from "./orgs.js";
@@ -117,24 +118,19 @@ export async function usageView(ctx) {
     return nameOf(l.group) || "Deleted";
   };
   const chartData = res.chart || {};
-  const chart = h(
-    "div",
-    { class: "card", style: { marginBottom: "16px" } },
-    h("div", { class: "card-head" }, h("h2", {}, "Served requests")),
-    h(
-      "div",
-      { class: "card-body" },
-      lineChart(
-        chartData.at,
-        (chartData.lines || []).map((l, i) => ({
-          label: lineName(l),
-          color: l.other ? "var(--faint)" : `var(--s${(i % 6) + 1})`,
-          dashed: l.other,
-          counts: l.counts,
-        })),
-        { bucket: chartData.bucket },
-      ),
+  const chart = card(
+    "Served requests",
+    lineChart(
+      chartData.at,
+      (chartData.lines || []).map((l, i) => ({
+        label: lineName(l),
+        color: l.other ? "var(--faint)" : `var(--s${(i % 6) + 1})`,
+        dashed: l.other,
+        counts: l.counts,
+      })),
+      { bucket: chartData.bucket },
     ),
+    { style: { marginBottom: "16px" } },
   );
 
   const label = (r) => {

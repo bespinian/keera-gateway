@@ -937,6 +937,22 @@ export function sectionHead(title, note, style) {
   );
 }
 
+/** card is a panel with a heading. tools, such as a link or a pill, sit at the
+ *  right of the heading. */
+export function card(title, body, { tools, style } = {}) {
+  return h(
+    "div",
+    { class: "card", style },
+    h(
+      "div",
+      { class: "card-head" },
+      h("h2", {}, title),
+      tools ? [h("div", { class: "spacer" }), tools] : null,
+    ),
+    h("div", { class: "card-body" }, body),
+  );
+}
+
 /** pct keeps three decimals for tiny shares, so they do not round to zero. */
 export function pct(part, whole) {
   if (!whole) return "-";

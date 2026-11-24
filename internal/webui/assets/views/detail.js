@@ -18,6 +18,7 @@ import {
   ago,
   date,
   dateTime,
+  tokens,
   icon,
   icons,
   currentRange,
@@ -32,6 +33,7 @@ import {
   detailHead,
   busyButton,
   banner,
+  card,
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
 import { requestLog } from "./requestlog.js";
@@ -141,29 +143,23 @@ export async function projectDetailView(ctx) {
         : null,
     ],
     panels: (o, names) => [modelsPanel(o), keysPanel(o, names)],
-    aside: h(
-      "div",
-      { class: "card" },
-      h("div", { class: "card-head" }, h("h2", {}, "What this project allows")),
-      h(
-        "div",
-        { class: "card-body" },
-        facts([
-          ["Models", modelsCell(project.limits)],
-          ["Budget", projectBudget(project)],
-          [
-            "Guardrails",
-            summarise(project.limits).length
-              ? h(
-                  "span",
-                  { class: "muted" },
-                  summarise(project.limits).join(" · "),
-                )
-              : h("span", { class: "faint" }, `Inherited from ${orgName}`),
-          ],
-          ["Created", h("span", { class: "muted" }, date(project.created_at))],
-        ]),
-      ),
+    aside: card(
+      "What this project allows",
+      facts([
+        ["Models", modelsCell(project.limits)],
+        ["Budget", projectBudget(project)],
+        [
+          "Guardrails",
+          summarise(project.limits).length
+            ? h(
+                "span",
+                { class: "muted" },
+                summarise(project.limits).join(" · "),
+              )
+            : h("span", { class: "faint" }, `Inherited from ${orgName}`),
+        ],
+        ["Created", h("span", { class: "muted" }, date(project.created_at))],
+      ]),
     ),
     note:
       "This project's guardrails apply to every key in it. A project can only " +
@@ -309,54 +305,44 @@ export async function keyDetailView(ctx) {
     ],
     panels: (o) => [
       modelsPanel(o),
-      h(
-        "div",
-        { class: "card" },
-        h("div", { class: "card-head" }, h("h2", {}, "This key")),
-        h(
-          "div",
-          { class: "card-body" },
-          facts([
-            ["Prefix", h("span", { class: "mono muted" }, key.prefix + "…")],
-            [
-              "User",
-              person
-                ? h("span", { class: "muted" }, personName(person))
-                : h("span", { class: "faint" }, NO_USER),
-            ],
-            ["Issued", h("span", { class: "muted" }, date(key.created_at))],
-            [
-              "Expires",
-              key.expires_at
-                ? h("span", { class: "muted" }, date(key.expires_at))
-                : h("span", { class: "faint" }, "Never"),
-            ],
-            [
-              "Last used",
-              key.last_used_at
-                ? h(
-                    "span",
-                    { class: "muted", title: dateTime(key.last_used_at) },
-                    ago(key.last_used_at),
-                  )
-                : h("span", { class: "faint" }, `Not ${inPeriod(since)}`),
-            ],
-            [
-              "Guardrails",
-              summarise(key.limits || {}).length
-                ? h(
-                    "span",
-                    { class: "muted" },
-                    summarise(key.limits).join(" · "),
-                  )
-                : h(
-                    "span",
-                    { class: "faint" },
-                    `Inherited from ${project ? project.name : orgNameOf(ctx, key.org_id)}`,
-                  ),
-            ],
-          ]),
-        ),
+      card(
+        "This key",
+        facts([
+          ["Prefix", h("span", { class: "mono muted" }, key.prefix + "…")],
+          [
+            "User",
+            person
+              ? h("span", { class: "muted" }, personName(person))
+              : h("span", { class: "faint" }, NO_USER),
+          ],
+          ["Issued", h("span", { class: "muted" }, date(key.created_at))],
+          [
+            "Expires",
+            key.expires_at
+              ? h("span", { class: "muted" }, date(key.expires_at))
+              : h("span", { class: "faint" }, "Never"),
+          ],
+          [
+            "Last used",
+            key.last_used_at
+              ? h(
+                  "span",
+                  { class: "muted", title: dateTime(key.last_used_at) },
+                  ago(key.last_used_at),
+                )
+              : h("span", { class: "faint" }, `Not ${inPeriod(since)}`),
+          ],
+          [
+            "Guardrails",
+            summarise(key.limits || {}).length
+              ? h("span", { class: "muted" }, summarise(key.limits).join(" · "))
+              : h(
+                  "span",
+                  { class: "faint" },
+                  `Inherited from ${project ? project.name : orgNameOf(ctx, key.org_id)}`,
+                ),
+          ],
+        ]),
       ),
     ],
     note:
@@ -445,70 +431,60 @@ export async function modelDetailView(ctx) {
       keysPanel(o, names),
     ],
     aside: model
-      ? h(
-          "div",
-          { class: "card" },
-          h(
-            "div",
-            { class: "card-head" },
-            h("h2", {}, "What it is configured to do"),
-          ),
-          h(
-            "div",
-            { class: "card-body" },
-            facts([
-              [
-                "Serves",
-                model.display_name
-                  ? h(
+      ? card(
+          "What it is configured to do",
+          facts([
+            [
+              "Serves",
+              model.display_name
+                ? h(
+                    "span",
+                    {},
+                    model.display_name,
+                    h(
                       "span",
-                      {},
-                      model.display_name,
+                      { class: "mono muted" },
+                      ` - ${model.backend_model}`,
+                    ),
+                  )
+                : h("span", { class: "mono muted" }, model.backend_model),
+            ],
+            [
+              "Backends",
+              (model.backends || []).length
+                ? h(
+                    "div",
+                    { class: "stack" },
+                    (model.backends || []).map((b) =>
                       h(
                         "span",
-                        { class: "mono muted" },
-                        ` - ${model.backend_model}`,
+                        {
+                          class: "mono muted small",
+                        },
+                        b,
                       ),
-                    )
-                  : h("span", { class: "mono muted" }, model.backend_model),
-              ],
-              [
-                "Backends",
-                (model.backends || []).length
-                  ? h(
-                      "div",
-                      { class: "stack" },
-                      (model.backends || []).map((b) =>
-                        h(
-                          "span",
-                          {
-                            class: "mono muted small",
-                          },
-                          b,
-                        ),
-                      ),
-                    )
-                  : h(
-                      "span",
-                      { class: "faint" },
-                      // Backends are for admins, so an empty list does not
-                      // mean there are none.
-                      isAdmin(ctx) ? "None" : "Not shown to your role",
                     ),
-              ],
-              [
-                "Price / MTok (CHF)",
-                model.input_micros_per_mtok || model.output_micros_per_mtok
-                  ? h(
-                      "span",
-                      { class: "muted nowrap" },
-                      `${listPrice(model.input_micros_per_mtok)} in · ` +
-                        `${listPrice(model.output_micros_per_mtok)} out`,
-                    )
-                  : h("span", { class: "faint" }, "Not billed"),
-              ],
-            ]),
-          ),
+                  )
+                : h(
+                    "span",
+                    { class: "faint" },
+                    // Backends are for admins, so an empty list does not
+                    // mean there are none.
+                    isAdmin(ctx) ? "None" : "Not shown to your role",
+                  ),
+            ],
+            [
+              "Price / MTok (CHF)",
+              model.input_micros_per_mtok || model.output_micros_per_mtok
+                ? h(
+                    "span",
+                    { class: "muted nowrap" },
+                    `${listPrice(model.input_micros_per_mtok)} in · ` +
+                      `${listPrice(model.output_micros_per_mtok)} out`,
+                  )
+                : h("span", { class: "faint" }, "Not billed"),
+            ],
+          ]),
         )
       : null,
     note:
@@ -587,68 +563,62 @@ export async function userDetailView(ctx) {
         ]
       : [],
     panels: (o, names) => [modelsPanel(o), keysPanel(o, names)],
-    aside: h(
-      "div",
-      { class: "card" },
-      h("div", { class: "card-head" }, h("h2", {}, "This user")),
-      h(
-        "div",
-        { class: "card-body" },
-        facts([
-          [
-            "Added",
-            h(
-              "span",
-              { class: "muted", title: dateTime(user.created_at) },
-              date(user.created_at),
-            ),
-          ],
-          [
-            "Last active",
-            user.last_active_at
-              ? h(
-                  "span",
-                  {
-                    class: "muted",
-                    title:
-                      dateTime(user.last_active_at) +
-                      " - last sign-in or request through one of their keys",
-                  },
-                  ago(user.last_active_at),
-                )
-              : h("span", { class: "faint" }, "Never"),
-          ],
-          user.disabled_at
-            ? [
-                "Disabled",
-                h(
-                  "span",
-                  { class: "muted", title: dateTime(user.disabled_at) },
-                  date(user.disabled_at),
-                ),
-              ]
-            : null,
-          [
-            "Active keys",
-            keys.length
-              ? h(
-                  "div",
-                  { class: "stack" },
-                  keys.map((k) =>
-                    h(
-                      "a",
-                      {
-                        href: "/keys/" + encodeURIComponent(k.id),
-                        onClick: go(ctx, "/keys/" + encodeURIComponent(k.id)),
-                      },
-                      k.name,
-                    ),
+    aside: card(
+      "This user",
+      facts([
+        [
+          "Added",
+          h(
+            "span",
+            { class: "muted", title: dateTime(user.created_at) },
+            date(user.created_at),
+          ),
+        ],
+        [
+          "Last active",
+          user.last_active_at
+            ? h(
+                "span",
+                {
+                  class: "muted",
+                  title:
+                    dateTime(user.last_active_at) +
+                    " - last sign-in or request through one of their keys",
+                },
+                ago(user.last_active_at),
+              )
+            : h("span", { class: "faint" }, "Never"),
+        ],
+        user.disabled_at
+          ? [
+              "Disabled",
+              h(
+                "span",
+                { class: "muted", title: dateTime(user.disabled_at) },
+                date(user.disabled_at),
+              ),
+            ]
+          : null,
+        [
+          "Active keys",
+          keys.length
+            ? h(
+                "div",
+                { class: "stack" },
+                keys.map((k) =>
+                  h(
+                    "a",
+                    {
+                      href: "/keys/" + encodeURIComponent(k.id),
+                      onClick: go(ctx, "/keys/" + encodeURIComponent(k.id)),
+                    },
+                    k.name,
                   ),
-                )
-              : h("span", { class: "faint" }, "None"),
-          ],
-        ]),
-      ),
+                ),
+              )
+            : h("span", { class: "faint" }, "None"),
+        ],
+      ]),
     ),
     note: "Counts the requests made with this user's keys.",
   });
@@ -684,59 +654,16 @@ async function screen(ctx, spec) {
     );
   }
 
-  wrap.append(
-    h(
-      "div",
-      { class: "grid grid-4" },
-      stat(
-        "Requests",
-        compact(o.requests),
-        o.refused ? `${num(o.refused)} refused` : "none refused",
-      ),
-      stat(
-        "Tokens",
-        compact(o.input_tokens + o.output_tokens),
-        `${compact(o.input_tokens)} in · ${compact(o.output_tokens)} out`,
-      ),
-      moneyStat("Cost", o.cost_micros),
-      stat("First token", ms(o.ttft_median_ms), `p95 ${ms(o.ttft_p95_ms)}`),
-    ),
-  );
+  wrap.append(overviewTiles(o));
 
   // The chart's failure count narrows the log below in place.
   wrap.append(
-    h(
-      "div",
-      { style: { marginTop: "16px" } },
-      h(
-        "div",
-        { class: "card" },
-        h(
-          "div",
-          { class: "card-head" },
-          h("h2", {}, "Traffic"),
-          h("div", { class: "spacer" }),
-          o.failed > 0
-            ? failureJump(
-                ctx,
-                `${num(o.failed)} failed (${pct(o.failed, o.requests)})`,
-                spec.sessions,
-              )
-            : h(
-                "span",
-                { class: "pill pill-good" },
-                h("span", { class: "dot" }),
-                "No failures",
-              ),
-        ),
-        h(
-          "div",
-          { class: "card-body" },
-          o.requests === 0
-            ? empty("Nothing recorded in this period", "Pick a longer period.")
-            : areaChart(o.series, { bucket: o.bucket }),
-        ),
-      ),
+    trafficCard(
+      o,
+      (text) => failureJump(ctx, text, spec.sessions),
+      o.requests === 0
+        ? empty("Nothing recorded in this period", "Pick a longer period.")
+        : undefined,
     ),
   );
 
@@ -769,6 +696,54 @@ async function screen(ctx, spec) {
       h("div", { class: "hint", style: { marginTop: "16px" } }, spec.note),
     );
   return wrap;
+}
+
+// overviewTiles are the four figures above the chart, on the dashboard too.
+export function overviewTiles(o) {
+  return h(
+    "div",
+    { class: "grid grid-4" },
+    stat(
+      "Requests",
+      compact(o.requests),
+      o.refused ? `${num(o.refused)} refused` : "none refused",
+    ),
+    stat(
+      "Tokens",
+      compact(o.input_tokens + o.output_tokens),
+      tokens(o.input_tokens, o.output_tokens),
+    ),
+    // What Claude plans paid for is shown beside the cost, not added to it.
+    moneyStat(
+      "Cost",
+      o.cost_micros,
+      o.subscription_micros
+        ? `+ ${money(o.subscription_micros)} covered by Claude plans`
+        : null,
+    ),
+    stat("First token", ms(o.ttft_median_ms), `p95 ${ms(o.ttft_p95_ms)}`),
+  );
+}
+
+// trafficCard charts the requests, on the dashboard too. failure makes the
+// failed count into a pill, which differs by where the failures are listed.
+export function trafficCard(
+  o,
+  failure,
+  body = areaChart(o.series, { bucket: o.bucket }),
+) {
+  return card("Traffic", body, {
+    style: { marginTop: "16px" },
+    tools:
+      o.failed > 0
+        ? failure(`${num(o.failed)} failed (${pct(o.failed, o.requests)})`)
+        : h(
+            "span",
+            { class: "pill pill-good" },
+            h("span", { class: "dot" }),
+            "No failures",
+          ),
+  });
 }
 
 // Under a session log it shows the sessions holding a failed request.
@@ -818,16 +793,7 @@ const keysPanel = (o, names) =>
   );
 
 function barPanel(title, rows, label, value, colorIndex, cost) {
-  return h(
-    "div",
-    { class: "card" },
-    h("div", { class: "card-head" }, h("h2", {}, title)),
-    h(
-      "div",
-      { class: "card-body" },
-      barList(rows || [], { label, value, colorIndex, cost }),
-    ),
-  );
+  return card(title, barList(rows || [], { label, value, colorIndex, cost }));
 }
 
 export function facts(rows) {

@@ -17,6 +17,7 @@ import {
   field,
   modeTiles,
   banner,
+  card,
 } from "../ui.js";
 import { facts } from "./detail.js";
 
@@ -751,37 +752,31 @@ function routeProbe(probe, number) {
       "div",
       { class: "stack", style: { marginTop: "12px" } },
       (probe.decisions || []).map((d) =>
-        h(
-          "div",
-          { class: "card" },
-          h(
-            "div",
-            { class: "card-head" },
-            h("h2", {}, d.asks),
-            h("div", { class: "spacer" }),
-            d.error
-              ? pill("Could not decide", "bad")
-              : h("span", { class: "pill pill-good mono" }, d.chosen),
-            // A sample decided at 35% went there by a hair. Needs backend
-            // probabilities.
-            !d.error && d.confidence
-              ? h(
-                  "span",
-                  { class: "muted", style: { marginLeft: "8px" } },
-                  `${Math.round(d.confidence * 100)}% sure`,
-                )
-              : null,
-          ),
-          h(
-            "div",
-            { class: "card-body" },
+        card(
+          d.asks,
+          [
             h(
               "div",
               { class: "mono muted", style: { whiteSpace: "pre-wrap" } },
               d.prompt,
             ),
             d.error ? banner("bad", d.error) : null,
-          ),
+          ],
+          {
+            tools: [
+              d.error
+                ? pill("Could not decide", "bad")
+                : h("span", { class: "pill pill-good mono" }, d.chosen), // A sample decided at 35% went there by a hair. Needs backend
+              // probabilities.
+              !d.error && d.confidence
+                ? h(
+                    "span",
+                    { class: "muted", style: { marginLeft: "8px" } },
+                    `${Math.round(d.confidence * 100)}% sure`,
+                  )
+                : null,
+            ],
+          },
         ),
       ),
     ),

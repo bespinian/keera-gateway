@@ -40,6 +40,7 @@ import {
   rangeOf,
   followRequests,
   throttled,
+  card,
 } from "../ui.js";
 import { outcomeMeaning, outcomeOf, oneLine } from "../status.js";
 import { requestTable, showRequest } from "./requestlog.js";
@@ -567,27 +568,18 @@ export async function sessionDetailView(ctx) {
     h(
       "div",
       { style: { marginTop: "16px" } },
-      h(
-        "div",
-        { class: "card" },
-        h(
-          "div",
-          { class: "card-head" },
-          h("h2", {}, "Turns"),
-          h("div", { class: "spacer" }),
-          h(
+      card(
+        "Turns",
+        requests.length
+          ? turnStrip(ctx, requests, names)
+          : empty("Nothing recorded", "Its requests are no longer stored."),
+        {
+          tools: h(
             "span",
             { class: "faint small" },
             "each bar is one request, by what it cost",
           ),
-        ),
-        h(
-          "div",
-          { class: "card-body" },
-          requests.length
-            ? turnStrip(ctx, requests, names)
-            : empty("Nothing recorded", "Its requests are no longer stored."),
-        ),
+        },
       ),
     ),
   );

@@ -41,6 +41,7 @@ import {
   go,
   confirm,
   toast,
+  card,
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
 import { orgNameOf } from "./orgs.js";
@@ -534,75 +535,60 @@ export async function filterDetailView(ctx) {
     h(
       "div",
       { class: "grid grid-2", style: { marginTop: "16px" } },
-      h(
-        "div",
-        { class: "card" },
-        h(
-          "div",
-          { class: "card-head" },
-          h("h2", {}, "When it fired"),
-          h("div", { class: "spacer" }),
-          rep.runs
+      card(
+        "When it fired",
+        rep.runs
+          ? // Refusals are rare and would vanish on the same scale.
+            areaChart(
+              (rep.series || []).map((p) => ({
+                at: p.at,
+                requests: p.runs,
+                failed: p.refused + p.errored,
+                tokens: 0,
+                cost_micros: p.cost_micros,
+              })),
+              { bucket: rep.bucket },
+            )
+          : empty(
+              "Nothing ran in this period",
+              f
+                ? "No guardrail or router uses this filter, or nothing it " +
+                    "covers was called. Widen the period or check the " +
+                    "project's guardrails."
+                : "This filter no longer exists.",
+            ),
+        {
+          tools: rep.runs
             ? pill(`${compact(rep.runs)} ${plural(rep.runs, "run")}`)
             : null,
-        ),
-        h(
-          "div",
-          { class: "card-body" },
-          rep.runs
-            ? // Refusals are rare and would vanish on the same scale.
-              areaChart(
-                (rep.series || []).map((p) => ({
-                  at: p.at,
-                  requests: p.runs,
-                  failed: p.refused + p.errored,
-                  tokens: 0,
-                  cost_micros: p.cost_micros,
-                })),
-                { bucket: rep.bucket },
-              )
-            : empty(
-                "Nothing ran in this period",
-                f
-                  ? "No guardrail or router uses this filter, or nothing it " +
-                      "covers was called. Widen the period or check the " +
-                      "project's guardrails."
-                  : "This filter no longer exists.",
-              ),
-        ),
+        },
       ),
-      h(
-        "div",
-        { class: "card" },
-        h("div", { class: "card-head" }, h("h2", {}, "What it did")),
-        h(
-          "div",
-          { class: "card-body" },
-          rep.runs
-            ? h(
-                "div",
-                {},
-                barList(outcomeRows(rep), {
-                  label: (r) => r.label,
-                  value: (r) => r.value,
-                  color: (r) => r.color,
-                }),
-                // Shows whether an instruction is too eager.
-                rep.segments
-                  ? h(
-                      "div",
-                      { class: "hint", style: { marginTop: "12px" } },
-                      `It was shown ${num(rep.segments)} ` +
-                        `${plural(rep.segments, "segment")} of text and changed ` +
-                        `${num(rep.changed)} of them (${pct(rep.changed, rep.segments)}). `,
-                    )
-                  : null,
-              )
-            : empty(
-                "Nothing to show",
-                "No run of this filter is in this period.",
-              ),
-        ),
+      card(
+        "What it did",
+        rep.runs
+          ? h(
+              "div",
+              {},
+              barList(outcomeRows(rep), {
+                label: (r) => r.label,
+                value: (r) => r.value,
+                color: (r) => r.color,
+              }),
+              // Shows whether an instruction is too eager.
+              rep.segments
+                ? h(
+                    "div",
+                    { class: "hint", style: { marginTop: "12px" } },
+                    `It was shown ${num(rep.segments)} ` +
+                      `${plural(rep.segments, "segment")} of text and changed ` +
+                      `${num(rep.changed)} of them (${pct(rep.changed, rep.segments)}). `,
+                  )
+                : null,
+            )
+          : empty(
+              "Nothing to show",
+              "No run of this filter is in this period.",
+            ),
       ),
     ),
   );
@@ -627,73 +613,57 @@ export async function filterDetailView(ctx) {
       h(
         "div",
         { class: "grid grid-2", style: { marginTop: "16px" } },
-        h(
-          "div",
-          { class: "card" },
-          h("div", { class: "card-head" }, h("h2", {}, "What this filter is")),
-          h(
-            "div",
-            { class: "card-body" },
-            facts([
-              ["Mode", h("div", { class: "row-tight" }, modePills(f))],
-              [
-                "Deciding model",
-                usesModel(f)
-                  ? h("span", { class: "mono muted" }, f.model)
-                  : h(
-                      "span",
-                      { class: "muted" },
-                      "nothing - the rules run in the gateway and cost nothing",
-                    ),
-              ],
-              [
-                "Enforcing",
-                f.shadow
-                  ? h(
-                      "span",
-                      { class: "muted" },
-                      "no - it runs, but the request goes on as sent",
-                    )
-                  : h(
-                      "span",
-                      { class: "muted" },
-                      {
-                        gate: "yes - a refusal drops the request",
-                        pattern:
-                          "yes - the model gets the replaced text, and a REFUSE rule drops the request",
-                      }[mode(f)] || "yes - the model gets the rewrite",
-                    ),
-              ],
-              ["In routers", routerLinks(ctx, usedBy(routers, f.alias))],
-              [
-                "Description",
-                f.description
-                  ? h("span", { class: "muted" }, f.description)
-                  : dash(),
-              ],
-              [
-                "Last changed",
-                h("span", { class: "muted" }, dateTime(f.updated_at)),
-              ],
-            ]),
-          ),
+        card(
+          "What this filter is",
+          facts([
+            ["Mode", h("div", { class: "row-tight" }, modePills(f))],
+            [
+              "Deciding model",
+              usesModel(f)
+                ? h("span", { class: "mono muted" }, f.model)
+                : h(
+                    "span",
+                    { class: "muted" },
+                    "nothing - the rules run in the gateway and cost nothing",
+                  ),
+            ],
+            [
+              "Enforcing",
+              f.shadow
+                ? h(
+                    "span",
+                    { class: "muted" },
+                    "no - it runs, but the request goes on as sent",
+                  )
+                : h(
+                    "span",
+                    { class: "muted" },
+                    {
+                      gate: "yes - a refusal drops the request",
+                      pattern:
+                        "yes - the model gets the replaced text, and a REFUSE rule drops the request",
+                    }[mode(f)] || "yes - the model gets the rewrite",
+                  ),
+            ],
+            ["In routers", routerLinks(ctx, usedBy(routers, f.alias))],
+            [
+              "Description",
+              f.description
+                ? h("span", { class: "muted" }, f.description)
+                : dash(),
+            ],
+            [
+              "Last changed",
+              h("span", { class: "muted" }, dateTime(f.updated_at)),
+            ],
+          ]),
         ),
-        h(
-          "div",
-          { class: "card" },
+        card(
+          usesModel(f) ? "Instruction" : "Rules",
           h(
             "div",
-            { class: "card-head" },
-            h("h2", {}, usesModel(f) ? "Instruction" : "Rules"),
-          ),
-          h(
-            "div",
-            { class: "card-body" },
-            h(
-              "div",
-              { class: "prompt-text" },
-              usesModel(f) ? f.prompt : formatRules(f.rules),
-            ),
+            { class: "prompt-text" },
+            usesModel(f) ? f.prompt : formatRules(f.rules),
           ),
         ),
       ),

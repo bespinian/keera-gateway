@@ -1,21 +1,16 @@
 import { api } from "../api.js";
 import {
   h,
-  stat,
-  compact,
-  num,
-  money,
-  moneyStat,
-  ms,
-  tokens,
   go,
   currentRange,
   rangePicker,
   isAdmin,
   banner,
   rangeOf,
+  card,
 } from "../ui.js";
-import { areaChart, barList } from "../chart.js";
+import { barList } from "../chart.js";
+import { overviewTiles, trafficCard } from "./detail.js";
 import { firstRun, firstRunDue, memberRun, memberRunDue } from "./firstrun.js";
 import { openFailed } from "./logfilters.js";
 import { orgNameOf } from "./orgs.js";
@@ -63,8 +58,6 @@ export async function dashboardView(ctx) {
 
   ctx.setSubtitle(rangeOf(since)?.long || "");
 
-  const failRate = o.requests ? (o.failed / o.requests) * 100 : 0;
-
   const header = h(
     "div",
     { class: "row", style: { marginBottom: "16px" } },
@@ -72,102 +65,40 @@ export async function dashboardView(ctx) {
     rangePicker(ctx, since),
   );
 
-  const tiles = h(
-    "div",
-    { class: "grid grid-4" },
-    stat(
-      "Requests",
-      compact(o.requests),
-      o.refused ? `${num(o.refused)} refused` : "none refused",
-    ),
-    stat(
-      "Tokens",
-      compact(o.input_tokens + o.output_tokens),
-      tokens(o.input_tokens, o.output_tokens),
-    ),
-    // What Claude plans paid for is shown beside the cost, not added to it.
-    moneyStat(
-      "Cost",
-      o.cost_micros,
-      o.subscription_micros
-        ? `+ ${money(o.subscription_micros)} covered by Claude plans`
-        : null,
-    ),
-    stat("First token", ms(o.ttft_median_ms), `p95 ${ms(o.ttft_p95_ms)}`),
-  );
-
-  const chartCard = h(
-    "div",
-    { class: "card" },
-    h(
-      "div",
-      { class: "card-head" },
-      h("h2", {}, "Traffic"),
-      h("div", { class: "spacer" }),
-      o.failed > 0
-        ? failureLink(
-            ctx,
-            h("span", { class: "dot" }),
-            `${num(o.failed)} failed (${failRate.toFixed(1)}%)`,
-          )
-        : h(
-            "span",
-            { class: "pill pill-good" },
-            h("span", { class: "dot" }),
-            "No failures",
-          ),
-    ),
-    h("div", { class: "card-body" }, areaChart(o.series, { bucket: o.bucket })),
-  );
-
   const panels = h(
     "div",
     { class: "grid grid-2", style: { marginTop: "16px" } },
-    h(
-      "div",
-      { class: "card" },
-      h(
-        "div",
-        { class: "card-head" },
-        h("h2", {}, "Projects by cost"),
-        h("div", { class: "spacer" }),
-        h(
+    card(
+      "Projects by cost",
+      barList(o.top_projects, {
+        label: (r) => names[r.group] || (r.group ? r.group : "No project"),
+        value: (r) => r.cost_micros,
+        cost: true,
+      }),
+      {
+        tools: h(
           "a",
           { href: "/projects", onClick: go(ctx, "/projects") },
           "All projects",
         ),
-      ),
-      h(
-        "div",
-        { class: "card-body" },
-        barList(o.top_projects, {
-          label: (r) => names[r.group] || (r.group ? r.group : "No project"),
-          value: (r) => r.cost_micros,
-          cost: true,
-        }),
-      ),
+      },
     ),
-    h(
-      "div",
-      { class: "card" },
-      h(
-        "div",
-        { class: "card-head" },
-        h("h2", {}, "Models by tokens"),
-        h("div", { class: "spacer" }),
-        h("a", { href: "/usage", onClick: go(ctx, "/usage") }, "Usage report"),
-      ),
-      h(
-        "div",
-        { class: "card-body" },
-        barList(o.top_models, {
-          // Across organisations, two can have a model of the same alias.
-          label: (r) =>
-            r.org_id ? `${r.group} · ${orgNameOf(ctx, r.org_id)}` : r.group,
-          value: (r) => r.input_tokens + r.output_tokens,
-          colorIndex: 1,
-        }),
-      ),
+    card(
+      "Models by tokens",
+      barList(o.top_models, {
+        // Across organisations, two can have a model of the same alias.
+        label: (r) =>
+          r.org_id ? `${r.group} · ${orgNameOf(ctx, r.org_id)}` : r.group,
+        value: (r) => r.input_tokens + r.output_tokens,
+        colorIndex: 1,
+      }),
+      {
+        tools: h(
+          "a",
+          { href: "/usage", onClick: go(ctx, "/usage") },
+          "Usage report",
+        ),
+      },
     ),
   );
 
@@ -175,8 +106,8 @@ export async function dashboardView(ctx) {
     "div",
     {},
     header,
-    tiles,
-    h("div", { style: { marginTop: "16px" } }, chartCard),
+    overviewTiles(o),
+    trafficCard(o, (text) => failureLink(ctx, text)),
     panels,
   );
 
@@ -201,7 +132,8 @@ export async function dashboardView(ctx) {
 // A member gets a plain pill: their request log holds only their own keys'
 // requests, so it would not match the count. A link, so it can open in a new
 // tab.
-function failureLink(ctx, ...content) {
+function failureLink(ctx, text) {
+  const content = [h("span", { class: "dot" }), text];
   if (!isAdmin(ctx)) {
     return h("span", { class: "pill pill-bad" }, ...content);
   }

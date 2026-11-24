@@ -38,6 +38,7 @@ import {
   trafficSummary,
   gone,
   busyButton,
+  card,
 } from "../ui.js";
 import { barList } from "../chart.js";
 import { oneLine } from "../status.js";
@@ -1100,18 +1101,12 @@ function fieldsFor(env, kind, step, preset) {
 }
 
 function answeredCard(destinations) {
-  return h(
-    "div",
-    { class: "card" },
-    h("div", { class: "card-head" }, h("h2", {}, "Answered by")),
-    h(
-      "div",
-      { class: "card-body" },
-      barList(destinations, {
-        label: (d) => d.alias || "refused before a model",
-        value: (d) => d.requests,
-      }),
-    ),
+  return card(
+    "Answered by",
+    barList(destinations, {
+      label: (d) => d.alias || "refused before a model",
+      value: (d) => d.requests,
+    }),
   );
 }
 
