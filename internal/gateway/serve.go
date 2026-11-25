@@ -71,10 +71,9 @@ type call struct {
 	chain []policy.Model
 
 	// native is the body in the client's own API, for destinations that get
-	// it untranslated (see native.go); nil when none do. translated says some
-	// get the translation. Until then the OpenAI-shaped body is nil.
-	native     *body
-	translated bool
+	// it untranslated (see native.go); nil when none do. The OpenAI-shaped
+	// body is nil until something needs the translation.
+	native *body
 	// audio is a transcription's audio, sent on as it came. It is set for
 	// every transcription and only for one, so after decode a nil check is
 	// how a step tells a transcription.
@@ -691,19 +690,23 @@ func (s *Server) useNative(c *call, b *body) (*body, bool) {
 		}
 		c.chain = kept
 	}
-	native := false
+	native, translated := false, false
 	for _, m := range c.chain {
 		if c.sendsNative(m) {
 			native = true
 		} else {
-			c.translated = true
+			translated = true
 		}
 	}
-	if c.translated {
+	if translated {
 		var ok bool
 		if b, ok = s.translate(c, b); !ok {
 			return nil, false
 		}
+	} else {
+		// A route step's translation goes to no destination. Dropped, so
+		// what follows sizes, bills and filters the body that is sent.
+		b = nil
 	}
 	if !native {
 		c.native = nil
@@ -741,7 +744,7 @@ func (s *Server) useFilters(c *call, b *body) bool {
 		return false
 	}
 	// The translation is made again from what the filters left.
-	if rewrote && c.native != nil && c.translated && !s.retranslate(c, b) {
+	if rewrote && c.native != nil && b != nil && !s.retranslate(c, b) {
 		return false
 	}
 	// Lists the enforcing filters, so a developer can see what changed or

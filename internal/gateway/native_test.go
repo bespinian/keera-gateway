@@ -965,3 +965,33 @@ func TestFiltersCollectTheImagesOfAResponsesRequest(t *testing.T) {
 		t.Errorf("images = %q, want the inline image only", got)
 	}
 }
+
+// A route step may translate the body to read it, then send it only to the
+// client's own API. The translation is then dropped, so the request is sized,
+// filtered and billed as it is sent.
+func TestATranslationNoDestinationGetsIsDropped(t *testing.T) {
+	native, err := parseBody([]byte(`{"model":"m","max_tokens":9,"messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	translated, err := parseBody([]byte(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	anthropic := policy.Model{Alias: "keera-frontier", Provider: "anthropic"}
+	local := policy.Model{Alias: "keera-code"}
+	for _, tc := range []struct {
+		name  string
+		chain []policy.Model
+		want  *body
+	}{
+		{"every destination native", []policy.Model{anthropic}, nil},
+		{"one translated", []policy.Model{anthropic, local}, translated},
+	} {
+		c := &call{surf: messagesSurface, native: native, chain: tc.chain}
+		b, ok := (&Server{}).useNative(c, translated)
+		if !ok || b != tc.want {
+			t.Errorf("%s: body = %p, ok %v; want %p", tc.name, b, ok, tc.want)
+		}
+	}
+}
