@@ -415,12 +415,17 @@ func (c Config) validateOIDC() error {
 				"identity provider may vouch for, or to %q for one that proves every "+
 				"address itself, such as Google", OIDCEnvPrefix(p.Name), p.Name, authn.AnyDomain)
 		}
-		// Any GitHub account can sign in to an OAuth App, and would land in
-		// the one organisation.
-		if p.IsGitHub() && len(p.Domains) == 0 {
-			return fmt.Errorf("set %sDOMAINS: any GitHub account can sign in, so name the "+
+		// Any GitHub account can sign in to an OAuth App, and any Google
+		// account to an external Google client. Each would land in the one
+		// organisation.
+		if (p.IsGitHub() || p.IsGoogle()) && len(p.Domains) == 0 {
+			public := "GitHub"
+			if p.IsGoogle() {
+				public = "Google"
+			}
+			return fmt.Errorf("set %sDOMAINS: any %s account can sign in, so name the "+
 				"email domains of the people who may, or %q where people sign up",
-				OIDCEnvPrefix(p.Name), authn.AnyDomain)
+				OIDCEnvPrefix(p.Name), public, authn.AnyDomain)
 		}
 		if p.IsEntraAnyTenant() {
 			if err := entraAnyTenant(p); err != nil {

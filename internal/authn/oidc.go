@@ -200,7 +200,7 @@ func NewOIDC(ctx context.Context, cfg OIDCConfig, client *http.Client) (*OIDC, e
 				"issuer %q, not %q", cfg.IssuerURL, meta.Issuer, entraIssuer)
 		}
 	}
-	google := isGoogle(cfg.IssuerURL)
+	google := cfg.IsGoogle()
 	scopes := cfg.Scopes
 	if len(scopes) == 0 {
 		scopes = []string{oidc.ScopeOpenID, "profile", "email"}
@@ -225,8 +225,8 @@ func NewOIDC(ctx context.Context, cfg OIDCConfig, client *http.Client) (*OIDC, e
 	}, nil
 }
 
-func isGoogle(issuer string) bool {
-	u, err := url.Parse(issuer)
+func (c OIDCConfig) IsGoogle() bool {
+	u, err := url.Parse(c.IssuerURL)
 	return err == nil && u.Host == "accounts.google.com"
 }
 

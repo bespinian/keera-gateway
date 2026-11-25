@@ -601,8 +601,8 @@ func TestGoogleIsRecognisedByItsIssuer(t *testing.T) {
 		"https://login.microsoftonline.com/tenant/v2.0":       false,
 		"https://accounts.google.com.attacker.example/issuer": false,
 	} {
-		if got := isGoogle(issuer); got != want {
-			t.Errorf("isGoogle(%q) = %v, want %v", issuer, got, want)
+		if got := (OIDCConfig{IssuerURL: issuer}).IsGoogle(); got != want {
+			t.Errorf("IsGoogle(%q) = %v, want %v", issuer, got, want)
 		}
 	}
 }

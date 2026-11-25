@@ -179,6 +179,26 @@ func TestGitHubNeedsDomains(t *testing.T) {
 	}
 }
 
+// Any Google account can sign in to an external Google client, so a Google
+// provider must name its domains, even when it is the only one.
+func TestGoogleNeedsDomains(t *testing.T) {
+	t.Setenv("KEERA_OIDC_PROVIDERS", "google")
+	t.Setenv("KEERA_OIDC_GOOGLE_ISSUER", "https://accounts.google.com")
+	t.Setenv("KEERA_OIDC_GOOGLE_CLIENT_ID", "google-client")
+	t.Setenv("KEERA_OIDC_GOOGLE_CLIENT_SECRET", "google-secret")
+
+	c := Config{PublicURL: "https://keera.example.ch", OIDC: oidcProviders("https://keera.example.ch")}
+	if err := c.validateOIDC(); err == nil {
+		t.Error("a Google provider without domains was accepted")
+	}
+
+	t.Setenv("KEERA_OIDC_GOOGLE_DOMAINS", "example.ch")
+	c.OIDC = oidcProviders("https://keera.example.ch")
+	if err := c.validateOIDC(); err != nil {
+		t.Errorf("a Google provider with domains: %v", err)
+	}
+}
+
 // An LDAP directory needs no OAuth client, and its administrator sets every
 // address, so it must name its domains and cannot let strangers sign up.
 func TestLDAPProvider(t *testing.T) {
