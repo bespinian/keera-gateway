@@ -176,6 +176,10 @@ func (s *Server) cliHandOver(r *http.Request, flow store.LoginFlow, user store.U
 // is signed in to the panel, so the person is not asked again. It reports
 // whether it answered.
 //
+// With silent=1, a browser that is not signed in goes back too, with
+// error=login_required. The app tries that first, so a person signed in to
+// the panel never sees the app's own list of ways to sign in.
+//
 // Only for an app the operator named: its address is fixed, and its state
 // check stops a link from finishing someone else's sign-in. A terminal still
 // signs in the usual way, since any local program can start one.
@@ -187,9 +191,10 @@ func (s *Server) alreadySignedIn(w http.ResponseWriter, r *http.Request) bool {
 	if _, ok := appFor(cli.Redirect, s.apps()); !ok {
 		return false
 	}
+	silent := r.URL.Query().Get("silent") == "1"
 	p, err := s.sessionPrincipal(r)
 	if err != nil {
-		return false
+		return silent && loginRequired(w, r, cli)
 	}
 	user, err := s.st.UserByID(r.Context(), p.UserID)
 	if err != nil {
@@ -204,6 +209,14 @@ func (s *Server) alreadySignedIn(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	http.Redirect(w, r, to, http.StatusFound)
+	return true
+}
+
+// loginRequired tells an app that this browser is not signed in, so it can
+// show its own way to sign in. It always answers.
+func loginRequired(w http.ResponseWriter, r *http.Request, cli cliLogin) bool {
+	q := url.Values{"error": {"login_required"}, "state": {cli.State}}
+	http.Redirect(w, r, cli.Redirect+"?"+q.Encode(), http.StatusFound)
 	return true
 }
 

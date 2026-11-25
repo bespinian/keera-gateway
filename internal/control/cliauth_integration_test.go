@@ -248,12 +248,15 @@ func TestASignedInBrowserIsHandedStraightBackToAnApp(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	verifier := authn.NewCLIVerifier()
-	start := func(redirect string, signedIn bool) *url.URL {
+	start := func(redirect string, signedIn, silent bool) *url.URL {
 		t.Helper()
 		q := url.Values{
 			"cli_redirect":  {redirect},
 			"cli_challenge": {authn.CLIChallenge(verifier)},
 			"cli_state":     {"state-1"},
+		}
+		if silent {
+			q.Set("silent", "1")
 		}
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 			ts.URL+httpx.ControlPrefix+"/auth/login?"+q.Encode(), nil)
@@ -279,7 +282,7 @@ func TestASignedInBrowserIsHandedStraightBackToAnApp(t *testing.T) {
 		return to
 	}
 
-	to := start(chat+AppCallbackPath, true)
+	to := start(chat+AppCallbackPath, true, false)
 	if got := to.Scheme + "://" + to.Host + to.Path; got != chat+AppCallbackPath {
 		t.Fatalf("signed in, the sign-in went to %q, want chat's callback", got)
 	}
@@ -302,11 +305,28 @@ func TestASignedInBrowserIsHandedStraightBackToAnApp(t *testing.T) {
 	}
 
 	// Signed out, chat goes through the usual sign-in.
-	if to := start(chat+AppCallbackPath, false); to.Host == "chat.example.ch" {
+	if to := start(chat+AppCallbackPath, false, false); to.Host == "chat.example.ch" {
 		t.Errorf("signed out, the sign-in went straight back to chat: %s", to)
 	}
 	// A terminal is not handed a token without being asked.
-	if to := start("http://127.0.0.1:1234/callback", true); to.Host == "127.0.0.1:1234" {
+	if to := start("http://127.0.0.1:1234/callback", true, false); to.Host == "127.0.0.1:1234" {
 		t.Errorf("a terminal was handed a sign-in without asking: %s", to)
+	}
+
+	// Asked silently, a signed-in browser gets a code as before.
+	if to := start(chat+AppCallbackPath, true, true); to.Query().Get("code") == "" {
+		t.Errorf("signed in and silent, the sign-in went to %s, want a code", to)
+	}
+	// Signed out, it goes back to chat with login_required, and no code.
+	to = start(chat+AppCallbackPath, false, true)
+	if got := to.Scheme + "://" + to.Host + to.Path; got != chat+AppCallbackPath {
+		t.Fatalf("signed out and silent, the sign-in went to %q, want chat's callback", got)
+	}
+	if q := to.Query(); q.Get("error") != "login_required" || q.Get("state") != "state-1" || q.Has("code") {
+		t.Errorf("signed out and silent, chat got %v, want login_required and its state", q)
+	}
+	// Silent means nothing to a terminal.
+	if to := start("http://127.0.0.1:1234/callback", false, true); to.Host == "127.0.0.1:1234" {
+		t.Errorf("a terminal was answered silently: %s", to)
 	}
 }

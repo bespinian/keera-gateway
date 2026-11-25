@@ -152,11 +152,19 @@ paths:
           in: query
           description: Handed back with the code. Needed with `cli_redirect`; up to 128 characters.
           schema: { type: string, maxLength: 128 }
+        - name: silent
+          in: query
+          description: |
+            `1` asks only whether this browser is signed in to the panel, for
+            Keera Chat and Keera Agents. If it is not, the browser goes back to
+            the app's callback with `error=login_required` and the state.
+          schema: { type: string, enum: ["1"] }
       responses:
         "302":
           description: |
             To the identity provider, to the panel's password or passkey
-            form, or back to the sign-in screen with an error.
+            form, back to the sign-in screen with an error, or back to Keera
+            Chat or Keera Agents.
           headers:
             Location:
               schema:
