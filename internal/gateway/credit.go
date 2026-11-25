@@ -1,7 +1,11 @@
 package gateway
 
 import (
+	"bytes"
+	"cmp"
+	"encoding/json"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/httpx"
@@ -172,9 +176,12 @@ const mostOutputTokens = 10_000_000
 // request is charged.
 func (s *Server) creditHold(c *call, b *body) int64 {
 	t, in := c.most(b)
+	media := mediaIn(b)
 	var most int64
 	for _, m := range s.billedAnswerers(c) {
-		if line, ok := m.Bill(t, t); ok {
+		answer := t
+		answer.Input = media.mostInput(answer.Input, cmp.Or(m.MaxContext, unknownContextTokens))
+		if line, ok := m.Bill(answer, answer); ok {
 			most = max(most, line.CreditMicros)
 		}
 	}
@@ -186,6 +193,121 @@ func (s *Server) creditHold(c *call, b *body) int64 {
 		}
 	}
 	return most + s.filtersHold(c.res.Key.OrgID, s.callFilters(c), in)
+}
+
+// unknownContextTokens is held as the prompt of a model with no stated
+// context that is sent content its bytes do not bound.
+const unknownContextTokens = 1_000_000
+
+// media is what a body sends that is billed by more than its bytes. A few
+// bytes can stand for a large image, or for a whole context of tokens.
+type media struct {
+	// images are inline images. A provider bills one by its pixels, up to
+	// imageTokensAtMost.
+	images int
+	// unbounded is content whose cost only the model's context bounds: an
+	// image, document or file the provider fetches itself, or an inline
+	// document, audio or video. A compressed PDF can hold a hundred pages
+	// in a few kilobytes.
+	unbounded bool
+}
+
+// mostInput is the most prompt a request of input tokens by its bytes may be
+// billed, at a model with a context of context tokens.
+func (m media) mostInput(input, context int) int {
+	switch {
+	case m.unbounded:
+		return max(input, context)
+	case m.images > 0:
+		return max(input, min(input+m.images*imageTokensAtMost, context))
+	}
+	return input
+}
+
+// mediaIn finds the media in a body's messages or input.
+func mediaIn(b *body) media {
+	var m media
+	for _, field := range []string{"messages", "input"} {
+		raw, ok := b.value(field)
+		if !ok || !mayCarryMedia(raw) {
+			continue
+		}
+		var v any
+		if json.Unmarshal(raw, &v) == nil {
+			m.scan(v)
+		}
+	}
+	return m
+}
+
+// mayCarryMedia spares decoding most bodies again: those with no key or value
+// that names media. Nested values pass through as the client wrote them, so a
+// key spelled with a \u escape counts too.
+func mayCarryMedia(raw []byte) bool {
+	for _, marker := range []string{`url"`, `"file_id"`, `"file_data"`, `"input_audio"`, `"base64"`, `\u`} {
+		if bytes.Contains(raw, []byte(marker)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *media) scan(v any) {
+	switch v := v.(type) {
+	case []any:
+		for _, inner := range v {
+			m.scan(inner)
+		}
+	case map[string]any:
+		// Anthropic's source of an image or document: {"type": "url", "url": ...}
+		// or {"type": "base64", "data": ...}. Only an image block's is
+		// bounded by its pixels.
+		if v["type"] == "url" && remote(v["url"]) {
+			m.unbounded = true
+		}
+		if src, ok := v["source"].(map[string]any); ok && src["type"] == "base64" {
+			if v["type"] == "image" {
+				m.images++
+			} else {
+				m.unbounded = true
+			}
+		}
+		for key, inner := range v {
+			switch key {
+			case "file_id", "file_url", "file_data":
+				if s, _ := inner.(string); s != "" {
+					m.unbounded = true
+				}
+			case "input_audio", "audio_url", "video_url":
+				if inner != nil {
+					m.unbounded = true
+				}
+			case "image_url":
+				if obj, ok := inner.(map[string]any); ok {
+					inner = obj["url"]
+				}
+				if s, _ := inner.(string); s != "" {
+					if remote(s) {
+						m.unbounded = true
+					} else {
+						m.images++
+					}
+				}
+			// A tool's arguments are the model's words, not media.
+			case "input", "arguments":
+				if v["type"] == "tool_use" || v["type"] == "server_tool_use" {
+					continue
+				}
+			}
+			m.scan(inner)
+		}
+	}
+}
+
+// remote reports whether a URL is fetched, as opposed to inline data.
+func remote(v any) bool {
+	s, _ := v.(string)
+	return s != "" && !strings.HasPrefix(s, "data:")
 }
 
 // filtersHold is the most the billed filters may cost to read in tokens. Each

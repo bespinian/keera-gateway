@@ -167,6 +167,20 @@ func waitFor(t *testing.T, what string, done func() bool) {
 	}
 }
 
+// mostHeld waits for every hold to be given back, and says the most that was
+// held at once.
+func mostHeld(t *testing.T, h *harness) int64 {
+	t.Helper()
+	waitFor(t, "the hold to be given back", func() bool {
+		h.budgets.mu.Lock()
+		defer h.budgets.mu.Unlock()
+		return h.budgets.held == 0
+	})
+	h.budgets.mu.Lock()
+	defer h.budgets.mu.Unlock()
+	return h.budgets.mostHeld
+}
+
 // Holding the most it may cost stops parallel requests spending the same
 // credit.
 func TestARequestOnTheDeploymentsKeyHoldsCreditWhileItRuns(t *testing.T) {
@@ -180,15 +194,8 @@ func TestARequestOnTheDeploymentsKeyHoldsCreditWhileItRuns(t *testing.T) {
 	// The filter's model is on the organisation's own key, so it adds nothing.
 	most := policy.Tokens{Input: len(body) / bytesPerToken, Output: 1000}
 	want, _ := h.src.models["keera-code"].Bill(most, most)
-	waitFor(t, "the hold to be given back", func() bool {
-		h.budgets.mu.Lock()
-		defer h.budgets.mu.Unlock()
-		return h.budgets.held == 0
-	})
-	h.budgets.mu.Lock()
-	defer h.budgets.mu.Unlock()
-	if h.budgets.mostHeld != want.CreditMicros || want.CreditMicros == 0 {
-		t.Errorf("held = %d, want %d", h.budgets.mostHeld, want.CreditMicros)
+	if held := mostHeld(t, h); held != want.CreditMicros || want.CreditMicros == 0 {
+		t.Errorf("held = %d, want %d", held, want.CreditMicros)
 	}
 }
 
@@ -207,15 +214,8 @@ func TestARoutedRequestHoldsItsDecisionOnTopOfItsAnswer(t *testing.T) {
 	decided := policy.Tokens{Input: in, Output: routeOutputTokens}
 	decision, _ := h.src.models["keera-picker"].Bill(decided, decided)
 	want := answer.CreditMicros + 2*decision.CreditMicros
-	waitFor(t, "the hold to be given back", func() bool {
-		h.budgets.mu.Lock()
-		defer h.budgets.mu.Unlock()
-		return h.budgets.held == 0
-	})
-	h.budgets.mu.Lock()
-	defer h.budgets.mu.Unlock()
-	if h.budgets.mostHeld != want || decision.CreditMicros == 0 {
-		t.Errorf("held = %d, want %d", h.budgets.mostHeld, want)
+	if held := mostHeld(t, h); held != want || decision.CreditMicros == 0 {
+		t.Errorf("held = %d, want %d", held, want)
 	}
 }
 
@@ -678,5 +678,140 @@ func TestAFiltersCallWithoutUsageIsBilledItsCeiling(t *testing.T) {
 	ev := h.sink.last(t)
 	if len(ev.Bills) != 1 || ev.Bills[0].Alias != "keera-guard" || ev.Bills[0].OutputTokens == 0 {
 		t.Errorf("bills = %+v, want the filter's call billed at its ceiling", ev.Bills)
+	}
+}
+
+// Content the provider fetches itself costs tokens the body does not show, so
+// the hold is the model's whole context. An inline image costs its pixels, not
+// its bytes: a blank PNG of a few hundred bytes is held as a whole image.
+func TestMediaHoldsMoreThanItsBytes(t *testing.T) {
+	const context = 200_000
+	for _, tt := range []struct {
+		name, url string
+		input     func(body string) int
+	}{
+		{
+			"fetched by the provider", "https://example.ch/large.png",
+			func(string) int { return context },
+		},
+		{
+			"inline image", "data:image/png;base64,AAAA",
+			func(body string) int { return len(body)/bytesPerToken + imageTokensAtMost },
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h := filterHarness(t, redactor, nil)
+			onPlatformKey(h, "keera-code")
+			m := h.src.models["keera-code"]
+			m.MaxContext = context
+			h.src.models["keera-code"] = m
+
+			body := `{"model":"keera-code","max_tokens":1000,"messages":[{"role":"user","content":[` +
+				`{"type":"image_url","image_url":{"url":"` + tt.url + `"}}]}]}`
+			h.post(t, "/v1/chat/completions", body)
+
+			most := policy.Tokens{Input: tt.input(body), Output: 1000}
+			want, _ := m.Bill(most, most)
+			if held := mostHeld(t, h); held != want.CreditMicros {
+				t.Errorf("held = %d, want %d", held, want.CreditMicros)
+			}
+		})
+	}
+}
+
+func TestMediaIn(t *testing.T) {
+	const pdf = `"data:application/pdf;base64,JVBERi0="`
+	tests := []struct {
+		name, body string
+		want       media
+	}{
+		{"text", `{"messages":[{"role":"user","content":"read https://example.ch"}]}`, media{}},
+		{"inline image", `{"messages":[{"role":"user","content":[` +
+			`{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}]}]}`, media{images: 1}},
+		{"inline images in Responses", `{"input":[{"role":"user","content":[` +
+			`{"type":"input_image","image_url":"data:image/png;base64,AAAA"},` +
+			`{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]}]}`, media{images: 2}},
+		{
+			"Anthropic inline image", `{"messages":[{"role":"user","content":[` +
+				`{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}}]}]}`,
+			media{images: 1},
+		},
+		{
+			"image in a tool result", `{"messages":[{"role":"user","content":[{"type":"tool_result",` +
+				`"tool_use_id":"t","content":[{"type":"image","source":{"type":"base64","data":"AAAA"}}]}]}]}`,
+			media{images: 1},
+		},
+		{"image by URL", `{"messages":[{"role":"user","content":[` +
+			`{"type":"image_url","image_url":{"url":"https://example.ch/a.png"}}]}]}`, media{unbounded: true}},
+		{"image URL as a string", `{"input":[{"role":"user","content":[` +
+			`{"type":"input_image","image_url":"https://example.ch/a.png"}]}]}`, media{unbounded: true}},
+		{
+			"Anthropic document by URL", `{"messages":[{"role":"user","content":[` +
+				`{"type":"document","source":{"type":"url","url":"https://example.ch/a.pdf"}}]}]}`,
+			media{unbounded: true},
+		},
+		{
+			"Anthropic inline document", `{"messages":[{"role":"user","content":[` +
+				`{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0="}}]}]}`,
+			media{unbounded: true},
+		},
+		{
+			"Anthropic text document", `{"messages":[{"role":"user","content":[` +
+				`{"type":"document","source":{"type":"text","media_type":"text/plain","data":"hi"}}]}]}`,
+			media{},
+		},
+		{"Anthropic file", `{"messages":[{"role":"user","content":[` +
+			`{"type":"document","source":{"type":"file","file_id":"file_1"}}]}]}`, media{unbounded: true}},
+		{"chat file", `{"messages":[{"role":"user","content":[` +
+			`{"type":"file","file":{"file_id":"file_1"}}]}]}`, media{unbounded: true}},
+		{"chat inline file", `{"messages":[{"role":"user","content":[` +
+			`{"type":"file","file":{"filename":"a.pdf","file_data":` + pdf + `}}]}]}`, media{unbounded: true}},
+		{"Responses inline file", `{"input":[{"role":"user","content":[` +
+			`{"type":"input_file","filename":"a.pdf","file_data":` + pdf + `}]}]}`, media{unbounded: true}},
+		{"Responses file by URL", `{"input":[{"role":"user","content":[` +
+			`{"type":"input_file","file_url":"https://example.ch/a.pdf"}]}]}`, media{unbounded: true}},
+		{"inline audio", `{"messages":[{"role":"user","content":[` +
+			`{"type":"input_audio","input_audio":{"data":"AAAA","format":"wav"}}]}]}`, media{unbounded: true}},
+		{"inline video", `{"messages":[{"role":"user","content":[` +
+			`{"type":"video_url","video_url":{"url":"data:video/mp4;base64,AAAA"}}]}]}`, media{unbounded: true}},
+		{"escaped key", `{"messages":[{"role":"user","content":[` +
+			`{"type":"image_url","image\u005furl":{"url":"https://example.ch/a.png"}}]}]}`, media{unbounded: true}},
+		{
+			"a tool's arguments", `{"messages":[{"role":"assistant","content":[` +
+				`{"type":"tool_use","id":"t","name":"fetch","input":{"file_id":"x","url":"https://example.ch"}}]}]}`,
+			media{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, err := parseBody([]byte(tt.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := mediaIn(b); got != tt.want {
+				t.Errorf("mediaIn = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMostInput(t *testing.T) {
+	tests := []struct {
+		name  string
+		media media
+		want  int
+	}{
+		{"text", media{}, 1000},
+		{"an image", media{images: 1}, 1000 + imageTokensAtMost},
+		{"more images than fit", media{images: 100}, 200_000},
+		{"a document", media{unbounded: true}, 200_000},
+	}
+	for _, tt := range tests {
+		if got := tt.media.mostInput(1000, 200_000); got != tt.want {
+			t.Errorf("%s: mostInput = %d, want %d", tt.name, got, tt.want)
+		}
+	}
+	if got := (media{unbounded: true}).mostInput(300_000, 200_000); got != 300_000 {
+		t.Errorf("a body larger than the context: mostInput = %d, want 300000", got)
 	}
 }
