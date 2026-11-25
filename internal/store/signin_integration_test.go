@@ -17,10 +17,10 @@ func TestSessionsExpireAndAreTouchedAtMostOnceAMinute(t *testing.T) {
 	}
 	live := []byte("session-hash-000000000000000001!")
 	dead := []byte("session-hash-000000000000000002!")
-	if err := st.CreateSession(ctx, live, user.ID, "csrf-1", now.Add(time.Hour)); err != nil {
+	if err := st.CreateSession(ctx, live, user.ID, "csrf-1", now.Add(time.Hour), nil); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if err := st.CreateSession(ctx, dead, user.ID, "csrf-2", now.Add(-time.Minute)); err != nil {
+	if err := st.CreateSession(ctx, dead, user.ID, "csrf-2", now.Add(-time.Minute), nil); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 

@@ -202,7 +202,7 @@ func TestNoRouteLetsOneTenantReachAnother(t *testing.T) {
 		t.Fatal(err)
 	}
 	token, hash, csrf := authn.NewSession()
-	if err := st.CreateSession(ctx, hash, eve.ID, csrf, time.Now().Add(time.Hour)); err != nil {
+	if err := st.CreateSession(ctx, hash, eve.ID, csrf, time.Now().Add(time.Hour), nil); err != nil {
 		t.Fatal(err)
 	}
 

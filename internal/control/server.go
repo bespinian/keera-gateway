@@ -11,6 +11,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -443,6 +444,9 @@ type secretHash struct {
 func newSecretHash(secret string) secretHash {
 	return secretHash{sum: sha256.Sum256([]byte(secret)), set: secret != ""}
 }
+
+// hex is the secret's hash, to keep and compare without the secret.
+func (h secretHash) hex() string { return hex.EncodeToString(h.sum[:]) }
 
 // matches is false while no secret is set: otherwise an empty one would accept
 // sha256(""), which anyone can send.

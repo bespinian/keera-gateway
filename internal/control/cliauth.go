@@ -163,7 +163,7 @@ func validChallenge(s string) bool { return auth.Encoded32(s) }
 func (s *Server) cliHandOver(r *http.Request, flow store.LoginFlow, user store.User) (string, error) {
 	code, hash := authn.NewCLICode()
 	if err := s.st.CreateCLICode(r.Context(), hash, user.ID, flow.CLIChallenge,
-		time.Now().Add(authn.CLICodeTTL)); err != nil {
+		time.Now().Add(authn.CLICodeTTL), s.sealOperatorKey(user)); err != nil {
 		return "", err
 	}
 	// The redirect was rebuilt without a query at the start, so appending one
@@ -268,7 +268,10 @@ func (s *Server) cliToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	expires := time.Now().Add(ttl)
-	if err := s.st.CreateCLIToken(r.Context(), hash, user.ID, expires); err != nil {
+	// The code's operator key, not the current one: a key changed since then
+	// ends this sign-in too.
+	if err := s.st.CreateCLIToken(r.Context(), hash, user.ID, expires,
+		code.OperatorKey); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -309,6 +312,9 @@ func (s *Server) cliPrincipal(r *http.Request, token string) (*authn.Principal, 
 	hash := auth.Hash(token)
 	tu, err := s.st.LookupCLIToken(r.Context(), hash)
 	if err != nil {
+		return nil, authn.ErrUnauthenticated
+	}
+	if tu.User.ExternalID == operatorKeyExternalID && !s.signedInWithOperatorKey(tu.OperatorKey) {
 		return nil, authn.ErrUnauthenticated
 	}
 	user, ok := s.checkDirectory(r, tu.User, tu.Directory)

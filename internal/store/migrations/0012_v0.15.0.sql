@@ -70,3 +70,11 @@ UPDATE models SET capabilities = known.capabilities
     ) AS known (provider, backend_model, capabilities)
     WHERE models.kind = 'chat' AND models.provider = known.provider
         AND models.backend_model = known.backend_model;
+
+-- The operator key a sign-in was made with, sealed with KEERA_SECRET_KEY, so
+-- changing the key ends its sessions, and the tokens Keera Chat and Keera
+-- Agents were handed for them. Empty for everyone else. Sign-ins made with the
+-- key before this have none and end now.
+ALTER TABLE sessions ADD COLUMN operator_key bytea;
+ALTER TABLE cli_codes ADD COLUMN operator_key bytea;
+ALTER TABLE cli_tokens ADD COLUMN operator_key bytea;

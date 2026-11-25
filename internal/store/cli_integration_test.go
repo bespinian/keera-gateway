@@ -29,7 +29,7 @@ func TestACLICodeIsRedeemedExactlyOnce(t *testing.T) {
 
 	hash := []byte("code-hash-one-code-hash-one-0123")
 	if err := st.CreateCLICode(ctx, hash, userID, "challenge",
-		time.Now().Add(time.Minute)); err != nil {
+		time.Now().Add(time.Minute), nil); err != nil {
 		t.Fatalf("recording the code: %v", err)
 	}
 
@@ -52,7 +52,7 @@ func TestAnExpiredCLICodeIsAlreadyGone(t *testing.T) {
 
 	hash := []byte("code-hash-two-code-hash-two-0123")
 	if err := st.CreateCLICode(ctx, hash, userID, "challenge",
-		time.Now().Add(-time.Second)); err != nil {
+		time.Now().Add(-time.Second), nil); err != nil {
 		t.Fatalf("recording the code: %v", err)
 	}
 	if _, err := st.TakeCLICode(ctx, hash); !errors.Is(err, ErrNotFound) {
@@ -68,7 +68,7 @@ func TestACLITokenResolvesToThePersonBehindIt(t *testing.T) {
 
 	hash := []byte("token-hash-one-token-hash-one-01")
 	if err := st.CreateCLIToken(ctx, hash, userID,
-		time.Now().Add(time.Hour)); err != nil {
+		time.Now().Add(time.Hour), nil); err != nil {
 		t.Fatalf("storing the token: %v", err)
 	}
 	tu, err := st.LookupCLIToken(ctx, hash)
@@ -94,7 +94,7 @@ func TestAnExpiredCLITokenIsNotAToken(t *testing.T) {
 
 	hash := []byte("token-hash-two-token-hash-two-01")
 	if err := st.CreateCLIToken(ctx, hash, userID,
-		time.Now().Add(-time.Second)); err != nil {
+		time.Now().Add(-time.Second), nil); err != nil {
 		t.Fatalf("storing the token: %v", err)
 	}
 	if _, err := st.LookupCLIToken(ctx, hash); !errors.Is(err, ErrNotFound) {
@@ -111,11 +111,11 @@ func TestSigningSomebodyOutReachesTheirTerminals(t *testing.T) {
 	token := []byte("token-hash-out-token-hash-out-01")
 	code := []byte("code-hash-out--code-hash-out--01")
 	if err := st.CreateCLIToken(ctx, token, userID,
-		time.Now().Add(time.Hour)); err != nil {
+		time.Now().Add(time.Hour), nil); err != nil {
 		t.Fatalf("storing the token: %v", err)
 	}
 	if err := st.CreateCLICode(ctx, code, userID, "challenge",
-		time.Now().Add(time.Minute)); err != nil {
+		time.Now().Add(time.Minute), nil); err != nil {
 		t.Fatalf("recording the code: %v", err)
 	}
 

@@ -19,7 +19,7 @@ func TestDeleteOrgTakesItsTenancyAndKeepsItsHistory(t *testing.T) {
 		t.Fatalf("AddUser: %v", err)
 	}
 	hash := []byte("session-hash-000000000000000001!")
-	if err := st.CreateSession(ctx, hash, user.ID, "csrf", now.Add(time.Hour)); err != nil {
+	if err := st.CreateSession(ctx, hash, user.ID, "csrf", now.Add(time.Hour), nil); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	for _, sc := range []struct {
@@ -494,7 +494,7 @@ func TestListUsersSaysWhenEachPersonWasLastActive(t *testing.T) {
 		t.Fatalf("AddUser: %v", err)
 	}
 	if err := st.CreateCLIToken(ctx, []byte("cli-token-hash-00000000000000001"), busy.ID,
-		time.Now().Add(time.Hour)); err != nil {
+		time.Now().Add(time.Hour), nil); err != nil {
 		t.Fatalf("CreateCLIToken: %v", err)
 	}
 	// A request after the sign-in is later, so it shows.
@@ -541,7 +541,7 @@ func TestListUsersSaysWhenEachPersonWasLastActive(t *testing.T) {
 
 	// Signing in alone counts too.
 	if err := st.CreateSession(ctx, []byte("session-hash-000000000000000009!"), idle.ID, "csrf",
-		time.Now().Add(time.Hour)); err != nil {
+		time.Now().Add(time.Hour), nil); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	users, err = st.ListUsers(ctx, f.orgID)

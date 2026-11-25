@@ -13,17 +13,20 @@ import (
 type Session struct {
 	CSRF      string
 	CreatedAt time.Time
+	// OperatorKey is the sealed operator key a session signed in with, and
+	// nil for everyone else.
+	OperatorKey []byte
 }
 
 // CreateSession stores a session under the hash of its cookie value, and
 // notes that its person signed in.
 func (s *Store) CreateSession(ctx context.Context, hash []byte, userID, csrf string,
-	expires time.Time,
+	expires time.Time, operatorKey []byte,
 ) error {
 	_, err := s.pool.Exec(ctx, `WITH signed_in AS (
 			UPDATE users SET signed_in_at = now() WHERE id = $2)
-		INSERT INTO sessions (id, user_id, csrf, expires_at)
-		VALUES ($1,$2,$3,$4)`, hash, userID, csrf, expires)
+		INSERT INTO sessions (id, user_id, csrf, expires_at, operator_key)
+		VALUES ($1,$2,$3,$4,$5)`, hash, userID, csrf, expires, operatorKey)
 	return err
 }
 
@@ -39,8 +42,9 @@ type SessionUser struct {
 // disabled person, is reported as missing.
 func (s *Store) LookupSession(ctx context.Context, hash []byte) (SessionUser, error) {
 	var su SessionUser
-	dest := append([]any{&su.Session.CSRF, &su.Session.CreatedAt}, userTargets(&su.User)...)
-	err := s.pool.QueryRow(ctx, `SELECT s.csrf, s.created_at,
+	dest := append([]any{&su.Session.CSRF, &su.Session.CreatedAt, &su.Session.OperatorKey},
+		userTargets(&su.User)...)
+	err := s.pool.QueryRow(ctx, `SELECT s.csrf, s.created_at, s.operator_key,
 		`+userColumnsOf("u.")+`, `+directoryColumns+`
 		FROM sessions s JOIN users u ON u.id = s.user_id`+identityJoin+`
 		WHERE s.id = $1 AND s.expires_at > now() AND u.disabled_at IS NULL`, hash,

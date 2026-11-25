@@ -367,7 +367,7 @@ func TestATerminalTokenActsInTheOrganisationItNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	token, hash := authn.NewCLIToken()
-	if err := s.st.CreateCLIToken(ctx, hash, user.ID, time.Now().Add(authn.SignInTTL)); err != nil {
+	if err := s.st.CreateCLIToken(ctx, hash, user.ID, time.Now().Add(authn.SignInTTL), nil); err != nil {
 		t.Fatal(err)
 	}
 	me := func(orgID string) whoAmI {

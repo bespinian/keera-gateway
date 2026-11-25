@@ -68,7 +68,7 @@ func signedInThroughADirectory(t *testing.T, refreshToken string) directorySetup
 		}
 	}
 	token, hash := authn.NewCLIToken()
-	if err := st.CreateCLIToken(ctx, hash, user.ID, time.Now().Add(authn.SignInTTL)); err != nil {
+	if err := st.CreateCLIToken(ctx, hash, user.ID, time.Now().Add(authn.SignInTTL), nil); err != nil {
 		t.Fatalf("creating the token: %v", err)
 	}
 	return directorySetup{srv: srv, ts: ts, st: st, idp: idp, user: user, token: token}

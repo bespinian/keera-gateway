@@ -34,7 +34,7 @@ func signedInAtATerminal(t *testing.T, verifier string) (*httptest.Server, strin
 
 	code, hash := authn.NewCLICode()
 	if err := st.CreateCLICode(ctx, hash, user.ID, authn.CLIChallenge(verifier),
-		time.Now().Add(authn.CLICodeTTL)); err != nil {
+		time.Now().Add(authn.CLICodeTTL), nil); err != nil {
 		t.Fatalf("recording the code: %v", err)
 	}
 
@@ -239,7 +239,7 @@ func TestASignedInBrowserIsHandedStraightBackToAnApp(t *testing.T) {
 		t.Fatalf("creating the person: %v", err)
 	}
 	session, hash, csrf := authn.NewSession()
-	if err := st.CreateSession(ctx, hash, user.ID, csrf, time.Now().Add(time.Hour)); err != nil {
+	if err := st.CreateSession(ctx, hash, user.ID, csrf, time.Now().Add(time.Hour), nil); err != nil {
 		t.Fatalf("creating the session: %v", err)
 	}
 	srv := New(st, nil, nil, nil, Options{OperatorKey: testOperatorKey, ChatURL: chat},

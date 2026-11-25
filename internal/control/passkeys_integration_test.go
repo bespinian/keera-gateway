@@ -321,7 +321,7 @@ func TestAnAdministratorKeepsToTheirDomain(t *testing.T) {
 	}
 	b := e.browser()
 	token, hash, csrf := authn.NewSession()
-	if err := e.st.CreateSession(e.ctx, hash, admin.ID, csrf, time.Now().Add(time.Hour)); err != nil {
+	if err := e.st.CreateSession(e.ctx, hash, admin.ID, csrf, time.Now().Add(time.Hour), nil); err != nil {
 		t.Fatal(err)
 	}
 	u, _ := url.Parse(e.ts.URL)
@@ -474,7 +474,7 @@ func TestAddingAPasskeyNeedsARecentBrowserSignIn(t *testing.T) {
 	}
 
 	cli, hash := authn.NewCLIToken()
-	if err := e.st.CreateCLIToken(e.ctx, hash, userID, time.Now().Add(time.Hour)); err != nil {
+	if err := e.st.CreateCLIToken(e.ctx, hash, userID, time.Now().Add(time.Hour), nil); err != nil {
 		t.Fatal(err)
 	}
 	req, _ := http.NewRequest("POST", e.ts.URL+httpx.ControlPrefix+"/v1/passkeys/options", nil)

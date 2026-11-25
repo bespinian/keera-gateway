@@ -394,6 +394,30 @@ func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// operatorKeySeal names the operator key sealed on a sign-in.
+const operatorKeySeal = "session:operator-key"
+
+// sealOperatorKey is the current operator key, sealed, for a sign-in of the
+// operator key's stand-in, and nil for anyone else. A session, a one-time
+// code and a token each keep it, so changing the key ends them all.
+func (s *Server) sealOperatorKey(user store.User) []byte {
+	if user.ExternalID != operatorKeyExternalID {
+		return nil
+	}
+	return s.opts.Secrets.Seal(operatorKeySeal, s.operatorKey.hex())
+}
+
+// signedInWithOperatorKey reports whether a sign-in of the operator key's
+// stand-in was made with the current key. No directory checks the stand-in,
+// so without this, changing a leaked key would leave its sign-ins working.
+func (s *Server) signedInWithOperatorKey(sealed []byte) bool {
+	if sealed == nil || !s.operatorKey.set {
+		return false
+	}
+	got, err := s.opts.Secrets.Open(operatorKeySeal, sealed)
+	return err == nil && subtle.ConstantTimeCompare([]byte(got), []byte(s.operatorKey.hex())) == 1
+}
+
 // operatorKeyOrg is the organisation of the operator key's stand-in: where it
 // already is, else the first organisation, else a new one.
 //
@@ -527,7 +551,8 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, user store
 		return err
 	}
 	token, hash, csrf := authn.NewSession()
-	if err := s.st.CreateSession(r.Context(), hash, user.ID, csrf, time.Now().Add(ttl)); err != nil {
+	if err := s.st.CreateSession(r.Context(), hash, user.ID, csrf, time.Now().Add(ttl),
+		s.sealOperatorKey(user)); err != nil {
 		return err
 	}
 	http.SetCookie(w, s.cookie(sessionCookie, token, "/", int(ttl.Seconds()),
@@ -544,6 +569,9 @@ func (s *Server) sessionPrincipal(r *http.Request) (*authn.Principal, error) {
 	hash := auth.Hash(c.Value)
 	su, err := s.st.LookupSession(r.Context(), hash)
 	if err != nil {
+		return nil, authn.ErrUnauthenticated
+	}
+	if su.User.ExternalID == operatorKeyExternalID && !s.signedInWithOperatorKey(su.Session.OperatorKey) {
 		return nil, authn.ErrUnauthenticated
 	}
 	user, ok := s.checkDirectory(r, su.User, su.Directory)

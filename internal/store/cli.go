@@ -15,15 +15,18 @@ type CLICode struct {
 	// Challenge is the command line's S256 challenge. Redeeming the code needs
 	// the matching verifier.
 	Challenge string
+	// OperatorKey is the sealed operator key of a sign-in with it, passed on
+	// to the token. Nil for everyone else.
+	OperatorKey []byte
 }
 
 // CreateCLICode records the code the browser is about to carry to a loopback
 // listener.
 func (s *Store) CreateCLICode(ctx context.Context, hash []byte, userID, challenge string,
-	expires time.Time,
+	expires time.Time, operatorKey []byte,
 ) error {
-	_, err := s.pool.Exec(ctx, `INSERT INTO cli_codes (id, user_id, challenge, expires_at)
-		VALUES ($1,$2,$3,$4)`, hash, userID, challenge, expires)
+	_, err := s.pool.Exec(ctx, `INSERT INTO cli_codes (id, user_id, challenge, expires_at, operator_key)
+		VALUES ($1,$2,$3,$4,$5)`, hash, userID, challenge, expires, operatorKey)
 	return err
 }
 
@@ -32,7 +35,7 @@ func (s *Store) TakeCLICode(ctx context.Context, hash []byte) (CLICode, error) {
 	var c CLICode
 	err := s.pool.QueryRow(ctx, `DELETE FROM cli_codes
 		WHERE id = $1 AND expires_at > now()
-		RETURNING user_id, challenge`, hash).Scan(&c.UserID, &c.Challenge)
+		RETURNING user_id, challenge, operator_key`, hash).Scan(&c.UserID, &c.Challenge, &c.OperatorKey)
 	return c, notFound(err)
 }
 
@@ -41,17 +44,19 @@ func (s *Store) TakeCLICode(ctx context.Context, hash []byte) (CLICode, error) {
 type CLITokenUser struct {
 	User      User
 	Directory Directory
+	// OperatorKey is the sealed operator key of a sign-in with it.
+	OperatorKey []byte
 }
 
 // CreateCLIToken stores a token under its hash, and notes that its person
 // signed in.
 func (s *Store) CreateCLIToken(ctx context.Context, hash []byte, userID string,
-	expires time.Time,
+	expires time.Time, operatorKey []byte,
 ) error {
 	_, err := s.pool.Exec(ctx, `WITH signed_in AS (
 			UPDATE users SET signed_in_at = now() WHERE id = $2)
-		INSERT INTO cli_tokens (id, user_id, expires_at)
-		VALUES ($1,$2,$3)`, hash, userID, expires)
+		INSERT INTO cli_tokens (id, user_id, expires_at, operator_key)
+		VALUES ($1,$2,$3,$4)`, hash, userID, expires, operatorKey)
 	return err
 }
 
@@ -59,10 +64,11 @@ func (s *Store) CreateCLIToken(ctx context.Context, hash []byte, userID string,
 // disabled person, is reported as missing.
 func (s *Store) LookupCLIToken(ctx context.Context, hash []byte) (CLITokenUser, error) {
 	var tu CLITokenUser
-	err := s.pool.QueryRow(ctx, `SELECT `+userColumnsOf("u.")+`, `+directoryColumns+`
+	err := s.pool.QueryRow(ctx, `SELECT `+userColumnsOf("u.")+`, `+directoryColumns+`, t.operator_key
 		FROM cli_tokens t JOIN users u ON u.id = t.user_id`+identityJoin+`
 		WHERE t.id = $1 AND t.expires_at > now() AND u.disabled_at IS NULL`, hash,
-	).Scan(append(userTargets(&tu.User), &tu.Directory.Linked, &tu.Directory.CheckedAt)...)
+	).Scan(append(userTargets(&tu.User), &tu.Directory.Linked, &tu.Directory.CheckedAt,
+		&tu.OperatorKey)...)
 	return tu, notFound(err)
 }
 
