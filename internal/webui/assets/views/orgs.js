@@ -7,6 +7,8 @@ import {
   table,
   modal,
   date,
+  num,
+  compact,
   icons,
   iconButton,
   empty,
@@ -20,7 +22,9 @@ import {
 } from "../ui.js";
 
 export async function orgsView(ctx) {
-  const orgs = (await api.orgs()).data || [];
+  const list = await api.orgsWithStats();
+  const orgs = list.data || [];
+  const days = list.stats_days;
   ctx.setSubtitle(`${orgs.length} ${plural(orgs.length, "organisation")}`);
 
   const head = listHead(null, null, {
@@ -57,6 +61,27 @@ export async function orgsView(ctx) {
           o.email_domain
             ? h("span", { class: "mono" }, o.email_domain)
             : h("span", { class: "faint" }, "Not set"),
+      },
+      {
+        label: "Models",
+        num: true,
+        shrink: true,
+        sortKey: (o) => o.stats.models,
+        sortDir: "desc",
+        cell: (o) => num(o.stats.models),
+      },
+      {
+        label: `Requests, ${days} days`,
+        num: true,
+        shrink: true,
+        sortKey: (o) => o.stats.requests,
+        sortDir: "desc",
+        cell: (o) =>
+          h(
+            "span",
+            { title: `${num(o.stats.requests)} in the last ${days} days` },
+            compact(o.stats.requests),
+          ),
       },
       {
         label: "Created",

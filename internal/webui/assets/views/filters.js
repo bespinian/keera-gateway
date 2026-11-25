@@ -433,9 +433,7 @@ export async function filterDetailView(ctx) {
     detailHead(
       ctx,
       ["/filters", "Filters"],
-      [
-        f ? modePills(f) : pill(`Deleted from ${orgNameOf(ctx)}`, "warn"),
-      ],
+      [f ? modePills(f) : pill(`Deleted from ${orgNameOf(ctx)}`, "warn")],
       [
         rangePicker(ctx, since),
         f && canEdit

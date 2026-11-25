@@ -1331,6 +1331,14 @@ paths:
       tags: [tenancy]
       summary: List organisations
       description: An operator sees every organisation. Anyone else sees only their own.
+      parameters:
+        - name: stats
+          in: query
+          description: |
+            `1` adds `stats` to each organisation: its number of models, and
+            its requests over the last `stats_days` UTC days, today included.
+            Only an operator may ask.
+          schema: { type: string, enum: ["1"] }
       responses:
         "200":
           description: The organisations.
@@ -1343,9 +1351,27 @@ paths:
                   data:
                     type: array
                     items:
-                      $ref: "#/components/schemas/Org"
+                      allOf:
+                        - $ref: "#/components/schemas/Org"
+                        - type: object
+                          properties:
+                            stats:
+                              type: object
+                              description: Only with `stats=1`.
+                              required: [models, requests]
+                              properties:
+                                models:
+                                  type: integer
+                                requests:
+                                  type: integer
+                                  description: Every request, refused and failed ones too.
+                  stats_days:
+                    type: integer
+                    description: Only with `stats=1`.
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /control/v1/orgs/{id}:
     parameters:
       - name: id

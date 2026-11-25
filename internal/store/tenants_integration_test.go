@@ -605,3 +605,40 @@ func TestAWriteHeldToAnotherOrganisationFindsNothing(t *testing.T) {
 		t.Errorf("revoking in its own organisation = %v", err)
 	}
 }
+
+// An organisation's stats count its models and its requests from a UTC day
+// on. One without either still has a row, of zeros.
+func TestOrgStats(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	anOrg(t, st, ctx, "org_2")
+	day := time.Date(2026, 9, 7, 0, 0, 0, 0, time.UTC)
+	dailyTraffic(t, st, f, day)
+	if err := st.UpsertModel(ctx, policy.Model{
+		OrgID: f.orgID, Alias: "keera-code", Kind: policy.KindChat, Backends: []string{"http://x/v1"},
+		BackendModel: "x", Location: policy.LocationOnPrem, Enabled: true,
+	}, Credential{}); err != nil {
+		t.Fatalf("UpsertModel: %v", err)
+	}
+
+	for _, c := range []struct {
+		since time.Time
+		want  OrgStats
+	}{
+		{day, OrgStats{Models: 1, Requests: 5}},
+		// A time of day counts from the start of its UTC day.
+		{day.Add(30 * time.Hour), OrgStats{Models: 1, Requests: 1}},
+		{day.AddDate(0, 0, 2), OrgStats{Models: 1}},
+	} {
+		stats, err := st.OrgStats(ctx, c.since)
+		if err != nil {
+			t.Fatalf("OrgStats: %v", err)
+		}
+		if stats[f.orgID] != c.want {
+			t.Errorf("OrgStats(%s)[%s] = %+v, want %+v", c.since, f.orgID, stats[f.orgID], c.want)
+		}
+		if other, ok := stats["org_2"]; !ok || other != (OrgStats{}) {
+			t.Errorf("OrgStats(%s)[org_2] = %+v, %v; want zeros", c.since, other, ok)
+		}
+	}
+}

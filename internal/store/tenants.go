@@ -303,6 +303,26 @@ func (s *Store) ListOrgs(ctx context.Context) ([]Org, error) {
 	return queryAll(ctx, s.pool, scanOrg, orgColumns+" FROM orgs ORDER BY created_at")
 }
 
+// OrgStats is what the operator's list of organisations shows about each.
+type OrgStats struct {
+	Models int64 `json:"models"`
+	// Requests counts every request since the UTC day OrgStats was given,
+	// refused and failed ones too.
+	Requests int64 `json:"requests"`
+}
+
+// OrgStats returns the stats of every organisation, by id. Requests come
+// from usage_daily, so since is a UTC day and the count reaches back further
+// than the request log.
+func (s *Store) OrgStats(ctx context.Context, since time.Time) (map[string]OrgStats, error) {
+	return queryMap(ctx, s.pool, func(v *OrgStats) []any { return []any{&v.Models, &v.Requests} },
+		`SELECT o.id,
+			(SELECT count(*) FROM models WHERE org_id = o.id),
+			COALESCE((SELECT sum(requests) FROM usage_daily
+				WHERE org_id = o.id AND day >= $1::date), 0)
+		FROM orgs o`, since.UTC().Format(time.DateOnly))
+}
+
 // orgFields are the columns scanOrg reads, in its order.
 const orgFields = "id, name, COALESCE(email_domain, ''), limited, created_at"
 

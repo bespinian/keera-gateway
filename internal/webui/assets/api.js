@@ -177,6 +177,8 @@ export const api = {
     request("POST", path`/v1/users/${userID}/passkey-link`),
 
   orgs: () => get("/v1/orgs"),
+  // With each one's models and recent requests. Only an operator may ask.
+  orgsWithStats: () => get("/v1/orgs?stats=1"),
   createOrg: (name, emailDomain) =>
     request("POST", "/v1/orgs", { name, email_domain: emailDomain || "" }),
   updateOrg: (id, name, emailDomain) =>

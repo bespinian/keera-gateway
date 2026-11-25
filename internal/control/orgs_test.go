@@ -111,6 +111,11 @@ func TestHandlersRefuseWhatTheCallerMayNotDo(t *testing.T) {
 			"an administrator sets the domain", s.updateOrg, admin("org_1"), patch, "/v1/orgs/org_1",
 			`{"email_domain":"example.ch"}`, forbidden, "only an operator",
 		},
+		// How much other tenants use the gateway is the operator's to know.
+		{
+			"an administrator asks for the stats of organisations", s.listOrgs, admin("org_1"), get,
+			"/v1/orgs?stats=1", "", forbidden, "only an operator",
+		},
 		// Creating a tenant is not something a tenant does.
 		{
 			"a member creates an organisation", s.createOrg, member("org_1"), post, "/v1/orgs",

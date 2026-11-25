@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/httpx"
@@ -47,6 +48,13 @@ func (s *Server) createOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 }
 
 func (s *Server) listOrgs(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
+	// Stats are asked for, because the CLI lists organisations only to find
+	// one.
+	withStats := r.URL.Query().Get("stats") == "1"
+	if withStats && !p.Unrestricted() {
+		forbid(w, "only an operator can see the stats of organisations")
+		return
+	}
 	orgs, err := s.st.ListOrgs(r.Context())
 	if err != nil {
 		s.fail(w, err)
@@ -57,8 +65,29 @@ func (s *Server) listOrgs(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	if !p.Unrestricted() {
 		orgs = slices.DeleteFunc(orgs, func(o store.Org) bool { return o.ID != p.OrgID })
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"data": orgs})
+	if !withStats {
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"data": orgs})
+		return
+	}
+	stats, err := s.st.OrgStats(r.Context(), time.Now().UTC().AddDate(0, 0, -(statsDays-1)))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	type orgWithStats struct {
+		store.Org
+		Stats store.OrgStats `json:"stats"`
+	}
+	out := make([]orgWithStats, len(orgs))
+	for i, o := range orgs {
+		out[i] = orgWithStats{o, stats[o.ID]}
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"data": out, "stats_days": statsDays})
 }
+
+// statsDays is how many UTC days, today included, an organisation's stats
+// count requests over.
+const statsDays = 7
 
 func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	if !p.Unrestricted() {
