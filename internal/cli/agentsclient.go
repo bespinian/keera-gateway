@@ -126,32 +126,6 @@ func agentsError(status int, raw []byte) error {
 	return &apiError{Status: status, Message: errorMessage(raw)}
 }
 
-// pickOne finds an entry by id, or else by name ignoring case. Names need
-// not be unique, so a name several share is refused rather than guessed.
-// listCmd is the command that lists them, such as "agent list".
-func pickOne[T any](entries []T, given, noun, listCmd string, idName func(T) (string, string)) (T, error) {
-	var zero T
-	given = strings.TrimSpace(given)
-	var named []T
-	for _, e := range entries {
-		id, name := idName(e)
-		if id == given {
-			return e, nil
-		}
-		if strings.EqualFold(name, given) {
-			named = append(named, e)
-		}
-	}
-	switch len(named) {
-	case 0:
-		return zero, notFoundError(fmt.Sprintf("no %s %q (see: keera %s)", noun, given, listCmd))
-	case 1:
-		return named[0], nil
-	}
-	return zero, fmt.Errorf("%d %ss are called %q; name one by its id (see: keera %s)",
-		len(named), noun, given, listCmd)
-}
-
 // machineClass is the size of an agent's or a workspace's machine.
 type machineClass struct {
 	Isolation string `json:"isolation"`

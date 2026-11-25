@@ -216,9 +216,9 @@ func (r *orgRun) switchTo(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		org, ok := findIn(orgs, given, func(o store.Org) (string, string) { return o.ID, o.Name })
-		if !ok {
-			return notFound("organisation", given, "", "org")
+		org, err := pickOne(orgs, given, "organisation", "org list", orgIDName)
+		if err != nil {
+			return err
 		}
 		if err := saveOrg(r.c.base, org.ID); err != nil {
 			return err
@@ -229,9 +229,9 @@ func (r *orgRun) switchTo(ctx context.Context) error {
 	}
 
 	mine := myOrgs(me)
-	m, ok := findIn(mine, given, func(o membership) (string, string) { return o.ID, o.Name })
-	if !ok {
-		return notFound("organisation", given, "", "org")
+	m, err := pickOne(mine, given, "organisation", "org list", func(o membership) (string, string) { return o.ID, o.Name })
+	if err != nil {
+		return err
 	}
 	var res struct {
 		OrgID   string `json:"org_id"`
@@ -340,9 +340,9 @@ func confirmOrgDelete(ctx context.Context, c *client, orgID string) error {
 	if err != nil {
 		return err
 	}
-	org, ok := findIn(orgs, orgID, func(o store.Org) (string, string) { return o.ID, o.Name })
-	if !ok {
-		return notFound("organisation", orgID, "", "org")
+	org, err := pickOne(orgs, orgID, "organisation", "org list", orgIDName)
+	if err != nil {
+		return err
 	}
 
 	// Read only when asking, so the prompt can say how much goes.

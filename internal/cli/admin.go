@@ -147,22 +147,33 @@ func notFound(noun, name, orgID, cmd string) error {
 	return notFoundError(fmt.Sprintf("no %s %q%s (see: keera %s list)", noun, name, where, cmd))
 }
 
-// findIn matches by id, or else by name, ignoring case.
-func findIn[T any](entries []T, given string, idName func(T) (string, string)) (T, bool) {
+// pickOne finds an entry by id, or else by name ignoring case. Names need
+// not be unique, so a name several share is refused rather than guessed.
+// listCmd is the command that lists them, such as "agent list".
+func pickOne[T any](entries []T, given, noun, listCmd string, idName func(T) (string, string)) (T, error) {
+	var zero T
 	given = strings.TrimSpace(given)
-	for _, byName := range []bool{false, true} {
-		for _, e := range entries {
-			id, name := idName(e)
-			if (!byName && id == given) || (byName && strings.EqualFold(name, given)) {
-				return e, true
-			}
+	var named []T
+	for _, e := range entries {
+		id, name := idName(e)
+		if id == given {
+			return e, nil
+		}
+		if strings.EqualFold(name, given) {
+			named = append(named, e)
 		}
 	}
-	var zero T
-	return zero, false
+	switch len(named) {
+	case 0:
+		return zero, notFoundError(fmt.Sprintf("no %s %q (see: keera %s)", noun, given, listCmd))
+	case 1:
+		return named[0], nil
+	}
+	return zero, fmt.Errorf("%d %ss are called %q; name one by its id (see: keera %s)",
+		len(named), noun, given, listCmd)
 }
 
-// findNamed lists path and picks an entry as findIn does. noun and cmd word
+// findNamed lists path and picks an entry as pickOne does. noun and cmd word
 // the error when there is none.
 func findNamed[T any](ctx context.Context, c *client, org, given, path, noun, cmd string,
 	idName func(T) (string, string),
@@ -176,10 +187,12 @@ func findNamed[T any](ctx context.Context, c *client, org, given, path, noun, cm
 	if err != nil {
 		return zero, err
 	}
-	if e, ok := findIn(entries, given, idName); ok {
-		return e, nil
+	e, err := pickOne(entries, given, noun, cmd+" list", idName)
+	if errors.Is(err, errNotFound) {
+		// Says which organisation was searched, which --org may not have.
+		return zero, notFound(noun, given, orgID, cmd)
 	}
-	return zero, notFound(noun, given, orgID, cmd)
+	return e, err
 }
 
 // keepRaw also returns the raw answer, so --json prints everything, not only
@@ -229,11 +242,11 @@ func resolveOrg(ctx context.Context, c *client, given string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if o, ok := findIn(orgs, given, func(o store.Org) (string, string) { return o.ID, o.Name }); ok {
-		return o.ID, nil
-	}
-	return "", notFound("organisation", given, "", "org")
+	o, err := pickOne(orgs, given, "organisation", "org list", orgIDName)
+	return o.ID, err
 }
+
+func orgIDName(o store.Org) (string, string) { return o.ID, o.Name }
 
 // orgIfGiven is resolveOrg for a report, which spans every organisation when
 // none is given.
