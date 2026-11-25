@@ -9,6 +9,9 @@ import (
 )
 
 var (
+	// relativeImport is any import of the panel's own modules. There are no
+	// bare specifiers: with no build step, nothing could resolve them.
+	relativeImport = regexp.MustCompile(`from\s+"(\.[^"]+)"`)
 	// namedImport is `import { a, b as c } from "./x.js"`, over several lines.
 	namedImport = regexp.MustCompile(`import\s*\{([^}]*)\}\s*from\s*"(\.[^"]+)"`)
 	// declaredExport is `export function a`, `export const a` and the like.
@@ -21,9 +24,10 @@ var (
 	otherExport = regexp.MustCompile(`(?m)^export\s+(?:default|\*)`)
 )
 
-// Importing a name a module does not export is a SyntaxError in the browser:
-// the whole panel is blank, and with no build step nothing catches it earlier.
-func TestEveryImportedNameIsExported(t *testing.T) {
+// Importing a module that is not embedded, or a name it does not export,
+// blanks the whole panel in the browser. With no build step, nothing catches
+// it earlier.
+func TestEveryImportResolves(t *testing.T) {
 	modules := map[string]string{}
 	if err := fs.WalkDir(assets, "assets", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".js") {
@@ -56,12 +60,15 @@ func TestEveryImportedNameIsExported(t *testing.T) {
 
 	checked := 0
 	for p, body := range modules {
+		for _, m := range relativeImport.FindAllStringSubmatch(body, -1) {
+			if _, ok := modules[path.Join(path.Dir(p), m[1])]; !ok {
+				t.Errorf("%s imports %s, which is not embedded", p, m[1])
+			}
+		}
 		for _, m := range namedImport.FindAllStringSubmatch(body, -1) {
-			target := path.Join(path.Dir(p), m[2])
-			names, ok := exports[target]
+			names, ok := exports[path.Join(path.Dir(p), m[2])]
 			if !ok {
-				// TestEveryImportIsEmbedded reports it.
-				continue
+				continue // reported above
 			}
 			for _, entry := range listNames(m[1]) {
 				// What it is exported as: the name before "as", if any.

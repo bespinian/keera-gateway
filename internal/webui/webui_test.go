@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
-	"path"
 	"regexp"
 	"strings"
 	"testing"
@@ -76,46 +75,6 @@ func TestAssetsAreServedWithTheRightType(t *testing.T) {
 		}
 		if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, want) {
 			t.Errorf("%s: Content-Type = %q, want %q", path, ct, want)
-		}
-	}
-}
-
-// relativeImport matches the panel's own imports. There are no bare
-// specifiers: with no build step, nothing could resolve them.
-var relativeImport = regexp.MustCompile(`from\s+"(\.[^"]+)"`)
-
-func TestEveryImportIsEmbedded(t *testing.T) {
-	// A module missing from the binary is a blank page at run time and no
-	// error at build time. The list comes from the imports, so new views are
-	// covered too.
-	roots := []string{"assets/app.js"}
-	if err := fs.WalkDir(assets, "assets/views", func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() && strings.HasSuffix(p, ".js") {
-			roots = append(roots, p)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if len(roots) < 2 {
-		t.Fatal("no views are embedded at all")
-	}
-
-	for _, src := range roots {
-		body, err := fs.ReadFile(assets, src)
-		if err != nil {
-			t.Fatalf("%s: %v", src, err)
-		}
-		for _, m := range relativeImport.FindAllStringSubmatch(string(body), -1) {
-			target := path.Join(path.Dir(src), m[1])
-			url := "/" + target
-			if w := get(t, url, nil); w.Code != http.StatusOK {
-				t.Errorf("%s imports %s, which is missing from the binary (status %d)",
-					src, m[1], w.Code)
-			}
 		}
 	}
 }
