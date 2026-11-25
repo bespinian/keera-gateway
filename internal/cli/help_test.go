@@ -97,20 +97,16 @@ func TestOverviewNamesEveryCommand(t *testing.T) {
 	}
 }
 
-// The names Run accepts are listed here, because a switch cannot be read.
-func TestEveryDispatchedCommandIsRegistered(t *testing.T) {
-	dispatched := []string{
-		"org", "orgs", "project", "projects", "user", "users", "key", "keys",
-		"model", "models", "filter", "filters", "router", "routers", "router", "routers",
-		"guardrail", "guardrails",
-		"mcp", "limit", "limits", "budget", "budgets", "usage", "failure", "failures", "sessions",
-		"session", "connect", "doctor", "login", "logout", "whoami", "audit",
-		"agent", "agents", "task", "tasks", "schedule", "schedules", "workspace", "workspaces", "ws",
-		"version", "help",
+// Every command help.go lists runs, and every command that runs is listed.
+func TestEveryCommandRuns(t *testing.T) {
+	for _, c := range commands {
+		if _, ok := runners[c.name]; !ok && c.name != "help" {
+			t.Errorf("help.go lists %q and Run cannot run it", c.name)
+		}
 	}
-	for _, name := range dispatched {
-		if _, ok := find(name); !ok {
-			t.Errorf("Run dispatches %q and help.go does not know it", name)
+	for name := range runners {
+		if c, ok := find(name); !ok || c.name != name {
+			t.Errorf("Run runs %q and help.go does not list it", name)
 		}
 	}
 }

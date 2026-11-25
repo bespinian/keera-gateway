@@ -30,74 +30,53 @@ func Run(ctx context.Context, args []string) error {
 	}
 
 	cmd, rest := args[0], args[1:]
-	name := cmd
-	if c, ok := find(cmd); ok {
-		// One case per command: help.go owns the other spellings.
-		name = c.name
-	}
-	switch name {
-	case "org":
-		return orgCmd(ctx, rest)
-	case "project":
-		return projectCmd(ctx, rest)
-	case "user":
-		return userCmd(ctx, rest)
-	case "key":
-		return keyCmd(ctx, rest)
-	case "model":
-		return modelCmd(ctx, rest)
-	case "filter":
-		return filterCmd(ctx, rest)
-	case "router":
-		return routerCmd(ctx, rest)
-	case "mcp":
-		return mcpCmd(ctx, rest)
-	case "guardrail":
-		return guardrailCmd(ctx, rest)
-	// Each sets one part of a guardrail, like 'guardrail set' with fewer flags.
-	case "limit":
-		return facetCmd(ctx, "limit", rest)
-	case "budget":
-		return facetCmd(ctx, "budget", rest)
-	case "usage":
-		return usageCmd(ctx, rest)
-	case "billing":
-		return billingCmd(ctx, rest)
-	case "failures":
-		return failuresCmd(ctx, rest)
-	case "audit":
-		return auditCmd(ctx, rest)
-	case "session":
-		return sessionCmd(ctx, rest)
-	case "connect":
-		return connectCmd(ctx, rest)
-	case "agent":
-		return agentCmd(ctx, rest)
-	case "task":
-		return taskCmd(ctx, rest)
-	case "schedule":
-		return scheduleCmd(ctx, rest)
-	case "workspace":
-		return workspaceCmd(ctx, rest)
-	case "doctor":
-		return doctorCmd(ctx, rest)
-	case "login":
-		return loginCmd(ctx, rest)
-	case "logout":
-		return logoutCmd(ctx, rest)
-	case "whoami":
-		return whoamiCmd(ctx, rest)
-	case "version":
-		return versionCmd(rest)
-	case "help", "-h", "--help":
+	// helpCmd calls Run, so it cannot sit in runners without an
+	// initialization cycle.
+	if cmd == "help" || cmd == "-h" || cmd == "--help" {
 		return helpCmd(ctx, rest)
-	default:
-		if near := suggest(cmd); near != "" {
-			return fmt.Errorf("no command %q; did you mean 'keera %s'?\n"+
-				"Run 'keera' for the whole list", cmd, near)
-		}
-		return fmt.Errorf("no command %q; run 'keera' for the list", cmd)
 	}
+	if c, ok := find(cmd); ok {
+		if run, ok := runners[c.name]; ok {
+			return run(ctx, rest)
+		}
+	}
+	if near := suggest(cmd); near != "" {
+		return fmt.Errorf("no command %q; did you mean 'keera %s'?\n"+
+			"Run 'keera' for the whole list", cmd, near)
+	}
+	return fmt.Errorf("no command %q; run 'keera' for the list", cmd)
+}
+
+// runners runs each command in help.go's commands, by name. It is a map of
+// its own, as a field on command would make an initialization cycle.
+var runners = map[string]func(context.Context, []string) error{
+	"org":       orgCmd,
+	"project":   projectCmd,
+	"user":      userCmd,
+	"key":       keyCmd,
+	"model":     modelCmd,
+	"filter":    filterCmd,
+	"router":    routerCmd,
+	"mcp":       mcpCmd,
+	"guardrail": guardrailCmd,
+	// Each sets one part of a guardrail, like 'guardrail set' with fewer flags.
+	"limit":     func(ctx context.Context, args []string) error { return facetCmd(ctx, "limit", args) },
+	"budget":    func(ctx context.Context, args []string) error { return facetCmd(ctx, "budget", args) },
+	"usage":     usageCmd,
+	"billing":   billingCmd,
+	"failures":  failuresCmd,
+	"audit":     auditCmd,
+	"session":   sessionCmd,
+	"connect":   connectCmd,
+	"agent":     agentCmd,
+	"task":      taskCmd,
+	"schedule":  scheduleCmd,
+	"workspace": workspaceCmd,
+	"doctor":    doctorCmd,
+	"login":     loginCmd,
+	"logout":    logoutCmd,
+	"whoami":    whoamiCmd,
+	"version":   func(_ context.Context, args []string) error { return versionCmd(args) },
 }
 
 func versionCmd(args []string) error {
