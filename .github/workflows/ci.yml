@@ -52,6 +52,19 @@ jobs:
       - name: Check the panel's JavaScript
         run: make check-js
 
+  # vendorHash in flake.nix must follow go.sum, and nothing else notices when
+  # it does not. Fetching the modules is enough to check it.
+  nix:
+    name: Nix vendor hash
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: cachix/install-nix-action@v31
+
+      - name: Fetch the Go modules
+        run: nix build .#keera.goModules --no-link
+
   test:
     name: Unit tests
     runs-on: ubuntu-latest
